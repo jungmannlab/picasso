@@ -27,7 +27,7 @@ nanoTRON Train
 Train a MLP model for nanopattern prediction using nanoTRON.
 
 1. In ``Picasso: nanoTRON``, select ``Tools`` > ``Train Model`` to open the training user interface.
-2. Set the number of different classes of the model via ``Number of Classes`` and press ``Generate Data Set``.
+2. Set the number of different classes of the model (at least two) via ``Number of Classes`` and press ``Generate Data Set``.
 3. Load all the training files via the various buttons ``Load File``. Grayed out buttons indicate that the data set slot is loaded.
 4. Name every data set (class) with a unique name.
 5. Set up the image parameters in the box ``Image Parameter``:
@@ -112,7 +112,9 @@ Use a trained nanoTRON model to classify nanopatterns on new data.
 
 1. Load the model via ``Tools`` > ``Train Model``. The different classes should now be listed on the right side.
 2. Drag and drop the Picasso localization table file (HDF5) that should be used for prediction into the large gray box. If the file was loaded correctly, the box displays the image.
-3. Start the classification via the button ``Predict``.
+3. Start the classification via the button ``Predict``. If the model ``.yaml``
+   does not record the pick diameter or the display pixel size the model was
+   trained with, nanoTRON asks for them.
 4. Choose the classes that should be exported in the box ``Export Structures``. By default, each class is exported.
 5. Set the export parameters in the box ``Export``:
 

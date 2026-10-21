@@ -185,8 +185,8 @@ class Generator(QtCore.QThread):
                     self.datasets_made.emit(
                         id + 1,
                         self.n_datasets,
-                        splits * (c + 1),
-                        splits * (n_locs + 1),
+                        int(splits * (c + 1)),
+                        int(splits * (n_locs + 1)),
                     )
                 else:
                     self.datasets_made.emit(
@@ -250,6 +250,7 @@ class Trainer(QtCore.QThread):
     """
 
     training_finished = QtCore.pyqtSignal(list, float, float, list)
+    training_failed = QtCore.pyqtSignal(str)
 
     def __init__(
         self,
@@ -271,31 +272,36 @@ class Trainer(QtCore.QThread):
         self.cm_list = []  # container to carry confusion_matrix
 
     def run(self) -> None:
-        """Train the MLPClassifier model."""
+        """Train the MLPClassifier model. An error is reported with
+        ``training_failed``."""
         self.mlp_list = []
         hidden_layer_sizes = tuple(self.network.values())
 
-        mlp = MLPClassifier(
-            hidden_layer_sizes=hidden_layer_sizes,
-            activation=self.activation,
-            max_iter=self.iterations,
-            alpha=0.01,
-            solver=self.solver,
-            verbose=False,
-            shuffle=True,
-            tol=1e-4,
-            random_state=1,
-            validation_fraction=0.15,
-            learning_rate_init=self.learning_rate,
-        )
+        try:
+            mlp = MLPClassifier(
+                hidden_layer_sizes=hidden_layer_sizes,
+                activation=self.activation,
+                max_iter=self.iterations,
+                alpha=0.01,
+                solver=self.solver,
+                verbose=False,
+                shuffle=True,
+                tol=1e-4,
+                random_state=1,
+                validation_fraction=0.15,
+                learning_rate_init=self.learning_rate,
+            )
 
-        mlp.fit(self.X_train, self.Y_train)
-        score = mlp.score(self.X_train, self.Y_train)
-        test_score = mlp.score(self.X_test, self.Y_test)
+            mlp.fit(self.X_train, self.Y_train)
+            score = mlp.score(self.X_train, self.Y_train)
+            test_score = mlp.score(self.X_test, self.Y_test)
+            Y_pred = mlp.predict(self.X_test)
+            cm = confusion_matrix(self.Y_test, Y_pred)
+        except Exception as error:
+            # an exception escaping a thread aborts the program
+            self.training_failed.emit(str(error))
+            return
         self.mlp_list.append(mlp)
-
-        Y_pred = mlp.predict(self.X_test)
-        cm = confusion_matrix(self.Y_test, Y_pred)
         self.cm_list.append(cm)
 
         self.training_finished.emit(
@@ -351,6 +357,7 @@ class Predictor(QtCore.QThread):
 
     predictions_made = QtCore.pyqtSignal(int, int)
     prediction_finished = QtCore.pyqtSignal(pd.DataFrame)
+    prediction_failed = QtCore.pyqtSignal(str)
 
     def __init__(
         self,
@@ -375,10 +382,6 @@ class Predictor(QtCore.QThread):
         self.prediction["group"] = np.unique(self.locs["group"])
         self.n_groups = len(np.unique(self.locs["group"]))
 
-    def checkConsecutive(self, ll: lib.IntArray1D) -> bool:
-        n = len(ll) - 1
-        return sum(np.diff(sorted(ll)) == 1) >= n
-
     def _worker(
         self,
         mlp: MLPClassifier,
@@ -393,25 +396,33 @@ class Predictor(QtCore.QThread):
         predictions: lib.FloatArray1D,
         probabilities: lib.FloatArray1D,
         finished: list[int],
+        errors: list[Exception],
     ) -> None:
         """Worker thread for making predictions allowing for parallel
-        execution."""
+        execution. An error stops all workers and is appended to
+        ``errors``."""
         while True:
             with lock:
                 index = current[0]
-                if index == n_picks:
+                if index >= n_picks:
                     return
                 current[0] += 1
 
             pick = picks[index]
-            pred, pred_proba = nanotron.predict_structure(
-                mlp=mlp,
-                locs=locs,
-                info=info,
-                pick=pick,
-                pick_diameter=pick_diameter,
-                disp_px_size=disp_px_size,
-            )
+            try:
+                pred, pred_proba = nanotron.predict_structure(
+                    mlp=mlp,
+                    locs=locs,
+                    info=info,
+                    pick=pick,
+                    pick_diameter=pick_diameter,
+                    disp_px_size=disp_px_size,
+                )
+            except Exception as error:
+                with lock:
+                    errors.append(error)
+                    current[0] = n_picks  # stop the other workers
+                return
             predictions[index] = pred[0]
             probabilities[index] = pred_proba.max()
 
@@ -426,7 +437,13 @@ class Predictor(QtCore.QThread):
         picks: lib.IntArray1D,
         pick_diameter: float,
         disp_px_size: float,
-    ) -> tuple[list[int], lib.FloatArray1D, lib.FloatArray1D, list[int]]:
+    ) -> tuple[
+        list[int],
+        lib.FloatArray1D,
+        lib.FloatArray1D,
+        list[int],
+        list[Exception],
+    ]:
         """Make predictions asynchronously, i.e., using
         multiprocessing."""
         n_picks = len(picks)
@@ -440,6 +457,7 @@ class Predictor(QtCore.QThread):
 
         current = [0]
         finished = [0]
+        errors = []
         executor = concurrent.futures.ThreadPoolExecutor(n_workers)
         for i in range(n_workers):
             executor.submit(
@@ -456,36 +474,44 @@ class Predictor(QtCore.QThread):
                 predictions,
                 probabilities,
                 finished,
+                errors,
             )
 
         executor.shutdown(wait=False)
-        return current, predictions, probabilities, finished
+        return current, predictions, probabilities, finished, errors
 
     def run(self) -> None:
-        """Runs predictions."""
+        """Runs predictions. An error is reported with
+        ``prediction_failed``."""
         N = len(self.prediction["group"])
         picks = self.prediction["group"]
 
-        current, predictions, probabilities, finished = self._predict_async(
-            self.model,
-            self.locs,
-            self.info,
-            picks,
-            self.pick_diameter,
-            self.disp_px_size,
+        current, predictions, probabilities, finished, errors = (
+            self._predict_async(
+                self.model,
+                self.locs,
+                self.info,
+                picks,
+                self.pick_diameter,
+                self.disp_px_size,
+            )
         )
 
-        while finished[0] < N:
+        while finished[0] < N and not errors:
             self.predictions_made.emit(int(current[0]), N)
             sleep(0.1)
+        if errors:
+            self.prediction_failed.emit(str(errors[0]))
+            return
 
         classes = np.array(predictions)
         probas = np.array(probabilities)
 
-        assert self.checkConsecutive(picks)
-
-        self.locs["prediction"] = classes[self.locs["group"]]
-        self.locs["score"] = probas[self.locs["group"]]
+        # one prediction per group number in ``picks`` (sorted), which
+        # need not count from 0 without gaps, e.g., after filtering picks
+        index = np.searchsorted(picks, self.locs["group"])
+        self.locs["prediction"] = classes[index]
+        self.locs["score"] = probas[index]
         self.prediction_finished.emit(self.locs)
 
 
@@ -519,8 +545,9 @@ class train_dialog(lib.Dialog):
         choose_class_grid = QtWidgets.QGridLayout(choose_n_files_box)
         self.choose_n_files = QtWidgets.QSpinBox()
         self.choose_n_files.resize(50, 50)
-        self.choose_n_files.setRange(1, 6)
-        self.choose_n_files.setValue(0)
+        # a classifier needs at least two classes to tell apart
+        self.choose_n_files.setRange(2, 6)
+        self.choose_n_files.setValue(2)
         self.choose_n_files.setKeyboardTracking(False)
 
         self.file_slots_btn = QtWidgets.QPushButton("Generate Data Set")
@@ -591,7 +618,7 @@ class train_dialog(lib.Dialog):
         train_parameter_grid.addWidget(QtWidgets.QLabel("Iterations:"), 0, 0)
         self.iterations = QtWidgets.QSpinBox()
         self.iterations.resize(100, 50)
-        self.iterations.setRange(0, int(1e4))
+        self.iterations.setRange(1, int(1e4))
         self.iterations.setValue(400)
         train_parameter_grid.addWidget(self.iterations, 0, 1)
         train_parameter_grid.addWidget(
@@ -682,7 +709,7 @@ class train_dialog(lib.Dialog):
 
             n = QtWidgets.QSpinBox()
             n.resize(100, 50)
-            n.setRange(0, 999)
+            n.setRange(1, 999)
             n.setValue(500)
             self.nodes.append(n)
             self.nodes_box.addWidget(n, 0, layer)
@@ -693,11 +720,13 @@ class train_dialog(lib.Dialog):
 
             fname, ext = lib.get_save_filename_ext_dialog(
                 self,
-                "Save mode file",
+                "Save model file",
                 "model.sav",
                 ".sav",
                 check_ext=".yaml",
             )
+            if not fname:
+                return
 
             base, ext = os.path.splitext(fname)
             fname = base + ".sav"
@@ -710,11 +739,10 @@ class train_dialog(lib.Dialog):
             self.train_log["Scikit-Learn Version"] = sklearn.__version__
             self.train_log["Created on"] = datetime.datetime.now()
 
-            if fname:
-                joblib.dump(self.mlp, fname)
-                print("Saving complete.")
-                info_path = base + ".yaml"
-                io.save_info(info_path, [self.train_log])
+            joblib.dump(self.mlp, fname)
+            print("Saving complete.")
+            info_path = base + ".yaml"
+            io.save_info(info_path, [self.train_log])
 
     def train(self):
 
@@ -741,6 +769,7 @@ class train_dialog(lib.Dialog):
             )
 
             self.train_thread.training_finished.connect(self.train_finished)
+            self.train_thread.training_failed.connect(self.train_failed)
             self.train_thread.start()
             self.trainer_running = True
             print("Training started.")
@@ -756,8 +785,20 @@ class train_dialog(lib.Dialog):
 
                     ax1, ax2 = canvas.figure.subplots(1, 2)
                     ax1.set_title("Learning Curve")
-                    ax1.plot(self.mlp.loss_curve_, label="Train")
-                    ax1.legend(loc="best")
+                    # the lbfgs solver records no loss per iteration
+                    loss_curve = getattr(self.mlp, "loss_curve_", None)
+                    if loss_curve is None:
+                        ax1.text(
+                            0.5,
+                            0.5,
+                            f"Not recorded by the {self.mlp.solver} solver",
+                            ha="center",
+                            va="center",
+                            transform=ax1.transAxes,
+                        )
+                    else:
+                        ax1.plot(loss_curve, label="Train")
+                        ax1.legend(loc="best")
                     ax1.set_xlabel("Iterations")
                     ax1.set_ylabel("Loss")
 
@@ -835,14 +876,14 @@ class train_dialog(lib.Dialog):
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open training localizations", filter="*.hdf5"
         )
-        if path:
-            try:
-                locs, info = io.load_locs(path)
-            except lib.FILE_LOAD_ERRORS as error:
-                lib.show_load_error(self, path, error)
-                return
-            self.pick_diameters[file] = self.parse_pick_diameter(info)
-            self.training_files_path[file] = path
+        if not path:
+            return
+        try:
+            locs, info = io.load_locs(path)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
+            return
+        pick_diameter = self.parse_pick_diameter(info)
 
         if "group" not in locs.columns:
             msgBox = QtWidgets.QMessageBox(self)
@@ -856,13 +897,25 @@ class train_dialog(lib.Dialog):
                 )
             )
             msgBox.exec()
+        elif pick_diameter is None:
+            # e.g., groups from clustering: the size of the images to
+            # train on is not known
+            QtWidgets.QMessageBox.warning(
+                self,
+                "No pick diameter found",
+                "The metadata does not record the pick diameter. Please"
+                " load localizations picked in Picasso: Render.",
+            )
         else:
+            self.pick_diameters[file] = pick_diameter
+            self.training_files_path[file] = path
             self.training_files[(file)] = locs
             self.training_files_info[(file)] = info
             self.f_btns[file].setText("Loaded")
             self.f_btns[file].setEnabled(False)
 
-    def parse_pick_diameter(self, info):
+    @staticmethod
+    def parse_pick_diameter(info):
         """The pick diameter (nm) recorded in the metadata of picked
         localizations. Files picked before Picasso 1.0 record it in
         camera pixels ("Pick Diameter")."""
@@ -918,7 +971,7 @@ class train_dialog(lib.Dialog):
                     msgBox.setWindowTitle("Info")
                     msgBox.setText("Class {} will be downsampled".format(key))
                     msgBox.setInformativeText(
-                        "Datasets are inbalanced. "
+                        "Datasets are imbalanced. "
                         "This can cause training artifacts. "
                     )
                     msgBox.exec()
@@ -930,10 +983,10 @@ class train_dialog(lib.Dialog):
                     msgBox.setIcon(QtWidgets.QMessageBox.Icon.Information)
                     msgBox.setWindowTitle("Info")
                     msgBox.setText(
-                        f"Class {key} is to small. Not enough picks"
+                        f"Class {key} is too small. Not enough picks"
                     )
                     msgBox.setInformativeText(
-                        "Datasets are inbalanced. "
+                        "Datasets are imbalanced. "
                         "This can cause training artifacts. "
                         "Try to gather more data for class {}.".format(key)
                     )
@@ -985,7 +1038,7 @@ class train_dialog(lib.Dialog):
             msgBox = QtWidgets.QMessageBox(self)
             msgBox.setIcon(QtWidgets.QMessageBox.Icon.Warning)
             msgBox.setWindowTitle("Warning")
-            msgBox.setText("No all data sets loaded or names defined")
+            msgBox.setText("Not all data sets loaded or names defined")
             msgBox.setInformativeText(
                 "Check if all names are set up correctly."
                 " Duplicate names are not valid."
@@ -1012,6 +1065,12 @@ class train_dialog(lib.Dialog):
         self.data_prepared = True
         self.X_train = X_train
         self.Y_train = Y_train
+
+    def train_failed(self, message):
+        print("Training failed.")
+        self.trainer_running = False
+        self.train_label.setText("Training failed.")
+        QtWidgets.QMessageBox.warning(self, "Training failed", message)
 
     def train_finished(self, mlp, score, test_score, cm):
         print("Training finished.")
@@ -1115,6 +1174,8 @@ class Window(QtWidgets.QMainWindow):
         self.predicting = False
         self.model_loaded = False
         self.locs_loaded = False
+        # the localizations hold the predictions of the loaded model
+        self.predicted = False
         self.nanotron_log = {}
         self.classes = []
 
@@ -1165,7 +1226,8 @@ class Window(QtWidgets.QMainWindow):
 
         if default_model:
             self.load_default_model()
-            self.update_class_buttons()
+            if self.model_loaded:
+                self.update_class_buttons()
 
         self.classbox_grid.addStretch(1)
 
@@ -1223,13 +1285,39 @@ class Window(QtWidgets.QMainWindow):
 
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
 
+    def _complete_model_info(self):
+        """Ask for the pick diameter and display pixel size the model
+        was trained with if its metadata does not record them, once per
+        model. Returns False if a question was canceled."""
+        questions = (
+            (
+                "Pick Diameter (nm)",
+                "Pick diameter (nm)",
+                train_dialog.parse_pick_diameter(self.info) or 100.0,
+            ),
+            ("Display pixel size (nm)", "Display pixel size (nm)", 2.6),
+        )
+        for key, label, default in questions:
+            if key in self.model_info:
+                continue
+            value, ok = QtWidgets.QInputDialog.getDouble(
+                self,
+                "Model metadata",
+                "The metadata of the model does not record the setting "
+                "it was trained with.\n" + label + ":",
+                float(default),
+                0.01,
+                1e5,
+                2,
+            )
+            if not ok:
+                return False
+            self.model_info[key] = value
+        return True
+
     def predict(self):
 
         if (self.predicting is False) and (self.model_loaded is True):
-
-            self.predicting = True
-            self.dist_btn.setDisabled(True)
-            self.export_btn.setDisabled(True)
 
             if io.FORMAT_VERSION_ATTR not in self.model_info:
                 # a model trained before Picasso 1.0: pick diameter in
@@ -1241,6 +1329,12 @@ class Window(QtWidgets.QMainWindow):
                 self.model_info = legacy.nanotron_model_to_nm(
                     self.model_info, pixelsize
                 )
+            if not self._complete_model_info():
+                return
+
+            self.predicting = True
+            self.dist_btn.setDisabled(True)
+            self.export_btn.setDisabled(True)
             self.disp_px_size = self.model_info["Display pixel size (nm)"]
             self.pick_diameter = self.model_info["Pick Diameter (nm)"]
 
@@ -1253,6 +1347,7 @@ class Window(QtWidgets.QMainWindow):
             )
             self.thread.predictions_made.connect(self.on_progress)
             self.thread.prediction_finished.connect(self.on_finished)
+            self.thread.prediction_failed.connect(self.on_failed)
             self.thread.start()
 
         if self.model_loaded is False:
@@ -1308,9 +1403,15 @@ class Window(QtWidgets.QMainWindow):
     def on_finished(self, locs):
         self.locs = locs.copy()
         self.predicting = False
+        self.predicted = True
         self.export_btn.setDisabled(False)
         self.dist_btn.setDisabled(False)
         self.status_bar.showMessage("Prediction finished.")
+
+    def on_failed(self, message):
+        self.predicting = False
+        self.status_bar.showMessage("Prediction failed.")
+        QtWidgets.QMessageBox.warning(self, "Prediction failed", message)
 
     def on_progress(self, pick, total_picks):
         if pick == total_picks:
@@ -1331,18 +1432,20 @@ class Window(QtWidgets.QMainWindow):
             self.open_file(path)
 
     def open_file(self, path):
-        self.path = path
-
         try:
             self.locs, self.info = io.load_locs(path)
         except lib.FILE_LOAD_ERRORS as error:
             lib.show_load_error(self, path, error)
             return
+        self.path = path
         self.view.locs = self.locs
         # one rendered pixel per camera pixel of the data
         self.view.disp_px_size = lib.get_from_metadata(
             self.info, "Pixelsize", raise_error=True
         )
+        self.predicted = False
+        self.export_btn.setDisabled(True)
+        self.dist_btn.setDisabled(True)
 
         if "group" not in self.locs.columns:
             msgBox = QtWidgets.QMessageBox(self)
@@ -1356,18 +1459,18 @@ class Window(QtWidgets.QMainWindow):
                 )
             )
             msgBox.exec()
-        else:
-            groups = np.unique(self.locs.group)
-            groups_max = max(groups)
-            self.export_btn.setDisabled(True)
-            self.locs_loaded = True
-            self.dist_btn.setDisabled(True)
-            self.view.update_image()
-            self.status_bar.showMessage(f"{groups_max} picks loaded.")
+            self.locs_loaded = False
+            self.predict_btn.setDisabled(True)
+            return
+
+        n_picks = len(np.unique(self.locs.group))
+        self.locs_loaded = True
+        self.view.update_image()
+        self.status_bar.showMessage(f"{n_picks} picks loaded.")
 
         if self.model_loaded is False:
             self.status_bar.showMessage(
-                f"{groups_max} picks loaded. Load model to predict"
+                f"{n_picks} picks loaded. Load model to predict"
             )
         else:
             self.predict_btn.setDisabled(False)
@@ -1386,53 +1489,87 @@ class Window(QtWidgets.QMainWindow):
             print("Opening {} ..".format(path))
             self.open_file(path)
 
+    def read_model(self, path):
+        """Read a model (.sav) and its metadata (the .yaml next to it).
+
+        Parameters
+        ----------
+        path : str
+            Path to the .sav file.
+
+        Returns
+        -------
+        model : MLPClassifier
+            The trained classifier.
+        model_info : dict
+            Its metadata.
+
+        Raises
+        ------
+        ValueError
+            If the file is not a model saved with joblib.
+        OSError
+            If the metadata file cannot be read.
+        KeyError
+            If the metadata does not list the classes.
+        """
+        try:
+            model = joblib.load(path)
+        except Exception as error:
+            # unpickling raises errors of many types
+            raise ValueError(
+                f"Not a nanoTRON model ({type(error).__name__}: {error})."
+            ) from error
+        info_path = os.path.splitext(path)[0] + ".yaml"
+        model_info = io.load_yaml(info_path)
+        if not isinstance(model_info, dict) or "Classes" not in model_info:
+            raise KeyError(
+                f"{os.path.basename(info_path)} does not list the classes "
+                "of the model."
+            )
+        return model, model_info
+
     def load_default_model(self):
 
         path = os.getcwd() + DEFAULT_MODEL_PATH
 
         try:
-            self.model = joblib.load(path)
-            self.nanotron_log["Model Path"] = path
-            print("Default model loaded.")
+            self.model, self.model_info = self.read_model(path)
         except Exception:
             print("Default model not loaded.")
             self.status_bar.showMessage("Load model.")
-
-        try:
-            base, ext = os.path.splitext(path)
-            self.model_info = io.load_yaml(base + ".yaml")
-            self.classes.clear()
-            self.classes = self.model_info["Classes"]
-            self.model_loaded = True
-        except io.NoMetadataFileError:
             return
+        print("Default model loaded.")
+        self.nanotron_log["Model Path"] = path
+        self.classes = self.model_info["Classes"]
+        self.model_loaded = True
 
     def load_model(self):
 
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load model file", filter="*.sav", directory=None
         )
-        if path:
+        if not path:
+            return
+        try:
+            model, model_info = self.read_model(path)
+        except Exception as error:
+            lib.show_load_error(self, path, error)
+            return
+        self.model = model
+        self.model_info = model_info
+        self.nanotron_log["Model Path"] = path
+        self.classes = self.model_info["Classes"]
+        self.model_loaded = True
+        self.update_class_buttons()
+        # the predictions of another model are not exported under the
+        # classes of this one
+        self.predicted = False
+        self.export_btn.setDisabled(True)
+        self.dist_btn.setDisabled(True)
 
-            try:
-                self.model = joblib.load(path)
-                self.nanotron_log["Model Path"] = path
-            except Exception:
-                raise ValueError("No model file loaded.")
-
-            try:
-                base, ext = os.path.splitext(path)
-                self.model_info = io.load_yaml(base + ".yaml")
-                self.classes.clear()
-                self.classes = self.model_info["Classes"]
-                self.model_loaded = True
-                self.update_class_buttons()
-
-                if self.locs_loaded is True:
-                    self.predict_btn.setDisabled(False)
-
-            except io.NoMetadataFileError:
-                return
+        if self.locs_loaded is True:
+            self.predict_btn.setDisabled(False)
 
     def clearLayout(self, layout):
         while layout.count():
@@ -1453,7 +1590,8 @@ class Window(QtWidgets.QMainWindow):
 
     def export(self):
 
-        if "prediction" not in self.locs.columns:
+        # also reached with File > Save, before predicting
+        if not self.predicted:
             msgBox = QtWidgets.QMessageBox(self)
             msgBox.setIcon(QtWidgets.QMessageBox.Icon.Information)
             msgBox.setWindowTitle("Information")
@@ -1474,7 +1612,7 @@ class Window(QtWidgets.QMainWindow):
         for btn in checks:
 
             if isinstance(btn, QtWidgets.QWidgetItem):
-                if btn.widget().checkState():
+                if btn.widget().isChecked():
                     export_map.append(True)
                 else:
                     export_map.append(False)
@@ -1500,6 +1638,8 @@ class Window(QtWidgets.QMainWindow):
             dropped_picks = all_picks - len(np.unique(export_locs["group"]))
             print(f"Dropped {dropped_picks} from {all_picks} picks.")
             self.nanotron_log["Probability"] = accuracy
+        else:
+            self.nanotron_log.pop("Probability", None)
 
         count = 1
         for prediction, name in export_classes.items():
@@ -1517,7 +1657,7 @@ class Window(QtWidgets.QMainWindow):
         progress.close()
         print("Export of all predicted datasets finished.")
         self.status_bar.showMessage(
-            f"{len(export_classes.items())} files exported."
+            f"{len(export_classes.items())} files exported."
         )
 
     def _export_class(
@@ -1544,6 +1684,8 @@ class Window(QtWidgets.QMainWindow):
             regroup_map = [regroup_dict[_] for _ in filtered_locs["group"]]
             filtered_locs["group"] = regroup_map
             print(f"Regrouped datatset {name} to {len(n_groups)} picks.")
+        else:
+            self.nanotron_log.pop("Regroup", None)
 
         nanotron_info = self.nanotron_log.copy()
         nanotron_info.update(lib.step_info("Nanotron"))
@@ -1567,7 +1709,7 @@ class Window(QtWidgets.QMainWindow):
                 )
 
             pick_out_path = (
-                f"{os.path.splitext(self.path)[0]}_{out_filename}_picks"
+                f"{os.path.splitext(self.path)[0]}{out_filename}_picks"
                 + ".yaml"
             )
             io.save_picks(

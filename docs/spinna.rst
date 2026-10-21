@@ -319,7 +319,8 @@ Clicking *Fit labeling efficiency* opens a small dialog with three sections:
    used (entered in the *Distance (nm)* field; by default the distance in a
    loaded heterodimer structure, otherwise 10 nm).
 3. **Save fit scores** (checkbox) - when checked, the user selects a folder
-   where SPINNA saves the fit scores for every candidate.
+   where SPINNA saves the fit scores for every candidate. Without a folder,
+   the fit does not run.
 
 The dialog also displays a live "Estimated SPINNA rounds" preview that updates
 as the spin boxes change, so the user can gauge how long the fit will take
@@ -509,7 +510,8 @@ the heterogeneous density distribution present in the experimental data.
    value (off by default). The value is pre-filled with the Otsu threshold
    (`Otsu, IEEE Transactions on Systems, Man, and Cybernetics, 1979
    <https://doi.org/10.1109/TSMC.1979.4310076>`__) after *Generate mask*. With the mask type
-   *Binary*, the thresholded mask contains only 0 and 1.
+   *Binary*, the thresholded mask contains only 0 and 1. The threshold stays
+   below the highest probability, so the mask is never empty.
 6. To explore the mask:
 
    - scroll (or pinch on a trackpad) over the preview to zoom at the cursor,

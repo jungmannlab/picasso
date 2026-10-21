@@ -74,6 +74,9 @@ FIT_RESULT_LIM = 100
 # number of molecules (before labeling efficiency) of the first target
 # in a single simulation run without experimental data
 SINGLE_SIM_N_MOL = 10_000
+# errors of the loaders of structures and masks; both raise TypeError
+# for a file that was not written by SPINNA
+SPINNA_LOAD_ERRORS = lib.FILE_LOAD_ERRORS + (TypeError,)
 
 # The font matplotlib actually resolves for its default family
 # (e.g. "DejaVu Sans"), used as the default in the NND plot font
@@ -949,7 +952,14 @@ class MaskGeneratorTab(lib.Dialog):
             # show the mask
             self.preview.on_mask_generated()
             self.update_mask_info()
-            # set threshold to otsu threhold
+            # cap the threshold below the densest pixel/voxel, so that a
+            # thresholded mask is never empty; 8 decimals are shown
+            peak = float(self.mask_generator.image.max())
+            cap = np.floor(peak * 1e8) / 1e8
+            if cap >= peak:
+                cap -= 1e-8
+            self.thresholding_value.setMaximum(max(cap, 0.0))
+            # set threshold to otsu threshold
             self.thresholding_check.setChecked(False)
             self.thresholding_value.setValue(self.mask_generator.thresh)
             for widget in (
@@ -1015,8 +1025,10 @@ class MaskGeneratorTab(lib.Dialog):
                     )
                     if reply == QtWidgets.QMessageBox.StandardButton.Yes:
                         for z in range(self.mask.shape[2]):
+                            # a copy: the slice is a view of the mask;
+                            # empty slices stay black
                             image = self.mask[:, :, z]
-                            image /= image.max()
+                            image = image / (image.max() or 1)
                             Image.fromarray(
                                 np.round(255 * image).astype("uint8")
                             ).save(os.path.splitext(path)[0] + f"_z{z}.png")
@@ -1798,8 +1810,30 @@ class StructuresTab(lib.Dialog):
         )
         if path:
             self.window.pwd = os.path.dirname(path)
-            structures, _ = io.load_structures(path)
+            try:
+                structures, _ = io.load_structures(path)
+            except SPINNA_LOAD_ERRORS as error:
+                lib.show_load_error(self, path, error)
+                return
+            titles = [structure.title for structure in self.structures]
             self.structures.extend(structures)
+            # structures are selected and deleted by their titles, so
+            # only the first of several with one title can be edited
+            duplicates = []
+            for structure in structures:
+                if structure.title in titles:
+                    if structure.title not in duplicates:
+                        duplicates.append(structure.title)
+                titles.append(structure.title)
+            if duplicates:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Duplicate structure titles",
+                    "More than one structure is titled "
+                    f"{', '.join(duplicates)}. Only the first one of each "
+                    "title can be selected, edited or deleted; rename the "
+                    "others in the file to tell them apart.",
+                )
 
             self.current_structure = self.structures[0].title
             self.update_structure_box()
@@ -1880,13 +1914,16 @@ class StructuresTab(lib.Dialog):
             if widget.objectName():  # skip labels
                 base, num = split_name(widget.objectName())
                 if num == row:  # delete the widget if the same row
+                    # removing it from the layout alone leaves it drawn
+                    # in the box
                     self.mol_tar_box.content_layout.removeWidget(widget)
-                    del widget
+                    widget.setParent(None)
+                    widget.deleteLater()
                 elif num > row:  # if the widget below, lower the object name
                     widget.setObjectName(f"{base}{num-1}")
                     # if this is delete button, connect it to a new function
                     if base == "del":
-                        widget.disconnect()
+                        widget.released.disconnect()
                         widget.released.connect(
                             partial(
                                 self.delete_molecular_target,
@@ -2236,7 +2273,11 @@ class CompareModelsDialog(lib.Dialog):
             return
         self.sim_tab.window.pwd = os.path.dirname(paths[0])
         for path in paths:
-            structures, targets = io.load_structures(path)
+            try:
+                structures, targets = io.load_structures(path)
+            except SPINNA_LOAD_ERRORS as error:
+                lib.show_load_error(self, path, error)
+                return
             # check that the loaded targets match the exp. data's targets
             if not set(targets) == set(self.sim_tab.targets):
                 QtWidgets.QMessageBox.warning(
@@ -2499,6 +2540,9 @@ class FitLEDialog(lib.Dialog):
                 "Choose folder to save scores",
                 os.path.dirname(sim_tab.structures_path or ""),
             )
+            # no folder, no fit, as in Compare models
+            if not savedir:
+                accepted = False
         return distances, label_unc, savedir, accepted
 
 
@@ -2954,6 +2998,10 @@ class NNDPlotSettingsDialog(lib.Dialog):
     def update_plots(self) -> None:
         """Run a single simulation (if data loaded) or update the plots
         of the experimental NNDs only."""
+        # keep the requested rehistogramming for after the settings
+        # are corrected
+        if not self.extract_params():  # a warning was shown
+            return
         plot = not (self.rehist_exp or self.rehist_sim)
         if self.rehist_exp:
             self.sim_tab.hist_and_plot_exp_nnds()
@@ -3574,7 +3622,12 @@ class SimulationsTab(lib.Dialog):
         )
         if path:
             self.window.pwd = os.path.dirname(path)
-            self.structures, targets = io.load_structures(path)
+            try:
+                structures, targets = io.load_structures(path)
+            except SPINNA_LOAD_ERRORS as error:
+                lib.show_load_error(self, path, error)
+                return
+            self.structures = structures
             # reset exp data-related widgets if new/different targets
             # are present
             if set(targets) != set(self.targets):
@@ -3640,8 +3693,6 @@ class SimulationsTab(lib.Dialog):
     def load_exp_data(self, name: str) -> None:
         """Load experimental data for the specified molecular target
         species."""
-        self.nnd_hist_data_sim = []
-        self.nnd_hist_data_exp = []
         target = name[3:]
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
@@ -3677,6 +3728,9 @@ class SimulationsTab(lib.Dialog):
 
             self.exp_data[target] = coords
             self.exp_data_paths[target] = path
+            # the histograms of the previous data are outdated
+            self.nnd_hist_data_sim = []
+            self.nnd_hist_data_exp = []
             # change the color of the button
             for button in self.load_exp_data_buttons:
                 if button.objectName() == name:
@@ -3705,7 +3759,11 @@ class SimulationsTab(lib.Dialog):
         if path:
             self.window.pwd = os.path.dirname(path)
             # load the data
-            mask, info = io.load_mask(path)
+            try:
+                mask, info = io.load_mask(path)
+            except SPINNA_LOAD_ERRORS as error:
+                lib.show_load_error(self, path, error)
+                return
             self.masks[target] = mask
             self.mask_infos[target] = info
             self.mask_paths[target] = path
@@ -4078,17 +4136,17 @@ class SimulationsTab(lib.Dialog):
         )
         if path:
             self.window.pwd = os.path.dirname(path)
-            df = pd.read_csv(path)
+            try:
+                df = pd.read_csv(path)
+            except lib.FILE_LOAD_ERRORS as error:
+                lib.show_load_error(self, path, error)
+                return
             # check if the structure titles are the same as the ones loaded
             loaded = df.columns
             titles = [_.title for _ in self.structures]
             if len(loaded) == len(titles) * 2 and all(
                 [f"N_{t}" in loaded for t in titles]
             ):  # check that all titles are present
-                self.N_structures_fit = {
-                    structure_name: np.int32(df[f"N_{structure_name}"])
-                    for structure_name in titles
-                }
                 n_sim_fit, ok = QtWidgets.QInputDialog.getInt(
                     self,
                     "",
@@ -4098,9 +4156,13 @@ class SimulationsTab(lib.Dialog):
                     max=100000,
                     step=1,
                 )
-                if not ok:
+                if not ok:  # canceled: keep the current search space
                     return
 
+                self.N_structures_fit = {
+                    structure_name: np.int32(df[f"N_{structure_name}"])
+                    for structure_name in titles
+                }
                 self.n_sim_fit = n_sim_fit
                 self.granularity = "loaded from file"
                 # update the generate n structures button
@@ -4127,15 +4189,6 @@ class SimulationsTab(lib.Dialog):
         self.mixer = self.setup_mixer(mode="fit")
         if self.mixer is None:
             return
-
-        # discard the z component if 3D data is loaded but 2D simulation
-        # is conducted
-        if self.mask_den_stack.currentIndex() == 1:  # rect. ROI
-            if self.dim_widget.currentIndex() == 0:  # 2D
-                self.exp_data = {
-                    target: coords[:, :2]
-                    for target, coords in self.exp_data.items()
-                }
 
         save = ""
         if self.save_fit_results_check.isChecked():
@@ -4720,21 +4773,6 @@ class SimulationsTab(lib.Dialog):
             QtWidgets.QMessageBox.warning(self, "Warning", message)
             return
 
-        # check if the molecules are to be saved
-        if self.save_sim_result_check.isChecked():
-            out_path = os.path.splitext(self.structures_path)[0] + "_sim.hdf5"
-            path, _ = lib.get_save_filename_ext_dialog(
-                self,
-                "Save positions of simulated molecules",
-                out_path,
-                filter=".hdf5",
-            )
-            if not path:
-                return
-            self.window.pwd = os.path.dirname(path)
-        else:
-            path = ""
-
         # without experimental data, the numbers of molecules come from
         # the observed densities, which are not used with masks
         if (
@@ -4749,10 +4787,26 @@ class SimulationsTab(lib.Dialog):
             QtWidgets.QMessageBox.information(self, "Warning", message)
             return
 
-        # create the mixer instance
-        self.mixer = self.setup_mixer(mode="single_sim")
-        if self.mixer is None:
+        # create the mixer instance (refuses e.g. missing masks)
+        mixer = self.setup_mixer(mode="single_sim")
+        if mixer is None:
             return
+
+        # check if the molecules are to be saved; asked only once the
+        # simulation can run
+        path = ""
+        if self.save_sim_result_check.isChecked():
+            out_path = os.path.splitext(self.structures_path)[0] + "_sim.hdf5"
+            path, _ = lib.get_save_filename_ext_dialog(
+                self,
+                "Save positions of simulated molecules",
+                out_path,
+                filter=".hdf5",
+            )
+            if not path:
+                return
+            self.window.pwd = os.path.dirname(path)
+        self.mixer = mixer
 
         # run the simulation
         self.sim_and_plot_NND()
@@ -4806,6 +4860,8 @@ class SimulationsTab(lib.Dialog):
         n_total = self.single_sim_n_total()
         n_str = self.mixer.convert_props_to_counts(prop_str, n_total)
         plot_params = self.nn_plot_settings_dialog.extract_params()
+        if not plot_params:  # invalid plot settings, a warning was shown
+            return
         show_exp = self.check_exp_loaded()
 
         # extract NNDs from simulated data
@@ -4816,8 +4872,13 @@ class SimulationsTab(lib.Dialog):
             duplicate=True,
         )
         if show_exp:  # get the simulation's fitting score:
+            exp_data = self.exp_data
+            # a 2D homogeneous simulation of 3D data is compared in xy,
+            # as in spinna.SPINNA
+            if self.mixer.roi[0] is not None and self.mixer.roi[2] is None:
+                exp_data = {t: c[:, :2] for t, c in exp_data.items()}
             dist_exp = spinna.get_NN_dist_experimental(
-                self.exp_data, mixer=self.mixer, duplicate=True
+                exp_data, mixer=self.mixer, duplicate=True
             )
             self.current_score = spinna.NND_score(dist_exp, dist_sim)
             if self.nn_plot_settings_dialog.rehist_exp:
@@ -4848,8 +4909,10 @@ class SimulationsTab(lib.Dialog):
     def hist_and_plot_exp_nnds(self) -> None:
         """Histogram NNDs of experimental data only, according to the
         chosen plot settings and display the current NND plot."""
-        self.nnd_hist_data_exp = []
         plot_params = self.nn_plot_settings_dialog.extract_params()
+        if not plot_params:  # invalid plot settings, a warning was shown
+            return
+        self.nnd_hist_data_exp = []
         for i, t1 in enumerate(self.targets):
             for t2 in self.targets[i:]:
                 hist_data_t1t2 = self.hist_exp_nnds(t1, t2, plot_params)
@@ -5186,13 +5249,15 @@ class SimulationsTab(lib.Dialog):
         if not (len(self.nnd_hist_data_exp) or len(self.nnd_hist_data_sim)):
             return
 
+        plot_params = self.nn_plot_settings_dialog.extract_params()
+        if not plot_params:  # invalid plot settings, a warning was shown
+            return
         self.nnd_ax.cla()
         if self.nn_plot_settings_dialog.nnd_legend_check.isChecked():
             show_legend = True
         else:
             show_legend = False
 
-        plot_params = self.nn_plot_settings_dialog.extract_params()
         mixer = (
             self.setup_mixer(mode="dummy")
             if self.mixer is None
@@ -5302,6 +5367,8 @@ class SimulationsTab(lib.Dialog):
         self.window.pwd = os.path.dirname(path)
 
         plot_params = self.nn_plot_settings_dialog.extract_params()
+        if not plot_params:  # invalid plot settings, a warning was shown
+            return
         mixer = (
             self.setup_mixer(mode="dummy")
             if self.mixer is None
@@ -5389,13 +5456,15 @@ class SimulationsTab(lib.Dialog):
             else self.mixer
         )
 
-        for i, (t1, t2, n) in enumerate(
+        for i, (t1, t2, _) in enumerate(
             mixer.get_neighbor_idx(duplicate=True)
         ):
-            if not n:
-                continue
-            # extract simulated data (if available)
-            if len(self.nnd_hist_data_sim):
+            # extract simulated data (if available); the number of
+            # neighbors histogrammed is set in the plot settings, not
+            # by the mixer, and may be zero
+            if len(self.nnd_hist_data_sim) and len(
+                self.nnd_hist_data_sim[i]["counts"]
+            ):
                 data_sim = {}
                 bins = self.nnd_hist_data_sim[i]["bins"][0]
                 bin_centers = (bins[1:] + bins[:-1]) / 2.0
@@ -5411,7 +5480,9 @@ class SimulationsTab(lib.Dialog):
                 df.to_csv(outpath_sim, index=False)
 
             # extract experimental data (if available)
-            if len(self.nnd_hist_data_exp):
+            if len(self.nnd_hist_data_exp) and len(
+                self.nnd_hist_data_exp[i]["counts"]
+            ):
                 data_exp = {}
                 bins = self.nnd_hist_data_exp[i]["bins"][0]
                 bin_centers = (bins[1:] + bins[:-1]) / 2.0

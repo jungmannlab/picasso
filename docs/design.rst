@@ -34,7 +34,9 @@ Design rectangular DNA origami
 5. Use ``Get plates`` to get an Excel sheet with all needed sequences in a
    plate format.
 6. Use ``Pipetting scheme`` and select the folder with your plate list to
-   generate a pipetting scheme.
+   generate a pipetting scheme. If sequences of the design are not found in
+   the plate list, Design warns before saving the scheme, which then shows only
+   the sequences found.
 7. Use ``Folding scheme`` to get a table for pipetting folding mixes.
 
 A design can be saved and loaded using the ``Save`` and ``Load`` buttons. A

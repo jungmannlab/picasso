@@ -221,20 +221,23 @@ def read_plate(filename: str) -> list:
     return data
 
 
-def save_plate(filename: str, data: list) -> None:
+def save_plate(filename: str, data: list | dict) -> None:
     """Save the plate data to a CSV file.
 
     Parameters
     ----------
     filename : str
         The name of the file to save the data to.
-    data : list
-        A list of lists containing the plate data to save.
+    data : list or dict
+        The plates to save, one after the other: a list of plates or a
+        dict of plates by number (0, 1, ...). Each plate is a list of
+        rows.
     """
+    plates = data.values() if isinstance(data, dict) else data
     with open(filename, "w", newline="") as csvfile:
         writer = csv.writer(
             csvfile, delimiter=",", quotechar="|", quoting=csv.QUOTE_MINIMAL
         )
-        for plate in data:
+        for plate in plates:
             for row in plate:
                 writer.writerow(row)

@@ -1339,7 +1339,9 @@ class MaskGenerator:
             outpath = os.path.splitext(path)[0] + ".png"
             if self.mask.ndim == 3:
                 mask_ = np.sum(self.mask, axis=2)
-            mask_ /= mask_.max()  # normalize to save image
+            else:
+                mask_ = self.mask
+            mask_ = mask_ / mask_.max()  # normalized copy for the image
             im = Image.fromarray(np.uint8(mask_ * 255))
             im.save(outpath)
 

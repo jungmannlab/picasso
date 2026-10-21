@@ -383,6 +383,7 @@ class PipettingDialog(lib.Dialog):
             )
         if path:
             self.folderEdit.setText(path)
+            self.fulllist = []  # the sequences of this folder only
             csvFiles = glob.glob(os.path.join(path, "*.csv"))
             csvCounter = len(csvFiles)
             self.csvCounter.setText(
@@ -391,7 +392,6 @@ class PipettingDialog(lib.Dialog):
             platelist = []
             sequencelist = []
             for element in csvFiles:
-                os.chdir(path)
                 data = design.read_plate(element)
                 for i in range(0, len(data)):
                     platelist.append(data[i][0])
@@ -495,9 +495,10 @@ class SeqDialog(lib.Dialog):
             Long names for the docking sequences (i.e., the DNA
             sequences).
         """
-        noseq = _np.count_nonzero(colorcounts)
-        # table defintion
-        self.table.setRowCount(noseq - 1)
+        # one row per color used; the last count is of uncolored sites
+        noseq = _np.count_nonzero(colorcounts[:-1])
+        # table definition
+        self.table.setRowCount(noseq)
         rowRunner = 0
         for i in range(len(colorcounts) - 1):
             if colorcounts[i] > 0:
@@ -570,23 +571,12 @@ class SeqDialog(lib.Dialog):
         tablelong = ["None", "None", "None", "None", "None", "None", "None"]
 
         for i in range(self.table.rowCount()):
-            try:
-                tableshort[int(self.table.item(i, 0).text()) - 1] = (
-                    self.table.item(i, 3).text()
-                )
-                if tableshort[i] == "":
-                    tableshort[i] = "None"
-            except AttributeError:
-                tableshort[i] = "None"
-
-            try:
-                tablelong[int(self.table.item(i, 0).text()) - 1] = (
-                    self.table.item(i, 4).text()
-                )
-                if tablelong[i] == "":
-                    tablelong[i] = "None"
-            except AttributeError:
-                tablelong[i] = "None"
+            # the row of color ``ext``; an empty cell sets no extension
+            ext = int(self.table.item(i, 0).text()) - 1
+            for column, table in ((3, tableshort), (4, tablelong)):
+                item = self.table.item(i, column)
+                if item is not None and item.text() != "":
+                    table[ext] = item.text()
         return tablelong, tableshort
 
 
@@ -679,6 +669,20 @@ class FoldingDialog(lib.Dialog):
 
     def clcExcess(self) -> None:
         """Calculate and update volumes to match desired
+        concentrations, warning about values that are not numbers."""
+        try:
+            self._calculate_volumes()
+        except (ValueError, ZeroDivisionError):
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Folding table",
+                "The volumes cannot be calculated. Please enter non-zero"
+                " numbers for the concentrations and the total volume and"
+                " whole numbers for the parts and the excess.",
+            )
+
+    def _calculate_volumes(self) -> None:
+        """Calculate and update volumes to match desired
         concentrations."""
         rowCount = self.table.rowCount()
         self.resize(800, 285 + (rowCount - 6) * 30)
@@ -696,7 +700,12 @@ class FoldingDialog(lib.Dialog):
         for i in range(rowCount - 3):
             iconc = float(self.table.item(i, 1).text())
             parts = int(self.table.item(i, 2).text())
-            content = _np.round((iconc / parts * 1000), decimals=3)
+            # a mix without staples, e.g., the core mix of a design with
+            # every site colored, is not added
+            if parts == 0:
+                content = 0
+            else:
+                content = _np.round((iconc / parts * 1000), decimals=3)
             self.writeTable(i, 3, str(content))
 
         # Calculate Volume based on pool and final concentration
@@ -704,7 +713,8 @@ class FoldingDialog(lib.Dialog):
         for i in range(rowCount - 3):
             target = float(self.table.item(i, 4).text())
             pool = float(self.table.item(i, 3).text())
-            volume[i] = target / pool * totalvolume
+            parts = int(self.table.item(i, 2).text())
+            volume[i] = 0 if parts == 0 else target / pool * totalvolume
             self.writeTable(i, 5, str(_np.round(volume[i], decimals=3)))
         foldingbuffer = totalvolume / 10
 
@@ -728,18 +738,6 @@ class FoldingDialog(lib.Dialog):
 
     def colorTable(self, row: int, col: int, color: QtGui.QColor) -> None:
         set_item_color(self.table.item(row, col), color)
-
-    def setExt(
-        parent: QtWidgets.QWidget | None = None,
-    ) -> tuple[list[str], list[str], bool]:
-        dialog = FoldingDialog(parent)
-        result = dialog.exec()
-        tablelong, tableshort = dialog.evalTable()
-        return (
-            tablelong,
-            tableshort,
-            result == QtWidgets.QDialog.DialogCode.Accepted,
-        )
 
 
 class PlateDialog(lib.Dialog):
@@ -1228,15 +1226,24 @@ class Scene(QtWidgets.QGraphicsScene):
         }
         design.save_info(path, info)
 
-    def loadCanvas(self, path: str) -> None:
-        """Load the origami design from the given path."""
+    def loadCanvas(self, path: str) -> bool:
+        """Load the origami design from the given path.
+
+        Returns
+        -------
+        loaded : bool
+            False if the file holds no design; the canvas is unchanged.
+        """
         info = _io.load_info(path)
         try:
             structure = info[0]["Structure"]
-        except KeyError:
+            tableshort = info[0]["Extensions Short"]
+            tablelong = info[0]["Extensions Long"]
+        except (KeyError, IndexError, TypeError):
             self.window.statusBar().showMessage(
                 "Error. Filetype not recognized"
             )
+            return False
         structure = structure[::-1]
         allitems = self.items()
         lenitems = len(allitems)
@@ -1251,9 +1258,10 @@ class Scene(QtWidgets.QGraphicsScene):
             )
 
         self.evaluateCanvas()
-        self.tableshort = info[0]["Extensions Short"]
-        self.tablelong = info[0]["Extensions Long"]
+        self.tableshort = tableshort
+        self.tablelong = tablelong
         self.updateExtensions(self.tableshort)
+        return True
 
     def readCanvas(self) -> dict:
         """Load the designed origami into plates containing the plate
@@ -1453,9 +1461,9 @@ class Window(QtWidgets.QMainWindow):
                 self, "Open design", filter="*.yaml"
             )
         if path:
-            self.mainscene.loadCanvas(path)
-            self.statusBar().showMessage("File loaded from: " + path)
-            self.pwd = os.path.dirname(path)
+            if self.mainscene.loadCanvas(path):
+                self.statusBar().showMessage("File loaded from: " + path)
+                self.pwd = os.path.dirname(path)
         else:
             self.statusBar().showMessage(
                 "Filename not specified. File not loaded."
@@ -1565,9 +1573,10 @@ class Window(QtWidgets.QMainWindow):
         or vice versa."""
         colorcounts = self.mainscene.colorcounts
         tableshort = self.mainscene.tableshort
+        tablelong = self.mainscene.tablelong
         errors = 0
         for i in range(len(colorcounts) - 1):
-            if colorcounts[i] != 0 and tableshort[i] == "None":
+            if colorcounts[i] != 0 and "None" in (tableshort[i], tablelong[i]):
                 errors += 1
 
         return errors
@@ -1629,8 +1638,14 @@ class Window(QtWidgets.QMainWindow):
                             "Filename not specified. Plates not saved."
                         )
 
-    def _save_pipett_pdf(self, allfig: dict, platenames: list) -> None:
-        """Open a save dialog and export all plate figures to a PDF."""
+    def _save_pipett_pdf(self, allfig: dict, platenames: list) -> str:
+        """Open a save dialog and export all plate figures to a PDF.
+
+        Returns
+        -------
+        path : str
+            The saved PDF, or an empty string if saving was canceled.
+        """
         if hasattr(self, "pwd"):
             path, ext = lib.get_save_filename_ext_dialog(
                 self,
@@ -1658,8 +1673,9 @@ class Window(QtWidgets.QMainWindow):
                         dpi=200,
                     )
             progress.close()
-            self.statusBar().showMessage("Pippetting scheme saved to: " + path)
+            self.statusBar().showMessage("Pipetting scheme saved to: " + path)
             self.pwd = os.path.dirname(path)
+        return path
 
     def pipettingScheme(self) -> None:
         """Creates the pipetting scheme (i.e., the .pdf file showing
@@ -1681,7 +1697,10 @@ class Window(QtWidgets.QMainWindow):
 
         structureData = self.mainscene.readCanvas()[0]
         pwd = getattr(self, "pwd", [])
-        fulllist, _ = PipettingDialog.getSchemes(pwd=pwd)
+        fulllist, ok = PipettingDialog.getSchemes(pwd=pwd)
+        if not ok:
+            self.statusBar().showMessage("Canceled. Scheme not created.")
+            return
         if not fulllist:
             self.statusBar().showMessage("No *.csv found. Scheme not created.")
             return
@@ -1690,31 +1709,52 @@ class Window(QtWidgets.QMainWindow):
             structureData, fulllist
         )
         noplates = len(set(platelist))
-        if (len(structureData) - 1 - 16) == len(pipettlist):
+        n_needed = len(structureData) - 1 - 16
+        n_missing = n_needed - len(pipettlist)
+        if n_missing == 0:
             self.statusBar().showMessage(
                 f"All sequences found in {noplates} Plates."
                 " Pipetting scheme complete."
             )
         else:
-            self.statusBar().showMessage(
-                "Error: Sequences sequences missing."
-                " Please check *.csv file.."
+            # said before saving, and not only in the status bar, which
+            # the saved message would replace
+            missing = (
+                f"{n_missing} of the {n_needed} sequences of the design "
+                "were not found in the .csv files of the chosen folder."
+            )
+            self.statusBar().showMessage("Error: " + missing)
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Sequences missing",
+                missing + " The pipetting scheme shows only the sequences"
+                " that were found. Please check the .csv files.",
             )
 
         allfig, platenames = _build_plate_figures(pipettlist, platelist)
-        self._save_pipett_pdf(allfig, platenames)
+        try:
+            path = self._save_pipett_pdf(allfig, platenames)
+        finally:
+            for fig in allfig.values():
+                plt.close(fig)
+        if path and n_missing:
+            self.statusBar().showMessage(
+                f"Pipetting scheme saved to: {path} ({n_missing} sequences "
+                "missing)."
+            )
 
     def foldingScheme(self) -> None:
         """Run the folding dialog to get volumes to mix."""
-        fdialog = FoldingDialog()  # Intitialize FoldingDialog Class
+        fdialog = FoldingDialog()  # Initialize FoldingDialog Class
         # Fill with Data
         colorcounts = self.mainscene.colorcounts
-        noseq = _np.count_nonzero(colorcounts)
+        # one mix per color used; the last count is of uncolored sites
+        noseq = _np.count_nonzero(colorcounts[:-1])
 
         if hasattr(self, "pwd"):
             fdialog.pwd = self.pwd
 
-        fdialog.table.setRowCount(noseq + 5)
+        fdialog.table.setRowCount(noseq + 6)
 
         fdialog.writeTable(0, 0, "Scaffold")
         fdialog.writeTable(0, 1, str(0.1))
