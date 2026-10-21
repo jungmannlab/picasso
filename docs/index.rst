@@ -246,5 +246,6 @@ Citing Picasso
    Getting started <getting-started>
    User guide <user-guide>
    Reference <reference>
+   FAQ <faq>
    Release notes <changelog>
    Contributing <development>

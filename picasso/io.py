@@ -5985,10 +5985,12 @@ def _report_dropped_locs(
         message += (
             f" Most of them lie beyond the field of view: x reaches "
             f"{np.nanmax(x):,.1f} and y {np.nanmax(y):,.1f} nm. Since "
-            "Picasso 1.0, x and y are in nm; a file written in camera "
-            "pixels needs the picasso_format attribute removed (or "
-            "picasso convert-units), else Width, Height or Pixelsize in "
-            "the metadata are too small."
+            "Picasso 1.0, x and y are in nm, and a file without the "
+            "picasso_format attribute is taken to be in camera pixels, "
+            "i.e., multiplied by Pixelsize: a file written in nm by other "
+            "software needs the attribute (see "
+            f"{docs_url('files.html#files-legacy')}). Else Width, Height "
+            "or Pixelsize in the metadata are too small."
         )
     _log.warning(message)
 

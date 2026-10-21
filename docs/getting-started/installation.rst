@@ -198,8 +198,9 @@ the tracebacks of failing background threads. The file rotates to
 ``picasso.log.1`` once it exceeds 5 MB. The one-click installers have no
 console, so everything Picasso prints goes to this file as well.
 
-Please report problems on `GitHub
-<https://github.com/jungmannlab/picasso/issues>`__ and attach the log file.
+Many problems are answered in the :doc:`/faq`. Please report others on
+`GitHub <https://github.com/jungmannlab/picasso/issues>`__ and attach the log
+file.
 
 Next steps
 ----------

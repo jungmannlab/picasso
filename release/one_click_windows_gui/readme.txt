@@ -7,6 +7,8 @@ The Picasso software is complemented by our Nature Protocols publication (https:
 
 A comprehensive documentation can be found here: https://picassosr.readthedocs.io/en/latest/
 
+If something does not work, see the answers to common problems: https://picassosr.readthedocs.io/en/latest/faq.html
+
 How to install
 --------------
 
@@ -33,7 +35,7 @@ Adding camera configuration and plugins
 
 Since version 0.11, both the camera configuration and plugins live in your Picasso user folder, C:\Users\<your user name>\.picasso. This is the same folder that already holds settings.yaml and the log file, and it is the same for every installation type (one-click installer, PyPI, conda, source). Because it sits outside the installation folder, it survives updating or uninstalling Picasso, it is writable without administrator rights, and it is shared by the standard and CUDA editions.
 
-Camera configuration is essential for correct photon conversion and thus correct localization precision calculation. Put your config file at C:\Users\<your user name>\.picasso\config.yaml. The file is never created for you - you have to create it yourself. The quickest way to get there is to open Picasso: Localize and select File > "Open camera config file location", which opens the folder in Explorer (creating it if needed) or reveals wherever a config already in use actually lives. To start from a template, copy config_template.yaml (bundled inside the picasso package, next to __init__.py) into that folder and rename it to config.yaml. For more details, see documentation: https://picassosr.readthedocs.io/en/latest/localize.html#camera-config
+Camera configuration is essential for correct photon conversion and thus correct localization precision calculation. Put your config file at C:\Users\<your user name>\.picasso\config.yaml. The file is never created for you - you have to create it yourself. The quickest way to get there is to open Picasso: Localize and select File > "Open camera config file location", which opens the folder in Explorer (creating it if needed) or reveals wherever a config already in use actually lives. To start from a template, copy config_template.yaml (bundled inside the picasso package, next to __init__.py) into that folder and rename it to config.yaml. For more details, see documentation: https://picassosr.readthedocs.io/en/latest/localize/camera.html#localize-camera-config
 
 Older versions read config.yaml from the installation folder (C:\Picasso\_internal\picasso). *That still works*: if no config.yaml exists in the user folder, Picasso falls back to the in-package file and reads it in place, so an existing setup keeps working. When both are present, the one in .picasso wins.
 

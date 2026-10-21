@@ -120,9 +120,10 @@ into the console):
 
    picasso localize foldername
 
-Picasso will analyze the folder and process all ``*.ome.tif`` files in it. If
-the files have consecutive names (e.g., ``File.ome.tif``, ``File_1.ome.tif``,
-``File_2.ome.tif``), they will be treated as one.
+Picasso will analyze the folder and process all ``.tif``, ``.raw``, ``.nd2``,
+``.stk``, ``.czi`` and ``.lif`` movies in it. If ``.tif`` files have
+consecutive names (e.g., ``File.ome.tif``, ``File_1.ome.tif``,
+``File_2.ome.tif``), they will be treated as one movie.
 
 Drift correction
 ~~~~~~~~~~~~~~~~

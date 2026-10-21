@@ -85,7 +85,7 @@ additional summary statistics will then be stored in the local database.
           "movie.tif", "movie_locs.hdf5", drift=drift, len_mean=mean_len, nena=nena
       )
       localize.add_file_to_db(
-          "movie.tif", "movie_locs.hdf5", drift=drift, len_mean=mean_len, nena=nena_px
+          "movie.tif", "movie_locs.hdf5", drift=drift, len_mean=mean_len, nena=nena
       )
 
 
@@ -283,14 +283,15 @@ macOS and Linux, put paths with spaces in quotes, as in a terminal, e.g.,
 ``python "/Users/me/my scripts/test.py" $FILENAME``. If the command fails, the
 watcher's logfile shows its exit code.
 
-When having an existing Picasso one-click installation, Picasso can directly
-be called via the command line (see :doc:`cmd`). Some example commands would
-then be:
+The custom command can call Picasso's command line (see :doc:`cmd`), which
+the Windows one-click installer puts on the ``PATH``; with the macOS one-click
+installer, call ``/Applications/Picasso.app/Contents/MacOS/picasso`` instead
+of ``picasso``. Some example commands would then be:
 
 - ``picasso undrift $LOCS`` for drift correction;
 - ``picasso link $LOCS`` for linking localizations;
-- ``picasso dbscan $LOCS 0.1 2`` for performing DBSCAN cluster analysis
-  with clustering radius 0.1 and density 2.
+- ``picasso dbscan $LOCS 13 2`` for performing DBSCAN cluster analysis
+  with a clustering radius of 13 nm and density 2.
 
 Preview
 ~~~~~~~

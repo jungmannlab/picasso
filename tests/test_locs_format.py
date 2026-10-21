@@ -236,6 +236,26 @@ class TestDroppedLocalizations:
         assert "Most of them lie beyond the field of view" in message
         assert "nm" in message
 
+    def test_nm_file_without_the_format_marker_is_explained(
+        self, tmp_path, caplog
+    ):
+        # written in nm by other software, but without picasso_format:
+        # taken for camera pixels and multiplied by the pixel size, so the
+        # localizations land beyond the field of view
+        locs = make_locs()
+        pixelsize = lib.get_from_metadata(INFO, "Pixelsize")
+        for column in ("x", "y", "lpx", "lpy"):
+            locs[column] *= pixelsize
+        path = write_raw(tmp_path / "other_software.hdf5", locs)
+        with caplog.at_level(logging.WARNING, logger="picasso.io"):
+            io.load_locs(path)
+        message = caplog.text
+        assert "Most of them lie beyond the field of view" in message
+        # the fix is to add the marker, not to remove it or convert again
+        assert "needs the attribute" in message
+        assert "removed" not in message
+        assert "convert-units" not in message
+
     def test_a_few_dropped_rows_are_reported_without_hint(
         self, tmp_path, caplog
     ):
