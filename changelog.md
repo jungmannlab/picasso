@@ -92,6 +92,8 @@ Last change: 21-OCT-2026 CEST
 - Fixed: indexing a TIFF movie of a single file with a tuple (e.g., `movie[2, 1]` or `movie[1:3, :, 5]`) raised a `TypeError`, as did slicing the frames of a MetaMorph .stk file with a tuple. `movie[..., x]` now indexes the last axis, as in NumPy, for all movie formats.
 - Fixed: the `shape` of non-square Nikon .nd2 movies swapped the height and width.
 - Fixed: writing TIFF and .stk movies to raw files (`tofile`) swapped the bytes of big-endian movies, and of all movies when no byte order was given.
+- Fixed: starting a channel registration or a spline PSF calibration while one was still running closed Localize. Localize now says that one is already running.
+- Fixed: a 3D (astigmatism) calibration with more frames per step than the movie has, or a z binning that leaves fewer than 7 axial bins, raised an error instead of a warning saying what to change.
 
 ### Filter
 - Filtering by expression: `Filter > Filter by expression...` for universal filtering with comparisons, logic, arithmetic, functions and statistics over the shown localizations. See the [documentation](https://picassosr.readthedocs.io/en/latest/filter.html#filter-expression).

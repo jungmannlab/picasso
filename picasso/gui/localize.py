@@ -2545,7 +2545,7 @@ class CalibrateSplineDialog(lib.Dialog):
         # Magnification factor (applied to the fitted z, as in astigmatism)
         magnification_label = QtWidgets.QLabel("Magnification factor:")
         magnification_label.setToolTip(
-            "Factor used to correct for z-position abberation due to\n"
+            "Factor used to correct for z-position aberration due to\n"
             "refractive index mismatch, see Huang B, et al. Science. 2008."
         )
         grid.addWidget(magnification_label, 5, 0)
@@ -4581,7 +4581,7 @@ class ParametersDialog(lib.Dialog):
         z_grid.addWidget(self.z_calib_label, 0, 0)
         magnification_label = QtWidgets.QLabel("Magnification factor:")
         magnification_label.setToolTip(
-            "Factor used to correct for z-position abberation due to\n"
+            "Factor used to correct for z-position aberration due to\n"
             "refractive index mismatch, see Huang B, et al. Science. 2008."
         )
         z_grid.addWidget(magnification_label, 1, 0)
@@ -7793,8 +7793,27 @@ class Window(QtWidgets.QMainWindow):
             return None
         return [list(map(list, r)) for r in self.view.rois]
 
+    def _still_running(self, worker_name: str, title: str, what: str) -> bool:
+        """Whether the worker stored as ``worker_name`` has not finished yet,
+        in which case the user is told so.
+
+        Starting another one would drop the last reference to the running
+        thread, and a QThread destroyed while it runs aborts the
+        application."""
+        worker = getattr(self, worker_name, None)
+        if worker is None or not worker.isRunning():
+            return False
+        QtWidgets.QMessageBox.information(
+            self, title, f"A {what} is already running."
+        )
+        return True
+
     def _check_registration_channels(self) -> bool:
         """Whether enough channels are loaded to register anything."""
+        if self._still_running(
+            "registration_worker", "Register channels", "channel registration"
+        ):
+            return False
         if self._registration_regions() is not None:
             return True
         if len(self.channels) < 2:
@@ -7917,6 +7936,12 @@ class Window(QtWidgets.QMainWindow):
                 self, "Spline PSF Calibration", "No file loaded."
             )
             return
+        if self._still_running(
+            "spline_calibration_worker",
+            "Spline PSF Calibration",
+            "spline PSF calibration",
+        ):
+            return
 
         # identify spots first so the beads are displayed (like the
         # astigmatic 3D calibration); the calibration is built afterwards.
@@ -8008,6 +8033,12 @@ class Window(QtWidgets.QMainWindow):
     def build_spline_calibration(self) -> None:
         """Prompt for the spline PSF calibration parameters and build the
         calibration from the loaded bead z-stack in a background thread."""
+        if self._still_running(
+            "spline_calibration_worker",
+            "Spline PSF Calibration",
+            "spline PSF calibration",
+        ):
+            return
         split_fov = self.view.split_fov_mode
         regions = list(self.view.rois) if split_fov else None
         if split_fov and len(regions) < 2:
@@ -13532,17 +13563,28 @@ class Window(QtWidgets.QMainWindow):
                     identification = localize.identification_info(
                         self.last_identification_info or {}
                     )
-                    zfit.calibrate_z(
-                        locs,
-                        self.info + [identification | self.camera_info],
-                        step,
-                        self.parameters_dialog.magnification_factor.value(),
-                        path=path,
-                        frame_bounds=self.frame_range,
-                        frames_per_step=frames_per_step,
-                        frame_order=frame_order,
-                        z_binning=z_binning,
+                    magnification = (
+                        self.parameters_dialog.magnification_factor.value()
                     )
+                    try:
+                        zfit.calibrate_z(
+                            locs,
+                            self.info + [identification | self.camera_info],
+                            step,
+                            magnification,
+                            path=path,
+                            frame_bounds=self.frame_range,
+                            frames_per_step=frames_per_step,
+                            frame_order=frame_order,
+                            z_binning=z_binning,
+                        )
+                    except ValueError as error:
+                        # the specs do not fit the stack (frames per step,
+                        # z binning); the fitted spots stay on display
+                        QtWidgets.QMessageBox.warning(
+                            self, "3D calibration", str(error)
+                        )
+                        return
                     dt = time.time() - t0
                     notifications.notify_finished(dt)
                     self.status_bar.showMessage(
