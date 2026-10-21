@@ -8,6 +8,10 @@ Picasso
    :target: https://github.com/jungmannlab/picasso/workflows/CI/badge.svg
    :alt: CI
 
+.. image:: https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/jungmannlab/picasso/badges/coverage-badge.json
+   :target: https://github.com/jungmannlab/picasso/actions/workflows/main.yml?query=branch%3Amaster
+   :alt: Test coverage
+
 .. image:: http://img.shields.io/badge/DOI-10.1038/nprot.2017.024-52c92e.svg
    :target: https://doi.org/10.1038/nprot.2017.024
    :alt: DOI

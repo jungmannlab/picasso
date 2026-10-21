@@ -79,14 +79,64 @@ jobs:
         fi
     - name: Coverage report
       # in the job's summary page, least covered modules first; also when
-      # tests failed. Numba-compiled functions count as not run.
+      # tests failed. Numba-compiled functions and the CUDA modules are left
+      # out (pyproject.toml, [tool.coverage.report]).
       if: ${{ !cancelled() && runner.os == 'Linux' && matrix.python-version == '3.14' }}
       run: |
         echo "## Test coverage" >> "$GITHUB_STEP_SUMMARY"
         coverage report --format=markdown >> "$GITHUB_STEP_SUMMARY"
+        # the readme's badge, published by the coverage-badge job below
+        coverage json -q -o coverage.json
+        python - <<'EOF'
+        import json
+
+        percent = json.load(open("coverage.json"))["totals"]["percent_covered"]
+        colors = ((90, "brightgreen"), (80, "green"), (70, "yellowgreen"),
+                  (60, "yellow"), (0, "orange"))
+        color = next(c for limit, c in colors if percent >= limit)
+        badge = {"schemaVersion": 1, "label": "coverage",
+                 "message": f"{percent:.0f}%", "color": color}
+        json.dump(badge, open("coverage-badge.json", "w"))
+        EOF
+    - name: Keep the coverage badge
+      if: ${{ success() && runner.os == 'Linux' && matrix.python-version == '3.14' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-badge
+        path: coverage-badge.json
     - name: Show the crash log
       if: always()
       run: cat "$PICASSO_CRASH_LOG" || echo "no crash log"
+
+  coverage-badge:
+    # The readme's coverage badge reads coverage-badge.json from the
+    # "badges" branch (through shields.io). Only master's coverage is
+    # published, from a run whose tests passed; the branch holds this one
+    # file in a single commit, replaced each time.
+    name: Publish the coverage badge
+    needs: build
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: coverage-badge
+    - name: Push it to the badges branch
+      env:
+        TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        git init -q -b badges site
+        mv coverage-badge.json site/
+        cd site
+        git add coverage-badge.json
+        git -c user.name="github-actions[bot]" \
+          -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+          commit -q -m "Coverage badge of ${GITHUB_SHA::7}"
+        git push -q --force \
+          "https://x-access-token:${TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+          badges
 
   docs:
     name: Documentation

@@ -185,6 +185,15 @@ source = ["picasso"]
 # least covered first
 sort = "Cover"
 skip_empty = true
+# the CUDA fitting modules run only on an NVIDIA GPU, which CI does not have
+omit = ["picasso/fitting/*_cuda.py"]
+# Numba compiles these functions to machine code, which coverage cannot
+# trace, so they would count as missed even when the tests run them; a
+# decorator excluded excludes the whole function
+exclude_also = [
+    "@(numba\\.)?n?jit\\b",
+    "@cuda\\.jit\\b",
+]
 
 [tool.black]
 line-length = 79
