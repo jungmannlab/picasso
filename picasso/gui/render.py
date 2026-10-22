@@ -6896,6 +6896,11 @@ class MaskSettingsDialog(lib.Dialog):
         Container for all widgets in the scroll area.
     disp_px_size : QSpinBox
         Contains the display pixel size in nm.
+    index_infos : list
+        Metadata of ``index_locs``, as ``masking.mask_locs`` returned
+        it.
+    index_infos_out : list
+        Metadata of ``index_locs_out``.
     index_locs : list
         Localizations that were masked; may contain a single or all
         channels.
@@ -6949,7 +6954,9 @@ class MaskSettingsDialog(lib.Dialog):
         self.setModal(False)
         self.channel = 0
         self.index_locs = []
+        self.index_infos = []
         self.index_locs_out = []
+        self.index_infos_out = []
 
         self.scroll_area = QtWidgets.QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -7276,23 +7283,34 @@ class MaskSettingsDialog(lib.Dialog):
     def mask_locs(self) -> None:
         """Mask localizations from a single or all channels."""
         self.index_locs = []  # locs in the mask
+        self.index_infos = []  # and their metadata
         self.index_locs_out = []  # locs outside the mask
+        self.index_infos_out = []
         if self.save_all.isChecked():  # all channels
-            for locs in self.locs:
-                self._mask_locs(locs)
+            for channel in range(len(self.locs)):
+                self._mask_locs(channel)
         else:  # only the current channel
-            locs = self.locs[self.channel]
-            self._mask_locs(locs)
+            self._mask_locs(self.channel)
 
-    def _mask_locs(self, locs: pd.DataFrame) -> None:
-        """Mask localizations given a mask."""
-        locs_in, locs_out = masking.mask_locs(
-            locs,
-            self.infos[self.channel],
+    def _mask_locs(self, channel: int) -> None:
+        """Mask localizations of a channel given a mask."""
+        locs_in, info_in, locs_out, info_out = masking.mask_locs(
+            self.locs[channel],
+            self.infos[channel],
             mask=self.mask,
+            # the mask spans the channel it was made from
+            field_of_view=(self.x_max, self.y_max),
+            mask_info={
+                "Display pixel size (nm)": self.disp_px_size.value(),
+                "Blur (nm)": self.mask_blur.value(),
+                "Threshold": self.mask_thresh.value(),
+                "Threshold method": self.thresh_method.currentText(),
+            },
         )
         self.index_locs.append(locs_in)  # locs in the mask
+        self.index_infos.append(info_in)
         self.index_locs_out.append(locs_out)  # locs outside the mask
+        self.index_infos_out.append(info_out)
 
         # update masked locs plot if the current channel is masked
         if (
@@ -7393,47 +7411,10 @@ class MaskSettingsDialog(lib.Dialog):
         the position of the channel in the masked localizations;
         ``channel`` if None, i.e., when all channels were masked."""
         index = channel if index is None else index
-        info = self.get_info(channel, locs_in=True)
-        io.save_locs(path_in, self.index_locs[index], info)
-        info = self.get_info(channel, locs_in=False)
-        io.save_locs(path_out, self.index_locs_out[index], info)
-
-    def get_info(self, channel: int, locs_in: bool = True) -> list[dict]:
-        """Returns metadata for masked localizations.
-
-        Parameters
-        ----------
-        channel : int
-            Channel of localizations to be saved.
-        locs_in : bool, optional
-            True if localizations inside the mask are to be saved.
-            Default is True.
-
-        Returns
-        -------
-        info : list of dicts
-            Metadata for masked localizations.
-        """
-        mask_in = "Mask in" if locs_in else "Mask out"
-        mask_pixelsize = self.disp_px_size.value()
-        area_in = float(np.sum(self.mask)) * (mask_pixelsize * 1e-3) ** 2
-        picked_area = lib.get_from_metadata(self.infos[channel], "Area (um^2)")
-        if picked_area is not None:
-            area_total = picked_area
-        else:
-            area_total = float(self.mask.size * (mask_pixelsize * 1e-3) ** 2)
-        area = area_in if locs_in else area_total - area_in
-        info = self.infos[channel] + [
-            {
-                **lib.step_info(f"Render : {mask_in}"),
-                "Display pixel size (nm)": mask_pixelsize,
-                "Blur (nm)": self.mask_blur.value(),
-                "Threshold": self.mask_thresh.value(),
-                "Threshold method": self.thresh_method.currentText(),
-                "Area (um^2)": area,
-            }
-        ]
-        return info
+        io.save_locs(path_in, self.index_locs[index], self.index_infos[index])
+        io.save_locs(
+            path_out, self.index_locs_out[index], self.index_infos_out[index]
+        )
 
     def show_hist(self) -> None:
         """Show histogram of values of the blurred image."""

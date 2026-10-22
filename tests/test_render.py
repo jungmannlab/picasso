@@ -2565,13 +2565,60 @@ class TestMasking:
 
     def test_mask_locs_partitions_input(self, locs, info, image):
         mask, _ = masking.mask_image(image, method="otsu")
-        locs_in, locs_out = masking.mask_locs(locs, info, mask=mask)
+        locs_in, _, locs_out, _ = masking.mask_locs(locs, info, mask=mask)
         assert len(locs_in) + len(locs_out) == len(locs)
         # in / out are disjoint
         assert set(locs_in.index).isdisjoint(set(locs_out.index))
         # both partitions only contain valid loc indices
         all_idx = set(locs_in.index) | set(locs_out.index)
         assert all_idx == set(locs.index)
+
+    def test_mask_locs_records_the_areas(self):
+        # the left half of a 10 x 4 um field of view
+        info = [{"Width": 100, "Height": 40, "Pixelsize": 100.0}]
+        locs = pd.DataFrame(
+            {
+                "frame": np.arange(2, dtype=np.uint32),
+                "x": np.array([1000.0, 9000.0], dtype=np.float32),
+                "y": np.array([2000.0, 2000.0], dtype=np.float32),
+            }
+        )
+        mask = np.zeros((4, 10), dtype=bool)
+        mask[:, :5] = True
+        locs_in, info_in, locs_out, info_out = masking.mask_locs(
+            locs, info, mask=mask, mask_info={"Blur (nm)": 50.0}
+        )
+        assert locs_in["x"].tolist() == [1000.0]
+        assert locs_out["x"].tolist() == [9000.0]
+        assert info_in[:-1] == info and info_out[:-1] == info
+        assert info_in[-1]["Step"] == "Mask in"
+        assert info_out[-1]["Step"] == "Mask out"
+        assert info_in[-1]["Blur (nm)"] == info_out[-1]["Blur (nm)"] == 50.0
+        assert info_in[-1]["Area (um^2)"] == pytest.approx(20.0)
+        assert info_out[-1]["Area (um^2)"] == pytest.approx(20.0)
+        # the area of picked localizations is the total
+        picked = info + [{"Area (um^2)": 30.0}]
+        *_, info_out = masking.mask_locs(locs, picked, mask=mask)
+        assert info_out[-1]["Area (um^2)"] == pytest.approx(10.0)
+
+    def test_mask_locs_beyond_the_mask_are_outside(self):
+        """Localizations of a larger field of view (e.g., another
+        channel) than the mask spans are outside it rather than
+        indexing past the mask."""
+        info = [{"Width": 200, "Height": 40, "Pixelsize": 100.0}]
+        locs = pd.DataFrame(
+            {
+                "frame": np.arange(2, dtype=np.uint32),
+                "x": np.array([1000.0, 15000.0], dtype=np.float32),
+                "y": np.array([2000.0, 2000.0], dtype=np.float32),
+            }
+        )
+        mask = np.ones((4, 10), dtype=bool)
+        locs_in, _, locs_out, _ = masking.mask_locs(
+            locs, info, mask=mask, field_of_view=(10000.0, 4000.0)
+        )
+        assert locs_in["x"].tolist() == [1000.0]
+        assert locs_out["x"].tolist() == [15000.0]
 
 
 # ---------------------------------------------------------------------------

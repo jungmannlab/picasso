@@ -497,6 +497,9 @@ The functions whose results changed:
    * - ``lib.apply_filter_steps``
      - ``locs, ranges, to_remove, missing``
      - ``locs, info, missing``
+   * - ``masking.mask_locs``
+     - ``locs_in, locs_out``
+     - ``locs_in, info_in, locs_out, info_out``
 
 ``aim.aim``, ``postprocess.undrift_from_fiducials``, ``zfit.zfit``,
 ``lib.unfold_localizations_square`` and the other functions that returned
@@ -528,7 +531,10 @@ record their steps differently:
   localizations in picks and undrifting by RCC or from a file. CBC and
   tracking record what ``postprocess.cbc`` and ``spt.link_tracks`` return
   (no ``Scored channel`` and ``Partner channels``; the tracking step is
-  ``SPT``). Pick properties record the linking and the dark times.
+  ``SPT``). Pick properties record the linking and the dark times. Masked
+  localizations record ``Mask in`` or ``Mask out`` (was ``Render : Mask in``
+  or ``Render : Mask out``), and the two areas add up to the field of view
+  rather than to the mask image, which can be slightly larger.
 - Picasso: Average adds an ``Average`` entry per run, instead of listing the
   runs under ``Rounds``.
 

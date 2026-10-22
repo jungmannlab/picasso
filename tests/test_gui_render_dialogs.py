@@ -2270,6 +2270,8 @@ def test_mask_histogram(mask_dialog):
 def test_masked_localizations_are_saved(
     mask_dialog, window, answers, tmp_path
 ):
+    from picasso import lib
+
     mask_dialog.save_locs()  # nothing masked yet
     assert len(answers.messages) == 1
     mask_dialog.mask_locs()
@@ -2280,9 +2282,16 @@ def test_masked_localizations_are_saved(
     locs_out, info_out = _load(tmp_path / "out.hdf5")
     assert len(locs_in) + len(locs_out) == len(window.view.locs[0])
     assert len(locs_in) > len(locs_out)  # the clusters are in the mask
+    # the mask spans the field of view
+    width, height = lib.field_of_view(window.view.infos[0])
     assert info_in[-1]["Area (um^2)"] + info_out[-1]["Area (um^2)"] == (
-        pytest.approx(mask_dialog.mask.size * (260.0 * 1e-3) ** 2, rel=1e-6)
+        pytest.approx(width * height * 1e-6, rel=1e-6)
     )
+    # the metadata masking.mask_locs returned
+    assert info_in[-1]["Step"] == "Mask in"
+    assert info_out[-1]["Step"] == "Mask out"
+    assert info_in[-1]["Display pixel size (nm)"] == 260.0
+    assert info_in[-1]["Blur (nm)"] == 100
 
 
 @pytest.mark.parametrize("cancel", [1, 2])
@@ -2335,6 +2344,34 @@ def test_mask_all_channels(window2, answers, tmp_path):
     )
     answers.text("_in", None)  # canceled
     dialog.save_locs()
+    dialog.close()
+
+
+def test_mask_all_channels_beyond_the_mask(window2, answers):
+    """A channel with localizations beyond the field of view of the
+    channel the mask was made from: they are outside the mask (were
+    indexed past the mask)."""
+    import pandas as pd
+
+    from picasso import lib
+
+    width, height = lib.field_of_view(window2.view.infos[0])
+    far = window2.view.locs[1].iloc[:1].copy()
+    far["x"] = np.float32(1.5 * width)
+    window2.view.locs[1] = pd.concat(
+        [window2.view.locs[1], far], ignore_index=True
+    )
+    info = [dict(window2.view.infos[1][0])]
+    info[0]["Width"] *= 2
+    window2.view.infos[1] = info + window2.view.infos[1][1:]
+    dialog = window2.mask_settings_dialog
+    answers.item(window2.view.locs_paths[0])
+    dialog.init_dialog()
+    dialog.save_all.setChecked(True)
+    dialog.mask_locs()
+    assert len(dialog.index_locs) == 2
+    assert 1.5 * width in dialog.index_locs_out[1]["x"].tolist()
+    assert dialog.index_infos[1][-1]["Step"] == "Mask in"
     dialog.close()
 
 

@@ -160,7 +160,7 @@ A function that returns new localizations (a processing step) returns ``locs, in
         entry = lib.step_info("My step", **{"Radius (nm)": radius})
         return locs, lib.append_metadata(info, entry)
 
-Use ``lib.step_info`` for the entry, so that it records the Picasso version and the step. Functions that select localizations rather than process them (e.g., ``postprocess.picked_locs``, ``masking.mask_locs``) return no metadata, and ``lib.fit_canvas`` updates the canvas of the metadata it is given in place. A loop that calls a step many times (e.g., once per pick) calls a private core function that skips the metadata. The Picasso windows keep and save the metadata these functions return rather than building their own. ``tests/test_locs_info_api.py`` checks the signatures of all public functions and the metadata of the steps.
+Use ``lib.step_info`` for the entry, so that it records the Picasso version and the step. Functions that select localizations rather than process them (e.g., ``postprocess.picked_locs``) return no metadata, and ``lib.fit_canvas`` updates the canvas of the metadata it is given in place. A loop that calls a step many times (e.g., once per pick) calls a private core function that skips the metadata. The Picasso windows keep and save the metadata these functions return rather than building their own. ``tests/test_locs_info_api.py`` checks the signatures of all public functions and the metadata of the steps.
 
 Reporting Progress
 ^^^^^^^^^^^^^^^^^^

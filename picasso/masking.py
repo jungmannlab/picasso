@@ -31,7 +31,9 @@ def mask_locs(
     info: list[dict],
     *,
     mask: lib.BoolArray2D,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+    field_of_view: tuple[float, float] | None = None,
+    mask_info: dict | None = None,
+) -> tuple[pd.DataFrame, list[dict], pd.DataFrame, list[dict]]:
     """Mask localizations given a binary mask.
 
     Parameters
@@ -39,26 +41,66 @@ def mask_locs(
     locs : pd.DataFrame
         Localizations to be masked.
     info : list of dict
-        Localization metadata; the mask spans the field of view
-        (``lib.field_of_view``).
+        Localization metadata.
     mask : lib.BoolArray2D
         Binary mask where True indicates the area to keep.
+    field_of_view : tuple of floats, optional
+        Width and height (nm) of the area the mask spans, starting at
+        the origin. Pass the field of view of the localizations the
+        mask was made from to mask others, e.g., other channels.
+        Localizations beyond it are outside the mask. If None, the
+        field of view of ``info`` (``lib.field_of_view``). Default is
+        None.
+    mask_info : dict, optional
+        How the mask was made, e.g., ``{"Blur (nm)": 500.0}``, recorded
+        in the metadata of both parts. Default is None.
 
     Returns
     -------
     locs_in : pd.DataFrame
         Localizations inside the mask.
+    info_in : list of dicts
+        Metadata of ``locs_in``: ``info`` with a ``"Mask in"`` entry
+        appended (see ``lib.append_metadata``), recording ``mask_info``
+        and the area of the mask under ``"Area (um^2)"``.
     locs_out : pd.DataFrame
         Localizations outside the mask.
+    info_out : list of dicts
+        Metadata of ``locs_out``: ``info`` with a ``"Mask out"`` entry
+        appended, recording ``mask_info`` and the area outside the
+        mask, i.e., the area of the localizations (their
+        ``"Area (um^2)"``, e.g., of picks, or else their field of view)
+        minus the area of the mask.
     """
-    width, height = lib.field_of_view(info)
-    x_ind = np.int32(np.floor(locs["x"] / width * mask.shape[1]))
-    y_ind = np.int32(np.floor(locs["y"] / height * mask.shape[0]))
-
-    index = mask[y_ind, x_ind].astype(bool)
+    if field_of_view is None:
+        field_of_view = lib.field_of_view(info)
+    width, height = field_of_view
+    n_y, n_x = mask.shape
+    x_ind = np.floor(locs["x"].to_numpy() / width * n_x).astype(np.int64)
+    y_ind = np.floor(locs["y"].to_numpy() / height * n_y).astype(np.int64)
+    inside = (x_ind >= 0) & (x_ind < n_x) & (y_ind >= 0) & (y_ind < n_y)
+    index = np.zeros(len(locs), dtype=bool)
+    index[inside] = mask[y_ind[inside], x_ind[inside]].astype(bool)
     locs_in = locs.iloc[index].sort_values(by="frame", kind="quicksort")
     locs_out = locs.iloc[~index].sort_values(by="frame", kind="quicksort")
-    return locs_in, locs_out
+
+    pixel_area = width / n_x * height / n_y * 1e-6  # um^2
+    area_in = float(np.count_nonzero(mask)) * pixel_area
+    area_total = lib.get_from_metadata(info, "Area (um^2)")
+    if area_total is None:
+        locs_width, locs_height = lib.field_of_view(info)
+        area_total = locs_width * locs_height * 1e-6
+    area_out = max(float(area_total) - area_in, 0.0)
+    mask_info = {} if mask_info is None else mask_info
+    info_in = lib.append_metadata(
+        info,
+        lib.step_info("Mask in", **(mask_info | {"Area (um^2)": area_in})),
+    )
+    info_out = lib.append_metadata(
+        info,
+        lib.step_info("Mask out", **(mask_info | {"Area (um^2)": area_out})),
+    )
+    return locs_in, info_in, locs_out, info_out
 
 
 def generate_image(
