@@ -441,3 +441,6 @@ Written and read only by the update-notification feature, not by any module's ow
    * - ``Disabled``
      - ``False``
      - Update checks are switched off entirely, e.g., for batch jobs on a computing cluster.
+   * - ``Installing``
+     - *(unset)*
+     - The version that *Install Now* closed Picasso to install (one-click installers); at the next start, Picasso removes it and tells if that version is not the one running. See :ref:`faq-update`.

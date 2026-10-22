@@ -21,6 +21,11 @@ How to install
 
 Alternatively, you can create the dmg file yourself by cloning our GitHub repo and running the bash script picasso/release/one_click_macos_gui/create_macos_dmg.sh from the Terminal. Note that you must have conda installed on your computer.
 
+How to update
+-------------
+
+When a new version is out, Picasso tells you about it (at most once a day). Click "Install Now" to download it, check it and install it; Picasso closes, replaces Picasso.app and the module apps in the same folder (e.g., Picasso Render) and opens again. Please close other Picasso programs and save your work first. If the apps cannot be replaced, e.g., without the rights to change the Applications folder, the disk image opens so that you can drag the apps to Applications as on the first installation. Settings, camera configuration and plugins in ~/.picasso are kept either way.
+
 Adding camera configuration and plugins
 ---------------------------------------
 

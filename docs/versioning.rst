@@ -193,6 +193,10 @@ Before each release:
    be built at the same time.
 7. Publish the release on GitHub, with a tag ``v`` plus the version in
    ``picasso/version.py`` (e.g., ``v1.1.0``) and the three zips attached.
+   Keep their names as the scripts write them: *Install Now* in the update
+   notification finds the installer of each edition by name ("Windows",
+   "CUDA" for the CUDA edition, and "Apple" or "macOS"), see
+   ``picasso.updater.find_installer``.
    ``python release/make_release_notes.py`` writes its description, from the
    changelog section of this version, to ``release/release_notes.txt``, to
    paste into the release.

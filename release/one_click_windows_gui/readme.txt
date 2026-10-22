@@ -19,6 +19,11 @@ How to install
 [!] Camera config and plugins belong in C:\Users\<your user name>\.picasso, not in the installation folder, see "Adding camera configuration and plugins" below.
 [!] Windows Safety features and Windows Defender may ask multiple times for permission during the installation and download.
 
+How to update
+-------------
+
+When a new version is out, Picasso tells you about it (at most once a day). Click "Install Now" to download it, check it and install it; Picasso closes, the installer asks for administrator rights, installs the update into the same folder (keeping the selected modules) and Picasso opens again. Please close other Picasso programs and save your work first. Alternatively, download the new installer from the release page and run it; there is no need to uninstall the old version first. Settings, camera configuration and plugins in C:\Users\<your user name>\.picasso are kept either way.
+
 Creating your own installer
 ---------------------------
 

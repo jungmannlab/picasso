@@ -60,15 +60,31 @@ Which version of Picasso am I running?
 The title bar of every window shows it, e.g., *Picasso v1.0.0: Render*. In
 Python, ``import picasso; print(picasso.__version__)``.
 
+.. _faq-update:
+
 How do I update Picasso?
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-With the one-click installers, download and install the new version from the
-`release page <https://github.com/jungmannlab/picasso/releases>`__; your
-settings, camera configuration and plugins are kept. With pip,
-``pip install --upgrade picassosr``. Picasso checks for a new version at most
-once a day and tells you about it; ``Updates: Disabled: true`` in the
-:ref:`user settings <user-settings-file>` switches the checks off.
+Picasso checks for a new version at most once a day and tells you about it;
+``Updates: Disabled: true`` in the :ref:`user settings <user-settings-file>`
+switches the checks off. Your settings, camera configuration and plugins are
+kept when you update.
+
+With the one-click installers (from v1.0 on), click *Install Now* in the
+notification. Picasso downloads the installer of the new version, checks it
+against the checksum published with the release, closes, installs the update
+and opens again. Other Picasso programs have to be closed first, and on
+Windows the installer asks for administrator rights, as when installing by
+hand. On macOS, ``Picasso.app`` and the module apps in the same folder (e.g.,
+*Picasso Render*) are replaced; if that is not possible, e.g., without the
+rights to change the Applications folder, the disk image opens to install it
+by hand. If the update was not installed, Picasso says so when it opens again;
+the log is in ``~/.picasso/logs/update.log``.
+
+You can also download and install the new version from the
+`release page <https://github.com/jungmannlab/picasso/releases>`__ yourself;
+on Windows, there is no need to uninstall the old version first. With pip,
+``pip install --upgrade picassosr``.
 
 Updating from a version before 1.0? See :doc:`migration`.
 
