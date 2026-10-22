@@ -1362,6 +1362,24 @@ class TestLinking:
         with pytest.raises(NotImplementedError):
             postprocess.link(locs.copy(), info, combine_mode="refit")
 
+    def test_link_removes_events_at_movie_edges(self):
+        # three events far apart: one starting in the first frame, one in
+        # the middle and one ending in the last frame of a 10-frame movie
+        locs = pd.DataFrame(
+            {
+                "frame": np.array([0, 1, 4, 5, 8, 9], dtype=np.int32),
+                "x": np.array([0, 0, 500, 500, 1000, 1000], dtype=np.float32),
+                "y": np.zeros(6, dtype=np.float32),
+                "lpx": np.full(6, 5.0, dtype=np.float32),
+                "lpy": np.full(6, 5.0, dtype=np.float32),
+            }
+        )
+        info = [{"Frames": 10, "Width": 1000, "Height": 1000}]
+        linked, _ = postprocess.link(locs, info)
+        assert linked["frame"].tolist() == [4]
+        kept, _ = postprocess.link(locs, info, remove_ambiguous_lengths=False)
+        assert kept["frame"].tolist() == [0, 4, 8]
+
     def test_link_groups_consistent_with_link(self, locs, info):
         # The number of unique non-(-1) link groups must equal the
         # number of linked events when there are no ambiguities to drop.

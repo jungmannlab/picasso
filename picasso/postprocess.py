@@ -3647,9 +3647,10 @@ def link(
         while 'refit' would refit the linked localizations to a model.
         'refit' is not implemented yet. Default is 'average'.
     remove_ambiguous_lengths : bool, optional
-        If True, removes linked localizations with ambiguous lengths,
-        i.e., localizations that are linked to multiple binding events
-        with different lengths. Default is True.
+        If True, removes binding events whose length is ambiguous,
+        i.e., those that start in the first frame or end in the last
+        frame of the movie and may thus extend beyond it. Default is
+        True.
 
     Returns
     -------
@@ -4162,9 +4163,10 @@ def _link_loc_groups(  # noqa: C901
     link_group : lib.IntArray1D
         Array that defines the link groups for the localizations.
     remove_ambiguous_lengths : bool, optional
-        If True, removes linked localizations with ambiguous lengths,
-        i.e., localizations that are linked to multiple binding events
-        with different lengths. Default is True.
+        If True, removes binding events whose length is ambiguous,
+        i.e., those that start in the first frame or end in the last
+        frame of the movie and may thus extend beyond it. Default is
+        True.
 
     Returns
     -------
@@ -4289,9 +4291,10 @@ def _link_loc_groups(  # noqa: C901
         columns["photon_rate"] = np.float32(columns["photons"] / n_)
     linked_locs = pd.DataFrame(columns)
     if remove_ambiguous_lengths:
+        # events touching the first or the last frame of the movie
         valid = np.logical_and(
             first_frame_ > 0,
-            last_frame_ < info[0]["Frames"],
+            last_frame_ < info[0]["Frames"] - 1,
         )
         linked_locs = linked_locs[valid]
     return linked_locs

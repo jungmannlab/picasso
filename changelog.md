@@ -152,6 +152,7 @@ The [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html)
 - Picasso says when it leaves out metadata it cannot read (e.g., Micro-Manager, CZI or LIF metadata) and when the camera of a movie is missing from the camera configuration, so that gain 1 is used. Before, these happened without a trace.
 - Opening a file whose path is too long gives a warning, see [FAQ](https://picassosr.readthedocs.io/en/latest/faq.html#picasso-says-that-the-path-is-too-long).
 - Fixed: `picasso.postprocess.remove_locs_in_picks` and `compute_dark_times` modified the localizations passed to them, and `picasso undrift --from-file` ignored the z drift.
+- Fixed: linking localizations kept the binding events that end in the last frame of the movie, although their length is cut off.
 - Fixed: `picasso.postprocess.evaluate_picks` changed the warning filters of the whole program, e.g., showing again the `RuntimeWarning`s a script had silenced or turned into errors.
 - Fixed: `picasso render` on the command line failed without a settings file, e.g., on a new installation, unless a colormap was given with `-c`.
 - Fixed: `picasso smlm-cluster` required `basic_fa` and `radius_z`, although they are optional, and switched the frame analysis on for any `basic_fa`, including `False`. It now takes `yes`/`no` (or `true`/`false`, `1`/`0`).
