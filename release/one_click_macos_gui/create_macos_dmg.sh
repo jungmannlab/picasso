@@ -284,14 +284,18 @@ echo ">>> Staging DMG contents..."
 rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR"
 
-# Copy the main .app bundle
-cp -r "$MAIN_APP_PATH" "$STAGING_DIR/$MAIN_BUNDLE_NAME"
+# Copy the main .app bundle. ditto keeps the bundle's symlinks (PyInstaller
+# links Contents/Resources to Contents/Frameworks, and each Qt .framework
+# links its Versions/Current), its extended attributes and its signature;
+# macOS's "cp -r" is "cp -RL", which copies every linked file again and
+# made the app twice as large (1.6 GB instead of ~0.8 GB).
+ditto "$MAIN_APP_PATH" "$STAGING_DIR/$MAIN_BUNDLE_NAME"
 
 # Copy all tool-specific .app bundles
 for tool_def in "${TOOLS[@]}"; do
     IFS=':' read -r display_name argument icon_name <<< "$tool_def"
     app_name="Picasso ${display_name}.app"
-    cp -r "$DIST_DIR/$app_name" "$STAGING_DIR/$app_name"
+    ditto "$DIST_DIR/$app_name" "$STAGING_DIR/$app_name"
 done
 
 # Third-party licenses, visible without opening the bundle
@@ -312,7 +316,7 @@ rm -f "${DMG_NAME}.dmg" rw.*."${DMG_NAME}.dmg"
 # Note: With multiple apps, we'll let create-dmg handle the layout automatically
 # or you can manually position each icon if you prefer more control.
 # create-dmg lays the window out through a Finder AppleScript after
-# mounting the image; with an image of this size (~1.7 GB) Finder has not
+# mounting the image; with an image of this size (~0.8 GB) Finder has not
 # registered the volume within the tool's default 2 s wait and the script
 # died with "Can't get disk (-1728)" on macOS 26, hence the longer wait
 # (create-dmg >= 1.3.0) and the hdiutil retries.
