@@ -1179,15 +1179,15 @@ class TestFit2DIntegration:
             fitting_method="spline",
             spline_calibration=calibration,
         )
-        assert fit_info["Fit method"] == "spline"
-        assert fit_info["Spline fit device"] == "CPU"
-        assert fit_info["Convergence criterion"] == (
+        assert fit_info[-1]["Fit method"] == "spline"
+        assert fit_info[-1]["Spline fit device"] == "CPU"
+        assert fit_info[-1]["Convergence criterion"] == (
             splinefit.TOLERANCE_MULTI_START
         )
-        assert fit_info["Max iterations"] == (
+        assert fit_info[-1]["Max iterations"] == (
             splinefit.MAX_ITERATIONS_MULTI_START
         )
-        assert fit_info["Axial seeds"] == localize._default_n_z_starts(
+        assert fit_info[-1]["Axial seeds"] == localize._default_n_z_starts(
             calibration
         )
 
@@ -1203,8 +1203,8 @@ class TestFit2DIntegration:
             eps=1e-6,
             max_it=7,
         )
-        assert fit_info["Convergence criterion"] == 1e-6
-        assert fit_info["Max iterations"] == 7
+        assert fit_info[-1]["Convergence criterion"] == 1e-6
+        assert fit_info[-1]["Max iterations"] == 7
 
     def test_progress_and_abort(self, scene):
         calibration, movie, info, camera_info, identifications, truth = scene
@@ -1384,7 +1384,7 @@ class TestMultichannelIntegration:
     def test_recovers_shared_position(self, scene, mle, link_photons):
         calibration, movies, camera_infos, identifications, truth = scene
         tracker = RecordingProgress()
-        locs = localize.fit_spline_multichannel(
+        locs, _ = localize.fit_spline_multichannel(
             movies,
             camera_infos,
             identifications,
@@ -1417,7 +1417,7 @@ class TestMultichannelIntegration:
         calibration = dict(
             calibration, photon_ratios=np.array([[1.0, 0.25], [0.25, 1.0]])
         )
-        locs = localize.fit_spline_multichannel_ratiometric(
+        locs, _ = localize.fit_spline_multichannel_ratiometric(
             movies,
             camera_infos,
             identifications,

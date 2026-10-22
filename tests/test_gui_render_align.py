@@ -110,6 +110,18 @@ def test_align_keeps_all_localizations_by_default(window):
     assert [len(_) for _ in window.view.locs] == n_before
 
 
+def test_align_records_the_shifts(window):
+    before = list(window.view.infos)
+    window.view.align()
+    for old, info in zip(before, window.view.infos):
+        entry = info[-1]
+        assert entry["Step"] == "Align"
+        assert entry["Method"] == "RCC"
+        assert "Shift x (nm)" in entry and "Shift y (nm)" in entry
+        # new lists: the old ones may be shared with linked windows
+        assert info is not old and old == _info()
+
+
 def test_align_removes_non_overlapping_localizations(window):
     _set_keep(False)
     n_before = [len(_) for _ in window.view.locs]

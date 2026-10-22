@@ -596,6 +596,7 @@ class Channel:
     locs_display: object = None
     ready_for_fit: bool = False
     last_identification_info: dict | None = None
+    identifications_info: list = field(default_factory=list)
     extra_info: list = field(default_factory=list)
     params: dict = field(default_factory=dict)
 
@@ -6562,9 +6563,13 @@ class Window(QtWidgets.QMainWindow):
     current_channel : int
         Index of the active channel within ``channels``.
     extra_info : list of dict
-        Movie metadata in a format of a dictionary, with Localize info.
+        Metadata of ``locs``, as returned by the fit (and the steps after
+        it, e.g., the z fit and the drift correction).
     identifications : pd.DataFrame
         Identified spots - frame, position, net gradient.
+    identifications_info : list of dict
+        Metadata of ``identifications``, as returned by
+        ``localize.identify`` or loaded with them.
     last_identification_info : dict
         A dictionary of analysis parameters used for the last operation.
         Used to save user settings when closing the application.
@@ -6772,6 +6777,7 @@ class Window(QtWidgets.QMainWindow):
         self.last_identification_info = None
         # Dataframe of identifcations with fields frame, x and y
         self.identifications = None
+        self.identifications_info = []
         self.ready_for_fit = False
         self.locs = None
         # Snapshot of ``self.locs`` used to draw the FitMarker overlay.
@@ -6789,9 +6795,6 @@ class Window(QtWidgets.QMainWindow):
         self.bead_diagnostics = []
         self.bead_calibration_path = None
         self._active_worker = None
-        # Lateral corrections the last fit applied, as descriptions, for the
-        # saved metadata (see _record_applied_lateral).
-        self._applied_lateral = []
         # Affine-transform (astigmatism) calibration dialog and its worker;
         # both created lazily when the calibration is first opened/run.
         self._affine_dialog = None
@@ -8860,6 +8863,7 @@ class Window(QtWidgets.QMainWindow):
         channel.locs_display = self.locs_display
         channel.ready_for_fit = self.ready_for_fit
         channel.last_identification_info = self.last_identification_info
+        channel.identifications_info = self.identifications_info
         channel.extra_info = self.extra_info
         params = self._capture_params()
         if self.sum_settings_on_dialog() and channel.params:
@@ -8891,6 +8895,7 @@ class Window(QtWidgets.QMainWindow):
             self.locs_display = channel.locs_display
             self.ready_for_fit = channel.ready_for_fit
             self.last_identification_info = channel.last_identification_info
+            self.identifications_info = channel.identifications_info
             self.extra_info = channel.extra_info
             self._apply_params(channel.params)
             # Contrast and the frame range are shared: keep the dialogs
@@ -9266,7 +9271,9 @@ class Window(QtWidgets.QMainWindow):
             n_frames=lib.get_from_metadata(self.info, "Frames"),
             drift=drift,
         )
-        self._clean_up_external_ids()
+        # the identifications come from the picks, not from an identify
+        # step: their metadata is the movie's
+        self._clean_up_external_ids(io.strip_mm_metadata(self.info))
 
     def open_locs(self) -> None:
         """Open localizations for refitting data. Provide spot
@@ -9318,7 +9325,9 @@ class Window(QtWidgets.QMainWindow):
             pixelsize=lib.get_from_metadata(info, "Pixelsize", default=None)
             or self.parameters_dialog.pixelsize.value(),
         )
-        self._clean_up_external_ids()
+        # the identifications come from localizations, not from an identify
+        # step: their metadata is the movie's
+        self._clean_up_external_ids(io.strip_mm_metadata(self.info))
 
     def open_identifications(self) -> None:
         """Open identifications previously saved as a HDF5 file."""
@@ -9385,7 +9394,7 @@ class Window(QtWidgets.QMainWindow):
             float(gaussian_sigma or 0.0)
         )
         self._restore_identification_method(info, min_ng)
-        self._clean_up_external_ids()
+        self._clean_up_external_ids(info)
 
     def _restore_identification_method(
         self, info: list[dict], min_ng: float | list | None
@@ -9426,9 +9435,13 @@ class Window(QtWidgets.QMainWindow):
                 dialog.update_roi_display()
         dialog.set_identification_method(method)
 
-    def _clean_up_external_ids(self) -> None:
+    def _clean_up_external_ids(self, info: list[dict]) -> None:
+        """Take identifications that were loaded or made from picks or
+        localizations, with their metadata ``info``, as the active
+        channel's."""
         if self.identifications is None:
             return
+        self.identifications_info = info
         # remove all identifications that are oob
         box = self.parameters["Box Size"]
         _, height, width = self.movie.shape
@@ -11599,6 +11612,7 @@ class Window(QtWidgets.QMainWindow):
         roi: list,
         elapsed_time: float,
         identifications: pd.DataFrame,
+        info: list[dict],
         fit_afterwards: bool,
         calibrate_z: bool,
         calibrate_spline: bool,
@@ -11617,6 +11631,7 @@ class Window(QtWidgets.QMainWindow):
             box = parameters["Box Size"]
             threshold = _format_threshold(parameters)
             self.identifications = identifications
+            self.identifications_info = info
             self.ready_for_fit = True
             # for split-FOV data the detections of every region sit in this one
             # table, but the joint fit only fits molecules linked across all of
@@ -11657,6 +11672,7 @@ class Window(QtWidgets.QMainWindow):
             # as for the channel sum: nothing to fit, and the boxes of an
             # earlier identification would contradict the message
             self.identifications = None
+            self.identifications_info = []
             self.ready_for_fit = False
             # drawn first: a frame with nothing to fit clears the status bar
             self.draw_frame()
@@ -11777,6 +11793,7 @@ class Window(QtWidgets.QMainWindow):
         roi: list,
         elapsed_time: float,
         identifications: pd.DataFrame,
+        info: list[dict],
         *_: object,
     ) -> None:
         """Store one channel's identifications, then start the next channel."""
@@ -11789,11 +11806,13 @@ class Window(QtWidgets.QMainWindow):
             self.last_identification_info["ROI"] = roi
             self.last_identification_info["Frame bounds"] = self.frame_range
             self.identifications = identifications
+            self.identifications_info = info
             self.ready_for_fit = True
             if state is not None:
                 state["sum"] += len(identifications)
         else:
             self.identifications = None
+            self.identifications_info = []
             self.ready_for_fit = False
         if state is not None:
             state["done"] += 1
@@ -12058,12 +12077,14 @@ class Window(QtWidgets.QMainWindow):
         roi: list,
         elapsed_time: float,
         identifications: pd.DataFrame,
+        info: list[dict],
         *_: object,
     ) -> None:
         """Split-FOV: keep the per-region detections and continue with the
         registration and the sum."""
         self._active_worker = None
         self.identifications = identifications
+        self.identifications_info = info
         self.last_identification_info = parameters.copy()
         self.last_identification_info["ROI"] = roi
         self.last_identification_info["Frame bounds"] = self.frame_range
@@ -12160,12 +12181,20 @@ class Window(QtWidgets.QMainWindow):
     def _start_sum_identification(self) -> None:
         """Identify on the summed view now in place."""
         summed = self._sum_movie
+        # the sum is in the reference channel's coordinates (for split-FOV
+        # data, those of the one movie)
+        reference_info = (
+            self.info
+            if self.view.split_fov_mode or self.current_channel == 0
+            else self.channels[0].info
+        )
         worker = IdentificationWorker(
             self,
             False,
             False,
             False,
             movie=summed,
+            info=reference_info,
             rois=self.identification_rois(),
             parameters=dict(self.parameters),
         )
@@ -12189,6 +12218,7 @@ class Window(QtWidgets.QMainWindow):
         roi: list,
         elapsed_time: float,
         identifications: pd.DataFrame,
+        info: list[dict],
         *_: object,
     ) -> None:
         """Store the channel sum's detections as the reference channel's
@@ -12217,6 +12247,7 @@ class Window(QtWidgets.QMainWindow):
         self.locs = None
         self.locs_display = None
         self.identifications = identifications
+        self.identifications_info = info
         self.sum_identifications = identifications
         self.ready_for_fit = True
         self.last_identification_info = parameters.copy()
@@ -12225,6 +12256,8 @@ class Window(QtWidgets.QMainWindow):
         state = state or {}
         n_summed = state.get("n_channels") or len(self.sum_transforms or [])
         source = state.get("source") or self.sum_transform_source
+        # window state (see sum_is_unregistered); the metadata record the
+        # summing itself (see localize.identify)
         self.last_identification_info["Channel sum registration"] = source
         if not self.view.split_fov_mode:
             # Registered, the detections are in the reference channel's
@@ -12238,13 +12271,14 @@ class Window(QtWidgets.QMainWindow):
             )
             for channel in channels:
                 channel.identifications = identifications
+                channel.identifications_info = info
                 channel.ready_for_fit = True
                 channel.last_identification_info = (
                     self.last_identification_info
                 )
         box = parameters["Box Size"]
         threshold = _format_threshold(parameters)
-        # the registration is in the metadata ("Channel sum registration")
+        # the summing is in the metadata (see localize.identify)
         self.status_bar.showMessage(
             f"Identified {len(identifications):,} spots on the sum of "
             f"{n_summed} channels in {elapsed_time:.2f} seconds. (Box Size: "
@@ -12445,7 +12479,7 @@ class Window(QtWidgets.QMainWindow):
             fit_z = False
         return FitWorker(
             self.movie,
-            self.info,
+            self.identifications_info,
             self.camera_info,
             (
                 self.identifications
@@ -12662,6 +12696,7 @@ class Window(QtWidgets.QMainWindow):
     def _on_region_fit_finished(
         self,
         locs: pd.DataFrame,
+        info: list[dict],
         elapsed_time: float,
         fit_z: bool,
         calibrate_z: bool,
@@ -12690,6 +12725,7 @@ class Window(QtWidgets.QMainWindow):
         )
         self.locs_display = locs
         self.info = localize.region_movie_info(state["info"], region)
+        self.extra_info = localize.region_movie_info(info, region)
         self.draw_frame()
         # the same tail as a single fit: the astigmatism z-fit (when it is
         # asked for), then saving and the optional drift correction, which
@@ -12855,6 +12891,7 @@ class Window(QtWidgets.QMainWindow):
             camera_calibration=(
                 self.parameters_dialog.camera_calibration or None
             ),
+            info=reference.identifications_info,
         )
         self.fit_worker.linkMade.connect(self.on_link_progress)
         self.fit_worker.linkFinished.connect(self.on_link_finished)
@@ -12953,6 +12990,7 @@ class Window(QtWidgets.QMainWindow):
             camera_calibration=(
                 self.parameters_dialog.camera_calibration or None
             ),
+            info=self.identifications_info,
         )
         self.fit_worker.linkMade.connect(self.on_link_progress)
         self.fit_worker.linkFinished.connect(self.on_link_finished)
@@ -13063,6 +13101,7 @@ class Window(QtWidgets.QMainWindow):
             camera_calibration=(
                 self.parameters_dialog.camera_calibration or None
             ),
+            info=reference.identifications_info,
         )
         self.fit_worker.linkMade.connect(self.on_link_progress)
         self.fit_worker.linkFinished.connect(self.on_link_finished)
@@ -13150,6 +13189,7 @@ class Window(QtWidgets.QMainWindow):
             camera_calibration=(
                 self.parameters_dialog.camera_calibration or None
             ),
+            info=self.identifications_info,
         )
         self.fit_worker.linkMade.connect(self.on_link_progress)
         self.fit_worker.linkFinished.connect(self.on_link_finished)
@@ -13442,7 +13482,7 @@ class Window(QtWidgets.QMainWindow):
         )
         self.fit_z_worker = FitZWorker(
             self.locs,
-            self.info + [self.camera_info],  # ensure pixel size in info
+            self.extra_info,  # with the camera info, recorded by the fit
             self.parameters_dialog.z_calibration,
             self.parameters_dialog.magnification_factor.value(),
             self.parameters_dialog.pixelsize.value(),
@@ -13459,17 +13499,10 @@ class Window(QtWidgets.QMainWindow):
         self.abort_action.setEnabled(True)
         self.fit_z_worker.start()
 
-    def _record_applied_lateral(self, worker) -> None:
-        """Keep what the finished fit did with the lateral corrections, so
-        that ``save_locs`` can write it into the metadata.
-
-        The workers discard the info their fit returns - it is rebuilt from
-        the dialog when saving - so without this a corrected file would
-        carry no record of the correction, and the CLI's would.
-        """
-        self._applied_lateral = list(
-            getattr(worker, "applied_lateral_transforms", None) or []
-        )
+    def _report_skipped_lateral(self, worker) -> None:
+        """Say which lateral corrections the finished fit skipped, since
+        the calibration it used applies them itself. The metadata the fit
+        returns records them."""
         skipped = list(
             getattr(worker, "skipped_lateral_transforms", None) or []
         )
@@ -13562,6 +13595,7 @@ class Window(QtWidgets.QMainWindow):
     def on_fit_finished(
         self,
         locs: pd.DataFrame,
+        info: list[dict],
         elapsed_time: float,
         fit_z: bool,
         calibrate_z: bool,
@@ -13569,7 +13603,7 @@ class Window(QtWidgets.QMainWindow):
         """Handle the completion of the fitting process. Draw fit
         markers, fit/calibration z coordinates, if requested, save
         localizations."""
-        self._record_applied_lateral(self._active_worker)
+        self._report_skipped_lateral(self._active_worker)
         self._active_worker = None
         self.abort_action.setEnabled(False)
         self.status_bar.showMessage(
@@ -13578,6 +13612,8 @@ class Window(QtWidgets.QMainWindow):
         self.locs = locs
         self.locs_display = locs
         self._distribute_multichannel_fit(locs)
+        # after the multichannel fit made the reference channel active
+        self.extra_info = info
         self.draw_frame()
         notifications.notify_finished(elapsed_time)
         base = self.channel_output_base()
@@ -13595,18 +13631,16 @@ class Window(QtWidgets.QMainWindow):
                 )
                 if path:
                     t0 = time.time()
-                    # with the Pixelsize and the identification parameters,
-                    # which the calibration records
-                    identification = localize.identification_info(
-                        self.last_identification_info or {}
-                    )
                     magnification = (
                         self.parameters_dialog.magnification_factor.value()
                     )
                     try:
+                        # the metadata of the fit give the Pixelsize and the
+                        # identification parameters, which the calibration
+                        # records
                         zfit.calibrate_z(
                             locs,
-                            self.info + [identification | self.camera_info],
+                            info,
                             d=step,
                             magnification_factor=magnification,
                             path=path,
@@ -13712,6 +13746,7 @@ class Window(QtWidgets.QMainWindow):
     def on_fit_z_finished(
         self,
         locs: pd.DataFrame,
+        info: list[dict],
         elapsed_time: float,
     ) -> None:
         """Handle the completion of the z fitting process.
@@ -13719,7 +13754,7 @@ class Window(QtWidgets.QMainWindow):
         ``self.locs_display`` is left untouched so the on-screen
         FitMarker overlays stay at their pre-z-fit, pre-affine
         positions (mirroring the drift-correction pattern)."""
-        self._record_applied_lateral(self._active_worker)
+        self._report_skipped_lateral(self._active_worker)
         self._active_worker = None
         self.abort_action.setEnabled(False)
         self.status_bar.showMessage(
@@ -13727,6 +13762,7 @@ class Window(QtWidgets.QMainWindow):
             "seconds."
         )
         self.locs = locs
+        self.extra_info = info
         self.save_locs_after_fit()
         notifications.notify_finished(elapsed_time)
 
@@ -13916,10 +13952,8 @@ class Window(QtWidgets.QMainWindow):
         spots = localize.get_spots(
             self.movie, self.identifications, box, self.camera_info
         )
-        info = io.strip_mm_metadata(self.info) + [
-            localize.identification_info(self.last_identification_info)
-            | self.camera_info
-        ]
+        # the spots are in photons, converted with the camera information
+        info = lib.append_metadata(self.identifications_info, self.camera_info)
         info_path = os.path.splitext(path)[0] + ".yaml"
         if path.endswith(".npy"):
             np.save(path, spots)
@@ -13990,69 +14024,8 @@ class Window(QtWidgets.QMainWindow):
         self.view.setMinimumSize(1, 1)
 
     def save_locs(self, path: str) -> None:
-        """Save localizations and their metadata."""
-        # An unset identification info must not cost the user the fit that was
-        # just run: the rest of the metadata is written either way.
-        localize_info = localize.identification_info(
-            self.last_identification_info or {}
-        )
-        localize_info.update(lib.step_info("Localize"))
-        model = self.parameters_dialog.fit_model.currentText()
-        if FIT_MODELS[model]["optimizers"] is None:
-            localize_info["Fit method"] = model
-        else:
-            optimizer = self.parameters_dialog.fit_optimizer.currentText()
-            localize_info["Fit method"] = f"{model}, {optimizer}"
-        # A channel fitted on its own says so, so that its file can be told
-        # apart from one the joint fit produced.
-        if self.fit_mode() == FIT_MODE_SEPARATE:
-            localize_info["Fit mode"] = FIT_MODE_SEPARATE
-            localize_info["Channel"] = self._region_suffix or (
-                self.channels[self.current_channel].name
-                if self.channels
-                else ""
-            )
-        if self.parameters_dialog.fit_z_checkbox.isChecked():
-            localize_info["Z Calibration Path"] = (
-                self.parameters_dialog.z_calibration_path
-            )
-            localize_info["Z Calibration"] = (
-                self.parameters_dialog.z_calibration
-            )
-        # A correction loaded separately from the calibration leaves no
-        # other trace in the metadata (the calibration dicts below only
-        # record the ones they carry themselves), so name every correction
-        # the fit applied, and where the separate ones came from.
-        if self._applied_lateral:
-            localize_info["Lateral corrections applied"] = list(
-                self._applied_lateral
-            )
-            if self.parameters_dialog.affine_calibration_paths:
-                localize_info["Lateral correction paths"] = list(
-                    self.parameters_dialog.affine_calibration_paths
-                )
-        if FIT_MODELS.get(model, {}).get("needs_spline_calibration"):
-            # Record the path and model only; the coefficient table is far
-            # too large to embed in the metadata.
-            localize_info["Spline Calibration Path"] = (
-                self.parameters_dialog.spline_calibration_path
-            )
-            localize_info["Spline Calibration Model"] = (
-                self.parameters_dialog.spline_calibration.get("model")
-            )
-        # ``fit`` records this itself, but its info is discarded here (see
-        # FitWorker.run) and this dict is rebuilt from the dialog, so without
-        # this line a GUI run leaves no trace of the noise model it used.
-        localize_info.update(
-            localize.camera_calibration_info(
-                self.parameters_dialog.camera_calibration
-            )
-        )
-        # the MicroManager metadata block of the movie is only carried
-        # over if the user settings ask for it (it is by default)
-        self.extra_info = io.strip_mm_metadata(self.info) + [
-            localize_info | self.camera_info
-        ]
+        """Save localizations and their metadata (``extra_info``), as the
+        fit and the steps after it returned them."""
         self.select_locs_columns()  # save only selected columns
         io.save_locs(path, self.locs, self.extra_info)
 
@@ -14079,30 +14052,13 @@ class Window(QtWidgets.QMainWindow):
     def save_identifications(self, path: str) -> None:
         """Save identifications and their metadata to an HDF5 file.
 
-        The metadata are the settings the identifications were made with
-        (``last_identification_info``), not the dialog's current ones, which
-        may have changed since, and of the identification method only the
-        settings of the one that was used (see
-        ``localize.identification_info``)."""
-        used = self.last_identification_info or self.parameters
-        keys = [
-            "Box Size",
-            "Identification Method",
-            # a list of per-region thresholds for split-FOV data, which
-            # load_identifications puts back onto the regions
-            "Min. Net Gradient",
-            *wavelet.WaveletParameters().to_info(),
-            "Temporal Median Window",
-            "Gaussian Filter Sigma",
-        ]
-        ids_info = localize.identification_info(
-            {
-                **lib.step_info("Localize"),
-                **{key: used[key] for key in keys if key in used},
-            }
+        The metadata are those of the identifications
+        (``identifications_info``), recording the settings they were made
+        with, not the dialog's current ones, which may have changed since.
+        """
+        io.save_identifications(
+            path, self.identifications, self.identifications_info
         )
-        info = io.strip_mm_metadata(self.info) + [ids_info]
-        io.save_identifications(path, self.identifications, info)
 
     def save_identifications_dialog(self) -> None:
         """Get the path to save identifications."""
@@ -14211,8 +14167,10 @@ class IdentificationWorker(QtCore.QThread):
 
     # frames identified so far, their total, the parameters
     progressMade = QtCore.pyqtSignal(int, int, dict)
+    # parameters, ROIs, elapsed time, identifications, their metadata, and
+    # the follow-ups asked for (fit, z calibration, spline calibration)
     finished = QtCore.pyqtSignal(
-        dict, object, float, pd.DataFrame, bool, bool, bool
+        dict, object, float, pd.DataFrame, object, bool, bool, bool
     )
     aborted = QtCore.pyqtSignal()
 
@@ -14224,16 +14182,20 @@ class IdentificationWorker(QtCore.QThread):
         calibrate_spline: bool = False,
         *,
         movie: object | None = None,
+        info: list[dict] | None = None,
         rois: list | None = None,
         parameters: dict | None = None,
     ) -> None:
-        """``movie`` / ``rois`` / ``parameters`` default to the window's, i.e.
-        to identifying the active channel as displayed. The channel-sum
-        identification overrides them to identify the summed view instead
-        (see ``Window.identify_channel_sum``)."""
+        """``movie`` / ``info`` / ``rois`` / ``parameters`` default to the
+        window's, i.e. to identifying the active channel as displayed. The
+        channel-sum identification overrides them to identify the summed
+        view instead (see ``Window.identify_channel_sum``)."""
         super().__init__()
         self.window = window
         self.movie = window.movie if movie is None else movie
+        # the MicroManager metadata block of the movie is only carried
+        # over if the user settings ask for it (it is by default)
+        self.info = io.strip_mm_metadata(window.info if info is None else info)
         # copied down to the corners: the worker's ROIs are handed back with
         # the finished identifications and stored as the settings it ran with
         # (see ``_copied_rois``)
@@ -14265,10 +14227,9 @@ class IdentificationWorker(QtCore.QThread):
 
     def run(self) -> None:
         t0 = time.time()
-        # we ignore info since we will merge the metadata from identification
-        # as well when saving localizations
         result = localize.identify(
             self.movie,
+            self.info,
             parameters=localize.IdentificationParameters.from_info(
                 self.parameters
             ),
@@ -14288,6 +14249,7 @@ class IdentificationWorker(QtCore.QThread):
             self.rois,
             elapsed_time,
             identifications,
+            info,
             self.fit_afterwards,
             self.calibrate_z,
             self.calibrate_spline,
@@ -14303,14 +14265,16 @@ class FitWorker(QtCore.QThread):
     phaseStarted = QtCore.pyqtSignal(str, int)
     # items finished in the current phase, its maximum
     progressMade = QtCore.pyqtSignal(int, int)
-    finished = QtCore.pyqtSignal(pd.DataFrame, float, bool, bool)
+    # localizations, their metadata, elapsed time, and whether a z fit and
+    # a z calibration follow
+    finished = QtCore.pyqtSignal(pd.DataFrame, object, float, bool, bool)
     aborted = QtCore.pyqtSignal()
     failed = QtCore.pyqtSignal(str)  # why the fit failed
 
     def __init__(
         self,
         movie: np.memmap,
-        movie_info: list[dict],
+        info: list[dict],
         camera_info: dict,
         identifications: pd.DataFrame,
         box: int,
@@ -14341,7 +14305,8 @@ class FitWorker(QtCore.QThread):
     ) -> None:
         super().__init__()
         self.movie = movie
-        self.movie_info = movie_info
+        # metadata of the identifications
+        self.info = info
         self.camera_info = camera_info
         self.identifications = identifications
         self.box = box
@@ -14351,10 +14316,6 @@ class FitWorker(QtCore.QThread):
         self.calibrate_z = calibrate_z
         self.spline_calibration = spline_calibration
         self.lateral_transforms = lateral_transforms or []
-        # What the fit did with them, for the metadata (see
-        # Window._record_applied_lateral). A 3D astigmatism run leaves this
-        # empty: FitZWorker applies them after the z fit and reports there.
-        self.applied_lateral_transforms = []
         self.camera_calibration = camera_calibration
         self.N = len(identifications)
         self.method = _effective_fit_code(method, use_gpu)
@@ -14383,11 +14344,10 @@ class FitWorker(QtCore.QThread):
 
     def run(self) -> None:
         t0 = time.time()
-        # we ignore info since we will merge the metadata from identification
-        # as well when saving localizations
         try:
             locs, info = localize.fit(
-                movie=self.movie,
+                self.movie,
+                self.info,
                 camera_info=self.camera_info,
                 identifications=self.identifications,
                 box=self.box,
@@ -14396,6 +14356,11 @@ class FitWorker(QtCore.QThread):
                 max_it=self.max_it,
                 spline_calibration=self.spline_calibration,
                 camera_calibration=self.camera_calibration,
+                # With a z fit to follow, FitZWorker applies them after it,
+                # so that they land on the final coordinates either way.
+                lateral_transforms=(
+                    None if self.fit_z else self.lateral_transforms
+                ),
                 multiprocess=True,
                 progress=_SignalProgress(
                     on_value=self.on_progress, on_phase=self.on_phase
@@ -14410,15 +14375,8 @@ class FitWorker(QtCore.QThread):
         if locs is None:  # handle aborted process
             self.aborted.emit()
             return
-        if not self.fit_z:
-            # With a z fit to follow, FitZWorker applies them after it, so
-            # that they land on the final coordinates either way.
-            locs = lib.apply_lateral_transforms(locs, self.lateral_transforms)
-            self.applied_lateral_transforms = lib.describe_lateral_transforms(
-                self.spline_calibration
-            ) + lib.describe_lateral_transforms(self.lateral_transforms)
         dt = time.time() - t0
-        self.finished.emit(locs, dt, self.fit_z, self.calibrate_z)
+        self.finished.emit(locs, info, dt, self.fit_z, self.calibrate_z)
 
 
 class MultichannelSplineFitWorker(QtCore.QThread):
@@ -14433,7 +14391,8 @@ class MultichannelSplineFitWorker(QtCore.QThread):
     # cross-channel linking: reference detections checked (done, maximum)
     linkMade = QtCore.pyqtSignal(int, int)
     linkFinished = QtCore.pyqtSignal(int, int)
-    finished = QtCore.pyqtSignal(pd.DataFrame, float, bool, bool)
+    # as FitWorker: localizations, metadata, elapsed time, z fit/calibration
+    finished = QtCore.pyqtSignal(pd.DataFrame, object, float, bool, bool)
     aborted = QtCore.pyqtSignal()
     failed = QtCore.pyqtSignal(str)  # why the fit failed
 
@@ -14454,10 +14413,13 @@ class MultichannelSplineFitWorker(QtCore.QThread):
         eps: float | None = None,
         max_it: int | None = None,
         camera_calibration: dict | None = None,
+        info: list[dict] | None = None,
     ) -> None:
         super().__init__()
         self.movies = movies
         self.camera_infos = camera_infos
+        # metadata of the reference channel's identifications
+        self.info = info
         # One loaded calibration, applied to every channel. Split-FOV really
         # is one sensor; separate cameras per channel would each need their
         # own maps, which the GUI has no way to load yet - the API
@@ -14596,7 +14558,7 @@ class MultichannelSplineFitWorker(QtCore.QThread):
                 self.aborted.emit()
                 return
             if self.split_fov:
-                locs = localize.fit_spline_split_fov(
+                locs, info = localize.fit_spline_split_fov(
                     self.movies[0],
                     self.camera_infos[0],
                     self.identifications,
@@ -14610,6 +14572,7 @@ class MultichannelSplineFitWorker(QtCore.QThread):
                     max_iterations=self.max_it,
                     progress=progress,
                     camera_calibration=self.camera_calibration,
+                    info=self.info,
                 )
             elif not self.link_photons and (
                 2 <= n_channels <= precision._LINK_XYZ_MAX_CHANNELS
@@ -14617,7 +14580,7 @@ class MultichannelSplineFitWorker(QtCore.QThread):
                 # Photon decoupling (globLoc link-XYZ): free per-channel
                 # photons and background, shared x/y/z. Supersedes the
                 # ratiometric scan.
-                locs = localize.fit_spline_multichannel(
+                locs, info = localize.fit_spline_multichannel(
                     self.movies,
                     self.camera_infos,
                     self.identifications,
@@ -14630,12 +14593,13 @@ class MultichannelSplineFitWorker(QtCore.QThread):
                     max_iterations=self.max_it,
                     progress=progress,
                     camera_calibrations=self.camera_calibrations,
+                    info=self.info,
                 )
             elif self.calibration.get("photon_ratios") is not None:
                 # Ratiometric color assignment: the calibration carries
                 # candidate per-channel photon ratios (one per dye/color). Each
                 # localization is assigned the max-likelihood ratio as `color`.
-                locs = localize.fit_spline_multichannel_ratiometric(
+                locs, info = localize.fit_spline_multichannel_ratiometric(
                     self.movies,
                     self.camera_infos,
                     self.identifications,
@@ -14647,9 +14611,10 @@ class MultichannelSplineFitWorker(QtCore.QThread):
                     max_iterations=self.max_it,
                     progress=progress,
                     camera_calibrations=self.camera_calibrations,
+                    info=self.info,
                 )
             else:
-                locs = localize.fit_spline_multichannel(
+                locs, info = localize.fit_spline_multichannel(
                     self.movies,
                     self.camera_infos,
                     self.identifications,
@@ -14661,6 +14626,7 @@ class MultichannelSplineFitWorker(QtCore.QThread):
                     max_iterations=self.max_it,
                     progress=progress,
                     camera_calibrations=self.camera_calibrations,
+                    info=self.info,
                 )
         except Exception as e:
             self.failed.emit(str(e))
@@ -14668,7 +14634,7 @@ class MultichannelSplineFitWorker(QtCore.QThread):
         dt = time.time() - t0
         # fit_z / calibrate_z are always False for the multichannel spline
         # path (z comes from the fit; there is no astigmatism step)
-        self.finished.emit(locs, dt, False, False)
+        self.finished.emit(locs, info, dt, False, False)
 
 
 class MultichannelGaussianFitWorker(QtCore.QThread):
@@ -14686,7 +14652,8 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
     # cross-channel linking: reference detections checked (done, maximum)
     linkMade = QtCore.pyqtSignal(int, int)
     linkFinished = QtCore.pyqtSignal(int, int)
-    finished = QtCore.pyqtSignal(pd.DataFrame, float, bool, bool)
+    # as FitWorker: localizations, metadata, elapsed time, z fit/calibration
+    finished = QtCore.pyqtSignal(pd.DataFrame, object, float, bool, bool)
     aborted = QtCore.pyqtSignal()
     failed = QtCore.pyqtSignal(str)  # why the fit failed
 
@@ -14707,6 +14674,7 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
         camera_calibration: dict | None = None,
         split_fov: bool = False,
         regions: list | None = None,
+        info: list[dict] | None = None,
     ) -> None:
         """Set up a joint fit of every channel.
 
@@ -14751,10 +14719,13 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
         regions : list, optional
             Split-FOV only: the channel ROIs in use, reference first. None uses
             the registration's own.
+        info : list of dicts, optional
+            Metadata of the reference channel's identifications.
         """
         super().__init__()
         self.movies = movies
         self.camera_infos = camera_infos
+        self.info = info
         # One loaded calibration applied to every channel, as for the spline
         # worker; the API takes a per-channel list.
         self.camera_calibration = camera_calibration
@@ -14921,7 +14892,7 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
                 self.aborted.emit()
                 return
             if self.split_fov:
-                locs = localize.fit_gauss_split_fov(
+                result = localize.fit_gauss_split_fov(
                     self.movies[0],
                     self.camera_infos[0],
                     self.identifications,
@@ -14936,9 +14907,10 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
                     progress=progress,
                     abort_callback=self.isInterruptionRequested,
                     camera_calibration=self.camera_calibration,
+                    info=self.info,
                 )
             else:
-                locs = localize.fit_gauss_multichannel(
+                result = localize.fit_gauss_multichannel(
                     self.movies,
                     self.camera_infos,
                     self.identifications,
@@ -14952,16 +14924,18 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
                     progress=progress,
                     abort_callback=self.isInterruptionRequested,
                     camera_calibrations=self.camera_calibrations,
+                    info=self.info,
                 )
         except Exception as e:
             self.failed.emit(str(e))
             return
-        if locs is None:
+        if result is None:
             self.aborted.emit()
             return
+        locs, info = result
         dt = time.time() - t0
         # this fit has no astigmatism step: it is 2D and its width is fitted
-        self.finished.emit(locs, dt, False, False)
+        self.finished.emit(locs, info, dt, False, False)
 
 
 #: Workers that fit every channel at once. They share the window's fit slots,
@@ -14977,7 +14951,8 @@ class FitZWorker(QtCore.QThread):
     calibration file using multiprocessing."""
 
     progressMade = QtCore.pyqtSignal(int, int)
-    finished = QtCore.pyqtSignal(pd.DataFrame, float)
+    # localizations, their metadata, elapsed time
+    finished = QtCore.pyqtSignal(pd.DataFrame, object, float)
     aborted = QtCore.pyqtSignal()
 
     def __init__(
@@ -15000,9 +14975,8 @@ class FitZWorker(QtCore.QThread):
         self.fitting_method = fitting_method
         self.gpu = gpu
         self.lateral_transforms = lateral_transforms or []
-        # What the fit actually did with the lateral corrections, for the
-        # metadata and the status bar (see Window._record_applied_lateral).
-        self.applied_lateral_transforms = []
+        # the lateral corrections the fit skipped, for the status bar (see
+        # Window._report_skipped_lateral)
         self.skipped_lateral_transforms = []
 
     def on_progress(self, n_done: int, maximum: int) -> None:
@@ -15017,10 +14991,6 @@ class FitZWorker(QtCore.QThread):
 
     def run(self) -> None:
         t0 = time.time()
-        # we ignore info since we will merge the metadata from 2D
-        # localization as well when saving localizations - except for what
-        # zfit reports about the lateral corrections, which is kept below
-        # because nothing else records it.
         # The separately loaded corrections go through zfit as well, so that
         # they are applied after the ones the 3D calibration carries and a
         # correction present in both is applied once, exactly as when it is
@@ -15044,14 +15014,11 @@ class FitZWorker(QtCore.QThread):
                 abort_callback=self.isInterruptionRequested,
             )
         if info is not None:
-            self.applied_lateral_transforms = (
-                info[-1].get("Lateral corrections applied") or []
-            )
             self.skipped_lateral_transforms = (
                 info[-1].get("Lateral corrections skipped") or []
             )
         dt = time.time() - t0
-        self.finished.emit(locs, dt)
+        self.finished.emit(locs, info, dt)
 
 
 class ChannelRegistrationWorker(QtCore.QThread):

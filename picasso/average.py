@@ -275,15 +275,34 @@ def prepare_locs_for_save(
         ``info`` with an entry recording the averaging appended, see
         ``lib.append_metadata``.
     """
-    width, height = lib.field_of_view(info)
-    cx = width / 2
-    cy = height / 2
-    # shift a copy: the caller's localizations (e.g., the average shown
-    # in Picasso: Average) stay centered at (0, 0)
-    locs = locs.copy()
-    locs["x"] += cx
-    locs["y"] += cy
+    locs = center_in_field_of_view(locs, info)
     return locs, lib.append_metadata(info, _average_entry(params))
+
+
+def center_in_field_of_view(
+    locs: pd.DataFrame, info: list[dict]
+) -> pd.DataFrame:
+    """Shift averaged localizations, which are centered at (0, 0), to the
+    center of the field of view, e.g., for saving.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Averaged localizations.
+    info : list of dicts
+        Their metadata, giving the field of view.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        A shifted copy: the caller's localizations (e.g., the average
+        shown in Picasso: Average) stay centered at (0, 0).
+    """
+    width, height = lib.field_of_view(info)
+    locs = locs.copy()
+    locs["x"] += width / 2
+    locs["y"] += height / 2
+    return locs
 
 
 def _average_entry(params: dict) -> dict:

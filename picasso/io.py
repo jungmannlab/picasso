@@ -835,7 +835,9 @@ def load_calibration(path: str, pixelsize: float | None = None) -> dict:
     Returns
     -------
     calibration : dict
-        A dictionary containing the 3D astigmatic calibration data.
+        A dictionary containing the 3D astigmatic calibration data and
+        ``path`` under ``"Path"``, which the metadata of the
+        localizations fitted with it record (see ``zfit.zfit``).
 
     Raises
     ------
@@ -864,7 +866,9 @@ def load_calibration(path: str, pixelsize: float | None = None) -> dict:
             "be a dictionary."
         )
 
-    return _legacy_calibration_to_nm(calibration, pixelsize, path)
+    calibration = _legacy_calibration_to_nm(calibration, pixelsize, path)
+    calibration["Path"] = path
+    return calibration
 
 
 def _json_default(obj):
@@ -943,8 +947,10 @@ def load_spline_calibration(path: str, pixelsize: float | None = None) -> dict:
     -------
     calibration : dict
         The calibration dictionary, with the coefficient table restored under
-        the ``"coefficients"`` key (float32 numpy array) and all metadata
-        keys alongside it.
+        the ``"coefficients"`` key (float32 numpy array), all metadata
+        keys alongside it and ``path`` under ``"Path"``, which the
+        metadata of the localizations fitted with it record (see
+        ``localize.fit``).
     """
     _check_path_length(path)
     calibration = _read_spline_calibration(path)
@@ -952,6 +958,7 @@ def load_spline_calibration(path: str, pixelsize: float | None = None) -> dict:
         if pixelsize is None:
             pixelsize = calibration.get("pixelsize")
         calibration = _legacy_calibration_to_nm(calibration, pixelsize, path)
+    calibration["Path"] = path
     return calibration
 
 
@@ -999,7 +1006,7 @@ def load_any_calibration(path: str, pixelsize: float | None = None) -> dict:
     Returns
     -------
     calibration : dict
-        The calibration dictionary.
+        The calibration dictionary, with ``path`` under ``"Path"``.
 
     Raises
     ------
@@ -1023,7 +1030,9 @@ def load_any_calibration(path: str, pixelsize: float | None = None) -> dict:
             "Invalid calibration file: expected a YAML mapping. This does "
             "not look like a Picasso calibration file."
         )
-    return _legacy_calibration_to_nm(calibration, pixelsize, path)
+    calibration = _legacy_calibration_to_nm(calibration, pixelsize, path)
+    calibration["Path"] = path
+    return calibration
 
 
 def save_any_calibration(path: str, calibration: dict) -> None:

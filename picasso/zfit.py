@@ -1060,9 +1060,12 @@ def _apply_lateral_transforms_and_build_info(
         new_info["Lateral corrections skipped"] = (
             lib.describe_lateral_transforms(duplicates)
         )
-    # the format marker describes the calibration file, not the metadata
+    # the format marker describes the calibration file, not the
+    # metadata, and its path is recorded above
     recorded = {
-        k: v for k, v in calibration.items() if k != io.FORMAT_VERSION_ATTR
+        k: v
+        for k, v in calibration.items()
+        if k not in (io.FORMAT_VERSION_ATTR, "Path")
     }
     return locs, lib.append_metadata(info, new_info | recorded)
 

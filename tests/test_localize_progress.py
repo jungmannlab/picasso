@@ -545,7 +545,7 @@ class TestGaussMultichannel:
         args = (movies, cameras, ids, BOX, self.REGISTRATION)
         kwargs = dict(link_photons=link_photons, use_gpu=False)
         tracker = RecordingProgress()
-        locs = localize.fit_gauss_multichannel(
+        locs, _ = localize.fit_gauss_multichannel(
             *args, progress=tracker, **kwargs
         )
         assert len(locs) == len(ids)
@@ -568,7 +568,7 @@ class TestGaussMultichannel:
         movie, ids = _split_fov_movie()
         args = (movie, CAMERA, ids, BOX, _split_fov_geometry())
         tracker = RecordingProgress()
-        locs = localize.fit_gauss_split_fov(
+        locs, _ = localize.fit_gauss_split_fov(
             *args, use_gpu=False, progress=tracker
         )
         assert len(locs) == len(ids)
@@ -617,7 +617,7 @@ class TestSplineMultichannel:
         args = (movies, cameras, ids, BOX, self._calibration())
         kwargs = dict(link_photons=link_photons, use_gpu=False)
         tracker = RecordingProgress()
-        locs = localize.fit_spline_multichannel(
+        locs, _ = localize.fit_spline_multichannel(
             *args, progress=tracker, **kwargs
         )
         assert len(locs) == len(ids)
@@ -631,7 +631,7 @@ class TestSplineMultichannel:
         calib = self._calibration(photon_ratios=[[0.5, 0.5], [0.8, 0.2]])
         args = (movies, cameras, ids, BOX, calib)
         tracker = RecordingProgress()
-        locs = localize.fit_spline_multichannel_ratiometric(
+        locs, _ = localize.fit_spline_multichannel_ratiometric(
             *args, use_gpu=False, progress=tracker
         )
         assert len(locs) == len(ids)
@@ -662,7 +662,7 @@ class TestSplineMultichannel:
             _spline_calibration(model="spline-3d-multichannel")
         )
         tracker = RecordingProgress()
-        locs = localize.fit_spline_split_fov(
+        locs, _ = localize.fit_spline_split_fov(
             movie, CAMERA, ids, BOX, calib, use_gpu=False, progress=tracker
         )
         assert len(locs) == len(ids)
@@ -710,7 +710,7 @@ class TestIndependent:
             *args, multiprocess=False, progress=tracker
         )
         assert len(results) == 2
-        assert [info["Channel"] for _, info in results] == [0, 1]
+        assert [info[-1]["Channel"] for _, info in results] == [0, 1]
         assert_phases_complete(
             tracker,
             [

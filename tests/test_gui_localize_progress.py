@@ -287,7 +287,7 @@ class TestFitStatus:
         """``localize.fit`` gets one tracker, whose phases arrive as the
         worker's ``phaseStarted`` and values as ``progressMade``."""
 
-        def fake_fit(**kwargs):
+        def fake_fit(movie, info=None, **kwargs):
             progress = kwargs["progress"]
             for label in ("Cutting spots", "Fitting spots"):
                 lib.start_phase(progress, label, 2, unit="spot")

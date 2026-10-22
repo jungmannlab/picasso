@@ -277,6 +277,16 @@ def test_metadata_of_the_opened_file(window, picked, monkeypatch):
 # -- averaging --------------------------------------------------------
 
 
+def _average_runs(view) -> list[tuple]:
+    """(display pixel size, iterations) of each averaging run recorded in
+    the metadata of the average."""
+    return [
+        (entry["Display pixel size (nm)"], entry["Iterations"])
+        for entry in view.info
+        if entry.get("Step") == "Average"
+    ]
+
+
 def test_averaging_records_its_parameters_and_reuses_the_pool(
     window, picked, monkeypatch, qt_offscreen
 ):
@@ -291,7 +301,7 @@ def test_averaging_records_its_parameters_and_reuses_the_pool(
     assert window.statuses[-1] == "Done!"
     assert "Iteration 2/2 — group 6/6" in window.statuses
     assert len(window.notified) == 1
-    assert view.avg_history == [{"disp_px_size": 5.0, "it": 2}]
+    assert _average_runs(view) == [(5.0, 2)]
     assert len(view.locs) == len(before)
     assert not np.allclose(view.locs["x"], before["x"])
     pool = view.pool
@@ -299,10 +309,7 @@ def test_averaging_records_its_parameters_and_reuses_the_pool(
     _average(window, qt_offscreen, disp_px_size=8.0, iterations=1)
 
     assert view.pool is pool and not pool.closed
-    assert view.avg_history == [
-        {"disp_px_size": 5.0, "it": 2},
-        {"disp_px_size": 8.0, "it": 1},
-    ]
+    assert _average_runs(view) == [(5.0, 2), (8.0, 1)]
 
 
 def test_average_while_averaging_starts_nothing(
@@ -317,7 +324,7 @@ def test_average_while_averaging_starts_nothing(
 
     assert window.view.thread is thread
     _wait(window.view, qt_offscreen)
-    assert len(window.view.avg_history) == 1
+    assert len(_average_runs(window.view)) == 1
 
 
 def test_abort_stops_averaging_and_starts_a_new_pool(
@@ -338,7 +345,7 @@ def test_abort_stops_averaging_and_starts_a_new_pool(
     view = window.view
     assert view.thread.was_aborted
     assert window.statuses[-1] == "Aborted."
-    assert view.avg_history == []
+    assert _average_runs(view) == []
     assert not view.running
     # aborting terminated the pool, so the next run gets a new one
     assert pool.closed
@@ -409,9 +416,9 @@ def test_saved_average_is_centered_in_the_field_of_view(
         locs["y"], window.view.locs["y"] + center, atol=1e-3
     )
     assert info[-1]["Step"] == "Average"
-    assert info[-1]["Rounds"] == [
-        {"Display pixel size (nm)": 5.0, "Iterations": 2}
-    ]
+    # the run, not the iterations now on the dialog
+    assert info[-1]["Display pixel size (nm)"] == 5.0
+    assert info[-1]["Iterations"] == 2
 
 
 def test_saving_twice_writes_the_same_localizations(

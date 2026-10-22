@@ -2301,8 +2301,9 @@ def _localize_regions(
         region_label,
     )
 
-    identifications, identify_info = identify(
+    identifications, ids_info = identify(
         movie,
+        info,
         parameters=_identification_parameters_from_args(
             args, box, min_net_gradient
         ),
@@ -2322,7 +2323,7 @@ def _localize_regions(
         box,
         roi,
         region_fit["methods"],
-        movie_info=info,
+        movie_info=ids_info,
         eps=convergence if convergence > 0 else None,
         max_it=max_iterations if max_iterations > 0 else None,
         spline_calibration=region_fit["spline_calibrations"],
@@ -2343,9 +2344,6 @@ def _localize_regions(
             )
             continue
         print(f"Region {label}: {len(locs):,} localizations")
-        # as ``localize`` builds it: the movie's metadata, then the
-        # identification, then the fit
-        region_info = region_info[:-1] + [identify_info] + [region_info[-1]]
         saved.append(
             _localize_finish(
                 locs,

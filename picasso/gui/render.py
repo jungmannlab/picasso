@@ -3996,6 +3996,31 @@ def locs_are_spline(infos: list[dict]) -> bool:
     return False
 
 
+def _camera_size(info: list[dict], axis: int) -> float:
+    """Width (``axis`` 0) or height (1) of the camera image of a channel
+    in camera pixels: the size ``lib.fit_canvas`` stored once the canvas
+    differed from it, else ``Width`` or ``Height`` (e.g., of a split-FOV
+    region, recorded after the movie's)."""
+    size = lib.get_from_metadata(info, lib.CAMERA_SIZE_KEYS[axis])
+    if size is None:
+        size = lib.get_from_metadata(info, ("Width", "Height")[axis])
+    return size
+
+
+def z_calibration_path(infos: list[dict]) -> str | None:
+    """Return the path of the 3D calibration that the localizations
+    described by ``infos`` were fitted with: the ``Calibration path`` of
+    their z fit (see ``zfit.zfit``) or the ``Z Calibration Path`` that the
+    command line (and Picasso: Localize before 1.0) record. None if
+    neither is known."""
+    for entry in reversed(infos):
+        if isinstance(entry, dict) and entry.get("Step") == "Fit 3D":
+            path = entry.get("Calibration path")
+            if path and path != "N/A":
+                return path
+    return lib.get_from_metadata(infos, "Z Calibration Path")
+
+
 class G5MDialog(lib.Dialog):
     """Extract parameters for G5M: ``min_locs``, ``min_sigma``,
     ``max_sigma``. For 3D, calibration is requested. The user can also
@@ -4304,7 +4329,7 @@ class G5MDialog(lib.Dialog):
         opened."""
         ch = self.channel if self.channel != len(self.window.view.locs) else 0
         infos = self.window.view.infos[ch]
-        calib_path = lib.get_from_metadata(infos, "Z Calibration Path")
+        calib_path = z_calibration_path(infos)
         if calib_path is not None:
             try:
                 self.load_calibration_(calib_path)
@@ -4844,10 +4869,12 @@ class TestClustererDialog(lib.Dialog):
 
             def job(progress: lib.TaskProgress) -> None:
                 lib.start_phase(progress, "Applying DBSCAN...", 0)
-                clustered, _ = clusterer.dbscan(locs, **params["DBSCAN"])
+                clustered, clustered_info = clusterer.dbscan(
+                    locs, info, **params["DBSCAN"]
+                )
                 centers, new_info, clustered_locs = g5m.g5m(
                     clustered,
-                    info,
+                    clustered_info,
                     **params["G5M"],
                     progress=progress,
                 )
@@ -10640,8 +10667,8 @@ class ImageOverlayDialog(lib.Dialog):
             return
         movie_height, movie_width = movie_size
         infos = self.window.view.infos
-        camera_width = max(info[0]["Width"] for info in infos)
-        camera_height = max(info[0]["Height"] for info in infos)
+        camera_width = max(_camera_size(info, 0) for info in infos)
+        camera_height = max(_camera_size(info, 1) for info in infos)
         text += (
             f"\nCamera (localizations' metadata): {camera_width:g} x "
             f"{camera_height:g} px ({movie_width:g} x {movie_height:g} nm)."
@@ -12460,9 +12487,12 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             def align():
                 return postprocess.align(locs, infos, method="rcc")
 
-        # the metadata is not updated: Render records its own state when
-        # saving
-        self.locs, _ = lib.run_with_status(align, "Aligning channels...", self)
+        self.locs, infos = lib.run_with_status(
+            align, "Aligning channels...", self
+        )
+        for channel, info in enumerate(infos):
+            # a new list, the old one may be shared with linked windows
+            self.infos[channel] = info
         if not keep_non_overlapping_setting():
             try:
                 self.locs = postprocess.remove_non_overlapping_locs(self.locs)
@@ -12492,14 +12522,16 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             "Combining localizations in picks", 0, 0, self
         )
         try:
-            self.locs[channel], _ = postprocess.combine_locs_in_picks(
-                self.locs[channel],
-                self.infos[channel],
-                picks=self._picks,
-                pick_shape=self._pick_shape,
-                pick_size=self._pick_size,
-                index_blocks=index_blocks,
-                progress=progress,
+            self.locs[channel], self.infos[channel] = (
+                postprocess.combine_locs_in_picks(
+                    self.locs[channel],
+                    self.infos[channel],
+                    picks=self._picks,
+                    pick_shape=self._pick_shape,
+                    pick_size=self._pick_size,
+                    index_blocks=index_blocks,
+                    progress=progress,
+                )
             )
         finally:
             progress.close()
@@ -15924,7 +15956,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         # snapshot the inputs for the worker thread
         locs = [self.locs[i] for i in used]
         infos = [self.infos[i] for i in used]
-        paths = [self.locs_paths[i] for i in used]
         kwargs = dict(
             r_max=params["r_max"],
             steps=params["steps"],
@@ -15958,12 +15989,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             for i, (new_locs, new_info) in enumerate(zip(all_locs, all_infos)):
                 if i >= len(out_paths):
                     break  # single pair: only the scored channel
-                entry = new_info[-1]
-                entry.update(lib.step_info("Render CBC"))
-                entry["Scored channel"] = paths[i]
-                entry["Partner channels"] = [
-                    p for j, p in enumerate(paths) if j != i
-                ]
                 io.save_locs(out_paths[i], new_locs, new_info)
 
         lib.run_task(
@@ -16794,15 +16819,20 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         )
         progress.set_value(0)
         dark = np.empty(len(clustered_locs))
+        # the same for every pick: the steps applied to all of them
+        kinetics_info = self.infos[channel]
         for i, pick_locs in enumerate(clustered_locs):
+            pick_info = self.infos[channel]
             if "len" not in pick_locs.columns:
-                pick_locs, _ = postprocess.link(
+                pick_locs, pick_info = postprocess.link(
                     pick_locs,
-                    self.infos[channel],
+                    pick_info,
                     r_max=r_max,
                     max_dark_time=max_dark,
                 )
-            pick_locs, _ = postprocess.compute_dark_times(pick_locs)
+            pick_locs, kinetics_info = postprocess.compute_dark_times(
+                pick_locs, pick_info
+            )
             dark[i] = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
             out_locs.append(pick_locs)
             progress.set_value(i + 1)
@@ -16818,7 +16848,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         n_units = self.window.info_dialog.calculate_n_units(dark)
         pick_props["n_units"] = n_units
         influx = self.window.info_dialog.influx_rate.value()
-        info = self.infos[channel] + [
+        info = kinetics_info + [
             {
                 **lib.step_info("Render"),
                 "Influx rate": influx,
@@ -17531,18 +17561,17 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         channel : int
             Index of the channel were localizations are removed.
         """
-        locs = self.locs[channel]
-        # the metadata is not updated: Render records its own state when
-        # saving
-        locs, _ = postprocess.remove_locs_in_picks(
-            locs,
-            self.infos[channel],
-            picks=self._picks,
-            pick_shape=self._pick_shape,
-            pick_size=self._pick_size,
-            index_blocks=self._pick_index(channel),
+        # a new list, the old one may be shared with linked windows
+        self.locs[channel], self.infos[channel] = (
+            postprocess.remove_locs_in_picks(
+                self.locs[channel],
+                self.infos[channel],
+                picks=self._picks,
+                pick_shape=self._pick_shape,
+                pick_size=self._pick_size,
+                index_blocks=self._pick_index(channel),
+            )
         )
-        self.locs[channel] = locs
         self.update_scene(resample_locs=True)
 
     def remove_polygon_point(self) -> None:
@@ -18486,23 +18515,26 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         def compute(progress: lib.TaskProgress) -> list[tuple]:
             results = []
             for c, locs, info in jobs:
-                # the undrifted locs are ignored, since _apply_drift
-                # assigns them together with the drift attributes
-                _, _, drift = postprocess.undrift(
+                new_locs, new_info, drift = postprocess.undrift(
                     locs,
                     info,
                     segmentation=segmentation,
                     display=False,
                     progress=progress,
                 )
-                results.append((c, drift))
+                results.append((c, new_locs, new_info, drift))
             return results
 
         def apply(results: list[tuple]) -> None:
-            for c, drift in results:
+            for c, locs, new_info, drift in results:
+                self.locs[c] = locs
+                # a new list, the old one may be shared with linked windows
+                self.infos[c] = new_info
                 self.invalidate_locs_index(c)
                 self.add_drift(c, drift)
-                self._apply_drift(c, drift)
+                self._drift[c] = drift
+                self.currentdrift[c] = copy.copy(drift)
+            self.update_scene(resample_locs=True)
             if len(channels) == 1:
                 self.show_drift()
 
@@ -18750,7 +18782,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """Shift localizations in a given channel based on drift from a
         .txt file. The drift is recorded in the metadata on saving
         (``Last driftfile``)."""
-        self.locs[channel], _ = postprocess.apply_drift(
+        # a new list, the old one may be shared with linked windows
+        self.locs[channel], self.infos[channel] = postprocess.apply_drift(
             self.locs[channel], self.infos[channel], drift=drift
         )
         self._drift[channel] = drift

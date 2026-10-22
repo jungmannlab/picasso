@@ -1776,7 +1776,8 @@ def test_cbc_of_one_pair_with_the_dialog(
     _wait_for_tasks(qt_offscreen)
     locs, info = _load(out)
     assert "cbc_B" in locs.columns
-    assert info[-1]["Scored channel"] == window2.view.locs_paths[0]
+    assert info[-1]["Step"] == "CBC"
+    assert info[-1]["CBC partner names"] == ["B"]
 
 
 def test_cbc_refuses_the_same_channel_twice(window2, answers, monkeypatch):

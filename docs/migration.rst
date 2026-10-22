@@ -473,6 +473,18 @@ The functions whose results changed:
    * - ``clusterer.cluster``, ``dbscan``, ``hdbscan``
      - ``locs, entry`` (one dictionary)
      - ``locs, info`` (the whole list)
+   * - ``localize.identify``, ``identify_multichannel_sum``, ``fit``
+     - ``ids, entry`` or ``locs, entry`` (one dictionary)
+     - ``ids, info`` or ``locs, info`` (the whole list; the metadata go in
+       as ``info``)
+   * - ``localize.fit_gauss_multichannel``, ``fit_gauss_split_fov``,
+       ``fit_spline_multichannel``, ``fit_spline_multichannel_ratiometric``,
+       ``fit_spline_split_fov``
+     - ``locs``
+     - ``locs, info`` (the metadata go in as ``info=``)
+   * - ``localize.fit_independent``
+     - ``[(locs, entry), ...]``
+     - ``[(locs, info), ...]`` (the metadata go in as ``infos=``)
    * - ``clusterer.find_cluster_centers``
      - ``centers``
      - ``centers, info``
@@ -495,6 +507,30 @@ with an entry recording the unfolding.
 ``info`` and the metadata with the filter steps as ``recipe``; in 0.11, the
 filter steps came second. ``postprocess.remove_locs_in_picks`` and
 ``compute_dark_times`` no longer modify the localizations passed to them.
+
+Identifying and fitting work the same way: ``localize.identify(movie,
+movie_info, ...)`` returns the metadata of the movie with an ``Identify``
+entry, and ``localize.fit(movie, ids_info, ...)`` and the joint fits of
+several channels append their own entry to it. ``io.load_calibration``,
+``load_spline_calibration`` and ``load_any_calibration`` keep the path of the
+file under ``"Path"``, which the fits record.
+
+The Picasso windows save the metadata these functions return, so some files
+record their steps differently:
+
+- Picasso: Localize records the identification (``Identify``) and the fit
+  (``Fit 2D``, or the joint fit of several channels) in entries of their own,
+  followed by the lateral corrections, the z fit and the drift correction,
+  instead of one ``Localize`` entry. The fit is named by its code (e.g.,
+  ``gaussmle``) and the 3D calibration by the ``Calibration path`` of the
+  ``Fit 3D`` entry (was ``Z Calibration Path``).
+- Picasso: Render records aligning channels, combining and removing
+  localizations in picks and undrifting by RCC or from a file. CBC and
+  tracking record what ``postprocess.cbc`` and ``spt.link_tracks`` return
+  (no ``Scored channel`` and ``Partner channels``; the tracking step is
+  ``SPT``). Pick properties record the linking and the dark times.
+- Picasso: Average adds an ``Average`` entry per run, instead of listing the
+  runs under ``Rounds``.
 
 .. code-block:: python
    :caption: Picasso 0.11
@@ -562,7 +598,7 @@ return ``qe``.
    parameters = localize.IdentificationParameters(
        method=localize.NetGradient(5000), box=7
    )
-   ids, identify_info = localize.identify(movie, parameters=parameters)
+   ids, ids_info = localize.identify(movie, movie_info, parameters=parameters)
    locs, info = localize.localize(
        movie,
        camera_info=camera_info,
@@ -579,8 +615,10 @@ return ``qe``.
      - Picasso 1.0
    * - ``localize.identify(movie, minimum_ng, box, temporal_median_window=...,
        gaussian_filter_sigma=..., return_info=...)``
-     - ``localize.identify(movie, parameters=IdentificationParameters(...))``,
-       which always returns ``(identifications, info)``.
+     - ``localize.identify(movie, movie_info,
+       parameters=IdentificationParameters(...))``, which always returns
+       ``(identifications, info)``, ``info`` being the complete metadata
+       (see :ref:`migration-python-locs-info`).
    * - ``localize.localize`` with a dictionary as ``identification_parameters``
        (or ``parameters``), ``mle_method`` and ``return_info``
      - ``localize.localize(movie, camera_info=...,
@@ -588,8 +626,9 @@ return ``qe``.
        the movie positionally, which always returns ``(locs, info)``.
    * - ``localize.fit2D(movie, movie_info, camera_info, identifications,
        box)``
-     - ``localize.fit(movie, camera_info=..., identifications=...,
-       box=...)``
+     - ``localize.fit(movie, ids_info, camera_info=..., identifications=...,
+       box=...)``, returning ``(locs, info)`` with the complete metadata;
+       ``lateral_transforms=`` applies and records lateral corrections.
    * - ``localize.localize_3D(movie, ..., box=7, minimum_ng=5000,
        calibration_3d=..., multiprocess=...)``
      - ``localize.localize(movie, ..., identification_parameters=...,

@@ -143,14 +143,15 @@ To fit every channel on its own instead — with any model, and without a regist
       parameters = localize.IdentificationParameters(
           method=localize.NetGradient(5000), box=7
       )
-      identifications, id_info = localize.identify(
-          movies[0], parameters=parameters
+      identifications, ids_info = localize.identify(
+          movies[0], infos[0], parameters=parameters
       )
-      locs = localize.fit_gauss_multichannel(
+      locs, locs_info = localize.fit_gauss_multichannel(
           list(movies), camera_infos, identifications, box=7,
           channel_registration=registration, mle=True, link_photons=False,
+          info=ids_info,
       )
-      io.save_locs("movie_locs.hdf5", locs, list(infos[0]) + [id_info])
+      io.save_locs("movie_locs.hdf5", locs, locs_info)
 
 
 .. _localize-linking-photon-counts:

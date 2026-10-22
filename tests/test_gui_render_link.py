@@ -525,6 +525,11 @@ def test_drift_applied_in_place_is_adopted(shared, monkeypatch):
         primary.view.locs[1]["x"], x_before + 65.0, atol=1e-2
     )
     assert primary.view._drift[1] is secondary.view._drift[0]
+    # the metadata recording it, too, while the channels that are not
+    # shared keep theirs
+    assert primary.view.infos[1] is secondary.view.infos[0]
+    assert primary.view.infos[1][-1]["Step"] == "Apply drift"
+    assert primary.view.infos[0] == _info()
     assert len(calls) >= 1
 
 

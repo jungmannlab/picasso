@@ -21,7 +21,6 @@ from PyQt6 import QtWidgets
 from picasso import lib_qt
 from picasso.gui import render as gui_render
 
-
 WIDTH = HEIGHT = 64.0
 PIXELSIZE = 130.0
 N_FRAMES = 2000
@@ -181,6 +180,44 @@ def test_rcc_applies_drift(window, qt_offscreen, monkeypatch):
     _wait_for_tasks(qt_offscreen)
     assert window.view._drift[0] is not None
     assert len(window.view._drift[0]) == N_FRAMES
+
+
+def test_rcc_records_the_undrifting(window, qt_offscreen, monkeypatch):
+    monkeypatch.setattr(
+        QtWidgets.QInputDialog, "getInt", lambda *a, **k: (500, True)
+    )
+    before = window.view.infos[0]
+    window.view.undrift_rcc()
+    _wait_for_tasks(qt_offscreen)
+    info = window.view.infos[0]
+    assert info[-1]["Step"] == "Undrift"
+    assert info[-1]["Segmentation"] == 500
+    # a new list: the old one may be shared with linked windows
+    assert info is not before and before == _info()
+
+
+def test_applied_drift_is_recorded(window, qt_offscreen):
+    before = window.view.infos[0]
+    x = window.view.locs[0]["x"].to_numpy().copy()
+    drift = pd.DataFrame(
+        {"x": np.full(N_FRAMES, 10.0), "y": np.zeros(N_FRAMES)}
+    )
+    window.view._apply_drift(0, drift)
+    np.testing.assert_allclose(window.view.locs[0]["x"], x - 10.0, atol=1e-3)
+    assert window.view.infos[0][-1]["Step"] == "Apply drift"
+    assert before == _info()
+
+
+def test_removing_picked_localizations_is_recorded(window, qt_offscreen):
+    _pick_clusters(window.view)
+    before = window.view.infos[0]
+    n_before = len(window.view.locs[0])
+    window.view._remove_picked_locs(0)
+    assert len(window.view.locs[0]) < n_before
+    entry = window.view.infos[0][-1]
+    assert entry["Step"] == "Remove picked localizations"
+    assert entry["Number of picks"] == N_CLUSTERS
+    assert before == _info()
 
 
 def test_rcc_suggests_four_segments(window, monkeypatch):
@@ -425,8 +462,9 @@ def test_cbc_single_pair_saves_scored_channel(
     locs, info = gui_render.io.load_locs(out)
     assert len(locs) == len(view.locs[1])
     assert "cbc_Bassoon" in locs.columns
-    assert info[-1]["Scored channel"] == view.locs_paths[1]
-    assert info[-1]["Partner channels"] == [view.locs_paths[0]]
+    # the metadata as postprocess.cbc returns it
+    assert info[-1]["Step"] == "CBC"
+    assert info[-1]["CBC partner names"] == ["Bassoon"]
     assert info[-1]["Undefined CBC value"] == -0.5
 
 

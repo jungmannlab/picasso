@@ -19,7 +19,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from picasso import clusterer, expression, lib, postprocess
+from picasso import clusterer, expression, io, lib, localize, postprocess
 from tests.regen_stability_snapshots import public_api
 
 #: names of the first argument of functions on localizations
@@ -357,3 +357,81 @@ def test_align_returns_metadata_of_each_channel():
         "Shift x (nm)"
     ] == pytest.approx(50, abs=1)
     assert [len(i) for i in infos] == [1, 1]
+
+
+# --- identifying and fitting a movie ----------------------------------------
+
+
+@pytest.fixture
+def movie(tmp_path):
+    """A memory-mapped movie with two spots per frame, and its metadata."""
+    rng = np.random.default_rng(0)
+    n_frames, height, width = 20, 32, 32
+    yy, xx = np.mgrid[:height, :width]
+    frames = rng.poisson(20, size=(n_frames, height, width)).astype(float)
+    for cy, cx in [(10, 10), (20, 22)]:
+        frames += 400 * np.exp(-((yy - cy) ** 2 + (xx - cx) ** 2) / 2.0)
+    movie = np.memmap(
+        tmp_path / "movie.raw",
+        dtype=np.uint16,
+        mode="w+",
+        shape=frames.shape,
+    )
+    movie[:] = frames.astype(np.uint16)
+    info = [{"Frames": n_frames, "Width": width, "Height": height}]
+    return movie, info
+
+
+CAMERA_INFO = {"Baseline": 0, "Sensitivity": 1, "Gain": 1, "Pixelsize": 130}
+
+
+def test_identify_and_fit_return_complete_metadata(movie):
+    movie, info = movie
+    parameters = localize.IdentificationParameters(
+        method=localize.NetGradient(1000), box=7
+    )
+    ids, ids_info = localize.identify(
+        movie, info, parameters=parameters, threaded=False
+    )
+    assert len(ids)
+    assert ids_info[0] == info[0]
+    assert ids_info[-1]["Step"] == "Identify"
+    assert ids_info[-1]["Box Size"] == 7
+    locs, locs_info = localize.fit(
+        movie,
+        ids_info,
+        camera_info=CAMERA_INFO,
+        identifications=ids,
+        box=7,
+        multiprocess=False,
+    )
+    assert len(locs) == len(ids)
+    assert [entry.get("Step") for entry in locs_info] == [
+        None,
+        "Identify",
+        "Fit 2D",
+    ]
+    assert locs_info[-1]["Pixelsize"] == 130
+    # the input metadata are not modified
+    assert len(info) == 1 and len(ids_info) == 2
+
+
+def test_identify_without_metadata_returns_only_its_entry(movie):
+    movie, _ = movie
+    parameters = localize.IdentificationParameters(
+        method=localize.NetGradient(1000), box=7
+    )
+    _, ids_info = localize.identify(
+        movie, parameters=parameters, threaded=False
+    )
+    assert [entry["Step"] for entry in ids_info] == ["Identify"]
+
+
+def test_calibration_loaders_keep_the_path(tmp_path):
+    path = str(tmp_path / "calib.yaml")
+    io.save_calibration(
+        path,
+        {"X Coefficients": [0.0] * 7, "Y Coefficients": [0.0] * 7},
+    )
+    assert io.load_calibration(path)["Path"] == path
+    assert io.load_any_calibration(path)["Path"] == path

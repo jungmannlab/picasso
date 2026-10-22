@@ -28,7 +28,7 @@ import pandas as pd
 import pytest
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-from picasso import io
+from picasso import io, lib, transforms
 from picasso.gui import localize as gui_localize
 from tests.test_gui_localize_calibration import (
     ACCEPTED,
@@ -37,6 +37,7 @@ from tests.test_gui_localize_calibration import (
     _load,
     _Messages,
 )
+from tests.conftest import affine
 
 FRAMES = 20
 SIZE = 32
@@ -75,6 +76,11 @@ def _wait(window):
             return
 
 
+def _step(info, step):
+    """The last entry of the metadata ``info`` recording ``step``."""
+    return next(e for e in reversed(info) if e.get("Step") == step)
+
+
 @pytest.fixture
 def window(qt_offscreen):
     window = gui_localize.Window()
@@ -107,7 +113,11 @@ class TestLocalize:
         assert messages.shown == []
         locs, info = io.load_locs(str(tmp_path / "Channel 0_locs.hdf5"))
         assert len(locs) == 2 * FRAMES
-        assert info[-1]["Box Size"] == loaded.parameters["Box Size"]
+        # the metadata the identification and the fit returned
+        assert _step(info, "Identify")["Box Size"] == (
+            loaded.parameters["Box Size"]
+        )
+        assert info[-1]["Step"] == "Fit 2D"
         assert _status(loaded) == f"Saved {2 * FRAMES} localizations."
         # fit markers on screen
         assert loaded.locs_display is not None
@@ -910,7 +920,7 @@ class TestIdentify:
         parameters["Gaussian Filter Sigma"] = 1.5
         ids = pd.DataFrame({"frame": [0], "x": [1.0], "y": [1.0]})
         loaded.on_identify_finished(
-            parameters, [], 0.5, ids, False, False, False
+            parameters, [], 0.5, ids, list(loaded.info), False, False, False
         )
         assert "; Temporal median: 11; Gaussian sigma: 1.5)" in _status(loaded)
 
@@ -1862,7 +1872,7 @@ class TestSavingSpotsAndLocs:
         box = identified.parameters["Box Size"]
         assert spots.shape == (2 * FRAMES, box, box)
         info = io.load_info(path)
-        assert info[-1]["Box Size"] == box
+        assert _step(info, "Identify")["Box Size"] == box
 
     def test_spots_canceled(self, identified, tmp_path, monkeypatch):
         _save_file(monkeypatch, "")
@@ -1878,9 +1888,8 @@ class TestSavingSpotsAndLocs:
         assert suggested == [str(tmp_path / "Channel 0_locs.hdf5")]
         locs, info = io.load_locs(path)
         assert len(locs) == 2 * FRAMES
-        assert info[-1]["Fit method"] == (
-            "2D elliptical Gaussian, Least squares"
-        )
+        # the fit's code for "2D elliptical Gaussian, Least squares"
+        assert _step(info, "Fit 2D")["Fit method"] == "gausslq"
 
     def test_locs_canceled(self, loaded, tmp_path, monkeypatch):
         _save_file(monkeypatch, "")
@@ -2818,7 +2827,7 @@ class TestFitZ:
         locs, info = io.load_locs(str(tmp_path / "Channel 0_locs.hdf5"))
         assert "z" in locs.columns
         assert len(locs) == 2 * FRAMES
-        assert info[-1]["Z Calibration Path"] == path
+        assert _step(info, "Fit 3D")["Calibration path"] == path
         assert _status(loaded) == (f"Saved {2 * FRAMES} localizations.")
 
     def test_a_missing_calibration_file_is_shown(self, loaded, tmp_path):
@@ -2860,9 +2869,16 @@ class TestChannelSum:
         assert ids is not None and len(ids)
         # every channel is fitted at them
         assert all(c.identifications is ids for c in window.channels)
-        info = window.last_identification_info
-        assert info["Channel sum registration"] == (
-            gui_localize.UNREGISTERED_SUM_SOURCE
+        # the identification records the sum: unregistered, every channel
+        # stands where it is
+        info = _step(window.identifications_info, "Identify")
+        assert info["Identification Mode"] == "sum"
+        assert info["Sum Channel Transforms"] == (
+            [transforms.identity("affine").to_dict()] * 2
+        )
+        assert all(
+            c.identifications_info is window.identifications_info
+            for c in window.channels
         )
         assert _status(window).startswith(
             f"Identified {len(ids)} spots on the sum of 2 channels"
@@ -2872,8 +2888,15 @@ class TestChannelSum:
         self, window, tmp_path, monkeypatch
     ):
         _two_channels(window, tmp_path)
+        registration = _registration()
+        # a small shift of the second channel, so that the recorded
+        # transforms are the registration's rather than identities
+        registration["channel_transforms"] = [
+            transforms.identity("affine").to_dict(),
+            affine([[1.0, 0.0, 13.0], [0.0, 1.0, 0.0]]).to_dict(),
+        ]
         window.parameters_dialog.channel_registration_calibration = (
-            _registration()
+            registration
         )
         fit = _Calls(window, monkeypatch, "fit")
         _identify_on(window, gui_localize.IDENTIFY_MODE_SUM)
@@ -2883,8 +2906,10 @@ class TestChannelSum:
         # the sum is in the reference channel's coordinates
         assert window.current_channel == 0
         assert window.channels[1].identifications is None
-        assert window.last_identification_info["Channel sum registration"] == (
-            "the loaded channel registration"
+        info = _step(window.identifications_info, "Identify")
+        assert info["Identification Mode"] == "sum"
+        assert info["Sum Channel Transforms"] == (
+            registration["channel_transforms"]
         )
         assert fit.calls == [((), {})]
 
@@ -3293,7 +3318,9 @@ class TestSeparateFit:
         assert saved == ["Channel 0_locs.hdf5", "Channel 1_locs.hdf5"]
         locs, info = io.load_locs(str(tmp_path / "Channel 1_locs.hdf5"))
         assert len(locs) == 2 * FRAMES
-        assert info[-1]["Channel"] == "Channel 1"
+        # the metadata of the channel's own identifications and fit
+        assert info[:-1] == window.channels[1].identifications_info
+        assert info[-1]["Step"] == "Fit 2D"
         assert _status(window) == (
             f"Fitted {4 * FRAMES} spots in 2 channels, saved to 2 files."
         )
@@ -3372,7 +3399,9 @@ class TestSeparateRegionFit:
         # in the right one
         offset = np.mean(second["x"]) - np.mean(first["x"])
         assert offset / 130.0 == pytest.approx(9.6 - 6.4, abs=0.1)
-        assert info[0]["Width"] == 16
+        # the region's size and place on the sensor, recorded last
+        assert lib.get_from_metadata(info, "Width") == 16
+        assert info[-1]["Region"] == [[0, 16], [32, 32]]
         assert _status(regions) == (
             f"Fitted {2 * FRAMES} spots in 2 regions, saved to 2 files."
         )

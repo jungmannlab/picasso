@@ -33,7 +33,7 @@ def window(qt_offscreen, tmp_path, monkeypatch):
     window.parameters_dialog.pixelsize.setValue(PIXELSIZE)
     window.info = [{"Frames": N_FRAMES, "Width": 64, "Height": 64}]
     # needs the movie; the identifications are checked as converted
-    monkeypatch.setattr(window, "_clean_up_external_ids", lambda: None)
+    monkeypatch.setattr(window, "_clean_up_external_ids", lambda info: None)
     yield window
     window.close()
 

@@ -84,6 +84,9 @@ The functions on localizations share one pattern:
   parameters appended. Further results follow, e.g., ``locs, info, drift =
   postprocess.undrift(...)``. The returned metadata can be saved as it is;
   ``info`` itself is not modified.
+- Identifying and fitting a movie work the same way, with the metadata of
+  the movie: ``ids, ids_info = localize.identify(movie, movie_info, ...)``,
+  then ``locs, locs_info = localize.fit(movie, ids_info, ...)``.
 
 To record a step of your own in the same way, append an entry with
 :func:`picasso.lib.append_metadata` and :func:`picasso.lib.step_info`:

@@ -21,7 +21,7 @@ import pandas as pd
 import pytest
 from PyQt6 import QtCore, QtWidgets
 
-from picasso import io, scmos
+from picasso import io, lib, localize, scmos
 from picasso.gui import localize as gui_localize
 
 ACCEPTED = QtWidgets.QDialog.DialogCode.Accepted
@@ -1013,11 +1013,25 @@ def _calibrate_3d(monkeypatch, specs, path):
     )
 
 
+def _fit_info(window):
+    """The metadata the fit hands ``on_fit_finished``: the movie's, then
+    the identification's and the fit's, with the camera information."""
+    identify = lib.step_info(
+        "Identify", **localize.identification_info(window.parameters)
+    )
+    fit = lib.step_info("Fit 2D", **{"Fit method": "gausslq"})
+    return lib.append_metadata(
+        window.info, [identify, fit | window.camera_info]
+    )
+
+
 class TestCalibrateZAfterTheFit:
     def test_writes_the_calibration(self, fitted, tmp_path, monkeypatch):
         path = str(tmp_path / "beads_3d_calib.yaml")
         _calibrate_3d(monkeypatch, (STEP, 1, "fov", 1, True), path)
-        fitted.on_fit_finished(_bead_stack_locs(), 1.0, False, True)
+        fitted.on_fit_finished(
+            _bead_stack_locs(), _fit_info(fitted), 1.0, False, True
+        )
         calibration = io.load_calibration(path)
         assert len(calibration["X Coefficients"]) == 7
         assert "3D calibrated" in fitted.status_bar.currentMessage()
@@ -1025,7 +1039,9 @@ class TestCalibrateZAfterTheFit:
     def test_cancel_writes_nothing(self, fitted, tmp_path, monkeypatch):
         path = str(tmp_path / "beads_3d_calib.yaml")
         _calibrate_3d(monkeypatch, (STEP, 1, "fov", 1, False), path)
-        fitted.on_fit_finished(_bead_stack_locs(), 1.0, False, True)
+        fitted.on_fit_finished(
+            _bead_stack_locs(), _fit_info(fitted), 1.0, False, True
+        )
         assert not os.path.exists(path)
 
     @pytest.mark.parametrize(
@@ -1048,7 +1064,9 @@ class TestCalibrateZAfterTheFit:
         _calibrate_3d(
             monkeypatch, (STEP, frames_per_step, "fov", z_binning, True), path
         )
-        fitted.on_fit_finished(_bead_stack_locs(), 1.0, False, True)
+        fitted.on_fit_finished(
+            _bead_stack_locs(), _fit_info(fitted), 1.0, False, True
+        )
         assert messages.kinds == ["warning"]
         assert reason in messages.text("warning").lower()
         assert not os.path.exists(path)

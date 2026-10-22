@@ -92,20 +92,22 @@ Hovering the mouse cursor over a fit marker or over an identification box shows 
       )
 
       # Identification of the whole movie
-      identifications, id_info = localize.identify(
-          movie, parameters=parameters, progress="console"
+      identifications, ids_info = localize.identify(
+          movie, info, parameters=parameters, progress="console"
       )
 
-      # Fitting
-      locs, fit_info = localize.fit(
+      # Fitting: the metadata now record the movie, the identification
+      # and the fit
+      locs, locs_info = localize.fit(
           movie,
+          ids_info,
           camera_info=camera_info,
           identifications=identifications,
           box=7,
           fitting_method="gaussmle",
           progress="console",
       )
-      io.save_locs("movie_locs.hdf5", locs, info + [id_info, fit_info])
+      io.save_locs("movie_locs.hdf5", locs, locs_info)
 
 
 .. _localize-remembered-parameters:

@@ -172,8 +172,7 @@ class Worker(QtCore.QThread):
             self.was_aborted = True
             self.aborted.emit()
         else:
-            # the window records the averaging in its metadata on saving
-            self.locs, _ = result
+            self.locs, self.info = result
 
 
 class ParametersDialog(lib.Dialog):
@@ -234,9 +233,6 @@ class View(QtWidgets.QLabel):
 
     Attributes
     ----------
-    avg_history : list of dicts
-        Stores the used display pixel size and iterations across
-        multiple rounds of averaging.
     _pixmap : QtGui.QPixmap
         Pixmap for displaying the averaged image.
     running : bool
@@ -263,7 +259,6 @@ class View(QtWidgets.QLabel):
         self.thread = None
         self.pool = None
         self.pool_thread = None
-        self.avg_history = []
 
     def average(self):
         """Start the averaging in a worker thread, reading the parameters
@@ -335,12 +330,8 @@ class View(QtWidgets.QLabel):
             self.window.statusBar().showMessage("Aborted.")
         else:
             if self.thread is not None:
-                self.avg_history.append(
-                    {
-                        "disp_px_size": self.thread.display_px_size,
-                        "it": self.thread.iterations,
-                    }
-                )
+                # the metadata of the average, with an entry per run
+                self.info = self.thread.info
             self.window.statusBar().showMessage("Done!")
             notifications.notify_finished(time.time() - self.t0)
         self.running = False
@@ -433,7 +424,6 @@ class View(QtWidgets.QLabel):
             return
         self.path = path
         self.locs, self.info = locs, info
-        self.avg_history = []
         self.r = r
         self.window.parameters_dialog.on_disp_px_size_changed()
         self.update_image()
@@ -495,21 +485,8 @@ class View(QtWidgets.QLabel):
         path : str
             Path to save localizations.
         """
-        display_pixel_size = self.window.parameters_dialog.disp_px_size.value()
-        iterations = self.window.parameters_dialog.iterations.value()
-        params = {"disp_px_size": display_pixel_size, "it": iterations}
-        out_locs, info = average.prepare_locs_for_save(
-            self.locs, self.info, params
-        )
-        if self.avg_history:
-            info[-1]["Rounds"] = [
-                {
-                    "Display pixel size (nm)": r["disp_px_size"],
-                    "Iterations": r["it"],
-                }
-                for r in self.avg_history
-            ]
-        io.save_locs(path, out_locs, info)
+        out_locs = average.center_in_field_of_view(self.locs, self.info)
+        io.save_locs(path, out_locs, self.info)
         self.window.statusBar().showMessage(f"File saved to {path}.")
 
     def set_image(self, image: lib.FloatArray2D) -> None:

@@ -1007,12 +1007,9 @@ class SPTController:
                 if len(tracked_locs) == 0:
                     empty.append(c)
                     continue
-                entry = dict(new_info[-1])
-                entry.update(lib.step_info("Render : Track"))
-                entry["Max. jump (nm)"] = float(params["max_jump"])
                 view.locs[c] = tracked_locs
                 # new list, the old one may be shared with linked windows
-                view.infos[c] = new_info[:-1] + [entry]
+                view.infos[c] = new_info
                 applied = True
             if applied:
                 if len(view.locs_paths) == 1:

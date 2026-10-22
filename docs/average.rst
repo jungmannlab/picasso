@@ -51,8 +51,8 @@ Particle averaging
    loaded like any other HDF5 localization file into ``Picasso: Render``.
 
    The metadata of the saved file record the averaging: every
-   ``Process > Average`` run since the file was opened is listed under
-   ``Rounds`` with its ``Display pixel size (nm)`` and ``Iterations``, so the
+   ``Process > Average`` run since the file was opened adds an ``Average``
+   entry with its ``Display pixel size (nm)`` and ``Iterations``, so the
    whole sequence of steps can be reproduced (see :ref:`files-metadata-settings`).
 
 .. dropdown:: Python
