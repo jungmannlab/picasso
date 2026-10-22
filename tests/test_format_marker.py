@@ -270,7 +270,9 @@ def test_hdf5_files_are_written_by_io_only():
     for source in package.rglob("*.py"):
         if source.name == "io.py" and source.parent == package:
             continue
-        for number, line in enumerate(source.read_text().splitlines(), 1):
+        for number, line in enumerate(
+            source.read_text(encoding="utf-8").splitlines(), 1
+        ):
             code = line.split("#", 1)[0]
             if HDF5_WRITE.search(code):
                 found.append(f"{source.relative_to(package)}:{number}")

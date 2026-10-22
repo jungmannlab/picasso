@@ -15,6 +15,7 @@ a removal that skipped the cycle.
 from __future__ import annotations
 
 import json
+import os
 import sys
 import types
 import warnings
@@ -272,7 +273,9 @@ class TestDeprecatedDecorator:
         old_function = self._function()
         with pytest.warns(FutureWarning) as caught:
             assert old_function(2) == 4
-        assert caught[0].filename == __file__
+        assert os.path.normcase(caught[0].filename) == os.path.normcase(
+            __file__
+        )
         message = str(caught[0].message)
         assert "old_function is deprecated since Picasso 1.1" in message
         assert "removed in Picasso 1.3" in message
@@ -318,7 +321,9 @@ class TestExistingDeprecations:
 
         with pytest.warns(FutureWarning) as caught:
             old_helper()
-        assert caught[0].filename == __file__
+        assert os.path.normcase(caught[0].filename) == os.path.normcase(
+            __file__
+        )
 
     def test_legacy_helper_warns_at_the_caller(self):
         def deprecated_function():
@@ -326,7 +331,9 @@ class TestExistingDeprecations:
 
         with pytest.warns(FutureWarning, match="gone soon") as caught:
             deprecated_function()
-        assert caught[0].filename == __file__
+        assert os.path.normcase(caught[0].filename) == os.path.normcase(
+            __file__
+        )
 
 
 class TestRenamedCommandLine:
