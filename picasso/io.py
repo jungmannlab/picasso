@@ -497,12 +497,15 @@ class SpilledFrame:
                 np.save(self._file(i), array, allow_pickle=False)
             for i, array in enumerate(arrays):
                 written = np.load(self._file(i), mmap_mode="r")
-                if (
-                    written.shape != array.shape
-                    or written.dtype != array.dtype
-                ):
+                complete = (
+                    written.shape == array.shape
+                    and written.dtype == array.dtype
+                )
+                # closes the file, also before raising, as Windows cannot
+                # remove an open one
+                del written
+                if not complete:
                     raise SpillError(f"{self._file(i)} was not written")
-                del written  # closes the file (Windows)
         except Exception as error:
             shutil.rmtree(self.path, ignore_errors=True)
             if isinstance(error, SpillError):
