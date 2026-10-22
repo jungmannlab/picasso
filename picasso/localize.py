@@ -10344,11 +10344,6 @@ def get_file_summary(
     return summary
 
 
-def _db_filename() -> str:  # TODO: remove in 1.0
-    """Old alias for `db_filename."""
-    return db_filename()
-
-
 def db_filename() -> str:
     """Return the path to the SQLite database of localization summaries.
 
