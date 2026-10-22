@@ -434,7 +434,7 @@ def _fit_z(
     locs = locs.copy()
     cx = np.array(calibration["X Coefficients"])
     cy = np.array(calibration["Y Coefficients"])
-    # in multiprocessing, pandas Series causes issues!
+    # pandas Series cause issues in the worker processes
     sx = locs["sx"].to_numpy()
     sy = locs["sy"].to_numpy()
     z = np.zeros_like(locs["x"])
@@ -481,7 +481,7 @@ def _fit_z_parallel(
     abort_callback: Callable[[], bool] | None = None,
 ) -> pd.DataFrame | None:
     """Internal function for fitting z coordinates to the localizations
-    using multiprocessing. See `zfit` for details.
+    in a pool of worker processes. See `zfit` for details.
 
     Submits the localizations in chunks to a process pool and waits for
     them, advancing ``progress`` (a normalized tracker whose phase the
@@ -836,7 +836,7 @@ def zfit(
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
     filter: int = 2,
     lateral_transforms: dict | list | str | None = None,
-    multiprocess: bool = False,
+    parallel: bool = False,
     gpu: bool = False,
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
@@ -908,26 +908,28 @@ def zfit(
         twice; both lists are reported in the returned metadata, under
         ``"Lateral corrections applied"`` and ``"Lateral corrections
         skipped"``. Default is None.
-    multiprocess : bool, optional
-        Whether to use multiprocessing for fitting the z coordinates.
-        Ignored when ``gpu`` is True. Default is False.
+    parallel : bool, optional
+        If True, the z coordinates are fitted in a pool of worker
+        processes (75% of the CPU cores, see ``lib.n_workers``); if
+        False, in the calling process. Ignored when ``gpu`` is True.
+        Default is False.
     gpu : bool, optional
         Whether to fit the z coordinates on a CUDA-capable GPU
         (numba.cuda). Reproduces the CPU result. Requires
         ``zfit.CUDA_AVAILABLE`` to be True. Takes precedence over
-        ``multiprocess``. Default is False.
+        ``parallel``. Default is False.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
         or None for no reporting. Reports one phase, "Fitting z" over the
         localizations (per localization when serial, per finished chunk
-        with ``multiprocess``, per million localizations with ``gpu``).
+        with ``parallel``, per million localizations with ``gpu``).
         Default is None.
     abort_callback : callable or None, optional
-        A callable for aborting multiprocessing in the GUI. If a
+        A callable for aborting the fit, e.g., from the GUI. If a
         callable provided, it must accept no input and return a boolean
         indicating whether the fitting should be aborted. Only polled
-        with ``multiprocess`` (and not ``gpu``).
+        with ``parallel`` (and not ``gpu``).
 
     Returns
     -------
@@ -981,7 +983,7 @@ def zfit(
             fitting_method,
             filter,
             lateral_transforms,
-            multiprocess,
+            parallel,
             gpu,
             progress,
             abort_callback,
@@ -1084,7 +1086,7 @@ def _zfit(
     fitting_method: Literal["gausslq", "gaussmle"],
     filter: int,
     lateral_transforms: dict | list | str | None,
-    multiprocess: bool,
+    parallel: bool,
     gpu: bool,
     progress: lib.Progress,
     abort_callback: Callable[[], bool] | None,
@@ -1106,7 +1108,7 @@ def _zfit(
             filter=filter,
             progress=progress,
         )
-    elif multiprocess:
+    elif parallel:
         locs = _fit_z_parallel(
             locs=locs,
             info=info,
@@ -1140,9 +1142,10 @@ def _zfit(
 def locs_from_futures(
     futures: list[futures.Future], filter: int = 2
 ) -> pd.DataFrame:
-    """Combine the results from a list of futures (i.e.,
-    multiprocessing results) into a single DataFrame of localizations
-    with fitted z coordinates and their residuals (d_zcalib).
+    """Combine the results from a list of futures (of the worker
+    processes of :func:`_fit_z_parallel`) into a single DataFrame of
+    localizations with fitted z coordinates and their residuals
+    (d_zcalib).
 
     Parameters
     ----------

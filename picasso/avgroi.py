@@ -86,36 +86,9 @@ def fit_spots(
     return theta
 
 
-def fit_spots_parallel(
-    spots: lib.FloatArray3D,
-    asynch: bool = False,
-    progress: lib.Progress | Literal["console"] | None = None,
-) -> lib.FloatArray2D | list[futures.Future]:
-    """Fit spots in a pool of worker processes.
-
-    Parameters
-    ----------
-    spots : lib.FloatArray3D
-        ``(n_spots, box, box)`` photon counts.
-    asynch : bool, optional
-        If True, return the pending futures immediately instead of waiting.
-        Default False.
-    progress : lib.Progress, "console" or None, optional
-        Progress tracker, see ``picasso.lib.Progress``: e.g. a
-        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
-        or None for no reporting. Reports one phase, "Fitting spots", over
-        the spots. Unused if ``asynch``. Default is None.
-
-    Returns
-    -------
-    theta : lib.FloatArray2D or list of futures.Future
-        ``(n_spots, 6)`` fit parameters, or the list of futures if
-        ``asynch``; pass those to :func:`fits_from_futures`.
-    """
-    n_workers = lib.n_workers()
-    n_spots = len(spots)
-    n_tasks = 100 * n_workers
-    spots_per_task = [
+def _task_sizes(n_spots: int, n_tasks: int) -> list[int]:
+    """Split ``n_spots`` into ``n_tasks`` near-equal, consecutive parts."""
+    return [
         (
             int(n_spots / n_tasks + 1)
             if _ < n_spots % n_tasks
@@ -123,30 +96,73 @@ def fit_spots_parallel(
         )
         for _ in range(n_tasks)
     ]
+
+
+def fit_spots_async(spots: lib.FloatArray3D) -> list[futures.Future]:
+    """Start fitting spots in a pool of worker processes and return
+    without waiting for them.
+
+    Parameters
+    ----------
+    spots : lib.FloatArray3D
+        ``(n_spots, box, box)`` photon counts.
+
+    Returns
+    -------
+    fs : list of futures.Future
+        One future per task, each fitting consecutive spots; pass them to
+        :func:`fits_from_futures` once all are done.
+    """
+    n_workers = lib.n_workers()
+    spots_per_task = _task_sizes(len(spots), 100 * n_workers)
     start_indices = np.cumsum([0] + spots_per_task[:-1])
-    fs = []
     executor = futures.ProcessPoolExecutor(n_workers)
-    for i, n_spots_task in zip(start_indices, spots_per_task):
-        fs.append(executor.submit(fit_spots, spots[i : i + n_spots_task]))
-    if asynch:
-        return fs
+    fs = [
+        executor.submit(fit_spots, spots[i : i + n_spots_task])
+        for i, n_spots_task in zip(start_indices, spots_per_task)
+    ]
+    # the submitted tasks keep running
+    executor.shutdown(wait=False)
+    return fs
+
+
+def fit_spots_parallel(
+    spots: lib.FloatArray3D,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> lib.FloatArray2D:
+    """Fit spots in a pool of worker processes.
+
+    Parameters
+    ----------
+    spots : lib.FloatArray3D
+        ``(n_spots, box, box)`` photon counts.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots", over
+        the spots. Default is None.
+
+    Returns
+    -------
+    theta : lib.FloatArray2D
+        ``(n_spots, 6)`` fit parameters.
+    """
+    n_spots = len(spots)
+    fs = fit_spots_async(spots)
     try:
         with lib.tracked_progress(
             progress, "Fitting spots", "spot"
         ) as progress:
             lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
             done = 0
-            sizes = dict(zip(fs, spots_per_task))
             for f in futures.as_completed(fs):
-                done += sizes[f]
+                done += len(f.result())
                 progress.set_value(done)
             progress.set_value(n_spots)
     except BaseException:
         for f in fs:
             f.cancel()
         raise
-    finally:
-        executor.shutdown(wait=False)
     return fits_from_futures(fs)
 
 
@@ -156,8 +172,7 @@ def fits_from_futures(futures: list[futures.Future]) -> lib.FloatArray2D:
     Parameters
     ----------
     futures : list of futures.Future
-        The futures returned by :func:`fit_spots_parallel` with
-        ``asynch=True``.
+        The futures returned by :func:`fit_spots_async`.
 
     Returns
     -------

@@ -2206,7 +2206,7 @@ def _localize_process_file(
         max_it=max_iterations if max_iterations > 0 else None,
         spline_calibration=spline_calibration,
         camera_calibration=camera_calibration,
-        threaded=True,
+        parallel=True,
         progress="console",
     )
 
@@ -2309,7 +2309,7 @@ def _localize_regions(
         ),
         roi=roi,
         frame_bounds=frame_bounds,
-        threaded=True,
+        parallel=True,
         progress="console",
     )
     print(
@@ -2328,7 +2328,7 @@ def _localize_regions(
         max_it=max_iterations if max_iterations > 0 else None,
         spline_calibration=region_fit["spline_calibrations"],
         camera_calibration=camera_calibration,
-        multiprocess=True,
+        parallel=True,
         progress="console",
     )
     saved = []
@@ -2458,7 +2458,7 @@ def _localize_finish(
                 fitting_method=method,
                 filter=0,
                 lateral_transforms=lateral_transforms,
-                multiprocess=not args.fit_z_gpu,
+                parallel=not args.fit_z_gpu,
                 gpu=args.fit_z_gpu,
                 progress="console",
             )
@@ -4065,7 +4065,7 @@ def _spinna_process_row(
     result_dir: str,
     io,
     spinna,
-    asynch: bool,
+    parallel: bool,
     bootstrap: bool,
     verbose: bool,
 ) -> dict:
@@ -4128,7 +4128,7 @@ def _spinna_process_row(
             z_range=z_range,
             random_rot_mode=random_rot_mode,
             save_filename=save_filename,
-            asynch=asynch,
+            parallel=parallel,
             verbose=verbose,
             fitting_mode=fitting_mode,
             spinna=spinna,
@@ -4161,7 +4161,7 @@ def _spinna_process_row(
         N_structures,
         fitting_mode=fitting_mode if fitting_mode is not None else "bayesian",
         save=f"{save_filename}_fit_scores.csv",
-        asynch=asynch,
+        parallel=parallel,
         bootstrap=bootstrap,
         progress="console" if verbose else None,
     )
@@ -4231,7 +4231,7 @@ def _spinna_process_row_le(
     z_range,
     random_rot_mode: str | None,
     save_filename: str,
-    asynch: bool,
+    parallel: bool,
     verbose: bool,
     fitting_mode: str | None,
     spinna,
@@ -4277,7 +4277,7 @@ def _spinna_process_row_le(
         height=height,
         depth=depth,
         random_rot_mode=random_rot_mode,
-        asynch=asynch,
+        parallel=parallel,
         savedir=os.path.dirname(save_filename),
         progress="console" if verbose else None,
         fitting_mode=(
@@ -4338,7 +4338,7 @@ def _spinna_process_row_le(
 
 def _spinna_batch_analysis(
     parameters_filename: str,
-    asynch: bool = True,
+    parallel: bool = True,
     bootstrap: bool = False,
     verbose: bool = False,
 ) -> None:
@@ -4426,8 +4426,8 @@ def _spinna_batch_analysis(
     ----------
     parameters_filename : str
         Path to the parameters file.
-    asynch : bool (default=True)
-        If True, multiprocessing is used.
+    parallel : bool (default=True)
+        If True, the candidates are scored in a pool of worker processes.
     bootstrap : bool (default=False)
         If True, bootstrapping is used.
     verbose : bool (default=True)
@@ -4449,7 +4449,7 @@ def _spinna_batch_analysis(
             result_dir,
             io,
             spinna,
-            asynch,
+            parallel,
             bootstrap,
             verbose,
         )
@@ -4475,7 +4475,7 @@ def _g5m(
     covariance_type: str = "auto",
     postprocess: bool = True,
     max_locs: int = 100000,
-    asynch: bool = True,
+    parallel: bool = True,
     group_column: Literal["group", "group_input"] = "group",
 ) -> None:
     """G5M analysis of clustered localizations. See ``picasso.g5m.g5m``
@@ -4525,7 +4525,7 @@ def _g5m(
             covariance_type=covariance_type,
             postprocess=postprocess,
             max_locs_per_cluster=max_locs,
-            asynch=asynch,
+            parallel=parallel,
             group_column=group_column,
             progress="console",
         )
@@ -4862,6 +4862,8 @@ _RENAMED_OPTIONS = {
         "dbscan": {"--radius_z": "--radius-z"},
         "join": {"--keepindex": "--keep-index"},
         "pair-correlation": {"--binsize": "--bin-size", "--rmax": "--r-max"},
+        "spinna": {"--asynch": "--no-parallel"},
+        "g5m": {"--asynch": "--no-parallel"},
     }.items()
 }
 
@@ -5673,9 +5675,10 @@ def _build_parser() -> (
     )
     spinna_parser.add_argument(
         "-a",
-        "--asynch",
+        "--no-parallel",
+        dest="parallel",
         action="store_false",
-        help="do not perform fitting asynchronously (multiprocessing)",
+        help="fit in this process instead of a pool of worker processes",
     )
     spinna_parser.add_argument(
         "-b",
@@ -6389,9 +6392,10 @@ def _build_parser() -> (
     )
     g5m_parser.add_argument(
         "-a",
-        "--asynch",
+        "--no-parallel",
+        dest="parallel",
         action="store_false",
-        help="do not perform fitting asynchronously (multiprocessing)",
+        help="fit in this process instead of a pool of worker processes",
     )
     g5m_parser.add_argument(
         "--group-column",
@@ -6895,7 +6899,7 @@ def main():  # noqa: C901
             elif args.parameters:
                 _spinna_batch_analysis(
                     args.parameters,
-                    args.asynch,
+                    args.parallel,
                     args.bootstrap,
                     args.verbose,
                 )
@@ -6985,7 +6989,7 @@ def main():  # noqa: C901
                 args.covariance_type,
                 args.postprocess,
                 args.max_locs,
-                args.asynch,
+                args.parallel,
                 args.group_column,
             )
         elif args.command == "nearest-neighbor":

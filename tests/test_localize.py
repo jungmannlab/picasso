@@ -648,10 +648,10 @@ class TestIdentify:
         """The (frame, y, x) sets identified threaded vs. serial must
         match exactly (order-independent)."""
         ids_t, _ = localize.identify(
-            movie, parameters=_params(), threaded=True
+            movie, parameters=_params(), parallel=True
         )
         ids_s, _ = localize.identify(
-            movie, parameters=_params(), threaded=False
+            movie, parameters=_params(), parallel=False
         )
         # Compare as set of (frame, y, x) tuples — same spots, possibly
         # different row order
@@ -699,7 +699,7 @@ class TestIdentify:
 
     def test_returns_metadata_list(self, movie):
         ids, info = localize.identify(
-            movie, parameters=_params(), threaded=False
+            movie, parameters=_params(), parallel=False
         )
         # the complete metadata: the (absent) movie metadata followed by
         # the identification entry
@@ -734,7 +734,7 @@ class TestIdentifyAsync:
             time.sleep(0.05)
         ids_async = localize.identifications_from_futures(fs)
         ids_serial, _ = localize.identify(
-            movie, parameters=_params(), threaded=False
+            movie, parameters=_params(), parallel=False
         )
         set_a = set(zip(ids_async["frame"], ids_async["y"], ids_async["x"]))
         set_s = set(zip(ids_serial["frame"], ids_serial["y"], ids_serial["x"]))
@@ -935,7 +935,7 @@ class TestIdentificationParameters:
             movie,
             parameters=parameters,
             frame_bounds=(0, 2),
-            threaded=False,
+            parallel=False,
         )
         assert (
             localize.IdentificationParameters.from_info(info[-1]) == parameters
@@ -996,7 +996,7 @@ class TestIdentificationParameters:
                     "Box Size": BOX,
                 },
                 movie_info=movie_info,
-                threaded=False,
+                parallel=False,
             )
 
 
@@ -1361,7 +1361,7 @@ class TestFit2D:
             identifications=real_identifications,
             box=BOX,
             fitting_method="gausslq",
-            multiprocess=False,
+            parallel=False,
         )
         assert len(locs) == len(real_identifications)
         for col in ["x", "y", "photons", "sx", "sy", "bg", "lpx", "lpy"]:
@@ -1371,22 +1371,21 @@ class TestFit2D:
         # camera_info keys merged into new_info
         assert new_info[-1]["Pixelsize"] == 130
 
-    @pytest.mark.parametrize("multiprocess", [False, True])
+    @pytest.mark.parametrize("parallel", [False, True])
     def test_gausslq_saves_chi_square_not_likelihood(
-        self, picasso_movie, real_identifications, movie_info, multiprocess
+        self, picasso_movie, real_identifications, movie_info, parallel
     ):
         """The CPU least-squares methods report their goodness of fit as
         ``chi_square`` (the residual sum of squares at the optimum), the
-        least-squares counterpart of the MLE fits' ``log_likelihood``. Both
-        the serial and the multiprocessing path must carry it, since the
-        multiprocessing path ferries it as an extra ``theta`` column."""
+        least-squares counterpart of the MLE fits' ``log_likelihood``. It
+        must be there whether ``parallel`` or not."""
         locs, _ = localize.fit(
             picasso_movie,
             camera_info=CAMERA_INFO_WITH_PIXELSIZE,
             identifications=real_identifications,
             box=BOX,
             fitting_method="gausslq",
-            multiprocess=multiprocess,
+            parallel=parallel,
         )
         assert "chi_square" in locs.columns
         assert "log_likelihood" not in locs.columns
@@ -1411,7 +1410,7 @@ class TestFit2D:
             identifications=real_identifications,
             box=BOX,
             fitting_method=method,
-            multiprocess=False,
+            parallel=False,
         )
         assert "chi_square" in locs.columns
         assert np.all(locs["chi_square"].to_numpy() >= 0)
@@ -1426,7 +1425,7 @@ class TestFit2D:
             identifications=real_identifications,
             box=BOX,
             fitting_method="gaussmle",
-            multiprocess=False,
+            parallel=False,
         )
         assert len(locs) == len(real_identifications)
         # MLE-specific metadata
@@ -1451,7 +1450,7 @@ class TestFit2D:
             identifications=real_identifications,
             box=BOX,
             fitting_method=method,
-            multiprocess=False,
+            parallel=False,
         )
         assert new_info[-1]["Fit method"] == method
         assert len(locs) == len(real_identifications)
@@ -1471,7 +1470,7 @@ class TestFit2D:
             identifications=real_identifications,
             box=BOX,
             fitting_method="gausslq-rotated",
-            multiprocess=False,
+            parallel=False,
         )
         assert new_info[-1]["Fit method"] == "gausslq-rotated"
         assert "ellipticity" in locs.columns
@@ -1489,7 +1488,7 @@ class TestFit2D:
             identifications=real_identifications,
             box=BOX,
             fitting_method="avg",
-            multiprocess=False,
+            parallel=False,
         )
         assert len(locs) == len(real_identifications)
         assert new_info[-1]["Fit method"] == "avg"
@@ -1504,7 +1503,7 @@ class TestFit2D:
                 identifications=real_identifications,
                 box=BOX,
                 fitting_method="bogus",
-                multiprocess=False,
+                parallel=False,
             )
 
     def test_negative_eps_rejected(
@@ -1518,7 +1517,7 @@ class TestFit2D:
                 box=BOX,
                 fitting_method="gaussmle",
                 eps=-1.0,
-                multiprocess=False,
+                parallel=False,
             )
 
     def test_missing_pixelsize_raises(
@@ -1534,7 +1533,7 @@ class TestFit2D:
                 identifications=real_identifications,
                 box=BOX,
                 fitting_method="gausslq",
-                multiprocess=False,
+                parallel=False,
             )
 
     @pytest.mark.parametrize("pixelsize", [True, 0, -130.0, np.nan, "130"])
@@ -1548,7 +1547,7 @@ class TestFit2D:
                 identifications=real_identifications,
                 box=BOX,
                 fitting_method="gausslq",
-                multiprocess=False,
+                parallel=False,
             )
 
     @pytest.mark.parametrize(
@@ -1565,7 +1564,7 @@ class TestFit2D:
             identifications=real_identifications,
             box=BOX,
             fitting_method="gausslq",
-            multiprocess=False,
+            parallel=False,
         )
         reference, _ = localize.fit(
             picasso_movie,
@@ -1573,7 +1572,7 @@ class TestFit2D:
             identifications=real_identifications,
             box=BOX,
             fitting_method="gausslq",
-            multiprocess=False,
+            parallel=False,
         )
         assert len(locs) > 0
         np.testing.assert_allclose(locs["x"], reference["x"], rtol=1e-6)
@@ -1602,7 +1601,7 @@ class TestFit2D:
             identifications=real_identifications,
             box=BOX,
             fitting_method="gausslq",
-            multiprocess=False,
+            parallel=False,
         )
         nm, _ = localize.fit(
             picasso_movie,
@@ -1610,7 +1609,7 @@ class TestFit2D:
             identifications=real_identifications,
             box=BOX,
             fitting_method="gausslq",
-            multiprocess=False,
+            parallel=False,
         )
         for col in ("x", "y", "sx", "sy", "lpx", "lpy"):
             np.testing.assert_allclose(
@@ -1787,7 +1786,7 @@ class TestReducedChiSquare:
             identifications=real_identifications,
             box=BOX,
             fitting_method=method,
-            multiprocess=False,
+            parallel=False,
         )
         assert locs["reduced_chi_square"].dtype == np.float32
         assert np.isfinite(locs["reduced_chi_square"]).all()
@@ -1807,7 +1806,7 @@ class TestLocalize:
             identification_parameters=_params(),
             movie_info=movie_info,
             fitting_method="gausslq",
-            threaded=False,
+            parallel=False,
         )
         assert isinstance(locs, pd.DataFrame)
         assert len(locs) > 0
@@ -1824,7 +1823,7 @@ class TestLocalize:
             identification_parameters=_params(),
             movie_info=movie_info,
             fitting_method="gausslq",
-            threaded=False,
+            parallel=False,
         )
         assert isinstance(locs, pd.DataFrame)
         assert isinstance(info, list)
@@ -1846,7 +1845,7 @@ class TestLocalize:
             identification_parameters=_params(),
             movie_info=mm_info,
             fitting_method="gausslq",
-            threaded=False,
+            parallel=False,
         )
         _, info = localize.localize(picasso_movie, **kwargs)
         assert info[0]["Micro-Manager Metadata"] == {"Cam": "Zyla"}
@@ -1871,7 +1870,7 @@ class TestLocalize:
             identification_parameters=_params(),
             movie_info=movie_info,
             fitting_method="gausslq",
-            threaded=False,
+            parallel=False,
         )
         plain, _ = localize.localize(picasso_movie, **kwargs)
         entries = [
@@ -1915,7 +1914,7 @@ class TestLocalize:
             identifications=real_identifications,
             box=BOX,
             fitting_method="gausslq",
-            multiprocess=False,
+            parallel=False,
         )
         # Through the high-level entry point
         locs_high, _ = localize.localize(
@@ -1924,7 +1923,7 @@ class TestLocalize:
             identification_parameters=_params(),
             movie_info=movie_info,
             fitting_method="gausslq",
-            threaded=False,
+            parallel=False,
         )
         assert len(locs_direct) == len(locs_high)
         # photons sums match
@@ -1945,7 +1944,7 @@ class TestLocalize:
             movie_info=movie_info,
             roi=roi,
             fitting_method="gausslq",
-            threaded=False,
+            parallel=False,
         )
         # No localization outside the ROI window (coordinates in nm)
         if len(locs) > 0:
@@ -2009,7 +2008,7 @@ class TestLocalizeAstigmatism3D:
             identification_parameters=_params(),
             movie_info=movie_info,
             fitting_method="gausslq",
-            threaded=False,
+            parallel=False,
             **kwargs,
         )
 
@@ -2045,7 +2044,7 @@ class TestLocalizeAstigmatism3D:
                 movie_info=movie_info,
                 fitting_method=fitting_method,
                 calibration_3d=dict(CALIB_3D),
-                threaded=False,
+                parallel=False,
             )
 
 
@@ -3669,7 +3668,7 @@ class TestSplineHelpers:
                 spots,
                 calib,
                 n_z_starts=n_z_starts,
-                multiprocess=False,
+                parallel=False,
                 use_gpu=use_gpu,
             )
             assert (seen["tolerance"], seen["max_iterations"]) == sentinel
@@ -3950,9 +3949,7 @@ class TestSplineHelpers:
             spots = np.zeros((3, box, box, n_channels), np.float32)
 
         calls = self._capture_kernel_call(monkeypatch)
-        localize.fit_spots_splinefit(
-            spots, calib, mle=True, multiprocess=False
-        )
+        localize.fit_spots_splinefit(spots, calib, mle=True, parallel=False)
         assert len(calls) == 1
         args, kwargs = calls[0]
         z_seeds, apply_seeds = args[6], args[7]
@@ -4071,7 +4068,7 @@ class TestSplineHelpers:
             np.zeros((3, box, box), np.float32),
             calib,
             n_z_starts=1,
-            multiprocess=False,
+            parallel=False,
         )
         assert len(calls) == 1
         args, kwargs = calls[0]
@@ -4823,7 +4820,7 @@ class TestConvergenceSchedulePlumbing:
                 fitting_method=method,
                 eps=eps,
                 max_it=max_it,
-                multiprocess=False,
+                parallel=False,
             )
             return (
                 info[-1]["Convergence criterion"],
@@ -4843,7 +4840,7 @@ class TestConvergenceSchedulePlumbing:
             identifications=real_identifications[:20],
             box=BOX,
             fitting_method="avg",
-            multiprocess=False,
+            parallel=False,
         )
         assert "Convergence criterion" not in info
         assert "Max iterations" not in info
@@ -7463,12 +7460,12 @@ class TestTemporalMedian:
 
     def test_threaded_matches_serial(self, movie):
         ids_t, _ = localize.identify(
-            movie, parameters=_params(temporal_median_window=11), threaded=True
+            movie, parameters=_params(temporal_median_window=11), parallel=True
         )
         ids_s, _ = localize.identify(
             movie,
             parameters=_params(temporal_median_window=11),
-            threaded=False,
+            parallel=False,
         )
         as_set = lambda ids: set(  # noqa: E731
             map(tuple, ids[["frame", "y", "x"]].to_numpy())
@@ -7479,19 +7476,19 @@ class TestTemporalMedian:
         ids_arg, info = localize.identify(
             movie,
             parameters=_params(temporal_median_window=11),
-            threaded=False,
+            parallel=False,
         )
         ids_wrapped, _ = localize.identify(
             localize.TemporalMedianMovie(movie, 11, roi_pad=int(BOX / 2) + 1),
             parameters=_params(),
-            threaded=False,
+            parallel=False,
         )
         pd.testing.assert_frame_equal(ids_arg, ids_wrapped)
         assert info[-1]["Temporal Median Window"] == 11
 
     def test_info_records_zero_when_disabled(self, movie):
         _, info = localize.identify(
-            movie, parameters=_params(), threaded=False
+            movie, parameters=_params(), parallel=False
         )
         assert info[-1]["Temporal Median Window"] == 0
 
@@ -7517,7 +7514,7 @@ class TestTemporalMedian:
         ).any()
 
         raw_ids, _ = localize.identify(
-            movie, parameters=_params(500), threaded=False
+            movie, parameters=_params(500), parallel=False
         )
         assert found(raw_ids, 8, 8)
         assert found(raw_ids, 24, 24)
@@ -7525,7 +7522,7 @@ class TestTemporalMedian:
         filtered_ids, _ = localize.identify(
             movie,
             parameters=_params(500, temporal_median_window=11),
-            threaded=False,
+            parallel=False,
         )
         assert not found(filtered_ids, 8, 8)
         assert found(filtered_ids, 24, 24)
@@ -7857,10 +7854,10 @@ class TestGaussianFilter:
         )
         parameters = _params(gaussian_filter_sigma=1.0)
         ids_t, _ = localize.identify(
-            movie, parameters=parameters, threaded=True
+            movie, parameters=parameters, parallel=True
         )
         ids_s, _ = localize.identify(
-            movie, parameters=parameters, threaded=False
+            movie, parameters=parameters, parallel=False
         )
         assert as_set(ids_t) == as_set(ids_s)
 
@@ -7868,19 +7865,19 @@ class TestGaussianFilter:
         ids_arg, info = localize.identify(
             movie,
             parameters=_params(gaussian_filter_sigma=1.0),
-            threaded=False,
+            parallel=False,
         )
         ids_wrapped, _ = localize.identify(
             localize.GaussianFilteredMovie(movie, 1.0),
             parameters=_params(),
-            threaded=False,
+            parallel=False,
         )
         pd.testing.assert_frame_equal(ids_arg, ids_wrapped)
         assert info[-1]["Gaussian Filter Sigma"] == 1.0
 
     def test_info_records_zero_when_disabled(self, movie):
         _, info = localize.identify(
-            movie, parameters=_params(), threaded=False
+            movie, parameters=_params(), parallel=False
         )
         assert info[-1]["Gaussian Filter Sigma"] == 0.0
 
@@ -7888,14 +7885,14 @@ class TestGaussianFilter:
         """The class deliberately does not implement the movie interface,
         so a filtered view reaching the fit is a loud error rather than
         silently wrong photon numbers."""
-        ids, _ = localize.identify(movie, parameters=_params(), threaded=False)
+        ids, _ = localize.identify(movie, parameters=_params(), parallel=False)
         with pytest.raises(AssertionError):
             localize.fit(
                 movie=localize.GaussianFilteredMovie(movie, 1.0),
                 camera_info=CAMERA_INFO,
                 identifications=ids,
                 box=BOX,
-                multiprocess=False,
+                parallel=False,
             )
 
     # -- kernel radius / ROI padding ---------------------------------------
@@ -7954,7 +7951,7 @@ class TestGaussianFilter:
                 parameters=_params(
                     200, temporal_median_window=5, gaussian_filter_sigma=sigma
                 ),
-                threaded=False,
+                parallel=False,
                 **kwargs,
             )
             return ids[ids["x"].between(29, 32)]["net_gradient"].to_numpy()
@@ -7974,7 +7971,7 @@ class TestGaussianFilter:
             sigma,
         )
         ids, _ = localize.identify(
-            too_small, parameters=_params(200), roi=[roi], threaded=False
+            too_small, parameters=_params(200), roi=[roi], parallel=False
         )
         starved = ids[ids["x"].between(29, 32)]["net_gradient"].to_numpy()
         assert not np.allclose(starved, whole_frame, rtol=1e-4)
@@ -7989,7 +7986,7 @@ class TestGaussianFilter:
         center = movie.shape[-1] // 2
 
         raw_ids, _ = localize.identify(
-            movie, parameters=_params(500), threaded=False
+            movie, parameters=_params(500), parallel=False
         )
         assert len(raw_ids) == 2 * len(movie)
 
@@ -7998,7 +7995,7 @@ class TestGaussianFilter:
         smoothed_ids, _ = localize.identify(
             movie,
             parameters=_params(50, gaussian_filter_sigma=2.0),
-            threaded=False,
+            parallel=False,
         )
         assert len(smoothed_ids) == len(movie)
         assert (smoothed_ids["x"] - center).abs().max() <= 1
@@ -8158,7 +8155,7 @@ class TestGaussianFilterGui:
                         gaussian_filter_sigma=sigma,
                     ),
                     roi=rois,
-                    threaded=False,
+                    parallel=False,
                 )
                 batch = batch[batch["frame"] == 3]
                 assert len(preview) == len(batch) == 1
@@ -8282,7 +8279,7 @@ class TestGaussianFilterGui:
                     movie,
                     window.info,
                     parameters=_params(gaussian_filter_sigma=1.5),
-                    threaded=False,
+                    parallel=False,
                 )
             )
             path = str(tmp_path / "ids.hdf5")
@@ -8429,7 +8426,7 @@ class TestPerRoiMinNetGradient:
             movie,
             parameters=_params([5000, 500], 7),
             roi=TWO_REGIONS,
-            threaded=False,
+            parallel=False,
         )
         assert info[-1]["Min. Net Gradient"] == [5000, 500]
         assert sorted(set(ids["x"])) == [30, 94]
@@ -8475,7 +8472,7 @@ class TestPerRoiWaveletSettings:
             movie,
             parameters=_wavelet_params(settings, box=7),
             roi=TWO_REGIONS,
-            threaded=False,
+            parallel=False,
         )
         assert info[-1]["Wavelet Threshold"] == [0.5, 1.0]
         assert info[-1]["Wavelet Noise Estimate"] == ["image_std", "w1_mad"]
@@ -8677,7 +8674,7 @@ class TestPerRegionMinNetGradientGui:
                     window.info,
                     parameters=_params([5000, 500]),
                     roi=TWO_REGIONS,
-                    threaded=False,
+                    parallel=False,
                 )
             )
             path = str(tmp_path / "ids.hdf5")
@@ -11671,7 +11668,7 @@ class TestUnregisteredSumTransforms:
         )
         parameters = _params(7000)
         alone, _ = localize.identify(
-            reference, parameters=parameters, threaded=False
+            reference, parameters=parameters, parallel=False
         )
         assert len(alone) == 0
         ids, _ = localize.identify_multichannel_sum(
@@ -11679,7 +11676,7 @@ class TestUnregisteredSumTransforms:
             localize.unregistered_sum_transforms(2),
             parameters=parameters,
             camera_infos=[UNIT_CAMERA] * 2,
-            threaded=False,
+            parallel=False,
         )
         found = set(zip(ids["x"].tolist(), ids["y"].tolist()))
         assert found == {(16, 20), (32, 28)}
@@ -11700,7 +11697,7 @@ class TestIdentifyMultichannelSum:
         # gradient of ~5000 here, the sum's ~10000)
         parameters = _params(7000)
         alone, _ = localize.identify(
-            reference, parameters=parameters, threaded=False
+            reference, parameters=parameters, parallel=False
         )
         assert len(alone) == 0
         ids, info = localize.identify_multichannel_sum(
@@ -11708,7 +11705,7 @@ class TestIdentifyMultichannelSum:
             [IDENTITY_AFFINE, transform],
             parameters=parameters,
             camera_infos=[UNIT_CAMERA] * 2,
-            threaded=False,
+            parallel=False,
         )
         assert len(ids) == 2 * len(reference)
         found = set(zip(ids["x"].tolist(), ids["y"].tolist()))
@@ -11737,7 +11734,7 @@ class TestIdentifyMultichannelSum:
             parameters=_params(800),
             camera_infos=[UNIT_CAMERA] * 2,
             regions=regions,
-            threaded=False,
+            parallel=False,
         )
         found = set(zip(ids["x"].tolist(), ids["y"].tolist()))
         assert found == {(12, 15), (30, 22)}
@@ -11769,7 +11766,7 @@ class TestIdentifyMultichannelSum:
             parameters=parameters,
             camera_infos=[UNIT_CAMERA] * 2,
             regions=regions,
-            threaded=False,
+            parallel=False,
         )
         found = set(zip(ids["x"].tolist(), ids["y"].tolist()))
         assert {(60, 15), (78, 22)} <= found
@@ -13147,7 +13144,7 @@ class TestFitGaussMultichannel:
             mle=mle,
             link_photons=link_photons,
             use_gpu=False,
-            multiprocess=False,
+            parallel=False,
         )
 
         assert len(locs) == self.N_FRAMES
@@ -13177,7 +13174,7 @@ class TestFitGaussMultichannel:
             self._registration(),
             mle=True,
             use_gpu=False,
-            multiprocess=False,
+            parallel=False,
         )
 
         frame = locs["frame"].to_numpy()
@@ -13198,7 +13195,7 @@ class TestFitGaussMultichannel:
             mle=True,
             link_photons=False,
             use_gpu=False,
-            multiprocess=False,
+            parallel=False,
         )
 
         expected = [a * 2 * np.pi * self.SIGMA**2 for a in amps]
@@ -13235,7 +13232,7 @@ class TestFitGaussMultichannel:
                 mle=True,
                 link_photons=link_photons,
                 use_gpu=False,
-                multiprocess=False,
+                parallel=False,
             )
             assert set(locs.columns) <= allowed
 
@@ -13253,7 +13250,7 @@ class TestFitGaussMultichannel:
                 registration,
                 mle=True,
                 use_gpu=False,
-                multiprocess=False,
+                parallel=False,
             )
             frame = locs["frame"].to_numpy()
             # coordinates in nm, truth on the camera pixel grid
@@ -13297,7 +13294,7 @@ class TestFitGaussMultichannel:
                 registration,
                 mle=True,
                 use_gpu=False,
-                multiprocess=False,
+                parallel=False,
                 camera_calibrations=camera_calibrations,
             )
 
@@ -13865,7 +13862,7 @@ class TestMultichannelGaussianUncertaintyColumns:
             mle=True,
             link_photons=link_photons,
             use_gpu=False,
-            multiprocess=False,
+            parallel=False,
         )
         return locs
 
@@ -13998,7 +13995,7 @@ class TestFitGaussSplitFov:
             mle=True,
             link_photons=link_photons,
             use_gpu=False,
-            multiprocess=False,
+            parallel=False,
         )
 
         # confined to the reference region, so one localization per molecule
@@ -14030,7 +14027,7 @@ class TestFitGaussSplitFov:
             regions=self.REGIONS,  # the ROIs actually in use
             mle=True,
             use_gpu=False,
-            multiprocess=False,
+            parallel=False,
         )
 
         frame = locs["frame"].to_numpy()
@@ -14054,7 +14051,7 @@ class TestFitGaussSplitFov:
             regions=self.REGIONS,
             mle=True,
             use_gpu=False,
-            multiprocess=False,
+            parallel=False,
         )
         externally, _ = localize.fit_gauss_split_fov(
             movie,
@@ -14066,7 +14063,7 @@ class TestFitGaussSplitFov:
             confine_to_reference=False,
             mle=True,
             use_gpu=False,
-            multiprocess=False,
+            parallel=False,
         )
 
         np.testing.assert_allclose(
@@ -14501,7 +14498,7 @@ class TestFitIndependent:
             ids,
             BOX,
             "gausslq",
-            multiprocess=False,
+            parallel=False,
         )
         assert len(results) == 2
         for c, (locs, info) in enumerate(results):
@@ -14511,7 +14508,7 @@ class TestFitIndependent:
                 identifications=ids[c],
                 box=BOX,
                 fitting_method="gausslq",
-                multiprocess=False,
+                parallel=False,
             )
             np.testing.assert_allclose(locs["x"], expected["x"], rtol=1e-6)
             assert info[-1]["Channel"] == c
@@ -14526,7 +14523,7 @@ class TestFitIndependent:
             ids,
             BOX,
             ["gausslq", "avg"],
-            multiprocess=False,
+            parallel=False,
         )
         assert results[0][1][-1]["Fit method"] == "gausslq"
         assert results[1][1][-1]["Fit method"] == "avg"
@@ -14539,7 +14536,7 @@ class TestFitIndependent:
             ids,
             BOX,
             "gausslq",
-            multiprocess=False,
+            parallel=False,
         )
         # coordinates in nm; the spots sit at 12.4 and 40.2 camera pixels
         assert abs(results[0][0]["x"].mean() / PIXELSIZE - 12.4) < 0.3
@@ -14580,7 +14577,7 @@ class TestFitIndependent:
                 ids,
                 BOX,
                 "gausslq",
-                multiprocess=False,
+                parallel=False,
             )
             is None
         )
@@ -14606,7 +14603,7 @@ class TestFitSplitFovIndependent:
             BOX,
             self.REGIONS,
             "gausslq",
-            multiprocess=False,
+            parallel=False,
             **kwargs,
         )
         return movie, ids, results
@@ -14621,7 +14618,7 @@ class TestFitSplitFovIndependent:
                 identifications=localize.confine_to_region(ids, region),
                 box=BOX,
                 fitting_method="gausslq",
-                multiprocess=False,
+                parallel=False,
             )
             expected = localize.locs_to_region_coordinates(
                 expected, region, PIXELSIZE
@@ -14674,7 +14671,7 @@ class TestFitSplitFovIndependent:
             BOX,
             self.REGIONS,
             ["gausslq", "avg"],
-            multiprocess=False,
+            parallel=False,
         )
         # "avg" has no fitted width, so its localizations differ from a
         # Gaussian fit's - the point is only that both ran
@@ -15735,7 +15732,7 @@ class TestWaveletIdentify:
     def test_finds_the_spots_and_has_no_net_gradient(self):
         movie, truth = _wavelet_movie()
         ids, _ = localize.identify(
-            movie, parameters=_wavelet_params(WAVELET), threaded=False
+            movie, parameters=_wavelet_params(WAVELET), parallel=False
         )
         assert list(ids.columns) == ["frame", "x", "y"]
         assert all(ids[c].dtype.kind == "i" for c in ids.columns)
@@ -15746,10 +15743,10 @@ class TestWaveletIdentify:
     def test_threaded_matches_serial(self):
         movie, _ = _wavelet_movie(n_frames=8)
         serial, _ = localize.identify(
-            movie, parameters=_wavelet_params(WAVELET), threaded=False
+            movie, parameters=_wavelet_params(WAVELET), parallel=False
         )
         threaded, _ = localize.identify(
-            movie, parameters=_wavelet_params(WAVELET), threaded=True
+            movie, parameters=_wavelet_params(WAVELET), parallel=True
         )
         pd.testing.assert_frame_equal(
             serial.reset_index(drop=True), threaded.reset_index(drop=True)
@@ -15816,7 +15813,7 @@ class TestWaveletIdentify:
         movie, truth = _wavelet_movie(n_frames=2)
         roi = [[0, 0], [48, 46]]
         ids, _ = localize.identify(
-            movie, parameters=_wavelet_params(WAVELET), roi=roi, threaded=False
+            movie, parameters=_wavelet_params(WAVELET), roi=roi, parallel=False
         )
         for f, xy in enumerate(truth):
             expected = sorted(
@@ -15834,7 +15831,7 @@ class TestWaveletIdentify:
             movie,
             parameters=_wavelet_params(WAVELET, temporal_median_window=5),
             roi=roi,
-            threaded=False,
+            parallel=False,
         )
         whole = localize.TemporalMedianMovie(movie, 5)
         for f in range(len(movie)):
@@ -15858,7 +15855,7 @@ class TestWaveletIdentify:
             [IDENTITY_AFFINE, IDENTITY_AFFINE],
             parameters=_wavelet_params(WAVELET),
             camera_infos=[UNIT_CAMERA] * 2,
-            threaded=False,
+            parallel=False,
         )
         assert list(ids.columns) == ["frame", "x", "y"]
         assert _found(ids, 0) == [(16, 21), (33, 28)]
@@ -15876,7 +15873,7 @@ class TestWaveletIdentify:
             ),
             movie_info=info,
             fitting_method="gausslq",
-            threaded=False,
+            parallel=False,
         )
         assert len(locs) == sum(len(xy) for xy in truth)
         assert "net_gradient" not in locs.columns
@@ -15918,7 +15915,7 @@ class TestWaveletIdentify:
             identifications=loaded,
             box=BOX,
             fitting_method="gaussmle",
-            multiprocess=False,
+            parallel=False,
         )
         assert len(locs) == len(ids)
         assert "net_gradient" not in locs.columns
@@ -16046,7 +16043,7 @@ class TestFitsWithoutNetGradient:
             identifications=ids,
             box=BOX,
             fitting_method=fitting_method,
-            multiprocess=False,
+            parallel=False,
         )
         assert len(locs) == len(ids)
         assert "net_gradient" not in locs.columns
@@ -16061,7 +16058,7 @@ class TestFitsWithoutNetGradient:
             case.BOX,
             case._registration(),
             use_gpu=False,
-            multiprocess=False,
+            parallel=False,
         )
         assert len(locs) == len(ids)
         assert "net_gradient" not in locs.columns
@@ -16216,7 +16213,7 @@ class TestWaveletGui:
                 parameters=localize.IdentificationParameters.from_info(
                     window.parameters
                 ),
-                threaded=False,
+                parallel=False,
             )
             window.last_identification_info = {
                 **window.parameters,

@@ -310,14 +310,14 @@ class TestZfit:
             locs,
             info,
             calibration=dict(CALIB_3D),
-            multiprocess=False,
+            parallel=False,
             filter=0,  # disable filtering so the lengths match exactly
         )
         out_par, _ = zfit.zfit(
             locs,
             info,
             calibration=dict(CALIB_3D),
-            multiprocess=True,
+            parallel=True,
             filter=0,
         )
         # both have the same length (filter=0)
@@ -341,7 +341,7 @@ class TestZfit:
             locs,
             info,
             calibration=dict(CALIB_3D),
-            multiprocess=True,
+            parallel=True,
             abort_callback=lambda: True,
         )
         assert out is None and info_out is None
@@ -387,7 +387,7 @@ class TestZfitProgress:
             few_locs,
             info,
             calibration=dict(CALIB_3D),
-            multiprocess=True,
+            parallel=True,
             filter=0,
             progress=tracker,
         )
@@ -395,9 +395,7 @@ class TestZfitProgress:
         assert_phases_complete(tracker, ["Fitting z"])
         assert tracker.phases[0]["maximum"] == self.N
         capsys.readouterr()
-        zfit.zfit(
-            few_locs, info, calibration=dict(CALIB_3D), multiprocess=True
-        )
+        zfit.zfit(few_locs, info, calibration=dict(CALIB_3D), parallel=True)
         captured = capsys.readouterr()
         assert captured.out == "" and captured.err == ""
 
@@ -410,7 +408,7 @@ class TestZfitProgress:
                 few_locs,
                 info,
                 calibration=dict(CALIB_3D),
-                multiprocess=True,
+                parallel=True,
                 progress=CancelingProgress(after=2),
             )
 
@@ -477,14 +475,14 @@ class TestZfitAffineCorrections:
             locs,
             info,
             calibration=self._calibration(("astigmatism", self.SHIFT)),
-            multiprocess=False,
+            parallel=False,
             filter=0,
         )
         parallel, _ = zfit.zfit(
             locs,
             info,
             calibration=self._calibration(("astigmatism", self.SHIFT)),
-            multiprocess=True,
+            parallel=True,
             filter=0,
         )
         keys = ["frame", "z"]
@@ -677,7 +675,7 @@ class TestZfitSeparatelyLoadedLateralCorrections:
             info,
             calibration=self._calibration(("astigmatism", self.ASTIG)),
             lateral_transforms=extra,
-            multiprocess=False,
+            parallel=False,
             filter=0,
         )
         parallel, _ = zfit.zfit(
@@ -685,7 +683,7 @@ class TestZfitSeparatelyLoadedLateralCorrections:
             info,
             calibration=self._calibration(("astigmatism", self.ASTIG)),
             lateral_transforms=extra,
-            multiprocess=True,
+            parallel=True,
             filter=0,
         )
         keys = ["frame", "z"]
@@ -722,7 +720,7 @@ class TestZfitGPU:
             locs,
             info,
             calibration=dict(CALIB_3D),
-            multiprocess=False,
+            parallel=False,
             filter=0,
             fitting_method=fitting_method,
         )
@@ -794,7 +792,7 @@ class TestZfitGPU:
             "locs, info = io.load_locs('./tests/data/testdata_locs.hdf5')\n"
             "locs = locs.head(25).reset_index(drop=True)\n"
             "s, _ = zfit.zfit(locs, info, calibration=dict(calib), "
-            "filter=0, multiprocess=False)\n"
+            "filter=0, parallel=False)\n"
             "from picasso import lib\n"
             "class Rec(lib.MockProgress):\n"
             "    values = []\n"

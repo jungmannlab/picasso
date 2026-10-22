@@ -3500,7 +3500,7 @@ def minimize_shifts(
 
 
 def n_futures_done(futures: list[Future]) -> int:
-    """Return the number of finished futures, used in multiprocessing.
+    """Return the number of finished futures, e.g., of a pool of workers.
 
     Parameters
     ----------

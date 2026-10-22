@@ -1241,7 +1241,7 @@ class TestFit2DIntegration:
             camera_info=camera_info,
             identifications=identifications,
             box=BOX,
-            multiprocess=False,
+            parallel=False,
             **common,
         )
         threaded, _ = localize.fit(
@@ -1249,7 +1249,7 @@ class TestFit2DIntegration:
             camera_info=camera_info,
             identifications=identifications,
             box=BOX,
-            multiprocess=True,
+            parallel=True,
             **common,
         )
         for column in ("x", "y", "z", "photons", "bg"):

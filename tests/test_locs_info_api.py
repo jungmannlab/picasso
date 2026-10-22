@@ -427,7 +427,7 @@ def test_identify_and_fit_return_complete_metadata(movie):
         method=localize.NetGradient(1000), box=7
     )
     ids, ids_info = localize.identify(
-        movie, info, parameters=parameters, threaded=False
+        movie, info, parameters=parameters, parallel=False
     )
     assert len(ids)
     assert ids_info[0] == info[0]
@@ -439,7 +439,7 @@ def test_identify_and_fit_return_complete_metadata(movie):
         camera_info=CAMERA_INFO,
         identifications=ids,
         box=7,
-        multiprocess=False,
+        parallel=False,
     )
     assert len(locs) == len(ids)
     assert [entry.get("Step") for entry in locs_info] == [
@@ -458,7 +458,7 @@ def test_identify_without_metadata_returns_only_its_entry(movie):
         method=localize.NetGradient(1000), box=7
     )
     _, ids_info = localize.identify(
-        movie, parameters=parameters, threaded=False
+        movie, parameters=parameters, parallel=False
     )
     assert [entry["Step"] for entry in ids_info] == ["Identify"]
 

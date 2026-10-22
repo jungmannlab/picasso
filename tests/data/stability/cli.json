@@ -77,7 +77,6 @@
  ],
  "filter": [],
  "g5m": [
-  "--asynch",
   "--bootstrap-sem",
   "--calibration",
   "--covariance-type",
@@ -89,6 +88,7 @@
   "--min-locs",
   "--min-sigma",
   "--mode",
+  "--no-parallel",
   "--postprocess",
   "-a",
   "-c",
@@ -295,9 +295,9 @@
  ],
  "smlm-cluster": [],
  "spinna": [
-  "--asynch",
   "--bootstrap",
   "--columns",
+  "--no-parallel",
   "--parameters",
   "--verbose",
   "-a",

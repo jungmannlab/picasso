@@ -134,7 +134,8 @@ new name: ``undrift_fiducials``, ``nneighbor``, ``clusterfilter``,
 ``smlm_cluster``, ``groupprops`` and ``pc`` are now ``undrift-fiducials``,
 ``nearest-neighbor``, ``cluster-filter``, ``smlm-cluster``,
 ``group-properties`` and ``pair-correlation``, and options such as
-``--rmax`` are now ``--r-max``. The short forms (``-r``, ``-zc``, ...) are
+``--rmax`` are now ``--r-max`` (``spinna`` and ``g5m`` ``--asynch``:
+``--no-parallel``). The short forms (``-r``, ``-zc``, ``-a``, ...) are
 unchanged. :ref:`cmd-renamed` lists them all.
 
 **Lengths are in nm.** The options that took camera pixels:
@@ -638,7 +639,7 @@ return ``qe``.
    * - ``localize.localize_3D(movie, ..., box=7, minimum_ng=5000,
        calibration_3d=..., multiprocess=...)``
      - ``localize.localize(movie, ..., identification_parameters=...,
-       calibration_3d=..., threaded=...)``
+       calibration_3d=..., parallel=...)``
    * - ``localize.identify_multichannel_sum(movies, minimum_ng, box,
        transforms, temporal_median_window=..., ...)``
      - ``localize.identify_multichannel_sum(movies, transforms,
@@ -979,6 +980,37 @@ Loading and saving
   ``StructureSimulator.save`` and ``StructureMixer.save`` need the pixel size
   (``pixelsize``, or a mask) instead of assuming 130 nm.
 
+.. _migration-python-parallel:
+
+Running in parallel
+~~~~~~~~~~~~~~~~~~~
+
+The argument that spreads a computation over several CPU cores is
+``parallel`` everywhere. The old names said how rather than whether, and
+some no longer matched what the functions do (e.g., the Gaussian fits moved
+from worker processes to threads). The docstrings say whether a function
+uses threads or processes.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 60 40
+
+   * - Picasso 0.11
+     - Picasso 1.0
+   * - ``asynch`` of ``g5m.g5m``, ``spinna.SPINNA.fit``,
+       ``fit_stoichiometry`` and ``fit_coarse_to_fine``,
+       ``spinna.compare_models``, ``compare_models_given_label_unc`` and
+       ``fit_le``
+     - ``parallel``
+   * - ``multiprocess`` of ``localize.fit``, ``zfit.zfit``,
+       ``localize.fit_independent``, ``fit_split_fov_independent``,
+       ``fit_spots_splinefit`` and the joint Gaussian fits of several
+       channels (``fit_gauss_multichannel``, ...)
+     - ``parallel``
+   * - ``threaded`` of ``localize.localize``, ``identify`` and
+       ``identify_multichannel_sum``
+     - ``parallel``
+
 .. _migration-python-renamed:
 
 Renamed functions
@@ -1023,6 +1055,9 @@ The old names are removed, without aliases.
      - ``picasso.render.render_hist``
    * - ``picasso.spinna.load_structures``
      - ``picasso.io.load_structures``
+   * - ``picasso.spinna.SPINNA.fit_stoichiometry_parallel``
+     - ``SPINNA.fit_stoichiometry_async``, which returns the futures
+       without waiting, as before
    * - ``picasso.lib``: ``get_sound_notification_path``,
        ``get_available_sound_notifications``, ``set_sound_notification``,
        ``SOUND_NOTIFICATION_DURATION``

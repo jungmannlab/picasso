@@ -439,7 +439,7 @@ class TestRotatedAngleConvention:
             covariance_type="rotated",
             calibration=CALIB_ASTIG,
             sigma_bounds=(0.3, 3.0),
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert len(mols) == 1
@@ -459,7 +459,7 @@ class TestRotatedAngleConvention:
             covariance_type="rotated",
             calibration=CALIB_ASTIG,
             sigma_bounds=(0.3, 3.0),
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert len(mols) == 1
@@ -481,7 +481,7 @@ class TestAutoSelection:
             info,
             min_locs=20,
             calibration=CALIB_ASTIG,
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert out_info[-1]["Covariance type"] == "rotated"
@@ -492,7 +492,7 @@ class TestAutoSelection:
             info,
             min_locs=5,
             calibration=CALIB_3D,
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert out_info[-1]["Covariance type"] == "diagonal"
@@ -505,7 +505,7 @@ class TestAutoSelection:
             min_locs=20,
             mode="spline",
             calibration=None,
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert out_info[-1]["Covariance type"] == "diagonal"
@@ -518,7 +518,7 @@ class TestAutoSelection:
         locs = dbscan_locs.copy()
         locs["angle"] = 30.0
         _, out_info, _ = g5m.g5m(
-            locs, info, min_locs=5, asynch=False, postprocess=False
+            locs, info, min_locs=5, parallel=False, postprocess=False
         )
         assert out_info[-1]["Covariance type"] == "spherical"
 
@@ -531,7 +531,7 @@ class TestAutoSelection:
             min_locs=20,
             covariance_type="diagonal",
             calibration=CALIB_ASTIG,
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert out_info[-1]["Covariance type"] == "diagonal"
@@ -549,7 +549,7 @@ class TestErrorPaths:
                 covariance_type="rotated",
                 mode="spline",
                 calibration=None,
-                asynch=False,
+                parallel=False,
             )
 
     def test_rotated_rejects_missing_angle_column(self, dbscan_locs_3d, info):
@@ -560,7 +560,7 @@ class TestErrorPaths:
                 min_locs=5,
                 covariance_type="rotated",
                 calibration=CALIB_3D,
-                asynch=False,
+                parallel=False,
             )
 
     def test_rotated_rejects_2d_data(self, dbscan_locs, info):
@@ -570,7 +570,7 @@ class TestErrorPaths:
                 info,
                 min_locs=5,
                 covariance_type="rotated",
-                asynch=False,
+                parallel=False,
             )
 
     def test_spherical_rejects_3d_data(self, dbscan_locs_3d, info):
@@ -581,7 +581,7 @@ class TestErrorPaths:
                 min_locs=5,
                 covariance_type="spherical",
                 calibration=CALIB_3D,
-                asynch=False,
+                parallel=False,
             )
 
     def test_unknown_covariance_type(self, dbscan_locs, info):
@@ -591,7 +591,7 @@ class TestErrorPaths:
                 info,
                 min_locs=5,
                 covariance_type="garbage",
-                asynch=False,
+                parallel=False,
             )
 
 
@@ -608,7 +608,7 @@ class TestOutputContract:
             covariance_type="rotated",
             calibration=CALIB_ASTIG,
             sigma_bounds=(0.3, 3.0),
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         for col in [
@@ -651,7 +651,7 @@ class TestOutputContract:
             min_locs=20,
             covariance_type="rotated",
             calibration=CALIB_ASTIG,
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         path = tmp_path / "relsigma.png"
@@ -671,7 +671,7 @@ class TestOutputContract:
             min_locs=20,
             covariance_type="rotated",
             calibration=CALIB_ASTIG,
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         n_before = len(mols)
@@ -715,7 +715,7 @@ class TestOutputContract:
             min_locs=20,
             covariance_type="rotated",
             calibration=CALIB_ASTIG,
-            asynch=False,
+            parallel=False,
             postprocess=True,
         )
         path = tmp_path / "mols.hdf5"
@@ -770,7 +770,7 @@ class TestCLIWiring:
             "covariance_type",
             "postprocess",
             "max_locs",
-            "asynch",
+            "parallel",
             "group_column",
         ]
 
@@ -990,7 +990,7 @@ class TestBootstrap:
             bootstrap_check=True,
             mode="spline",
             calibration=None,
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert len(mols) > 0
@@ -1057,7 +1057,7 @@ class TestBootstrap:
             covariance_type="rotated",
             calibration=CALIB_ASTIG,
             sigma_bounds=(0.3, 3.0),
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert out_info[-1]["Covariance type"] == "rotated"
@@ -1073,7 +1073,7 @@ class TestPublishedModelsUnchanged:
 
     def test_2d_spherical_golden(self, dbscan_locs, info):
         mols, _, _ = g5m.g5m(
-            dbscan_locs, info, min_locs=5, asynch=False, postprocess=False
+            dbscan_locs, info, min_locs=5, parallel=False, postprocess=False
         )
         assert len(mols) == GOLDEN_2D["n"]
         for col, scale, rtol in [
@@ -1095,7 +1095,7 @@ class TestPublishedModelsUnchanged:
             info,
             min_locs=5,
             calibration=CALIB_3D,
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert len(mols) == GOLDEN_3D["n"]
@@ -1124,7 +1124,7 @@ class TestPublishedModelsUnchanged:
 class TestG5M:
     def test_g5m_2d_with_bootstrap(self, dbscan_locs, info):
         mols, _, _ = g5m.g5m(
-            dbscan_locs, info, min_locs=5, bootstrap_check=True, asynch=False
+            dbscan_locs, info, min_locs=5, bootstrap_check=True, parallel=False
         )
         assert "p_val" in mols.columns
         # p-values must be in [0, 1]
@@ -1153,7 +1153,7 @@ class TestG5M3D:
             min_locs=5,
             bootstrap_check=True,
             calibration=CALIB_3D,
-            asynch=False,
+            parallel=False,
         )
         assert len(mols) > 0
         assert "p_val" in mols.columns
@@ -1182,7 +1182,7 @@ class TestG5M3D:
             bootstrap_check=False,
             mode="spline",
             calibration=None,
-            asynch=False,
+            parallel=False,
         )
         assert len(mols) > 0
         assert "z" in mols.columns
@@ -1201,7 +1201,7 @@ class TestG5M3D:
                 min_locs=5,
                 mode="spline",
                 calibration=None,
-                asynch=False,
+                parallel=False,
             )
 
     def test_g5m_3d_astigmatism_requires_calibration(
@@ -1214,7 +1214,7 @@ class TestG5M3D:
                 min_locs=5,
                 mode="astigmatism",
                 calibration=None,
-                asynch=False,
+                parallel=False,
             )
 
 
@@ -1227,21 +1227,23 @@ class TestG5M3D:
 class TestG5MProgress:
     def test_none_reports_nothing(self, capsys, dbscan_locs, info):
         """The default is None (it used to be "console")."""
-        mols, _, _ = g5m.g5m(dbscan_locs, info, min_locs=5, asynch=False)
+        mols, _, _ = g5m.g5m(dbscan_locs, info, min_locs=5, parallel=False)
         assert len(mols) > 0
         captured = capsys.readouterr()
         assert captured.out == captured.err == ""
 
     def test_console(self, capsys, dbscan_locs, info):
         mols, _, _ = g5m.g5m(
-            dbscan_locs, info, min_locs=5, asynch=False, progress="console"
+            dbscan_locs, info, min_locs=5, parallel=False, progress="console"
         )
         assert len(mols) > 0
         assert "Running G5M" in capsys.readouterr().err
 
     def test_reports_progress_to_tracker(self, dbscan_locs, info):
         tracker = RecordingProgress()
-        g5m.g5m(dbscan_locs, info, min_locs=5, asynch=False, progress=tracker)
+        g5m.g5m(
+            dbscan_locs, info, min_locs=5, parallel=False, progress=tracker
+        )
         assert_phases(tracker, ["Running G5M"])
         # one step per cluster, counted as they finish
         n_groups = dbscan_locs["group"].nunique()
@@ -1252,5 +1254,9 @@ class TestG5MProgress:
         """A Qt parent no longer builds a dialog in the core module."""
         with pytest.raises(TypeError):
             g5m.g5m(
-                dbscan_locs, info, min_locs=5, asynch=False, progress=object()
+                dbscan_locs,
+                info,
+                min_locs=5,
+                parallel=False,
+                progress=object(),
             )

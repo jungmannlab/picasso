@@ -80,7 +80,7 @@ def test_matches_batch_localize(movie, movie_info, fitting_method):
         identification_parameters=PARAMS,
         movie_info=movie_info,
         fitting_method=fitting_method,
-        threaded=True,
+        parallel=True,
     )
     out = localize.localize_frames(
         np.asarray(movie),

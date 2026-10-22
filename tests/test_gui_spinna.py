@@ -495,7 +495,7 @@ def test_reset_rotation_zeros_the_preview_angles(structures_tab, dialogs):
 def sim_tab(window):
     tab = window.simulations_tab
     # single process, single simulation per candidate: fast fits
-    tab.settings_dialog.asynch_check.setChecked(False)
+    tab.settings_dialog.parallel_check.setChecked(False)
     tab.settings_dialog.fitting_mode.setCurrentText("Brute force")
     return tab
 

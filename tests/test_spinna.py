@@ -5,6 +5,7 @@
 """
 
 import math
+from concurrent import futures
 
 import numpy as np
 import pandas as pd
@@ -1118,7 +1119,7 @@ def test_spinna_fit_brute_force_returns_pair(
     spinner = SPINNA(mixer=mixer, gt_coords=gt, N_sim=1)
     np.random.seed(0)
     props, score = spinner.fit_stoichiometry(
-        N_structures=ss, fitting_mode="brute-force", asynch=False
+        N_structures=ss, fitting_mode="brute-force", parallel=False
     )
     assert isinstance(score, float) and np.isfinite(score)
     assert isinstance(props, np.ndarray)
@@ -1146,7 +1147,7 @@ def test_spinna_fit_with_bootstrap_returns_pair_of_pairs(
     props_pair, score_pair = spinner.fit_stoichiometry(
         N_structures=ss,
         fitting_mode="brute-force",
-        asynch=False,
+        parallel=False,
         bootstrap=True,
     )
     assert isinstance(props_pair, tuple) and len(props_pair) == 2
@@ -1177,7 +1178,7 @@ def test_spinna_fit_return_scores_adds_extra_element(
     out = spinner.fit_stoichiometry(
         N_structures=ss,
         fitting_mode="brute-force",
-        asynch=False,
+        parallel=False,
         return_scores=True,
     )
     assert len(out) == 3
@@ -1207,7 +1208,7 @@ def test_spinna_fit_save_csv_creates_file(
     spinner.fit_stoichiometry(
         N_structures=ss,
         fitting_mode="brute-force",
-        asynch=False,
+        parallel=False,
         save=str(out_csv),
     )
     assert out_csv.exists()
@@ -1275,7 +1276,7 @@ def test_spinna_fit_save_csv_single_row_search_space(
     spinner.fit_stoichiometry(
         N_structures=ss,
         fitting_mode=fitting_mode,
-        asynch=False,
+        parallel=False,
         save=str(out_csv),
     )
     df = pd.read_csv(out_csv)
@@ -1309,7 +1310,7 @@ def test_spinna_fit_save_csv_non_brute_force_modes(
     spinner.fit_stoichiometry(
         N_structures=ss,
         fitting_mode=fitting_mode,
-        asynch=False,
+        parallel=False,
         save=str(out_csv),
     )
     if fitting_mode == "coarse-to-fine":
@@ -1351,7 +1352,7 @@ def test_coarse_to_fine_save_with_single_candidate_fine_pass(
     np.random.seed(0)
     out_csv = tmp_path / "c2f.csv"
     spinner.fit_coarse_to_fine(
-        ss, radius=1e-6, save=str(out_csv), asynch=False
+        ss, radius=1e-6, save=str(out_csv), parallel=False
     )
     written = sorted(tmp_path.glob("*.csv"))
     assert written, "no csv written"
@@ -1456,7 +1457,7 @@ def test_spinna_real_data_smoke(mols_real, monomer_dimer_structures):
     spinner = SPINNA(mixer=mixer, gt_coords={"target": coords}, N_sim=N_SIM)
     np.random.seed(0)
     props, score = spinner.fit_stoichiometry(
-        N_structures=ss, fitting_mode="brute-force", asynch=False
+        N_structures=ss, fitting_mode="brute-force", parallel=False
     )
     assert isinstance(score, float) and 0 <= score <= 1
     assert isinstance(props, np.ndarray)
@@ -1485,7 +1486,7 @@ def test_spinna_real_data_masked_smoke(
     spinner = SPINNA(mixer=mixer, gt_coords={"target": coords}, N_sim=N_SIM)
     np.random.seed(0)
     props, score = spinner.fit_stoichiometry(
-        N_structures=ss, fitting_mode="brute-force", asynch=False
+        N_structures=ss, fitting_mode="brute-force", parallel=False
     )
     assert isinstance(score, float) and 0 <= score <= 1
     assert math.isclose(props.sum(), 100.0, abs_tol=1.0)
@@ -1527,7 +1528,7 @@ def test_spinna_recovers_known_dimer_fraction(
     spinner = SPINNA(mixer=fit_mixer, gt_coords=gt, N_sim=RECOVERY_N_SIM)
     np.random.seed(0)
     props, score = spinner.fit_stoichiometry(
-        N_structures=ss, fitting_mode="brute-force", asynch=False
+        N_structures=ss, fitting_mode="brute-force", parallel=False
     )
     # convert truth to props (in 0–100 scale)
     prop_dimer_truth = p_dimer_truth * 100.0
@@ -1558,7 +1559,7 @@ def test_spinna_fit_coarse_to_fine_returns_pair(
     spinner = SPINNA(mixer=mixer, gt_coords=gt, N_sim=1)
     np.random.seed(0)
     props, score = spinner.fit_stoichiometry(
-        N_structures=ss, fitting_mode="coarse-to-fine", asynch=False
+        N_structures=ss, fitting_mode="coarse-to-fine", parallel=False
     )
     assert isinstance(score, float) and np.isfinite(score)
     assert props.shape == (2,)
@@ -1590,7 +1591,7 @@ def test_spinna_fit_bayesian_returns_pair(
 
 
 @pytest.mark.slow
-def test_spinna_fit_asynch_runs(mixer_2d_csr, monomer_dimer_structures):
+def test_spinna_fit_parallel_runs(mixer_2d_csr, monomer_dimer_structures):
     np.random.seed(0)
     gt = mixer_2d_csr.run_simulation([100, 50])
     mixer = StructureMixer(
@@ -1606,7 +1607,7 @@ def test_spinna_fit_asynch_runs(mixer_2d_csr, monomer_dimer_structures):
     spinner = SPINNA(mixer=mixer, gt_coords=gt, N_sim=1)
     np.random.seed(0)
     props, score = spinner.fit_stoichiometry(
-        N_structures=ss, fitting_mode="brute-force", asynch=True
+        N_structures=ss, fitting_mode="brute-force", parallel=True
     )
     assert isinstance(score, float) and np.isfinite(score)
     assert props.shape == (2,)
@@ -1725,7 +1726,7 @@ def test_compare_models_given_label_unc_returns_best(
             width=ROI,
             height=ROI,
             N_sim=1,
-            asynch=False,
+            parallel=False,
         )
     )
     assert isinstance(best_score, float) and np.isfinite(best_score)
@@ -1756,7 +1757,7 @@ def test_compare_models_full_fits_label_unc(
             width=ROI,
             height=ROI,
             N_sim=1,
-            asynch=False,
+            parallel=False,
         )
     )
     assert np.isfinite(best_score)
@@ -1784,7 +1785,7 @@ def test_fit_le_smoke(mols_real):
             N_sim=1,
             width=ROI,
             height=ROI,
-            asynch=False,
+            parallel=False,
         )
     )
     assert np.isfinite(best_score)
@@ -1861,7 +1862,7 @@ def test_fit_progress_modes(small_spinner, fitting_mode, progress):
     props, score = spinner.fit_stoichiometry(
         N_structures=ss,
         fitting_mode=fitting_mode,
-        asynch=False,
+        parallel=False,
         progress=progress,
     )
     assert np.isfinite(score)
@@ -1880,7 +1881,7 @@ def test_fit_reports_progress_to_duck_typed_tracker(
     spinner.fit_stoichiometry(
         N_structures=ss,
         fitting_mode=fitting_mode,
-        asynch=False,
+        parallel=False,
         progress=tracker,
     )
     assert tracker.values, "no progress was reported"
@@ -1905,7 +1906,7 @@ def test_coarse_to_fine_labels_both_passes(small_spinner):
     spinner.fit_stoichiometry(
         N_structures=ss,
         fitting_mode="coarse-to-fine",
-        asynch=False,
+        parallel=False,
         progress=tracker,
     )
     titles = " | ".join(t for t in tracker.titles if t)
@@ -1969,7 +1970,9 @@ def test_fit_phases_end_at_maximum(small_spinner, fitting_mode, labels):
     spinner, ss = small_spinner
     recorder = _PhaseRecorder()
     np.random.seed(0)
-    spinner.fit(ss, fitting_mode=fitting_mode, asynch=False, progress=recorder)
+    spinner.fit(
+        ss, fitting_mode=fitting_mode, parallel=False, progress=recorder
+    )
     assert recorder.labels() == labels
     _assert_phases_end_at_maximum(recorder)
 
@@ -2029,7 +2032,7 @@ def test_bootstrap_phases_keep_the_title(small_spinner):
     spinner.fit(
         ss,
         fitting_mode="brute-force",
-        asynch=False,
+        parallel=False,
         bootstrap=True,
         progress=recorder,
     )
@@ -2049,7 +2052,7 @@ def test_canceled_bootstrap_restores_the_data(small_spinner):
         spinner.fit(
             ss,
             fitting_mode="brute-force",
-            asynch=False,
+            parallel=False,
             bootstrap=True,
             progress=_PhaseRecorder(cancel_in="Bootstrapping"),
         )
@@ -2061,11 +2064,11 @@ def test_canceled_bootstrap_restores_the_data(small_spinner):
 def test_fit_none_is_silent_and_console_works(small_spinner, capsys):
     spinner, ss = small_spinner
     np.random.seed(0)
-    spinner.fit(ss, fitting_mode="coarse-to-fine", asynch=False)
+    spinner.fit(ss, fitting_mode="coarse-to-fine", parallel=False)
     captured = capsys.readouterr()
     assert captured.out == "" and captured.err == ""
     spinner.fit(
-        ss, fitting_mode="coarse-to-fine", asynch=False, progress="console"
+        ss, fitting_mode="coarse-to-fine", parallel=False, progress="console"
     )
     err = capsys.readouterr().err
     assert "Coarse pass" in err and "Fine pass" in err
@@ -2094,7 +2097,9 @@ def test_console_tracker_is_closed(small_spinner, counted_tqdm):
     # regression: no TqdmProgress was ever closed
     spinner, ss = small_spinner
     np.random.seed(0)
-    spinner.fit(ss, fitting_mode="bayesian", asynch=False, progress="console")
+    spinner.fit(
+        ss, fitting_mode="bayesian", parallel=False, progress="console"
+    )
     assert len(counted_tqdm) == 1
     assert counted_tqdm[0].n_closes > 0
     assert counted_tqdm[0].iterator is None  # the last bar ended
@@ -2120,7 +2125,7 @@ def test_compare_models_normalizes_once(mols_real, counted_tqdm):
         le={"target": LE},
         width=ROI,
         height=ROI,
-        asynch=False,
+        parallel=False,
         progress="console",
     )
     assert len(counted_tqdm) == 1
@@ -2139,7 +2144,7 @@ def test_compare_models_phases(mols_real):
         le={"target": LE},
         width=ROI,
         height=ROI,
-        asynch=False,
+        parallel=False,
         fitting_mode="brute-force",
         progress=recorder,
     )
@@ -2165,7 +2170,7 @@ def test_fit_le_reports_phases(mols_real):
         distances=[10.0],
         width=ROI,
         height=ROI,
-        asynch=False,
+        parallel=False,
         fitting_mode="brute-force",
         progress=recorder,
     )
@@ -2177,12 +2182,37 @@ def test_fit_le_reports_phases(mols_real):
 
 
 @pytest.mark.slow
-def test_asynch_fit_reports_finished_candidates(small_spinner):
+def test_parallel_fit_reports_finished_candidates(small_spinner):
     # regression: the parallel fit set the label directly, bypassing
     # zero_progress, and reported estimates from the finished tasks
     spinner, ss = small_spinner
     recorder = _PhaseRecorder()
     np.random.seed(0)
-    spinner.fit(ss, fitting_mode="brute-force", asynch=True, progress=recorder)
+    spinner.fit(
+        ss, fitting_mode="brute-force", parallel=True, progress=recorder
+    )
     assert recorder.labels() == ["Spinning structures"]
     _assert_phases_end_at_maximum(recorder)
+
+
+@pytest.mark.slow
+def test_fit_stoichiometry_async_returns_futures(small_spinner, monkeypatch):
+    """The futures carry every candidate's score, and the process pool
+    the method starts itself is shut down without waiting for them."""
+    spinner, ss = small_spinner
+    ss = spinner.mixer.convert_N_structures_to_array(ss)
+    shutdowns = []
+    original = futures.ProcessPoolExecutor.shutdown
+
+    def record_shutdown(self, wait=True, **kwargs):
+        shutdowns.append(wait)
+        return original(self, wait=wait, **kwargs)
+
+    monkeypatch.setattr(
+        futures.ProcessPoolExecutor, "shutdown", record_shutdown
+    )
+    fs = spinner.fit_stoichiometry_async(ss)
+    assert shutdowns == [False]
+    N_structures, scores = spinner.scores_from_futures(fs)
+    assert np.array_equal(np.sort(N_structures, axis=0), np.sort(ss, axis=0))
+    assert len(scores) == len(ss)

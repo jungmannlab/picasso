@@ -267,7 +267,7 @@ def _detect_bead_positions(
     box: int,
     ref_frame_bounds: tuple[int, int],
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
-    threaded: bool = True,
+    parallel: bool = True,
     min_separation: float | None = None,
     fov_of_frame: np.ndarray | None = None,
 ) -> pd.DataFrame:
@@ -299,7 +299,7 @@ def _detect_bead_positions(
         parameters=parameters,
         roi=roi,
         frame_bounds=ref_frame_bounds,
-        threaded=threaded,
+        parallel=parallel,
     )
     if len(ids) == 0:
         raise ValueError(
@@ -1054,7 +1054,7 @@ def build_psf_template(
     frames_per_step: int = 1,
     frame_bounds: tuple[int, int] | list | None = None,
     frame_order: Literal["fov", "z"] = "fov",
-    threaded: bool = True,
+    parallel: bool = True,
     beads: pd.DataFrame | None = None,
     return_spots: bool = False,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
@@ -1087,7 +1087,7 @@ def build_psf_template(
     frame_order : {"fov", "z"}, optional
         Acquisition order when ``frames_per_step`` > 1 (see
         ``zfit.calibrate_z``). Default "fov".
-    threaded : bool, optional
+    parallel : bool, optional
         Whether bead detection runs on several threads. Default True.
     beads : pd.DataFrame, optional
         Bead positions to use, with integer ``x``/``y`` columns. If given,
@@ -1168,7 +1168,7 @@ def build_psf_template(
             box,
             ref_segments,
             roi=roi,
-            threaded=threaded,
+            parallel=parallel,
             fov_of_frame=fov_of_frame,
         )
     if return_spots:

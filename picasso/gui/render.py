@@ -4734,7 +4734,7 @@ class TestClustererDialog(lib.Dialog):
             else:  # astigmatism
                 params["G5M"]["mode"] = "astigmatism"
                 params["G5M"]["calibration"] = self.test_g5m_params.calibration
-            params["G5M"]["asynch"] = False
+            params["G5M"]["parallel"] = False
 
         return params
 
@@ -4866,7 +4866,7 @@ class TestClustererDialog(lib.Dialog):
                 save_centers=save_centers,
             )
         elif self.clusterer_name.currentText() == "G5M":
-            params["G5M"]["asynch"] = True
+            params["G5M"]["parallel"] = True
 
             def job(progress: lib.TaskProgress) -> None:
                 lib.start_phase(progress, "Applying DBSCAN...", 0)
@@ -13224,7 +13224,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 covariance_type=params.get("covariance_type", "auto"),
                 postprocess=params["postprocess_check"],
                 max_locs_per_cluster=params["max_locs_per_cluster"][channel],
-                asynch=params["multiprocessing_check"],
+                parallel=params["multiprocessing_check"],
                 group_column=params["group_column"],
                 progress=progress,
             )

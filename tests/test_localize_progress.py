@@ -194,12 +194,12 @@ def factory(picasso_movie_factory):
 
 
 class TestIdentify:
-    @pytest.mark.parametrize("threaded", [True, False])
-    def test_one_phase_over_the_frames(self, threaded):
+    @pytest.mark.parametrize("parallel", [True, False])
+    def test_one_phase_over_the_frames(self, parallel):
         movie, _ = _gauss_frames()
         tracker = RecordingProgress()
         ids, _ = localize.identify(
-            movie, parameters=NET_GRADIENT, threaded=threaded, progress=tracker
+            movie, parameters=NET_GRADIENT, parallel=parallel, progress=tracker
         )
         assert len(ids)
         assert_phases_complete(tracker, ["Identifying spots"])
@@ -208,10 +208,10 @@ class TestIdentify:
         assert tracker.phases[0]["maximum"] == len(movie)
         assert tracker.phases[0]["unit"] == "frame"
 
-    @pytest.mark.parametrize("threaded", [True, False])
-    def test_silent_and_console(self, capsys, threaded):
+    @pytest.mark.parametrize("parallel", [True, False])
+    def test_silent_and_console(self, capsys, parallel):
         movie, _ = _gauss_frames()
-        kwargs = dict(parameters=NET_GRADIENT, threaded=threaded)
+        kwargs = dict(parameters=NET_GRADIENT, parallel=parallel)
         _silent(capsys, localize.identify, movie, **kwargs)
         _console(
             capsys, "Identifying spots", localize.identify, movie, **kwargs
@@ -223,7 +223,7 @@ class TestIdentify:
             localize.identify(
                 movie,
                 parameters=NET_GRADIENT,
-                threaded=False,
+                parallel=False,
                 progress=CancelingProgress(after=2),
             )
 
@@ -325,7 +325,7 @@ class TestGetSpots:
 
 
 class TestFit:
-    def _fit(self, factory, method, progress, multiprocess=False, **kwargs):
+    def _fit(self, factory, method, progress, parallel=False, **kwargs):
         frames, ids = _gauss_frames()
         movie = factory(frames, _info(frames))
         locs, _ = localize.fit(
@@ -334,7 +334,7 @@ class TestFit:
             identifications=ids,
             box=BOX,
             fitting_method=method,
-            multiprocess=multiprocess,
+            parallel=parallel,
             progress=progress,
             **kwargs,
         )
@@ -343,28 +343,28 @@ class TestFit:
     @pytest.mark.parametrize(
         "method", ["gausslq", "gaussmle", "gausslq-spherical", "avg"]
     )
-    @pytest.mark.parametrize("multiprocess", [False, True])
-    def test_gauss_and_avg_phases(self, factory, method, multiprocess):
-        if method == "avg" and multiprocess:
-            pytest.skip("covered by test_avg_multiprocess (process pool)")
+    @pytest.mark.parametrize("parallel", [False, True])
+    def test_gauss_and_avg_phases(self, factory, method, parallel):
+        if method == "avg" and parallel:
+            pytest.skip("covered by test_avg_parallel (process pool)")
         tracker = RecordingProgress()
-        locs, ids = self._fit(factory, method, tracker, multiprocess)
+        locs, ids = self._fit(factory, method, tracker, parallel)
         assert len(locs) == len(ids)
         assert_phases_complete(tracker, FIT_LABELS)
         assert [p["maximum"] for p in tracker.phases] == [len(ids)] * 2
 
     @pytest.mark.slow
-    def test_avg_multiprocess(self, factory):
+    def test_avg_parallel(self, factory):
         # regression: the process pool reported round(N * tasks / n_tasks)
         # with no final value
         tracker = RecordingProgress()
-        locs, ids = self._fit(factory, "avg", tracker, multiprocess=True)
+        locs, ids = self._fit(factory, "avg", tracker, parallel=True)
         assert len(locs) == len(ids)
         assert_phases_complete(tracker, FIT_LABELS)
 
     @pytest.mark.parametrize("method", ["spline", "spline-mle"])
-    @pytest.mark.parametrize("multiprocess", [False, True])
-    def test_spline_phases(self, factory, method, multiprocess):
+    @pytest.mark.parametrize("parallel", [False, True])
+    def test_spline_phases(self, factory, method, parallel):
         # regression: the threaded CPU fit reported claimed spots and the
         # CRLB was not reported at all
         tracker = RecordingProgress()
@@ -372,7 +372,7 @@ class TestFit:
             factory,
             method,
             tracker,
-            multiprocess,
+            parallel,
             spline_calibration=_spline_calibration(),
         )
         assert len(locs) == len(ids)
@@ -399,9 +399,9 @@ class TestFit:
     def test_silent_and_console(self, capsys, factory, method):
         kwargs = dict(spline_calibration=_spline_calibration())
         capsys.readouterr()
-        self._fit(factory, method, None, multiprocess=True, **kwargs)
+        self._fit(factory, method, None, parallel=True, **kwargs)
         assert capsys.readouterr() == ("", "")
-        self._fit(factory, method, "console", multiprocess=True, **kwargs)
+        self._fit(factory, method, "console", parallel=True, **kwargs)
         err = capsys.readouterr().err
         assert "Cutting spots" in err and "Fitting spots" in err
 
@@ -412,7 +412,7 @@ class TestFit:
                 factory,
                 "spline",
                 tracker,
-                multiprocess=True,
+                parallel=True,
                 spline_calibration=_spline_calibration(),
             )
 
@@ -421,7 +421,7 @@ class TestFit:
             factory,
             "spline",
             RecordingProgress(),
-            multiprocess=True,
+            parallel=True,
             spline_calibration=_spline_calibration(),
             abort_callback=lambda: True,
         )
@@ -442,13 +442,13 @@ class TestFitSpots:
         _silent(capsys, localize.fit_spots_gauss, spots, mle=mle)
         _console(capsys, "Fitting spots", localize.fit_spots_gauss, spots)
 
-    @pytest.mark.parametrize("multiprocess", [False, True])
-    def test_splinefit(self, capsys, multiprocess):
+    @pytest.mark.parametrize("parallel", [False, True])
+    def test_splinefit(self, capsys, parallel):
         spots, _ = self._spots()
         calib = _spline_calibration()
         tracker = RecordingProgress()
         localize.fit_spots_splinefit(
-            spots, calib, multiprocess=multiprocess, progress=tracker
+            spots, calib, parallel=parallel, progress=tracker
         )
         assert_phases_complete(tracker, ["Fitting spots"])
         assert tracker.phases[0]["maximum"] == len(spots)
@@ -457,7 +457,7 @@ class TestFitSpots:
             localize.fit_spots_splinefit,
             spots,
             calib,
-            multiprocess=multiprocess,
+            parallel=parallel,
         )
         _console(
             capsys,
@@ -465,7 +465,7 @@ class TestFitSpots:
             localize.fit_spots_splinefit,
             spots,
             calib,
-            multiprocess=multiprocess,
+            parallel=parallel,
         )
 
     def test_spline_and_its_crlb(self, capsys):
@@ -507,8 +507,8 @@ class TestGaussMultichannel:
         "channel_transforms": [IDENTITY, _shift(3.0)],
     }
 
-    @pytest.mark.parametrize("multiprocess", [False, True])
-    def test_fit_spots_reports_every_path(self, capsys, multiprocess):
+    @pytest.mark.parametrize("parallel", [False, True])
+    def test_fit_spots_reports_every_path(self, capsys, parallel):
         movies, cameras, ids = _two_channels()
         spots, residuals, jacobians = localize.get_spots_multichannel(
             movies,
@@ -520,7 +520,7 @@ class TestGaussMultichannel:
             return_jacobians=True,
         )
         args = (spots, residuals, jacobians)
-        kwargs = dict(use_gpu=False, multiprocess=multiprocess)
+        kwargs = dict(use_gpu=False, parallel=parallel)
         tracker = RecordingProgress()
         localize.fit_spots_gauss_multichannel(
             *args, progress=tracker, **kwargs
@@ -707,7 +707,7 @@ class TestIndependent:
         args = (movies, CAMERA, [ids, ids], BOX)
         tracker = RecordingProgress()
         results = localize.fit_independent(
-            *args, multiprocess=False, progress=tracker
+            *args, parallel=False, progress=tracker
         )
         assert len(results) == 2
         assert [info[-1]["Channel"] for _, info in results] == [0, 1]
@@ -720,13 +720,13 @@ class TestIndependent:
                 "Channel 2/2: fitting spots",
             ],
         )
-        _silent(capsys, localize.fit_independent, *args, multiprocess=False)
+        _silent(capsys, localize.fit_independent, *args, parallel=False)
         _console(
             capsys,
             "Channel 2/2: fitting spots",
             localize.fit_independent,
             *args,
-            multiprocess=False,
+            parallel=False,
         )
 
     def test_fit_split_fov_independent_labels_the_regions(self, factory):
@@ -742,7 +742,7 @@ class TestIndependent:
             ids_all,
             BOX,
             REGIONS,
-            multiprocess=False,
+            parallel=False,
             progress=tracker,
         )
         assert [len(locs) for locs, _ in results] == [len(ids)] * 2
@@ -767,14 +767,14 @@ class TestLocalize:
         frames, _ = _gauss_frames()
         return factory(frames, _info(frames))
 
-    @pytest.mark.parametrize("threaded", [False, True])
-    def test_phases(self, factory, threaded):
+    @pytest.mark.parametrize("parallel", [False, True])
+    def test_phases(self, factory, parallel):
         tracker = RecordingProgress()
         locs, _ = localize.localize(
             self._movie(factory),
             camera_info=CAMERA,
             identification_parameters=NET_GRADIENT,
-            threaded=threaded,
+            parallel=parallel,
             progress=tracker,
         )
         assert len(locs)
@@ -788,7 +788,7 @@ class TestLocalize:
             identification_parameters=NET_GRADIENT,
             calibration_3d=dict(CALIB_3D),
             movie_info=_info(_gauss_frames()[0]),
-            threaded=False,
+            parallel=False,
             progress=tracker,
         )
         assert "z" in locs

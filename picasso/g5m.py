@@ -3347,12 +3347,12 @@ def _g5m(
     bootstrap_check: bool,
     calibration: dict | None,
     max_locs_per_cluster: int,
-    asynch: bool,
+    parallel: bool,
     progress: lib.Progress,
     mode: Literal["astigmatism", "spline"] = "astigmatism",
     covariance_type: Literal["diagonal", "rotated"] = "diagonal",
 ) -> tuple[list[pd.DataFrame], list[pd.DataFrame]]:
-    """Run G5M with or without multiprocessing. The function returns the
+    """Run G5M, in a process pool if ``parallel``. The function returns the
     centers of the G5M components and localizations with assigned cluster
     labels. See ``g5m`` for parameters explanation; ``progress`` is a
     normalized tracker, see ``g5m`` for the phase it reports."""
@@ -3369,7 +3369,7 @@ def _g5m(
         covariance_type=covariance_type,
     )
     locs, bounds = _sort_by_group(locs)
-    if asynch:  # run G5M using multiprocessing
+    if parallel:  # run G5M in a process pool
         lib.start_phase(progress, "Running G5M", N_TASKS, unit="task")
         progress.set_value(0)
         executor, fs = _run_g5m_parallel(locs, bounds, **group_kwargs)
@@ -3395,7 +3395,7 @@ def _g5m(
         clustered_locs = [_[1] for _ in results if len(_)]
         clustered_locs = list(itchain(*clustered_locs))
 
-    else:  # run G5M without multiprocessing
+    else:  # run G5M in this process
         n_groups = len(bounds) - 1
         lib.start_phase(progress, "Running G5M", n_groups, unit="group")
         progress.set_value(0)
@@ -3626,11 +3626,11 @@ def g5m(
     ] = "auto",
     postprocess: bool = True,
     max_locs_per_cluster: int = np.inf,
-    asynch: bool = True,
+    parallel: bool = True,
     group_column: Literal["group", "group_input"] = "group",
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame | None, list[dict], pd.DataFrame | None]:
-    """Run G5M with or without multiprocessing. The function returns
+    """Run G5M, in a process pool if ``parallel``. The function returns
     the centers of the G5M components and localizations with assigned
     cluster labels.
 
@@ -3698,9 +3698,10 @@ def g5m(
         Maximum number of localizations per cluster accepted for G5M.
         Used to avoid fitting to fiducial markers. Such clusters are
         ignored. Default is np.inf.
-    asynch : bool, optional
-        If True, G5M is run in parallel using multiprocessing. Default
-        is True.
+    parallel : bool, optional
+        If True, the clusters are fitted in a pool of worker processes
+        (35% of the CPU cores, see ``lib.n_workers``); if False, one
+        after another in the calling process. Default is True.
     group_column : {"group", "group_input"}, optional
         Name of the column used to group localizations into clusters
         prior to G5M. Use "group_input" when the "group" column has been
@@ -3710,7 +3711,7 @@ def g5m(
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
         or None for no reporting. Reports "Running G5M" over the
-        ``N_TASKS`` parallel tasks if ``asynch``, else over the
+        ``N_TASKS`` parallel tasks if ``parallel``, else over the
         clusters. Default is None.
 
     Returns
@@ -3765,7 +3766,7 @@ def g5m(
             bootstrap_check=bootstrap_check,
             calibration=calibration,
             max_locs_per_cluster=max_locs_per_cluster,
-            asynch=asynch,
+            parallel=parallel,
             progress=progress,
             mode=mode,
             covariance_type=covariance_type,

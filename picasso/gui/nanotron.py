@@ -444,8 +444,8 @@ class Predictor(QtCore.QThread):
         list[int],
         list[Exception],
     ]:
-        """Make predictions asynchronously, i.e., using
-        multiprocessing."""
+        """Start the predictions on a pool of threads and return without
+        waiting for them; ``run`` polls ``finished``."""
         n_picks = len(picks)
 
         predictions = np.zeros(n_picks)

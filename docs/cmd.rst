@@ -66,6 +66,8 @@ format converters (``csv2hdf``, ``hdf2ts``, ...) keep their names. See
      - ``--radius-z``
    * - ``join --keepindex``
      - ``--keep-index``
+   * - ``spinna --asynch``, ``g5m --asynch``
+     - ``--no-parallel``
 
 .. _cmd-localize:
 
@@ -634,8 +636,8 @@ CSV structure).
      - Description
    * - ``-p``, ``--parameters`` (str)
      - .csv file containing the parameters for SPINNA batch analysis.
-   * - ``-a``, ``--asynch``
-     - Do not perform fitting asynchronously (multiprocessing).
+   * - ``-a``, ``--no-parallel``
+     - Fit in this process instead of a pool of worker processes.
    * - ``-b``, ``--bootstrap``
      - Perform bootstrapping.
    * - ``-v``, ``--verbose``
@@ -1192,9 +1194,9 @@ analyzed. If omitted, the GUI is launched.
      - ``100000``
      - Maximum number of localizations to process per cluster; useful for
        excluding fiducials.
-   * - ``-a``, ``--asynch``
+   * - ``-a``, ``--no-parallel``
      -
-     - Do not perform fitting asynchronously (multiprocessing).
+     - Fit in this process instead of a pool of worker processes.
 
 dark
 ----

@@ -370,6 +370,15 @@ class TestRenamedCommandLine:
         )
         assert vars(old) == vars(new)
 
+    @pytest.mark.parametrize("command", ["g5m", "spinna"])
+    def test_asynch_is_no_parallel(self, command, capsys):
+        parser, _ = cli._build_parser()
+        files = ["f.hdf5"] if command == "g5m" else []
+        assert parser.parse_args([command, *files]).parallel is True
+        for flag in ("--asynch", "--no-parallel", "-a"):
+            argv = cli._current_names([command, *files, flag])
+            assert parser.parse_args(argv).parallel is False
+
     def test_old_names_are_no_current_names(self):
         commands = command_line()
         for old, (new, _) in cli._RENAMED_COMMANDS.items():

@@ -29,7 +29,6 @@ from __future__ import annotations
 import logging
 import numbers
 import os
-import multiprocessing
 import sqlite3
 import threading
 import time
@@ -2332,15 +2331,16 @@ def _identify_worker(
 
 
 def identifications_from_futures(
-    futures: list[multiprocessing.pool.Future],
+    futures: list[Future],
 ) -> pd.DataFrame:
     """Collect the results from a list of futures and combines them
     into a single ``DataFrame``.
 
     Parameters
     ----------
-    futures : list of multiprocessing.pool.Future's
-        A list of futures representing the asynchronous tasks.
+    futures : list of concurrent.futures.Future
+        The futures of the identification threads, see
+        :func:`identify_async`.
 
     Returns
     -------
@@ -2366,10 +2366,11 @@ def identify_async(
     *,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
     frame_bounds: tuple[int, int] | list | None = None,
-) -> tuple[list[int], list[multiprocessing.pool.Future]]:
-    """Asynchronously (i.e., using multithreading) identify spots in a
-    movie using multiple threads. This function divides the work among a
-    specified number of threads.
+) -> tuple[list[int], list[Future]]:
+    """Start identifying spots in a movie on a pool of threads and return
+    without waiting for them. The threads claim the frames one by one;
+    their number is set by the ``cpu_utilization`` of the "Localize"
+    section of the user settings.
 
     Parameters
     ----------
@@ -2404,8 +2405,9 @@ def identify_async(
         the threads have started on and the number they have finished.
         The identification is complete when ``current[1]`` reaches the
         number of frames (or all futures are done).
-    f : list[multiprocessing.pool.Future]
-        A list of futures representing the asynchronous tasks.
+    f : list of concurrent.futures.Future
+        One future per thread; pass them to
+        :func:`identifications_from_futures` once all are done.
     """
     # fail here rather than in every worker thread
     method = _validate_method(method)
@@ -2525,12 +2527,12 @@ def identify(
     parameters: IdentificationParameters,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
     frame_bounds: tuple[int, int] | list | None = None,
-    threaded: bool = True,
+    parallel: bool = True,
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]] | None:
-    """Identify spots in a movie. This function can run in a threaded or
-    non-threaded mode.
+    """Identify spots in a movie, on a pool of threads or in the calling
+    thread.
 
     How the spots are identified is set by ``parameters``: local maxima
     whose net gradient exceeds a minimum (:class:`NetGradient`), or the
@@ -2576,19 +2578,21 @@ def identify(
         specified, the other is to be set to None, for example,
         ``(5, None)`` sets minimum frame to 5 without maximum frame.
         Default is None.
-    threaded : bool, optional
-        Whether to use threading for the identification process. Default
-        is True.
+    parallel : bool, optional
+        If True, the frames are identified on a pool of threads (the
+        ``cpu_utilization`` of the "Localize" section of the user
+        settings, 80% of the CPU cores by default); if False, one after
+        another in the calling thread. Default is True.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
         or None for no reporting. Reports one phase, "Identifying spots",
         over the frames of the movie. Default is None.
     abort_callback : callable, optional
-        A callable for aborting multiprocessing in the GUI. If a
-        callable provided, it must accept no input and return a boolean
-        indicating whether the identification should be aborted. Default
-        is None.
+        A callable for aborting the identification, e.g., from the GUI.
+        If a callable provided, it must accept no input and return a
+        boolean indicating whether the identification should be aborted.
+        Only polled if ``parallel``. Default is None.
 
     Returns
     -------
@@ -2681,7 +2685,7 @@ def identify(
         lib.start_phase(
             progress, "Identifying spots", len(movie), unit="frame"
         )
-        if threaded:
+        if parallel:
             ids = _identify_threaded(
                 movie,
                 method,
@@ -2863,7 +2867,7 @@ def identify_multichannel_sum(
     camera_calibrations: list | None = None,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
     frame_bounds: tuple[int, int] | list | None = None,
-    threaded: bool = True,
+    parallel: bool = True,
     order: int = 1,
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
@@ -2921,8 +2925,9 @@ def identify_multichannel_sum(
         the ROIs are clipped to the reference region.
     frame_bounds : tuple, list of tuples, optional
         Frame numbers to consider, as in :func:`identify`. Default is None.
-    threaded : bool, optional
-        Whether to use threading, as in :func:`identify`. Default is True.
+    parallel : bool, optional
+        Whether to identify on a pool of threads, as in :func:`identify`.
+        Default is True.
     order : int, optional
         Spline order of the resampling; see :class:`SummedChannelsMovie`.
         Default is 1.
@@ -2970,7 +2975,7 @@ def identify_multichannel_sum(
         parameters=parameters,
         roi=roi,
         frame_bounds=frame_bounds,
-        threaded=threaded,
+        parallel=parallel,
         progress=progress,
         abort_callback=abort_callback,
     )
@@ -3969,7 +3974,7 @@ def fit(
     spline_calibration: dict | None = None,
     camera_calibration: dict | None = None,
     lateral_transforms: dict | list | str | None = None,
-    multiprocess: bool = True,
+    parallel: bool = True,
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
 ) -> tuple[pd.DataFrame | None, list[dict]]:
@@ -4063,8 +4068,12 @@ def fit(
         that ``spline_calibration`` carries, and the fit therefore applies
         itself, are skipped with a ``lib.DuplicateLateralTransformWarning``.
         They are recorded in an entry of their own. Default is None.
-    multiprocess : bool, optional
-        Whether or not to use multiprocessing. Ignored for GPU fitting.
+    parallel : bool, optional
+        If True, the CPU fits of the "spline" and "spline-mle" methods run
+        on a pool of threads and those of "avg" on a pool of worker
+        processes; if False, they run in the calling thread. The CPU
+        Gaussian methods ("gausslq", "gaussmle" and their variants) run in
+        the calling thread either way, and the GPU methods ignore it.
         Default is True.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
@@ -4075,10 +4084,11 @@ def fit(
         methods, "Computing spline CRLB" over the localizations. Default
         is None.
     abort_callback : callable or None, optional
-        A callable for aborting multiprocessing in the GUI. If a
+        A callable for aborting the fit, e.g., from the GUI. If a
         callable provided, it must accept no input and return a boolean
-        indicating whether the fitting should be aborted. Default is
-        None.
+        indicating whether the fitting should be aborted. Only the
+        parallel CPU fits ("spline", "spline-mle" and "avg") poll it.
+        Default is None.
 
     Returns
     -------
@@ -4103,7 +4113,7 @@ def fit(
         spline_calibration,
         eps,
         max_it,
-        multiprocess,
+        parallel,
         camera_calibration,
     )
     with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
@@ -4129,7 +4139,7 @@ def fit(
             eps=eps,
             max_it=max_it,
             spline_calibration=spline_calibration,
-            multiprocess=multiprocess,
+            parallel=parallel,
             progress=progress,
             abort_callback=abort_callback,
             pixelsize=float(camera_info["Pixelsize"]),
@@ -4191,7 +4201,7 @@ def _validate_fit_args(
     spline_calibration: dict | None,
     eps: float | None,
     max_it: int | None,
-    multiprocess: bool,
+    parallel: bool,
     camera_calibration: dict | None,
 ) -> None:
     """Validate ``fit``'s arguments.
@@ -4230,7 +4240,7 @@ def _validate_fit_args(
     assert max_it is None or (
         isinstance(max_it, int) and max_it > 0
     ), "max_it must be a positive integer or None"
-    assert isinstance(multiprocess, bool), "multiprocess must be a boolean"
+    assert isinstance(parallel, bool), "parallel must be a boolean"
     pixelsize = camera_info.get("Pixelsize")
     if not _is_positive_number(pixelsize):
         raise ValueError(
@@ -4266,7 +4276,7 @@ def _dispatch_fit(
     eps: float | None,
     max_it: int | None,
     spline_calibration: dict | None,
-    multiprocess: bool,
+    parallel: bool,
     progress: lib.Progress,
     abort_callback: Callable[[], bool] | None,
     pixelsize: float,
@@ -4297,8 +4307,8 @@ def _dispatch_fit(
         The maximum number of iterations per spot, as in :func:`fit`.
     spline_calibration : dict or None
         Cubic-spline PSF calibration for the "spline*" methods.
-    multiprocess : bool
-        Whether to use multiprocessing. Ignored for GPU fitting.
+    parallel : bool
+        Whether to fit on a pool of workers, as in :func:`fit`.
     progress : lib.Progress
         Normalized tracker, given the fit's phases, as in :func:`fit`.
     abort_callback : callable or None
@@ -4355,7 +4365,7 @@ def _dispatch_fit(
             mle=fitting_method == "spline-mle",
             tolerance=eps,
             max_iterations=max_it,
-            multiprocess=multiprocess,
+            parallel=parallel,
             progress=progress,
             abort_callback=abort_callback,
             variance=variance,
@@ -4367,7 +4377,7 @@ def _dispatch_fit(
             identifications,
             box,
             em,
-            multiprocess,
+            parallel,
             progress,
             abort_callback,
             variance=variance,
@@ -5072,7 +5082,7 @@ def fit_spots_gauss_multichannel(
     use_gpu: bool | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    multiprocess: bool = True,
+    parallel: bool = True,
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     variance: np.ndarray | None = None,
@@ -5108,7 +5118,7 @@ def fit_spots_gauss_multichannel(
     max_iterations : int or None, optional
         Maximum number of iterations per spot. None uses the method's own,
         see :func:`gauss_schedule`.
-    multiprocess : bool, optional
+    parallel : bool, optional
         Run the CPU kernels on a thread pool (they are ``nogil``). Ignored on
         the GPU, where one launch fits every spot.
     progress : lib.Progress, "console" or None, optional
@@ -5177,7 +5187,7 @@ def fit_spots_gauss_multichannel(
             )
             if result is None:
                 return None
-        elif not multiprocess or len(spots) == 0:
+        elif not parallel or len(spots) == 0:
             # starts and ends its own "Fitting spots" phase
             result = gaussfit.fit_spots_multichannel(
                 kind,
@@ -5478,7 +5488,7 @@ def fit_gauss_multichannel(
     use_gpu: bool | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    multiprocess: bool = True,
+    parallel: bool = True,
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     camera_calibrations: list[dict | None] | None = None,
@@ -5526,7 +5536,7 @@ def fit_gauss_multichannel(
     max_iterations : int or None, optional
         Maximum number of iterations per spot. None uses the method's own,
         see :func:`gauss_schedule`.
-    multiprocess : bool, optional
+    parallel : bool, optional
         Run the CPU kernels on a thread pool (they are ``nogil``). Ignored on
         the GPU. Default True.
     progress : lib.Progress, "console" or None, optional
@@ -5608,7 +5618,7 @@ def fit_gauss_multichannel(
             use_gpu=use_gpu,
             tolerance=tolerance,
             max_iterations=max_iterations,
-            multiprocess=multiprocess,
+            parallel=parallel,
             progress=progress,
             abort_callback=abort_callback,
             variance=variance,
@@ -5664,7 +5674,7 @@ def fit_gauss_split_fov(
     use_gpu: bool | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    multiprocess: bool = True,
+    parallel: bool = True,
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     camera_calibration: dict | None = None,
@@ -5719,7 +5729,7 @@ def fit_gauss_split_fov(
     max_iterations : int or None, optional
         Maximum number of iterations per spot, as in
         :func:`fit_gauss_multichannel`.
-    multiprocess : bool, optional
+    parallel : bool, optional
         Run the CPU kernels on a thread pool. Default True.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
@@ -5772,7 +5782,7 @@ def fit_gauss_split_fov(
         use_gpu=use_gpu,
         tolerance=tolerance,
         max_iterations=max_iterations,
-        multiprocess=multiprocess,
+        parallel=parallel,
         progress=progress,
         abort_callback=abort_callback,
         # one physical camera, so every region reads the same maps; _cut_map
@@ -5975,7 +5985,7 @@ def _run_splinefit(
     jacobians: np.ndarray | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    multiprocess: bool = True,
+    parallel: bool = True,
     progress: lib.Progress | None = None,
     abort_callback: Callable[[], bool] | None = None,
     use_gpu: bool = False,
@@ -6002,12 +6012,12 @@ def _run_splinefit(
     byte-identical inputs. That is what makes a CPU/GPU comparison meaningful
     rather than a test of two translation layers agreeing.
 
-    ``multiprocess`` keeps ``fit``'s argument name, but as for the Gaussian
-    fits it selects a **thread** pool: the CPU kernels are ``nogil``, so the
-    workers run concurrently while sharing the spots and the coefficient
-    table rather than pickling a copy of each into a subprocess. False runs the fit serially
-    in the calling thread, which is what the tests use for reproducibility. It
-    is ignored on the GPU, where one launch fits every spot.
+    ``parallel`` selects a pool of **threads**: the CPU kernels are
+    ``nogil``, so the workers run concurrently while sharing the spots and
+    the coefficient table rather than pickling a copy of each into a
+    subprocess. False runs the fit serially in the calling thread, which is
+    what the tests use for reproducibility. It is ignored on the GPU, where
+    one launch fits every spot.
     """
     box = spots.shape[1]
     # Fit a smaller-than-calibration box against a centered crop, exactly as
@@ -6031,7 +6041,7 @@ def _run_splinefit(
         return None
     if use_gpu:
         return _run_splinefit_gpu(args, kwargs, progress, abort_callback)
-    if not multiprocess or n_spots == 0:
+    if not parallel or n_spots == 0:
         # starts and ends its own "Fitting spots" phase
         return splinefit.fit_spots(*args, progress=progress, **kwargs)
     return _run_splinefit_threaded(
@@ -6262,7 +6272,7 @@ def fit_spots_splinefit(
     jacobians: np.ndarray | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    multiprocess: bool = True,
+    parallel: bool = True,
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     use_gpu: bool = False,
@@ -6313,10 +6323,10 @@ def fit_spots_splinefit(
         Maximum number of iterations per spot. None (the default) uses the
         one that fit would use by default, see
         ``picasso.fitting.splinefit.convergence_schedule``.
-    multiprocess : bool, optional
-        Keeps ``fit``'s argument name, but selects a **thread** pool: the CPU
-        kernels are ``nogil``. False fits serially in the calling thread.
-        Ignored on the GPU. Default True.
+    parallel : bool, optional
+        If True, the CPU kernels (which are ``nogil``) run on a pool of
+        threads; if False, serially in the calling thread. Ignored on the
+        GPU. Default True.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -6356,7 +6366,7 @@ def fit_spots_splinefit(
             jacobians=jacobians,
             tolerance=tolerance,
             max_iterations=max_iterations,
-            multiprocess=multiprocess,
+            parallel=parallel,
             progress=progress,
             abort_callback=abort_callback,
             use_gpu=use_gpu,
@@ -6988,7 +6998,7 @@ def _fit2d_spline_cpu(
     n_z_starts: int | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    multiprocess: bool = True,
+    parallel: bool = True,
     progress: lib.Progress | None = None,
     abort_callback: Callable[[], bool] | None = None,
     variance: lib.FloatArray3D | None = None,
@@ -7010,7 +7020,7 @@ def _fit2d_spline_cpu(
         return_stats=True,
         tolerance=tolerance,
         max_iterations=max_iterations,
-        multiprocess=multiprocess,
+        parallel=parallel,
         progress=progress,
         abort_callback=abort_callback,
         variance=variance,
@@ -9157,7 +9167,7 @@ def fit_independent(
     max_it: int | list | None = None,
     spline_calibration: dict | list | None = None,
     camera_calibration: dict | list | None = None,
-    multiprocess: bool = True,
+    parallel: bool = True,
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
 ) -> list[tuple[pd.DataFrame, list[dict]]] | None:
@@ -9196,8 +9206,9 @@ def fit_independent(
     camera_calibration : dict, list or None, optional
         Per-pixel sCMOS calibration per channel, or one shared by all. Each
         must match the shape of its own movie.
-    multiprocess : bool, optional
-        Whether to use multiprocessing. Default True.
+    parallel : bool, optional
+        Whether to fit on a pool of workers, as in :func:`fit`. Default
+        True.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -9255,7 +9266,7 @@ def fit_independent(
                 max_it=max_its[c],
                 spline_calibration=splines[c],
                 camera_calibration=cameras[c],
-                multiprocess=multiprocess,
+                parallel=parallel,
                 progress=_LabeledProgress(
                     progress, f"Channel {c + 1}/{n_channels}: "
                 ),
@@ -9289,7 +9300,7 @@ def fit_split_fov_independent(
     max_it: int | list | None = None,
     spline_calibration: dict | list | None = None,
     camera_calibration: dict | None = None,
-    multiprocess: bool = True,
+    parallel: bool = True,
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
 ) -> list[tuple[pd.DataFrame, list[dict]]] | None:
@@ -9331,8 +9342,9 @@ def fit_split_fov_independent(
     camera_calibration : dict or None, optional
         Per-pixel sCMOS calibration for the (single) camera, covering the
         full frame. Default None.
-    multiprocess : bool, optional
-        Whether to use multiprocessing. Default True.
+    parallel : bool, optional
+        Whether to fit on a pool of workers, as in :func:`fit`. Default
+        True.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -9380,7 +9392,7 @@ def fit_split_fov_independent(
                 max_it=max_its[c],
                 spline_calibration=splines[c],
                 camera_calibration=camera_calibration,
-                multiprocess=multiprocess,
+                parallel=parallel,
                 progress=_LabeledProgress(
                     progress, f"Region {c + 1}/{n_regions}: "
                 ),
@@ -9414,7 +9426,7 @@ def _fit2d_avg(
     identifications: pd.DataFrame,
     box: int,
     em: bool,
-    multiprocess: bool = True,
+    parallel: bool = True,
     progress: lib.Progress | None = None,
     abort_callback: Callable[[], bool] | None = None,
     variance: lib.FloatArray3D | None = None,
@@ -9427,9 +9439,9 @@ def _fit2d_avg(
     spots" phase."""
     progress = lib.normalize_progress(progress)
     N = len(identifications)
-    if multiprocess:
+    if parallel:
         lib.start_phase(progress, "Fitting spots", N, unit="spot")
-        fs = avgroi.fit_spots_parallel(spots, asynch=True)
+        fs = avgroi.fit_spots_async(spots)
         theta = _process_fitting_futures(fs, N, progress, abort_callback)
         if theta is None:
             return
@@ -9453,7 +9465,7 @@ def _process_fitting_futures(
     progress: lib.Progress,
     abort_callback: Callable[[], bool] | None = None,
 ) -> lib.FloatArray2D | None:
-    """Wait for the tasks of ``avgroi.fit_spots_parallel(asynch=True)``,
+    """Wait for the tasks of ``avgroi.fit_spots_async``,
     reporting the spots of the finished tasks to the running phase of
     ``progress`` (a normalized tracker) and ending it at ``N``. Returns
     None if ``abort_callback`` asked to stop; the pending tasks are
@@ -9509,7 +9521,7 @@ def localize(
     calibration_3d: dict | str | None = None,
     affine_calibration: dict | list | None = None,
     camera_calibration: dict | None = None,
-    threaded: bool = True,
+    parallel: bool = True,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Localize (i.e., identify and fit) spots in a movie using the
@@ -9618,8 +9630,12 @@ def localize(
         forwarded to ``fit``. When given, its maps replace the scalar
         "Baseline" (and, if a gain map is present, "Sensitivity") of
         ``camera_info``. Default is None.
-    threaded : bool, optional
-        Whether to use multithreading/multiprocessing. Default is True.
+    parallel : bool, optional
+        If True, the spots are identified on a pool of threads (see
+        :func:`identify`), and fitted and, with ``calibration_3d``,
+        z-fitted on pools of workers (see :func:`fit` and
+        ``picasso.zfit.zfit``); if False, all of it runs in the calling
+        thread. Default is True.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -9708,7 +9724,7 @@ def localize(
             parameters=identification_parameters,
             roi=roi,
             frame_bounds=frame_bounds,
-            threaded=threaded,
+            parallel=parallel,
             progress=progress,
         )
 
@@ -9724,7 +9740,7 @@ def localize(
             max_it=max_it,
             spline_calibration=spline_calibration,
             camera_calibration=camera_calibration,
-            multiprocess=threaded,
+            parallel=parallel,
             progress=progress,
         )
         # Before the z fit and the lateral corrections below: both move x/y,
@@ -9746,7 +9762,7 @@ def localize(
                 ),
                 filter=0,
                 lateral_transforms=affine_calibration,
-                multiprocess=threaded,
+                parallel=parallel,
                 progress=progress,
             )
             # zfit applies both the calibration's own lateral corrections
@@ -9867,7 +9883,7 @@ def localize_frames(
     max_it: int | None = None,
     spline_calibration: dict | None = None,
     camera_calibration: dict | None = None,
-    threaded: bool = True,
+    parallel: bool = True,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Localize an in-memory frame stack, GUI-free (streaming/live input).
@@ -9906,7 +9922,7 @@ def localize_frames(
     fitting_method : str, optional
         Which fitting algorithm to use, see :func:`fit`. Default ``"gausslq"``
         (GPU variants such as ``"gausslq-gpu"`` run on the GPU if available).
-    eps, max_it, spline_calibration, camera_calibration, threaded
+    eps, max_it, spline_calibration, camera_calibration, parallel
         Forwarded to :func:`localize` unchanged.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
@@ -9948,7 +9964,7 @@ def localize_frames(
         max_it=max_it,
         spline_calibration=spline_calibration,
         camera_calibration=camera_calibration,
-        threaded=threaded,
+        parallel=parallel,
         progress=progress,
     )
 

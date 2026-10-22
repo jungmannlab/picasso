@@ -16,7 +16,6 @@ import sys
 import time
 import re
 from functools import partial
-from multiprocessing import cpu_count
 from datetime import datetime
 from copy import deepcopy
 from decimal import Decimal
@@ -2554,8 +2553,8 @@ class OptionalSettingsDialog(lib.Dialog):
 
     Attributes
     ----------
-    asynch_check : QtWidgets.QCheckBox
-        Checkbox for using multiprocessing.
+    parallel_check : QtWidgets.QCheckBox
+        Checkbox for fitting in a pool of worker processes.
     auto_nn_check : QtWidgets.QCheckBox
         Checkbox for auto setting the number of neighbors to consider
         at fitting.
@@ -2609,14 +2608,14 @@ class OptionalSettingsDialog(lib.Dialog):
         self.fitting_mode.setCurrentIndex(0)
         layout.addWidget(self.fitting_mode)
 
-        # use multiprocessing (parallel processing)
-        self.asynch_check = QtWidgets.QCheckBox("Use multiprocessing")
-        self.asynch_check.setToolTip(
+        # score the candidates in a pool of worker processes
+        self.parallel_check = QtWidgets.QCheckBox("Use multiprocessing")
+        self.parallel_check.setToolTip(
             "Run simulations in parallel using multiple CPU cores?\n"
             "Not used for Bayesian optimization (single-threaded only)."
         )
-        self.asynch_check.setChecked(True)
-        layout.addWidget(self.asynch_check)
+        self.parallel_check.setChecked(True)
+        layout.addWidget(self.parallel_check)
 
         # numbers of neighbors to consider at fitting
         self.auto_nn_check = QtWidgets.QCheckBox(
@@ -4086,14 +4085,14 @@ class SimulationsTab(lib.Dialog):
 
         # number of evaluations and parallelism per fitting mode
         mode = self.settings_dialog.fitting_mode.currentText()
-        use_async = self.settings_dialog.asynch_check.isChecked()
+        use_parallel = self.settings_dialog.parallel_check.isChecked()
         if mode == "Coarse to fine":
             # coarse pass = 10% of the search space; the fine pass is
             # data-dependent — approximate it with the same count as
             # the coarse pass for a rough total
             n_coarse = max(2, int(n * 0.1))
             n_evals = 2 * n_coarse
-            parallel = use_async
+            parallel = use_parallel
         elif mode == "Bayesian":
             # 20 initial + up to 80 GP-guided iterations (capped by n),
             # see spinna.SPINNA.fit_bayesian; single-threaded only
@@ -4101,11 +4100,12 @@ class SimulationsTab(lib.Dialog):
             parallel = False
         else:  # "Brute force" (and fallback)
             n_evals = n
-            parallel = use_async
+            parallel = use_parallel
 
-        # 0.8 is a rough correction for multiprocessing overhead
+        # 0.8 is a rough correction for the overhead of the worker
+        # processes
         if parallel:
-            total_dt = dt_single * n_evals / (cpu_count() * 0.8 * 0.8)
+            total_dt = dt_single * n_evals / (lib.n_workers() * 0.8)
         else:
             total_dt = dt_single * n_evals
 
@@ -4222,7 +4222,7 @@ class SimulationsTab(lib.Dialog):
                 self.N_structures_fit,
                 fitting_mode=fitting_mode,
                 save=save,
-                asynch=self.settings_dialog.asynch_check.isChecked(),
+                parallel=self.settings_dialog.parallel_check.isChecked(),
                 bootstrap=self.bootstrap_check.isChecked(),
                 progress=progress,
             )
@@ -4477,7 +4477,7 @@ class SimulationsTab(lib.Dialog):
                     height=base_mixer.roi[1],
                     depth=base_mixer.roi[2],
                     random_rot_mode=base_mixer.random_rot_mode,
-                    asynch=self.settings_dialog.asynch_check.isChecked(),
+                    parallel=self.settings_dialog.parallel_check.isChecked(),
                     savedir=savedir,
                     progress=progress,
                     fitting_mode=fitting_mode,
@@ -4566,7 +4566,7 @@ class SimulationsTab(lib.Dialog):
                     height=base_mixer.roi[1],
                     depth=base_mixer.roi[2],
                     random_rot_mode=base_mixer.random_rot_mode,
-                    asynch=self.settings_dialog.asynch_check.isChecked(),
+                    parallel=self.settings_dialog.parallel_check.isChecked(),
                     savedir=savedir,
                     progress=progress,
                     fitting_mode=fitting_mode,

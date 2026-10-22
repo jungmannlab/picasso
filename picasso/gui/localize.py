@@ -11416,7 +11416,7 @@ class Window(QtWidgets.QMainWindow):
         self.draw_frame()
 
     def abort(self) -> None:
-        """Abort the currently running async process."""
+        """Abort the running worker thread."""
         if self._active_worker is not None:
             self._active_worker.requestInterruption()
 
@@ -14160,7 +14160,7 @@ class Window(QtWidgets.QMainWindow):
 
 
 class IdentificationWorker(QtCore.QThread):
-    """Identify spots in the movie using multiprocessing.
+    """Identify spots in the movie on a pool of threads.
 
     Loads the user parameters and updates the status bar about the
     progress."""
@@ -14235,7 +14235,7 @@ class IdentificationWorker(QtCore.QThread):
             ),
             roi=self.rois,
             frame_bounds=self.frame_range,
-            threaded=True,
+            parallel=True,
             progress=_SignalProgress(on_value=self.on_progress),
             abort_callback=self.isInterruptionRequested,
         )
@@ -14257,8 +14257,8 @@ class IdentificationWorker(QtCore.QThread):
 
 
 class FitWorker(QtCore.QThread):
-    """Fit single molecules to the identified spots using
-    multiprocessing and update the status bar accordingly."""
+    """Fit single molecules to the identified spots on a pool of workers
+    (see ``localize.fit``) and update the status bar accordingly."""
 
     # a phase of the fit started: label (e.g. "Cutting spots", "Fitting
     # spots", "Computing spline CRLB") and maximum (0: unknown)
@@ -14361,7 +14361,7 @@ class FitWorker(QtCore.QThread):
                 lateral_transforms=(
                     None if self.fit_z else self.lateral_transforms
                 ),
-                multiprocess=True,
+                parallel=True,
                 progress=_SignalProgress(
                     on_value=self.on_progress, on_phase=self.on_phase
                 ),
@@ -14948,7 +14948,7 @@ _MULTICHANNEL_FIT_WORKERS = (
 
 class FitZWorker(QtCore.QThread):
     """Fit the z coordinates to fitted localizations based on the
-    calibration file using multiprocessing."""
+    calibration file in a pool of worker processes (on the CPU)."""
 
     progressMade = QtCore.pyqtSignal(int, int)
     # localizations, their metadata, elapsed time
@@ -15008,7 +15008,7 @@ class FitZWorker(QtCore.QThread):
                 pixelsize=self.pixelsize,
                 fitting_method=self.fitting_method,
                 lateral_transforms=self.lateral_transforms,
-                multiprocess=not self.gpu,
+                parallel=not self.gpu,
                 gpu=self.gpu,
                 progress=_SignalProgress(on_value=self.on_progress),
                 abort_callback=self.isInterruptionRequested,

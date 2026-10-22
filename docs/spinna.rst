@@ -240,7 +240,7 @@ Within the *Fitting* box:
       best_proportions, best_score = spinner.fit_stoichiometry(
           N_structures=search_space,
           fitting_mode="bayesian",    # or "coarse-to-fine", "brute-force"
-          asynch=True,
+          parallel=True,
           progress="console",
       )
       best_N_structures = mixer.convert_props_to_counts(best_proportions, n_egfr)
@@ -248,7 +248,7 @@ Within the *Fitting* box:
 
       # Fit uncertainty
       (props_mean, props_sd), (score, score_sd) = spinner.fit_stoichiometry(
-          N_structures=search_space, asynch=True, progress="console", bootstrap=True
+          N_structures=search_space, parallel=True, progress="console", bootstrap=True
       )
 
 .. _spinna-compare-models:
@@ -581,9 +581,9 @@ script directly.
 
          * - Argument
            - Effect
-         * - ``-a``, ``--asynch``
-           - Switches off the multiprocessing mode. If not specified,
-             multiprocessing is used.
+         * - ``-a``, ``--no-parallel``
+           - Fits in this process instead of a pool of worker processes,
+             which is used if not specified.
          * - ``-v``, ``--verbose``
            - Switches on the verbose mode, i.e., a progress bar for each row is
              displayed. If not specified, the verbose mode is off.

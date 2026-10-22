@@ -60,7 +60,7 @@ BOOTSTRAP_DISTANCE_METRIC = 1.0
 
 def _task_sizes(n_candidates: int) -> list[int]:
     """Number of candidates scored by each of the ``N_TASKS`` tasks of
-    a parallel fit (see ``SPINNA.fit_stoichiometry_parallel``)."""
+    a parallel fit (see ``SPINNA.fit_stoichiometry_async``)."""
     return [
         n_candidates // N_TASKS + (1 if i < n_candidates % N_TASKS else 0)
         for i in range(N_TASKS)
@@ -3115,9 +3115,9 @@ class SPINNA:
     (NND) across different combinations of the numbers of the
     structures.
 
-    Provides support for multiprocessing (80% CPU cores used by
-    default). Uses 2-sample Kolmogorov-Smirnov test to compare the
-    fitting scores.
+    Scores the candidates in a pool of worker processes (75% of the
+    CPU cores by default, see ``lib.n_workers``). Uses 2-sample
+    Kolmogorov-Smirnov test to compare the fitting scores.
 
     ...
 
@@ -3178,7 +3178,7 @@ class SPINNA:
             "coarse-to-fine", "bayesian", "brute-force"
         ] = "coarse-to-fine",
         save: str = "",
-        asynch: bool = True,
+        parallel: bool = True,
         bootstrap: bool = False,
         return_scores: bool = False,
         progress: lib.Progress | Literal["console"] | None = None,
@@ -3193,7 +3193,7 @@ class SPINNA:
         ]
     ):
         """Find fitting error for every combination of ``N_structures``
-        using NND comparison to ground truth. Applies multiprocessing
+        using NND comparison to ground truth. Runs in parallel
         and provides progress tracking. Outputs the optimal combination
         of structures and the correspodning score. Uses 2-sample
         Kolmogorov-Smirnov to compare the fitting scores.
@@ -3221,10 +3221,12 @@ class SPINNA:
             Path to save numbers of structures tested and their
             corresponding scores as a .csv file. If '' is given, the
             file is not saved. Default is ''.
-        asynch : bool, optional
-            If True, multiprocessing is used (80% of CPU cores are
-            used). Else, single thread is used for fitting. Default is
-            True.
+        parallel : bool, optional
+            If True, the candidates are scored in a pool of worker
+            processes (75% of the CPU cores, see ``lib.n_workers``); if
+            False, one after another in the calling process. The
+            "bayesian" fitting mode scores one candidate at a time either
+            way. Default is True.
         bootstrap : bool, optional
             If True, bootstrapping is used to estimate the fitting
             error. Default is False.
@@ -3259,7 +3261,7 @@ class SPINNA:
             N_structures,
             fitting_mode=fitting_mode,
             save=save,
-            asynch=asynch,
+            parallel=parallel,
             bootstrap=bootstrap,
             return_scores=return_scores,
             progress=progress,
@@ -3273,7 +3275,7 @@ class SPINNA:
             "coarse-to-fine", "bayesian", "brute-force"
         ] = "coarse-to-fine",
         save: str = "",
-        asynch: bool = True,
+        parallel: bool = True,
         bootstrap: bool = False,
         return_scores: bool = False,
         progress: lib.Progress | Literal["console"] | None = None,
@@ -3296,8 +3298,8 @@ class SPINNA:
         save : str, optional
             Path of a .csv file for the tested combinations and scores.
             If '' is given, the file is not saved. Default is ''.
-        asynch : bool, optional
-            If True, multiprocessing is used. Default is True.
+        parallel : bool, optional
+            As in :meth:`fit`. Default is True.
         bootstrap : bool, optional
             If True, bootstrapping is used to estimate the fitting
             error. Default is False.
@@ -3344,7 +3346,7 @@ class SPINNA:
                 return self.fit_coarse_to_fine(
                     N_structures,
                     save=save,
-                    asynch=asynch,
+                    parallel=parallel,
                     bootstrap=bootstrap,
                     progress=progress,
                 )
@@ -3358,7 +3360,7 @@ class SPINNA:
             return self._fit_brute_force(
                 N_structures,
                 save=save,
-                asynch=asynch,
+                parallel=parallel,
                 bootstrap=bootstrap,
                 return_scores=return_scores,
                 progress=progress,
@@ -3370,7 +3372,7 @@ class SPINNA:
         N_structures: lib.IntArray2D,
         *,
         save: str,
-        asynch: bool,
+        parallel: bool,
         bootstrap: bool,
         return_scores: bool,
         progress: lib.Progress,
@@ -3383,7 +3385,7 @@ class SPINNA:
         phase ``label`` over ``N_structures`` to the normalized tracker
         ``progress`` (plus the bootstrap phases)."""
         N_structures, scores = self._run_brute_force(
-            N_structures, asynch, progress, label
+            N_structures, parallel, progress, label
         )
 
         if save:
@@ -3420,13 +3422,13 @@ class SPINNA:
             return opt_proportions, score, scores
         return opt_proportions, score
 
-    def fit_stoichiometry_parallel(
+    def fit_stoichiometry_async(
         self,
         N_structures: lib.IntArray2D,
         executor: futures.Executor | None = None,
     ) -> list:
-        """Apply multiprocessing to find best fitting combination of
-        structures.
+        """Start scoring combinations of structures in a pool of worker
+        processes and return without waiting for them.
 
         Parameters
         ----------
@@ -3438,20 +3440,23 @@ class SPINNA:
         executor : concurrent.futures.Executor, optional
             Executor the tasks are submitted to; the caller shuts it
             down. Default is None: a new ``ProcessPoolExecutor`` using
-            ``lib.n_workers()`` processes, which is not shut down.
+            ``lib.n_workers()`` processes, which is shut down once its
+            tasks are done.
 
         Returns
         -------
         fs : list of Futures
             Contain the scoring for each combination of structures, one
-            per task of ``N_TASKS`` (equal parts of ``N_structures``).
+            per task of ``N_TASKS`` (equal parts of ``N_structures``);
+            pass them to :meth:`scores_from_futures` once all are done.
         """
         # split N_structures into groups that are tested by each Process
         # separately
         structures_per_task = _task_sizes(N_structures.shape[0])
         start_indices = np.cumsum([0] + structures_per_task[:-1])
         fs = []
-        if executor is None:
+        own_executor = executor is None
+        if own_executor:
             executor = futures.ProcessPoolExecutor(lib.n_workers())
         # call NN_scorer for each group of N_structures
         for i, n_neighbors_task in zip(start_indices, structures_per_task):
@@ -3461,6 +3466,9 @@ class SPINNA:
                     N_structures[i : i + n_neighbors_task],
                 )
             )
+        if own_executor:
+            # the submitted tasks keep running; the processes exit after
+            executor.shutdown(wait=False)
         return fs
 
     def fit_coarse_to_fine(
@@ -3469,7 +3477,7 @@ class SPINNA:
         coarse_fraction: float = 0.1,
         radius: float = BOOTSTRAP_DISTANCE,
         save: str = "",
-        asynch: bool = True,
+        parallel: bool = True,
         bootstrap: bool = False,
         progress: lib.Progress | Literal["console"] | None = None,
     ) -> (
@@ -3496,8 +3504,9 @@ class SPINNA:
         save : str, optional
             Path of a .csv file for the tested combinations and scores,
             as in :meth:`fit`. Default is ''.
-        asynch : bool, optional
-            If True, multiprocessing is used. Default is True.
+        parallel : bool, optional
+            If True, the candidates are scored in a pool of worker
+            processes, see :meth:`fit`. Default is True.
         bootstrap : bool, optional
             If True, bootstrapping is used to estimate the fitting
             error. Default is False.
@@ -3524,7 +3533,7 @@ class SPINNA:
                 coarse_fraction,
                 radius,
                 save,
-                asynch,
+                parallel,
                 bootstrap,
                 progress,
             )
@@ -3535,7 +3544,7 @@ class SPINNA:
         coarse_fraction: float,
         radius: float,
         save: str,
-        asynch: bool,
+        parallel: bool,
         bootstrap: bool,
         progress: lib.Progress,
     ) -> (
@@ -3563,7 +3572,7 @@ class SPINNA:
         fine_title = _phase_label(self.progress_title, "Fine pass")
 
         N_coarse, scores_coarse = self._run_brute_force(
-            N_coarse, asynch, progress, coarse_title
+            N_coarse, parallel, progress, coarse_title
         )
 
         coarse_best = N_coarse[np.argmin(scores_coarse)]
@@ -3578,7 +3587,7 @@ class SPINNA:
         spinna_results = self._fit_brute_force(
             N_fine,
             save="",
-            asynch=asynch,
+            parallel=parallel,
             bootstrap=bootstrap,
             return_scores=True,
             progress=progress,
@@ -3923,7 +3932,7 @@ class SPINNA:
     def _run_brute_force(
         self,
         N_structures: lib.IntArray2D,
-        asynch: bool,
+        parallel: bool,
         progress: lib.Progress,
         label: str,
     ) -> tuple[lib.IntArray2D, lib.FloatArray1D]:
@@ -3934,8 +3943,9 @@ class SPINNA:
         ----------
         N_structures : lib.IntArray2D
             Candidates to evaluate.
-        asynch : bool
-            If True, multiprocessing is used.
+        parallel : bool
+            If True, the candidates are scored in a pool of worker
+            processes; if False, in the calling process.
         progress : lib.Progress
             Normalized progress tracker (see ``lib.normalize_progress``).
             Reports the phase ``label`` over the candidates scored.
@@ -3947,14 +3957,14 @@ class SPINNA:
         N_structures : lib.IntArray2D
         scores : lib.FloatArray1D
         """
-        if not asynch:
+        if not parallel:
             return self._score(N_structures, progress, label)
         n_candidates = N_structures.shape[0]
         lib.start_phase(progress, label, n_candidates, unit="candidate")
         sizes = _task_sizes(n_candidates)
         executor = futures.ProcessPoolExecutor(lib.n_workers())
         try:
-            fs = self.fit_stoichiometry_parallel(N_structures, executor)
+            fs = self.fit_stoichiometry_async(N_structures, executor)
             # report the candidates of the finished tasks from this
             # (the calling) thread until all are done
             while True:
@@ -4268,7 +4278,7 @@ def _fit_label_unc_for_target(
     depth: float | None,
     random_rot_mode,
     N_sim: int,
-    asynch: bool,
+    parallel: bool,
     savedir: str,
     progress: lib.Progress,
     fitting_mode: Literal[
@@ -4312,8 +4322,9 @@ def _fit_label_unc_for_target(
         Mode of random rotation of structures.
     N_sim : int
         Number of times each simulation is repeated.
-    asynch : bool
-        If True, multiprocessing is used for fitting.
+    parallel : bool
+        Whether the candidates are scored in a pool of worker
+        processes, see ``SPINNA.fit``.
     savedir : str
         Directory where the fitting scores are saved as .csv files. If
         "" is given, the files are not saved.
@@ -4375,7 +4386,7 @@ def _fit_label_unc_for_target(
             random_rot_mode=random_rot_mode,
             nn_counts=nn_counts,
             N_sim=N_sim,
-            asynch=asynch,
+            parallel=parallel,
             savedir=savedir,
             progress=progress,
             progress_title=progress_title,
@@ -4436,7 +4447,7 @@ def compare_models(
     height: float | None = None,
     depth: float | None = None,
     random_rot_mode: Literal["2D", "3D"] | None = "2D",
-    asynch: bool = True,
+    parallel: bool = True,
     savedir: str = "",
     progress: lib.Progress | Literal["console"] | None = None,
     fitting_mode: Literal[
@@ -4485,9 +4496,12 @@ def compare_models(
         rotated randomly in 3D. If "2D", structures are rotated
         randomly in 2D about z axis. If None, structures are not
         rotated. Default is "2D".
-    asynch : bool, optional
-        If True, multiprocessing is used for fitting. Else, single
-        thread is used. Default is True.
+    parallel : bool, optional
+        If True, the candidates are scored in a pool of worker
+        processes (75% of the CPU cores, see ``lib.n_workers``); if
+        False, one after another in the calling process. The
+        "bayesian" fitting mode scores one candidate at a time
+        either way. Default is True.
     savedir : str, optional
         Path to the directory where the fitting scores are saved as
         .csv files. If "" is given, the files are not saved. Default
@@ -4577,7 +4591,7 @@ def compare_models(
                 depth=depth,
                 random_rot_mode=random_rot_mode,
                 N_sim=N_sim,
-                asynch=asynch,
+                parallel=parallel,
                 savedir=savedir,
                 progress=progress,
                 fitting_mode=fitting_mode,
@@ -4608,7 +4622,7 @@ def compare_models(
                 random_rot_mode=random_rot_mode,
                 nn_counts=nn_counts,
                 N_sim=N_sim,
-                asynch=asynch,
+                parallel=parallel,
                 savedir=savedir,
                 progress=progress,
                 progress_title=progress_title,
@@ -4633,7 +4647,7 @@ def compare_models_given_label_unc(
     random_rot_mode: Literal["2D", "3D"] | None = "2D",
     nn_counts: dict | str = "auto",
     N_sim: int = 1,
-    asynch: bool = True,
+    parallel: bool = True,
     savedir: str = "",
     progress: lib.Progress | Literal["console"] | None = None,
     progress_title: str = "Spinning structures",
@@ -4691,9 +4705,12 @@ def compare_models_given_label_unc(
     N_sim : int, optional
         Number of times each simulation is repeated to obtain smoother
         NND histograms. Default is 1.
-    asynch : bool, optional
-        If True, multiprocessing is used for fitting. Else, single
-        thread is used. Default is True.
+    parallel : bool, optional
+        If True, the candidates are scored in a pool of worker
+        processes (75% of the CPU cores, see ``lib.n_workers``); if
+        False, one after another in the calling process. The
+        "bayesian" fitting mode scores one candidate at a time
+        either way. Default is True.
     savedir : str, optional
         Path to the directory where the fitting scores are saved as
         .csv files. If "" is given, the files are not saved. Default
@@ -4747,7 +4764,7 @@ def compare_models_given_label_unc(
             random_rot_mode,
             nn_counts,
             N_sim,
-            asynch,
+            parallel,
             savedir,
             progress,
             progress_title,
@@ -4770,7 +4787,7 @@ def _compare_models_given_label_unc(
     random_rot_mode: Literal["2D", "3D"] | None,
     nn_counts: dict | str,
     N_sim: int,
-    asynch: bool,
+    parallel: bool,
     savedir: str,
     progress: lib.Progress,
     progress_title: str,
@@ -4832,7 +4849,7 @@ def _compare_models_given_label_unc(
             N_structures=search_space,
             fitting_mode=fitting_mode,
             save=savepath,
-            asynch=asynch,
+            parallel=parallel,
             progress=progress,
         )
         if score < best_score:
@@ -4856,7 +4873,7 @@ def fit_le(
     height: float | None = None,
     depth: float | None = None,
     random_rot_mode: Literal["2D", "3D"] | None = "2D",
-    asynch: bool = True,
+    parallel: bool = True,
     savedir: str = "",
     progress: lib.Progress | Literal["console"] | None = None,
     fitting_mode: Literal[
@@ -4899,8 +4916,12 @@ def fit_le(
         ``compare_models``. Default is None.
     random_rot_mode : {"2D", "3D", None}, optional
         Mode of random rotation of structures. Default is "2D".
-    asynch : bool, optional
-        If True, multiprocessing is used for fitting. Default is True.
+    parallel : bool, optional
+        If True, the candidates are scored in a pool of worker
+        processes (75% of the CPU cores, see ``lib.n_workers``); if
+        False, one after another in the calling process. The
+        "bayesian" fitting mode scores one candidate at a time
+        either way. Default is True.
     savedir : str, optional
         Directory where the fitting scores are saved as .csv files. If
         "" is given, the files are not saved. Default is "".
@@ -4976,7 +4997,7 @@ def fit_le(
         height=height,
         depth=depth,
         random_rot_mode=random_rot_mode,
-        asynch=asynch,
+        parallel=parallel,
         savedir=savedir,
         progress=progress,
         fitting_mode=fitting_mode,
