@@ -5537,16 +5537,20 @@ def calculate_fret(
         max_frames = max([acc_locs["frame"].max(), don_locs["frame"].max()])
 
     # Initialize a vector filled with zeros for the duration of the movie
+    # (float: an integer trace would truncate the photon numbers)
     xvec = np.arange(max_frames + 1)
-    yvec = xvec[:] * 0
-    acc_trace = yvec.copy()
-    don_trace = yvec.copy()
+    acc_trace = np.zeros(len(xvec))
+    don_trace = np.zeros(len(xvec))
     # Fill vector with the photon numbers of events that happend
     acc_trace[acc_locs["frame"]] = acc_locs["photons"] - acc_locs["bg"]
     don_trace[don_locs["frame"]] = don_locs["photons"] - don_locs["bg"]
 
-    # Calculate the FRET efficiency
-    fret_trace = acc_trace / (acc_trace + don_trace)
+    # Calculate the FRET efficiency (0 in frames without any photons, which
+    # the selection below drops)
+    total = acc_trace + don_trace
+    fret_trace = np.divide(
+        acc_trace, total, out=np.zeros_like(total), where=total != 0
+    )
     # Only select FRET values between 0 and 1
     selector = np.logical_and(fret_trace > 0, fret_trace < 1)
 

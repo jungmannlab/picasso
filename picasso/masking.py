@@ -457,6 +457,11 @@ def threshold_otsu(image: lib.FloatArray2D) -> float:
     ----------
     1. Wikipedia, https://en.wikipedia.org/wiki/Otsu's_Method
     """
+    if image.min() == image.max():
+        # a constant image has no two classes to tell apart: keep all of it
+        # (its histogram would leave the class means below at 0 / 0)
+        return float(image.min()) - 0.5
+
     # histogram the image and converts bin edges to bin centers
     counts, bin_edges = np.histogram(image, bins=256)
     counts = counts.astype("float32", copy=False)

@@ -1695,7 +1695,7 @@ class ViewRotation(QtWidgets.QLabel, idle.SpillableChannels):
         # shift z positions of locs so that the middle of the dataset is
         # at z = 0
         all_locs_z = np.concatenate([_["z"].to_numpy() for _ in self.locs])
-        z_shift = all_locs_z.mean()
+        z_shift = all_locs_z.mean() if len(all_locs_z) else 0.0
         # store the shift (nm) so that render-by-property limits, which
         # are given in the main window's z, can be mapped onto the
         # shifted z used here (see _apply_render_property_split)

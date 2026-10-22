@@ -25,6 +25,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 # must come after the PyQt6 import so that matplotlib's qt_compat
 # selects the PyQt6 binding (picasso core no longer imports PyQt6)
 from matplotlib.backends.backend_qt5agg import FigureCanvas
+from matplotlib.figure import Figure
 from scipy.optimize import curve_fit
 from scipy.stats import norm
 
@@ -998,9 +999,9 @@ class Window(QtWidgets.QMainWindow):
         posgrid = QtWidgets.QGridLayout(pos_groupbox)
         strgrid = QtWidgets.QGridLayout(str_groupbox)
 
-        self.figure1 = plt.figure(figsize=(2, 2), constrained_layout=True)
+        self.figure1 = Figure(figsize=(2, 2), constrained_layout=True)
         self.ax1 = self.figure1.add_subplot(111)
-        self.figure2 = plt.figure(figsize=(2, 2), constrained_layout=True)
+        self.figure2 = Figure(figsize=(2, 2), constrained_layout=True)
         self.ax2 = self.figure2.add_subplot(111)
         self.canvas1 = FigureCanvas(self.figure1)
         csize = 180

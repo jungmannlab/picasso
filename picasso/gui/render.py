@@ -35,6 +35,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets, sip
 # selects the PyQt6 binding (picasso core no longer imports PyQt6)
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
+from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 from scipy.ndimage import gaussian_filter
 from sklearn.metrics.pairwise import euclidean_distances
@@ -10058,7 +10059,7 @@ class DisplaySettingsDialog(lib.Dialog):
         render_grid.addWidget(self.render_check, 5, 0)
 
         fw, fh, dpi = (2, 1, 150)
-        self.figure_prop = plt.figure(
+        self.figure_prop = Figure(
             figsize=(fw, fh), dpi=dpi, constrained_layout=True
         )
         self.ax_prop = self.figure_prop.add_subplot(111)
@@ -10861,9 +10862,8 @@ class SlicerDialog(lib.Dialog):
         self.sl.valueChanged.connect(self.on_slice_position_changed)
         slicer_grid.addWidget(self.sl, 1, 0, 1, 2)
 
-        self.figure, self.ax = plt.subplots(
-            1, figsize=(3, 3), constrained_layout=True
-        )
+        self.figure = Figure(figsize=(3, 3), constrained_layout=True)
+        self.ax = self.figure.subplots()
         self.canvas = FigureCanvas(self.figure)
         slicer_grid.addWidget(self.canvas, 2, 0, 1, 2)
 

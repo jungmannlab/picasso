@@ -219,6 +219,8 @@ def test_scale_bar_is_drawn_and_saved_when_selected(dialog, qapp, shown):
     else:
         assert settings["Scale bar length (nm)"] is None
     # the bar sits 20 px above the bottom and 35 px from the right edge
-    frame = imageio.mimread(str(dialog.output))[-1]
+    # a plain array: imageio's Array subclass has a NumPy-2-deprecated
+    # __array_wrap__
+    frame = np.asarray(imageio.mimread(str(dialog.output))[-1])
     patch = frame[64 - 25 : 64 - 22, 96 - 40 : 96 - 37].astype(int)
     assert (patch.min() > 200) == shown

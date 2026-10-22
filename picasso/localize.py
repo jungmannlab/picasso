@@ -10714,12 +10714,13 @@ def _lateral_plot_alignment(
     off_raw = np.hypot(dy_raw, dx_raw)
     off_cor = np.hypot(dy_cor, dx_cor)
 
-    fig = plt.figure(figsize=(11, 11))
+    # constrained: tight_layout cannot place the colorbars' nested grids
+    fig = plt.figure(figsize=(11, 11), layout="constrained")
     title = _alignment_title(
         decomp, n_pairs, transform_type, ref_path, target_path
     )
     fig.suptitle(title, fontsize=10, fontweight="bold")
-    gs = gridspec.GridSpec(2, 2, figure=fig, wspace=0.30, hspace=0.25)
+    gs = gridspec.GridSpec(2, 2, figure=fig)
 
     ext = [0, img_ref.shape[1] * nm, img_ref.shape[0] * nm, 0]
 
@@ -10797,7 +10798,6 @@ def _lateral_plot_alignment(
     ax.set_xlabel(f"Δx ({unit})")
     ax.set_ylabel(f"Δy ({unit})")
 
-    fig.tight_layout()
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.show()

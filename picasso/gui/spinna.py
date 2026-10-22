@@ -34,6 +34,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 # must come after the PyQt6 import so that matplotlib's qt_compat
 # selects the PyQt6 binding (picasso core no longer imports PyQt6)
 from matplotlib.backends.backend_qt5agg import FigureCanvas
+from matplotlib.figure import Figure
 from scipy.spatial.transform import Rotation
 
 from .. import io, lib, lib_qt, render, spinna, __version__, docs_url
@@ -3403,7 +3404,7 @@ class SimulationsTab(lib.Dialog):
         nnd_plot_layout = QtWidgets.QVBoxLayout(nnd_plot_box)
         nnd_plot_layout.setSpacing(8)
 
-        self.nnd_fig = plt.figure(
+        self.nnd_fig = Figure(
             figsize=NND_FIGSIZE, dpi=NND_DPI, constrained_layout=True
         )
         self.nnd_ax = self.nnd_fig.add_subplot(111)

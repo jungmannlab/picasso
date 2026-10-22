@@ -56,7 +56,9 @@ def test_3d_movie_has_the_calibrated_spot_widths(window):
         mean = (frame * coordinate).sum() / total
         return np.sqrt((frame * (coordinate - mean) ** 2).sum() / total)
 
-    wx, wy = simulate.calculate_zpsf(Z, window.cx, window.cy)  # nm
+    wx, wy = simulate.calculate_zpsf(
+        Z, np.asarray(window.cx), np.asarray(window.cy)
+    )  # nm
     # the photons land in whole pixels: their variance gains 1/12
     np.testing.assert_allclose(
         spread(cols), np.sqrt((wx / PIXELSIZE) ** 2 + 1 / 12), rtol=0.03

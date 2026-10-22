@@ -345,8 +345,14 @@ def calibrate_z(
 
     ax = plt.subplot(236)
     square_deviation = deviation.to_numpy() ** 2
+    # a step without localizations has no precision (a gap in the plot)
     mean_square_deviation_step = [
-        np.mean(square_deviation[locs_step == _]) for _ in step_range
+        (
+            np.mean(square_deviation[locs_step == _])
+            if np.any(locs_step == _)
+            else np.nan
+        )
+        for _ in step_range
     ]
     rmsd_step = np.sqrt(mean_square_deviation_step)
     plt.plot(z_range, rmsd_step, ".-", color="0.3")

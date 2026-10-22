@@ -4240,11 +4240,6 @@ def plot_subclustering_check(
     has_clustered = len(clustered_n_events) > 0
     has_sparse = len(sparse_n_events) > 0
 
-    m_clustered = clustered_n_events.mean()
-    m_sparse = sparse_n_events.mean()
-    s_clustered = clustered_n_events.std()
-    s_sparse = sparse_n_events.std()
-
     # create the plot
     if fig is None:
         fig, ax1 = plt.subplots(1, figsize=(6, 4), constrained_layout=True)
@@ -4257,7 +4252,11 @@ def plot_subclustering_check(
 
     if has_clustered:
         label = _subcluster_label(
-            "Clustered", clustering_dist, "<", m_clustered, s_clustered
+            "Clustered",
+            clustering_dist,
+            "<",
+            clustered_n_events.mean(),
+            clustered_n_events.std(),
         )
         _plot_subcluster_bar(
             ax1, clustered_n_events, label, "C0", fill, outline
@@ -4265,7 +4264,11 @@ def plot_subclustering_check(
 
     if has_sparse:
         label = _subcluster_label(
-            "Sparse", sparse_dist, ">", m_sparse, s_sparse
+            "Sparse",
+            sparse_dist,
+            ">",
+            sparse_n_events.mean(),
+            sparse_n_events.std(),
         )
         _plot_subcluster_bar(ax1, sparse_n_events, label, "C1", fill, outline)
 

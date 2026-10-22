@@ -249,8 +249,6 @@ def paintgen(
     eventsum = np.cumsum(events)
     # Find the first event that exceeds the total integration time
     maxloc = np.argmax(eventsum > (frames * time))
-    simulatedmeandark = np.mean(events[:maxloc:2])
-    simulatedmeanbright = np.mean(events[1:maxloc:2])
 
     if np.mod(maxloc, 2):  # uneven -> ends with an OFF-event
         onevents = int(np.floor(maxloc / 2))
@@ -290,8 +288,8 @@ def paintgen(
         spotkinetics = [
             onevents,
             sum(photonsinframe > 0),
-            simulatedmeandark,
-            simulatedmeanbright,
+            np.mean(events[:maxloc:2]),
+            np.mean(events[1:maxloc:2]),
         ]
     else:
         spotkinetics = [0, sum(photonsinframe > 0), 0, 0]
@@ -408,6 +406,10 @@ def distribute_photons_xy(
             "(pixelsize, nm) to express the calibration's spot widths (nm) "
             "in camera pixels."
         )
+    if mode3Dstate:
+        # arrays: numba is dropping (reflected) list arguments
+        cx = np.asarray(cx, dtype=np.float64)
+        cy = np.asarray(cy, dtype=np.float64)
     bindingsitesx = structures[0, :]
     bindingsitesy = structures[1, :]
     bindingsitesz = structures[4, :]

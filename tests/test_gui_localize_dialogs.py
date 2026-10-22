@@ -22,6 +22,7 @@ boxes are recorded instead of shown.
 from __future__ import annotations
 
 import os
+import time
 
 import numpy as np
 import pandas as pd
@@ -56,17 +57,23 @@ def _spot_movie(n_frames=FRAMES, size=SIZE, spots=SPOTS, seed=0):
     return movie.astype(np.uint16)
 
 
-def _wait(window):
+def _wait(window, timeout=120.0):
     """Let every worker the window started finish and deliver its
-    signals - also the ones a finished worker starts in turn."""
+    signals - also the ones a finished worker starts in turn.
+
+    A batch fit (``_multi_fit``) starts its next fit from the previous
+    fit's signal, so no worker running is not enough: under load the next
+    fit can finish before its signal is delivered, and the batch is only
+    done once ``_multi_fit`` is cleared."""
     names = ("identification_worker", "fit_worker", "fit_z_worker")
-    for _ in range(20):
-        running = False
+    deadline = time.monotonic() + timeout
+    while True:
         for name in names:
             worker = getattr(window, name, None)
             if isinstance(worker, QtCore.QThread):
                 worker.wait()
         QtWidgets.QApplication.processEvents()
+        running = getattr(window, "_multi_fit", None) is not None
         for name in names:
             worker = getattr(window, name, None)
             if isinstance(worker, QtCore.QThread) and worker.isRunning():
@@ -74,6 +81,9 @@ def _wait(window):
         if not running:
             QtWidgets.QApplication.processEvents()
             return
+        if time.monotonic() > deadline:
+            raise AssertionError(f"the window's workers ran past {timeout} s")
+        QtCore.QThread.msleep(5)
 
 
 def _step(info, step):

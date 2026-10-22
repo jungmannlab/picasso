@@ -811,10 +811,10 @@ def plot_NN(  # noqa: C901
     # save figure(s)
     if savefig:
         if isinstance(savefig, str):
-            plt.savefig(savefig)
+            fig.savefig(savefig)
         elif isinstance(savefig, list) or isinstance(savefig, tuple):
             for name in savefig:
-                plt.savefig(name)
+                fig.savefig(name)
 
     # display and/or return figure
     if show:
