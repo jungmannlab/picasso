@@ -1471,25 +1471,32 @@ def _worker(
     done: list,
     lock,
     stop: np.ndarray,
+    chunk_size: int | None = None,
 ) -> None:
     """Worker for asynchronous fitting: claim the next spot, fit it with
-    ``kernel(spots, index, *args)`` and count it as finished.
+    ``kernel(spots, index, *args)`` and count it as finished. With a
+    ``chunk_size``, claim up to that many consecutive spots at once and fit
+    them with ``kernel(spots, start, stop, *args)``.
 
     The finished count is bumped under the same lock acquisition that claims
     the next spot, so counting costs no extra locking."""
     n_spots = len(spots)
-    fitted = False
+    fitted = 0
     while True:
         with lock:
-            if fitted:
-                done[0] += 1
+            done[0] += fitted
             if stop[0] or current[0] == n_spots:
                 return
-            index = current[0]
-            current[0] += 1
-        fitted = False
-        kernel(spots, index, *args)
-        fitted = True
+            start = current[0]
+            end = start + 1 if chunk_size is None else start + chunk_size
+            end = min(end, n_spots)
+            current[0] = end
+        fitted = 0
+        if chunk_size is None:
+            kernel(spots, start, *args)
+        else:
+            kernel(spots, start, end, *args)
+        fitted = end - start
 
 
 def _start_async(
@@ -1498,6 +1505,7 @@ def _start_async(
     args: tuple,
     outputs: tuple,
     n_threads: int | None,
+    chunk_size: int | None = None,
 ) -> AsyncFit:
     """Start ``n_threads`` workers fitting every spot with ``kernel``.
 
@@ -1506,7 +1514,9 @@ def _start_async(
     Parameters
     ----------
     kernel : callable
-        Per-spot ``nogil`` kernel, called as ``kernel(spots, index, *args)``.
+        Per-spot ``nogil`` kernel, called as ``kernel(spots, index, *args)``,
+        or, with ``chunk_size``, a kernel over a range of spots, called as
+        ``kernel(spots, start, stop, *args)``.
     spots : np.ndarray
         The spots, indexed by spot along the first axis.
     args : tuple
@@ -1516,6 +1526,11 @@ def _start_async(
     n_threads : int or None
         Number of worker threads; None uses :func:`n_workers`. Clipped to
         at most one thread per spot.
+    chunk_size : int or None, optional
+        Number of spots a worker claims at once, for kernels so short that
+        the Python round trip per spot (claim, dispatch) would hold the GIL
+        longer than the fit runs without it. None claims one spot at a
+        time with a per-spot kernel. Default None.
 
     Returns
     -------
@@ -1533,7 +1548,15 @@ def _start_async(
     executor = futures.ThreadPoolExecutor(n_threads)
     fs = [
         executor.submit(
-            _worker, kernel, spots, args, current, done, lock, stop
+            _worker,
+            kernel,
+            spots,
+            args,
+            current,
+            done,
+            lock,
+            stop,
+            chunk_size,
         )
         for _ in range(n_threads)
     ]
@@ -1647,7 +1670,8 @@ def fit_spots(
     max_iterations: int | None = None,
     progress: lib.Progress | Literal["console"] | None = None,
     variance: np.ndarray | None = None,
-) -> tuple:
+    abort_callback: Callable[[], bool] | None = None,
+) -> tuple | None:
     """Fit spots with a cubic-spline PSF model on the CPU, serially.
 
     Parameters
@@ -1696,6 +1720,9 @@ def fit_spots(
         Per-pixel sCMOS readout variance in photoelectrons squared, laid out
         exactly like ``spots``. ``None`` (the default) fits the plain Poisson
         model. See :func:`_estimator_terms`.
+    abort_callback : callable or None, optional
+        Polled between spots; returning True stops the fit and the
+        function returns None. Default is None.
 
     Returns
     -------
@@ -1745,6 +1772,8 @@ def fit_spots(
         lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
         progress.set_value(0)
         for index in range(n_spots):
+            if callable(abort_callback) and abort_callback():
+                return None
             _fit_spline_spot(spots, index, *args)
             progress.set_value(index + 1)
     return thetas, chi_squares, states, iterations

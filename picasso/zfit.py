@@ -421,7 +421,8 @@ def _fit_z(
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
     filter: int = 2,
     progress: lib.Progress | None = None,
-) -> pd.DataFrame:
+    abort_callback: Callable[[], bool] | None = None,
+) -> pd.DataFrame | None:
     """Internal function for fitting z coordinates to the localizations.
     See `zfit` for details. ``calibration`` and the spot widths of
     ``locs`` are in nm; ``pixelsize`` (nm) is only used to evaluate the
@@ -430,7 +431,8 @@ def _fit_z(
     ``progress`` is a normalized tracker whose phase the caller started;
     it is advanced to the number of localizations fitted. None (only for
     the worker processes of :func:`_fit_z_parallel`, which cannot report
-    to the caller's tracker) reports nothing."""
+    to the caller's tracker) reports nothing. Returns None if
+    ``abort_callback``, polled between localizations, asked to stop."""
     locs = locs.copy()
     cx = np.array(calibration["X Coefficients"])
     cy = np.array(calibration["Y Coefficients"])
@@ -443,6 +445,8 @@ def _fit_z(
     if progress is None:
         progress = lib.MockProgress()
     for i in range(len(z)):
+        if callable(abort_callback) and abort_callback():
+            return None
         # set bounds to avoid potential gaps in the calibration curve,
         # credits to Loek Andriessen
         result = minimize_scalar(
@@ -768,11 +772,13 @@ def _fit_z_gpu(
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
     filter: int = 2,
     progress: lib.Progress | None = None,
-) -> pd.DataFrame:
+    abort_callback: Callable[[], bool] | None = None,
+) -> pd.DataFrame | None:
     """GPU (numba.cuda) equivalent of ``_fit_z``. Fits the z coordinate
     of every localization in parallel on the GPU, reproducing the CPU
-    result. See ``_fit_z`` for details; ``progress`` is advanced once
-    per chunk of a million localizations."""
+    result. See ``_fit_z`` for details; ``progress`` is advanced, and
+    ``abort_callback`` polled, once per chunk of a million localizations.
+    Returns None if aborted."""
     if not CUDA_AVAILABLE:
         raise RuntimeError(
             "GPU z fitting requested but no CUDA-capable GPU is available."
@@ -797,6 +803,8 @@ def _fit_z_gpu(
         if progress is None:
             progress = lib.MockProgress()
         for start in range(0, N, chunk):
+            if callable(abort_callback) and abort_callback():
+                return None
             end = min(start + chunk, N)
             n = end - start
             d_sx = cuda.to_device(sx[start:end])
@@ -928,8 +936,8 @@ def zfit(
     abort_callback : callable or None, optional
         A callable for aborting the fit, e.g., from the GUI. If a
         callable provided, it must accept no input and return a boolean
-        indicating whether the fitting should be aborted. Only polled
-        with ``parallel`` (and not ``gpu``).
+        indicating whether the fitting should be aborted. Polled
+        throughout the fit, on every device.
 
     Returns
     -------
@@ -1107,6 +1115,7 @@ def _zfit(
             fitting_method=fitting_method,
             filter=filter,
             progress=progress,
+            abort_callback=abort_callback,
         )
     elif parallel:
         locs = _fit_z_parallel(
@@ -1120,8 +1129,6 @@ def _zfit(
             progress=progress,
             abort_callback=abort_callback,
         )
-        if locs is None:
-            return None, None
     else:
         locs = _fit_z(
             locs=locs,
@@ -1132,7 +1139,10 @@ def _zfit(
             fitting_method=fitting_method,
             filter=filter,
             progress=progress,
+            abort_callback=abort_callback,
         )
+    if locs is None:  # aborted
+        return None, None
     progress.set_value(N)
     return _apply_lateral_transforms_and_build_info(
         locs, info, calibration, lateral_transforms, filter, pixelsize

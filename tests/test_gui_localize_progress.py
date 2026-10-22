@@ -345,3 +345,60 @@ def test_quality_checks_take_a_tracker(monkeypatch):
     assert (
         "Checking Quality (2/4) NeNA: Calculating NeNA 4 / 4 ..." in messages
     )
+
+
+@pytest.mark.gui
+@pytest.mark.slow
+def test_aborting_an_avg_fit_leaves_the_window_usable(
+    picasso_movie, movie_info, real_identifications
+):
+    """Abort a real "avg" fit (a process pool) from the Localize window
+    once the spots are being fitted: the worker reports the abort without
+    an error, the window resets its state, and a second fit then runs to
+    the end."""
+    from PyQt6 import QtCore
+
+    from tests.conftest import BOX, CAMERA_INFO, PIXELSIZE
+
+    camera_info = {**CAMERA_INFO, "Pixelsize": PIXELSIZE}
+    window = gui_localize.Window()
+    try:
+
+        def run(abort: bool) -> dict:
+            worker = gui_localize.FitWorker(
+                picasso_movie, movie_info, camera_info,
+                real_identifications, BOX, "avg", None, None,
+                False, False, False,
+            )  # fmt: skip
+            events = {}
+            loop = QtCore.QEventLoop()
+
+            def on_phase(label, maximum):
+                if abort and label == "Fitting spots":
+                    window.abort()
+
+            worker.phaseStarted.connect(on_phase)
+            worker.aborted.connect(lambda: events.update(aborted=True))
+            worker.failed.connect(
+                lambda message: events.update(failed=message)
+            )
+            worker.finished.connect(lambda *a: events.update(locs=a[0]))
+            for signal in (worker.aborted, worker.failed, worker.finished):
+                signal.connect(loop.quit)
+            QtCore.QTimer.singleShot(120_000, loop.quit)
+            window._start_fit_worker(worker)
+            loop.exec()
+            assert worker.wait(60_000)
+            return events
+
+        events = run(abort=True)
+        assert events == {"aborted": True}
+        assert window._active_worker is None
+        assert not window.abort_action.isEnabled()
+        assert window.status_bar.currentMessage() == "Aborted."
+
+        events = run(abort=False)
+        assert "failed" not in events and "aborted" not in events
+        assert len(events["locs"]) == len(real_identifications)
+    finally:
+        window.close()

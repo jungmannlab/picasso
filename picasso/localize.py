@@ -2475,11 +2475,13 @@ def _identify_threaded(
     )
     try:
         while True:
+            # polled before the completion check, so that an abort is
+            # honored even when the work finishes before the first poll
+            if abort_callback is not None and abort_callback():
+                return None
             _, pending = wait_futures(futures, timeout=0.2)
             if not pending:
                 break
-            if abort_callback is not None and abort_callback():
-                return None
             progress.set_value(current[1])
         ids = identifications_from_futures(futures)
         progress.set_value(N)
@@ -2497,12 +2499,19 @@ def _identify_serial(
     roi,
     frame_bounds,
     progress: lib.Progress,
+    abort_callback=None,
 ):
     """Identify spots frame-by-frame in the current thread, reporting the
-    finished frames to ``progress`` (an already started phase)."""
+    finished frames to ``progress`` (an already started phase).
+
+    Returns None if ``abort_callback``, polled between frames, asked to
+    stop.
+    """
     N = len(movie)
     identifications = []
     for i in range(N):
+        if abort_callback is not None and abort_callback():
+            return None
         identifications.append(
             identify_by_frame_number(
                 movie,
@@ -2592,7 +2601,7 @@ def identify(
         A callable for aborting the identification, e.g., from the GUI.
         If a callable provided, it must accept no input and return a
         boolean indicating whether the identification should be aborted.
-        Only polled if ``parallel``. Default is None.
+        Default is None.
 
     Returns
     -------
@@ -2705,7 +2714,10 @@ def identify(
                 search_roi,
                 frame_bounds,
                 progress,
+                abort_callback,
             )
+            if ids is None:
+                return
     if window is not None:
         # back to canvas coordinates
         (y0, x0), _ = window
@@ -4069,12 +4081,10 @@ def fit(
         itself, are skipped with a ``lib.DuplicateLateralTransformWarning``.
         They are recorded in an entry of their own. Default is None.
     parallel : bool, optional
-        If True, the CPU fits of the "spline" and "spline-mle" methods run
-        on a pool of threads and those of "avg" on a pool of worker
-        processes; if False, they run in the calling thread. The CPU
-        Gaussian methods ("gausslq", "gaussmle" and their variants) run in
-        the calling thread either way, and the GPU methods ignore it.
-        Default is True.
+        If True, the CPU fits run on a pool of threads ("gausslq",
+        "gaussmle", "spline" and their variants) or, for "avg", of worker
+        processes; if False, they run in the calling thread. Ignored by
+        the GPU methods. Default is True.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -4086,9 +4096,9 @@ def fit(
     abort_callback : callable or None, optional
         A callable for aborting the fit, e.g., from the GUI. If a
         callable provided, it must accept no input and return a boolean
-        indicating whether the fitting should be aborted. Only the
-        parallel CPU fits ("spline", "spline-mle" and "avg") poll it.
-        Default is None.
+        indicating whether the fitting should be aborted. Polled after the
+        spots are cut and throughout the fit, by every method. Default is
+        None.
 
     Returns
     -------
@@ -4128,22 +4138,25 @@ def fit(
         )
         em = camera_info["Gain"] > 1
         gauss_flags = parse_gauss_code(fitting_method)
-        locs = _dispatch_fit(
-            fitting_method=fitting_method,
-            gauss_flags=gauss_flags,
-            spots=spots,
-            identifications=identifications,
-            box=box,
-            em=em,
-            variance=variance,
-            eps=eps,
-            max_it=max_it,
-            spline_calibration=spline_calibration,
-            parallel=parallel,
-            progress=progress,
-            abort_callback=abort_callback,
-            pixelsize=float(camera_info["Pixelsize"]),
-        )
+        if callable(abort_callback) and abort_callback():
+            locs = None  # aborted while the spots were cut
+        else:
+            locs = _dispatch_fit(
+                fitting_method=fitting_method,
+                gauss_flags=gauss_flags,
+                spots=spots,
+                identifications=identifications,
+                box=box,
+                em=em,
+                variance=variance,
+                eps=eps,
+                max_it=max_it,
+                spline_calibration=spline_calibration,
+                parallel=parallel,
+                progress=progress,
+                abort_callback=abort_callback,
+                pixelsize=float(camera_info["Pixelsize"]),
+            )
     localize_info = _fit_localize_info(
         fitting_method,
         gauss_flags,
@@ -4332,6 +4345,8 @@ def _dispatch_fit(
             max_iterations=max_it,
             progress=progress,
             variance=variance,
+            parallel=parallel,
+            abort_callback=abort_callback,
             pixelsize=pixelsize,
             **gauss_flags,
         )
@@ -4350,6 +4365,7 @@ def _dispatch_fit(
             tolerance=eps,
             max_iterations=max_it,
             variance=variance,
+            abort_callback=abort_callback,
             pixelsize=pixelsize,
         )
     elif fitting_method in ("spline", "spline-mle"):
@@ -4587,6 +4603,8 @@ def fit_spots_gauss(
     max_iterations: int | None = None,
     progress: lib.Progress | Literal["console"] | None = None,
     variance: lib.FloatArray3D | None = None,
+    parallel: bool = True,
+    abort_callback: Callable[[], bool] | None = None,
 ) -> (
     lib.FloatArray2D
     | tuple[
@@ -4595,6 +4613,7 @@ def fit_spots_gauss(
         lib.FloatArray1D,
         lib.FloatArray1D | None,
     ]
+    | None
 ):
     """Fit spots with a 2D Gaussian on the CPU or the GPU.
 
@@ -4631,14 +4650,21 @@ def fit_spots_gauss(
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
         or None for no reporting. Reports one phase, "Fitting spots", over
-        the spots: per spot on the CPU, per launched chunk on the GPU.
-        Default is None.
+        the spots finished: per chunk of 64 spots on the CPU, per launched
+        chunk on the GPU. Default is None.
     variance : lib.FloatArray3D, optional
         Per-pixel sCMOS readout variance in photoelectrons squared, laid out
         exactly like ``spots`` (from ``get_spots(..., return_variance=True)``).
         Applies Huang et al.'s noise model to the maximum-likelihood
         estimator; least squares is unaffected by construction. Default is
         None.
+    parallel : bool, optional
+        If True, the CPU fit runs on a pool of threads (the kernels are
+        ``nogil``); if False, in the calling thread. Ignored on the GPU,
+        where one launch fits a chunk of spots. Default is True.
+    abort_callback : callable or None, optional
+        Polled during the fit; returning True stops it and the function
+        returns None. Default is None.
 
     Returns
     -------
@@ -4653,6 +4679,8 @@ def fit_spots_gauss(
     chi_square : lib.FloatArray1D or None
         Only if ``return_stats``. The residual sum of squares at the optimum;
         None for maximum likelihood.
+    None
+        If ``abort_callback`` asked to stop.
     """
     if rotated and spherical:
         raise ValueError("'rotated' and 'spherical' are mutually exclusive.")
@@ -4674,21 +4702,48 @@ def fit_spots_gauss(
         spherical=spherical,
     ).astype(np.float64)
 
-    backend = gaussfit_cuda if use_gpu else gaussfit
+    kwargs = dict(
+        mle=mle,
+        tolerance=tolerance,
+        max_iterations=max_iterations,
+        variance=variance,
+    )
     with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
-        # the backend starts (and ends) the "Fitting spots" phase
-        parameters, chi_squares, _states, number_iterations = (
-            backend.fit_spots(
+        if use_gpu:
+            # starts and ends its own "Fitting spots" phase; stops between
+            # chunks when aborted, leaving the remaining spots unfitted
+            result = gaussfit_cuda.fit_spots(
                 model,
                 spots,
                 initial_parameters,
-                mle=mle,
-                tolerance=tolerance,
-                max_iterations=max_iterations,
                 progress=progress,
-                variance=variance,
+                abort_callback=abort_callback,
+                **kwargs,
             )
-        )
+            if callable(abort_callback) and abort_callback():
+                return None
+        elif not parallel or len(spots) == 0:
+            # starts and ends its own "Fitting spots" phase
+            result = gaussfit.fit_spots(
+                model,
+                spots,
+                initial_parameters,
+                progress=progress,
+                abort_callback=abort_callback,
+                **kwargs,
+            )
+            if result is None:
+                return None
+        else:
+            n_spots = len(spots)
+            lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
+            job = gaussfit.fit_spots_async(
+                model, spots, initial_parameters, **kwargs
+            )
+            if not _await_async_fit(job, n_spots, progress, abort_callback):
+                return None
+            result = job.results()
+    parameters, chi_squares, _states, number_iterations = result
     parameters = parameters.astype(np.float32)
     chi_squares = chi_squares.astype(np.float32)
 
@@ -5022,9 +5077,11 @@ def _fit2d_gauss(
     max_iterations: int | None = None,
     progress: lib.Progress | None = None,
     variance: lib.FloatArray3D | None = None,
+    parallel: bool = True,
+    abort_callback: Callable[[], bool] | None = None,
     *,
     pixelsize: float,
-) -> pd.DataFrame:
+) -> pd.DataFrame | None:
     """Fit 2D Gaussians with least squares or, if ``mle``, maximum
     likelihood, on the CPU or the GPU. If ``rotated``, a rotated elliptical
     Gaussian is fitted and the resulting localizations contain the fitted
@@ -5032,8 +5089,10 @@ def _fit2d_gauss(
     isotropic Gaussian with a single width is fitted and the resulting ``sx``
     and ``sy`` columns are identical. ``pixelsize`` (nm) converts the result
     to nm. ``progress`` (a normalized tracker, or None) gets the "Fitting
-    spots" phase. See ``fit`` for more details."""
-    theta, log_likelihood, iterations, chi_square = fit_spots_gauss(
+    spots" phase. See ``fit`` for more details.
+
+    Returns None if ``abort_callback`` asked to stop."""
+    result = fit_spots_gauss(
         spots,
         rotated=rotated,
         mle=mle,
@@ -5044,7 +5103,12 @@ def _fit2d_gauss(
         max_iterations=max_iterations,
         progress=progress,
         variance=variance,
+        parallel=parallel,
+        abort_callback=abort_callback,
     )
+    if result is None:
+        return None
+    theta, log_likelihood, iterations, chi_square = result
     locs = locs_from_fits_gauss(
         identifications,
         theta,
@@ -5200,7 +5264,10 @@ def fit_spots_gauss_multichannel(
                 max_iterations=max_iterations,
                 progress=progress,
                 variance=variance,
+                abort_callback=abort_callback,
             )
+            if result is None:
+                return None
         else:
             n_spots = len(spots)
             lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
@@ -6043,7 +6110,9 @@ def _run_splinefit(
         return _run_splinefit_gpu(args, kwargs, progress, abort_callback)
     if not parallel or n_spots == 0:
         # starts and ends its own "Fitting spots" phase
-        return splinefit.fit_spots(*args, progress=progress, **kwargs)
+        return splinefit.fit_spots(
+            *args, progress=progress, abort_callback=abort_callback, **kwargs
+        )
     return _run_splinefit_threaded(
         args, kwargs, n_spots, progress, abort_callback
     )
@@ -6236,13 +6305,16 @@ def _await_async_fit(
     """
     completed = False
     try:
-        while not job.finished():
+        while True:
+            # polled before the completion check, as in _identify_threaded
+            if callable(abort_callback) and abort_callback():
+                return False
+            if job.finished():
+                break
             # The workers write into preallocated arrays and nothing ever
             # collects their futures, so a worker that died would leave the
             # counter frozen. Surface the error instead.
             job.raise_errors()
-            if callable(abort_callback) and abort_callback():
-                return False
             progress.set_value(min(job.n_done, n_spots))
             time.sleep(0.1)
         job.raise_errors()
@@ -6946,9 +7018,10 @@ def _fit2d_spline_gpu(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     variance: lib.FloatArray3D | None = None,
+    abort_callback: Callable[[], bool] | None = None,
     *,
     pixelsize: float,
-) -> pd.DataFrame:
+) -> pd.DataFrame | None:
     """Fit an experimentally measured cubic-spline PSF on the GPU. For a 3D
     calibration the localizations contain the fitted ``z`` directly. See
     ``fit`` for more details. ``progress`` (a normalized tracker) gets two
@@ -6957,8 +7030,10 @@ def _fit2d_spline_gpu(
 
     ``n_z_starts`` is the axial multi-start (see
     :func:`fit_spots_splinefit`); ``None`` picks it from the calibration.
-    Pass 1 for the single in-focus start."""
-    theta, log_likelihood, iterations, chi_square = fit_spots_splinefit(
+    Pass 1 for the single in-focus start.
+
+    Returns None if ``abort_callback`` asked to stop."""
+    result = fit_spots_splinefit(
         spots,
         calibration,
         mle=mle,
@@ -6969,7 +7044,11 @@ def _fit2d_spline_gpu(
         progress=progress,
         use_gpu=True,
         variance=variance,
+        abort_callback=abort_callback,
     )
+    if result is None:
+        return None
+    theta, log_likelihood, iterations, chi_square = result
     locs = locs_from_fits_spline(
         identifications,
         theta,
@@ -9447,7 +9526,9 @@ def _fit2d_avg(
             return
     else:
         # starts and ends its own "Fitting spots" phase
-        theta = avgroi.fit_spots(spots, progress)
+        theta = avgroi.fit_spots(spots, progress, abort_callback)
+        if theta is None:
+            return None
     locs = avgroi.locs_from_fits(
         identifications,
         theta,
@@ -9473,11 +9554,12 @@ def _process_fitting_futures(
     completed = False
     try:
         while True:
+            # polled before the completion check, as in _identify_threaded
+            if callable(abort_callback) and abort_callback():
+                return None
             done, pending = wait_futures(fs, timeout=0.2)
             if not pending:
                 break
-            if callable(abort_callback) and abort_callback():
-                return None
             progress.set_value(sum(len(f.result()) for f in done))
         theta = avgroi.fits_from_futures(fs)
         completed = True

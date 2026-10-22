@@ -346,6 +346,17 @@ class TestZfit:
         )
         assert out is None and info_out is None
 
+    def test_serial_fit_can_be_aborted(self, locs, info):
+        """Regression: only the process pool polled ``abort_callback``."""
+        out, info_out = zfit.zfit(
+            locs,
+            info,
+            calibration=dict(CALIB_3D),
+            parallel=False,
+            abort_callback=lambda: True,
+        )
+        assert out is None and info_out is None
+
 
 class TestZfitProgress:
     """The ``progress`` argument of ``zfit``: one "Fitting z" phase over the

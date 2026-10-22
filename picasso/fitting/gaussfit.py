@@ -43,7 +43,7 @@ License (MIT): ``LICENSES/Gpufit-LICENSE.txt``.
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Callable, Literal
 
 import numba
 import numpy as np
@@ -1093,6 +1093,51 @@ def n_parameters(model: int) -> int:
     return _N_PARAMS[model]
 
 
+#: Spots a worker fits per claim (see ``_fit_gauss_spots``): one Gaussian
+#: fit takes a few microseconds, about as long as the Python round trip to
+#: claim it and call into numba, which holds the GIL. Fitting a range per
+#: call lets the threads run concurrently; the progress is then reported
+#: per chunk.
+_CHUNK_SIZE = 64
+
+
+@numba.njit(nogil=True, cache=True, fastmath=_FASTMATH)
+def _fit_gauss_spots(
+    spots: np.ndarray,
+    start: int,
+    stop: int,
+    variance: np.ndarray,
+    use_variance: bool,
+    model: int,
+    init: np.ndarray,
+    mle: bool,
+    tolerance: float,
+    max_iterations: int,
+    thetas: np.ndarray,
+    chi_squares: np.ndarray,
+    states: np.ndarray,
+    iterations: np.ndarray,
+) -> None:
+    """Fit the spots ``start`` to ``stop`` (exclusive) with
+    :func:`_fit_gauss_spot`, in one call without the GIL."""
+    for index in range(start, stop):
+        _fit_gauss_spot(
+            spots,
+            index,
+            variance,
+            use_variance,
+            model,
+            init,
+            mle,
+            tolerance,
+            max_iterations,
+            thetas,
+            chi_squares,
+            states,
+            iterations,
+        )
+
+
 def _prepare(
     model: int,
     spots: np.ndarray,
@@ -1177,13 +1222,13 @@ def fit_spots(
     max_iterations: int | None = None,
     progress: lib.Progress | Literal["console"] | None = None,
     variance: np.ndarray | None = None,
-) -> tuple:
+    abort_callback: Callable[[], bool] | None = None,
+) -> tuple | None:
     """Fit spots with a 2D Gaussian model on the CPU, serially.
 
     Takes the same arrays and returns the same results as
     :func:`picasso.fitting.gaussfit_cuda.fit_spots`, so the two are
-    interchangeable backends; the GPU fit also takes ``abort_callback``
-    and ``single_precision``.
+    interchangeable backends; the GPU fit also takes ``single_precision``.
 
     Parameters
     ----------
@@ -1206,11 +1251,14 @@ def fit_spots(
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
         or None for no reporting. Reports one phase, "Fitting spots" over
-        the spots. Default is None.
+        the spots, per chunk of 64 spots. Default is None.
     variance : np.ndarray, optional
         Per-pixel sCMOS readout variance in photoelectrons squared, laid out
         exactly like ``spots``. ``None`` (the default) fits the plain Poisson
         model.
+    abort_callback : callable or None, optional
+        Polled between chunks of 64 spots; returning True stops the fit and the
+        function returns None. Default is None.
 
     Returns
     -------
@@ -1252,9 +1300,12 @@ def fit_spots(
     ) as progress:
         lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
         progress.set_value(0)
-        for index in range(n_spots):
-            _fit_gauss_spot(spots, index, *args)
-            progress.set_value(index + 1)
+        for start in range(0, n_spots, _CHUNK_SIZE):
+            if callable(abort_callback) and abort_callback():
+                return None
+            stop = min(start + _CHUNK_SIZE, n_spots)
+            _fit_gauss_spots(spots, start, stop, *args)
+            progress.set_value(stop)
     return outputs
 
 
@@ -1332,7 +1383,14 @@ def fit_spots_async(
         max_iterations,
         outputs,
     )
-    return _start_async(_fit_gauss_spot, spots, args, outputs, n_threads)
+    return _start_async(
+        _fit_gauss_spots,
+        spots,
+        args,
+        outputs,
+        n_threads,
+        chunk_size=_CHUNK_SIZE,
+    )
 
 
 # ----------------------------------------------------------------------
@@ -2082,7 +2140,8 @@ def fit_spots_multichannel(
     max_iterations: int | None = None,
     progress: lib.Progress | Literal["console"] | None = None,
     variance: np.ndarray | None = None,
-) -> tuple:
+    abort_callback: Callable[[], bool] | None = None,
+) -> tuple | None:
     """Jointly fit several registered channels with an isotropic Gaussian.
 
     Takes the same arrays and returns the same results as
@@ -2117,10 +2176,14 @@ def fit_spots_multichannel(
         the spots. Default is None.
     variance : np.ndarray, optional
         Per-pixel sCMOS readout variance laid out exactly like ``spots``.
+    abort_callback : callable or None, optional
+        Polled between spots; returning True stops the fit and the
+        function returns None. Default is None.
 
     Returns
     -------
     thetas, chi_squares, states, iterations
+        Or None if ``abort_callback`` asked to stop.
     """
     (
         spots,
@@ -2161,6 +2224,8 @@ def fit_spots_multichannel(
         lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
         progress.set_value(0)
         for index in range(n_spots):
+            if callable(abort_callback) and abort_callback():
+                return None
             _fit_gauss_spot_multichannel(spots, index, *args)
             progress.set_value(index + 1)
     return outputs

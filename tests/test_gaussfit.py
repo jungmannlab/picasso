@@ -497,7 +497,7 @@ class TestProgress:
     @pytest.mark.parametrize("mle", [False, True], ids=["lsq", "mle"])
     def test_tracker_counts_every_spot(self, noisy_batch, mle):
         """One "Fitting spots" phase over the spots, reporting the number
-        of spots fitted so far after each spot."""
+        of spots fitted so far after each chunk of them."""
         seed = seeds.initial_parameters_gauss(noisy_batch, BOX).astype(
             np.float64
         )
@@ -511,7 +511,11 @@ class TestProgress:
         )
         assert_phases_complete(tracker, ["Fitting spots"])
         assert tracker.phases[0]["maximum"] == len(noisy_batch)
-        assert tracker.phases[0]["values"] == list(range(len(noisy_batch) + 1))
+        n = len(noisy_batch)
+        chunk = gaussfit._CHUNK_SIZE
+        assert tracker.phases[0]["values"] == [0] + [
+            min(stop, n) for stop in range(chunk, n + chunk, chunk)
+        ]
 
     def test_multichannel_tracker(self):
         n = 6

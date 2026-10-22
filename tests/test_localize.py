@@ -659,6 +659,17 @@ class TestIdentify:
         set_s = set(zip(ids_s["frame"], ids_s["y"], ids_s["x"]))
         assert set_t == set_s
 
+    @pytest.mark.parametrize("parallel", [False, True])
+    def test_can_be_aborted(self, movie, parallel):
+        """Regression: only the thread pool polled ``abort_callback``."""
+        result = localize.identify(
+            movie,
+            parameters=_params(),
+            parallel=parallel,
+            abort_callback=lambda: True,
+        )
+        assert result is None
+
     def test_frame_bounds_excludes_outside(self, movie):
         """Setting ``frame_bounds`` confines identifications to that
         range of frame indices."""
@@ -1394,6 +1405,62 @@ class TestFit2D:
         # the chi-square column must not have displaced a parameter column
         for col in ["x", "y", "photons", "sx", "sy", "bg", "ellipticity"]:
             assert col in locs.columns
+
+    @pytest.mark.parametrize(
+        "method", ["gausslq", "gaussmle", "gausslq-rotated"]
+    )
+    def test_gauss_parallel_matches_serial(
+        self, picasso_movie, real_identifications, method
+    ):
+        """Regression: the CPU Gaussian methods ignored ``parallel`` and
+        always fitted in the calling thread. The thread pool must give the
+        same localizations, bit for bit."""
+        fits = [
+            localize.fit(
+                picasso_movie,
+                camera_info=CAMERA_INFO_WITH_PIXELSIZE,
+                identifications=real_identifications,
+                box=BOX,
+                fitting_method=method,
+                parallel=parallel,
+            )[0]
+            for parallel in (False, True)
+        ]
+        pd.testing.assert_frame_equal(fits[0], fits[1])
+
+    @pytest.mark.parametrize(
+        "method", ["gausslq", "gaussmle", "spline", "spline-mle", "avg"]
+    )
+    @pytest.mark.parametrize("parallel", [False, True])
+    def test_every_cpu_fit_can_be_aborted(
+        self, picasso_movie, real_identifications, method, parallel
+    ):
+        """Regression: the CPU Gaussian fits and every serial fit never
+        polled ``abort_callback``, so the GUI's Abort waited for the whole
+        fit. The callback starts asking to stop after it was polled once,
+        i.e., during the fit rather than before it."""
+        polls = []
+
+        def abort():
+            polls.append(None)
+            return len(polls) > 1
+
+        locs, info = localize.fit(
+            picasso_movie,
+            camera_info=CAMERA_INFO_WITH_PIXELSIZE,
+            identifications=real_identifications,
+            box=BOX,
+            fitting_method=method,
+            spline_calibration=(
+                _synthetic_spline_3d_calibration(box=BOX)[0]
+                if method.startswith("spline")
+                else None
+            ),
+            parallel=parallel,
+            abort_callback=abort,
+        )
+        assert locs is None
+        assert info[-1]["Fit method"] == method
 
     @pytest.mark.parametrize(
         "method", ["gausslq", "gausslq-spherical", "gausslq-rotated"]

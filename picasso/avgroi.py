@@ -10,7 +10,7 @@ interest (ROI).
 """
 
 from concurrent import futures
-from typing import Literal
+from typing import Callable, Literal
 
 import numba
 import numpy as np
@@ -56,7 +56,8 @@ def fit_spot(spot: lib.FloatArray2D) -> list[float]:
 def fit_spots(
     spots: lib.FloatArray3D,
     progress: lib.Progress | Literal["console"] | None = None,
-) -> lib.FloatArray2D:
+    abort_callback: Callable[[], bool] | None = None,
+) -> lib.FloatArray2D | None:
     """Fit several spots, one after another.
 
     Parameters
@@ -68,11 +69,15 @@ def fit_spots(
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
         or None for no reporting. Reports one phase, "Fitting spots", over
         the spots. Default is None.
+    abort_callback : callable or None, optional
+        Polled between spots; returning True stops the fit and the
+        function returns None. Default is None.
 
     Returns
     -------
-    theta : lib.FloatArray2D
-        ``(n_spots, 6)`` fit parameters, each row as :func:`fit_spot`.
+    theta : lib.FloatArray2D or None
+        ``(n_spots, 6)`` fit parameters, each row as :func:`fit_spot`; None
+        if ``abort_callback`` asked to stop.
     """
     n_spots = len(spots)
     theta = np.empty((n_spots, 6), dtype=np.float32)
@@ -80,6 +85,8 @@ def fit_spots(
     with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
         lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
         for i in range(n_spots):
+            if callable(abort_callback) and abort_callback():
+                return None
             theta[i] = fit_spot(spots[i])
             progress.set_value(i + 1)
         progress.set_value(n_spots)
