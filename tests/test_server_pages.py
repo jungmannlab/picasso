@@ -286,9 +286,9 @@ class TestHistory:
         assert "From 3 Database entries, 3 are remaining." in _texts(app)
         table = app.dataframe[-1].value
         assert table["filename"].tolist() == [
-            "/data/beads.raw",
-            "/data/cell_r2.raw",
-            "/data/cell_r1.raw",
+            os.path.normpath("/data/beads.raw"),
+            os.path.normpath("/data/cell_r2.raw"),
+            os.path.normpath("/data/cell_r1.raw"),
         ]
         (download,) = app.get("download_button")
         assert download.proto.label == "Download as CSV"
@@ -331,7 +331,7 @@ class TestHistory:
         )
         app.run()
         assert app.dataframe[-1].value["filename"].tolist() == [
-            "/data/cell_r2.raw"
+            os.path.normpath("/data/cell_r2.raw")
         ]
 
     def test_groups_are_counted_and_added_to_the_table(
@@ -506,9 +506,11 @@ class TestPreview:
         app.run()
         assert not app.exception
         assert app.info.values[0].startswith("Performance Warning")
-        assert len(app.get("imgs")) == 1
+        # st.pyplot adds an "imgs" element up to Streamlit 1.56 and an
+        # "image" one in later versions
+        assert len(app.get("imgs")) + len(app.get("image")) == 1
         assert app.json[0].value  # the database entry
-        assert str(movie) in app.json[0].value
+        assert json.loads(app.json[0].value)["filename"] == str(movie)
 
         def dimensions():
             (text,) = [
@@ -621,7 +623,7 @@ class TestWatcherPage:
         assert folder == str(watcher_page.folder)
         assert command == ""
         assert os.path.dirname(logfile) == str(home / ".picasso")
-        assert existing == ["/data/old.raw"]
+        assert existing == [os.path.normpath("/data/old.raw")]
         assert update_time == 1
         assert watcher_page.success.values[0] == "Started watcher."
         watchers = module("helper").fetch_watcher()

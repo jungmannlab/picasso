@@ -45,6 +45,14 @@ from picasso import io, transforms  # noqa: E402
 # default rather than a fixture. ``setdefault`` keeps an explicit
 # ``QT_QPA_PLATFORM=xcb pytest`` (to watch the widgets) working.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# On Windows the offscreen platform finds no fonts of its own and draws every
+# character as an empty box of the same width, which throws off any test that
+# measures or paints text; point it at the system fonts.
+if sys.platform == "win32":
+    os.environ.setdefault(
+        "QT_QPA_FONTDIR",
+        os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"),
+    )
 
 
 # ---------------------------------------------------------------------------

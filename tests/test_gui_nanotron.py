@@ -372,7 +372,8 @@ def test_dropping_a_file_on_the_view_opens_it(window, locs_path):
 
     window.view.dropEvent(Event(locs_path))
     assert window.locs_loaded
-    assert window.path == locs_path
+    # Qt reports local files with forward slashes, also on Windows
+    assert os.path.normpath(window.path) == os.path.normpath(locs_path)
 
 
 # ---------------------------------------------------------------------------

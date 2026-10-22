@@ -15,6 +15,7 @@ and laser power, and fits the noise model to them.
 from __future__ import annotations
 
 import csv
+import os
 
 import numpy as np
 import pytest
@@ -374,7 +375,7 @@ def _rows(dialog) -> dict[str, list[str]]:
     for row in range(table.rowCount()):
         cells = [table.item(row, c) for c in range(table.columnCount())]
         texts = ["" if c is None else c.text() for c in cells]
-        rows[texts[0].split("/")[-1]] = texts[1:]
+        rows[os.path.basename(texts[0])] = texts[1:]
     return rows
 
 
@@ -457,7 +458,7 @@ def test_table_values(dialog, tif_folder, monkeypatch):
     bg, bgstd, las, time, conc = dialog.evalTable()
     rows = _rows(dialog)
     names = [
-        dialog.table.item(row, 0).text().split("/")[-1]
+        os.path.basename(dialog.table.item(row, 0).text())
         for row in range(dialog.table.rowCount())
     ]
     assert conc == [float(rows[name][0]) for name in names]
@@ -490,7 +491,7 @@ def test_export_table(dialog, tif_folder, monkeypatch, tmp_path):
         header, *rows = list(csv.reader(file))
     assert header[0] == "FileName"
     assert len(header) == 6
-    assert {row[0].split("/")[-1]: row[1:] for row in rows} == _rows(dialog)
+    assert {os.path.basename(row[0]): row[1:] for row in rows} == _rows(dialog)
 
 
 def test_ok_needs_three_evaluated_tifs(

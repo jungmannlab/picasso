@@ -12,6 +12,8 @@ the pool runs two worker processes, which every test shuts down.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -232,7 +234,8 @@ def test_dropping_a_localization_file_opens_it(window, picked, tmp_path):
     drop(str(tmp_path / "movie.raw"))
     assert not hasattr(view, "locs")
     drop(picked)
-    assert view.path == picked
+    # Qt reports local files with forward slashes, also on Windows
+    assert os.path.normpath(view.path) == os.path.normpath(picked)
 
 
 def test_only_drags_with_files_are_accepted(window):

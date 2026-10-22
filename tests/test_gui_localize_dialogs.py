@@ -2488,7 +2488,10 @@ class TestConfigLocation:
             QtGui.QDesktopServices, "openUrl", lambda url: opened.append(url)
         )
         window.open_config_location()
-        assert [url.toLocalFile() for url in opened] == [str(config.parent)]
+        # Qt reports local files with forward slashes, also on Windows
+        assert [os.path.normpath(url.toLocalFile()) for url in opened] == [
+            str(config.parent)
+        ]
         # created, so that the user can put the config there
         assert config.parent.is_dir()
 

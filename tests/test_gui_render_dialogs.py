@@ -24,6 +24,8 @@ tests check are their result.
 
 from __future__ import annotations
 
+import os
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
@@ -2427,7 +2429,8 @@ def test_dropped_localizations_are_loaded(window, qt_offscreen, tmp_path):
     io.save_locs(str(path), _locs(seed=5), _info())
     _drop(window, path, tmp_path / "ignored.npy")
     _wait(qt_offscreen, lambda: window.view._load_thread is None)
-    assert window.view.locs_paths[-1] == str(path)
+    # Qt reports local files with forward slashes, also on Windows
+    assert os.path.normpath(window.view.locs_paths[-1]) == str(path)
 
 
 def test_dropped_view_settings_are_applied(window, answers, tmp_path):
@@ -2492,7 +2495,8 @@ def test_dropped_image_is_overlaid(window, tmp_path):
     Image.fromarray(np.full((16, 16), 128, dtype=np.uint8)).save(path)
     _drop(window, path)
     overlay = window.image_overlay_dialog
-    assert overlay.path == str(path)
+    # Qt reports local files with forward slashes, also on Windows
+    assert os.path.normpath(overlay.path) == str(path)
     overlay.close()
 
 
