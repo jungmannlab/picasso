@@ -400,7 +400,9 @@ def cluster_3D(
         assigned).
     """
     radius = radius_xy
-    X = locs[["x", "y", "z"]].to_numpy()
+    # a copy, since z is scaled in place (pandas 3 returns read-only
+    # views of the columns)
+    X = locs[["x", "y", "z"]].to_numpy(copy=True)
     X[:, 2] *= radius_xy / radius_z
 
     if not fa:
@@ -611,7 +613,9 @@ def dbscan(
     locs = locs.copy()
     n_raw = len(locs)
     if "z" in locs.columns:
-        X = locs[["x", "y", "z"]].to_numpy(dtype=np.float64)
+        # a copy, since z is scaled in place (pandas 3 returns read-only
+        # views of the columns)
+        X = locs[["x", "y", "z"]].to_numpy(dtype=np.float64, copy=True)
         if radius_z is not None:
             X[:, 2] *= radius / radius_z
     else:

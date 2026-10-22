@@ -47,6 +47,12 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
             conda create --name picasso python=3.14
             conda activate picasso
 
+         .. note::
+
+            Python 3.15 is not supported yet: some of Picasso's dependencies
+            cannot be installed on it with pip, and GPU fitting (CUDA) would
+            not work. See :ref:`faq-python-315`.
+
       2. Install Picasso:
 
          .. code-block:: bash
@@ -124,7 +130,8 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
       Use a local, editable installation to work with your own changes to
       Picasso:
 
-      1. Create and activate a new conda environment:
+      1. Create and activate a new conda environment with Python 3.11 to
+         3.14 (not 3.15 yet, see :ref:`faq-python-315`):
 
          .. code-block:: bash
 

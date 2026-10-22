@@ -752,6 +752,15 @@ def test_apply_expression_moves_the_localizations(window, monkeypatch):
     np.testing.assert_allclose(after[:, 1], before[:, 1])
 
 
+def test_apply_expression_assigning_a_column(window, monkeypatch):
+    # assigning (not changing in place) used to leave the column as it was
+    before = _xy(window.view)
+    _apply(window, monkeypatch, "y = y + 100")
+    after = _xy(window.view)
+    np.testing.assert_allclose(after[:, 0], before[:, 0])
+    np.testing.assert_allclose(after[:, 1], before[:, 1] + 100, atol=1e-3)
+
+
 def test_apply_expression_canceled(window, monkeypatch):
     before = _xy(window.view)
     _apply(window, monkeypatch, "x += 100", ok=False)

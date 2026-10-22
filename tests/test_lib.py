@@ -349,6 +349,16 @@ class TestFitCumExp:
         # Fit should land in the same order of magnitude
         assert result["best_values"]["t"] == pytest.approx(true_tau, rel=0.4)
 
+    def test_leaves_the_localizations_unchanged(self):
+        # the dark times passed as a view of the column used to be
+        # sorted in place, reordering them among the localizations
+        rng = np.random.default_rng(2)
+        locs = pd.DataFrame({"dark": rng.exponential(scale=20.0, size=500)})
+        before = locs["dark"].to_numpy().copy()
+        result = lib.fit_cum_exp(locs["dark"].to_numpy())
+        np.testing.assert_array_equal(locs["dark"].to_numpy(), before)
+        np.testing.assert_array_equal(result["data"], np.sort(before))
+
 
 class TestEstimateKineticRate:
     def test_returns_finite_for_long_data(self):

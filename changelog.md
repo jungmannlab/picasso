@@ -16,7 +16,7 @@ Last change: 22-OCT-2026 CEST
 - Icons added to menu actions and buttons.
 - The sections of the long dialogs collapse and expand by clicking their header, and each dialog remembers which sections are open across sessions (`Expanded sections` in the [user settings](https://picassosr.readthedocs.io/en/latest/others.html#user-settings-file)).
 - A Picasso window left open but unused releases its memory after 30 minutes without input. Set the time with `Release memory after idle (min)` in the [user settings](https://picassosr.readthedocs.io/en/latest/others.html#user-settings-file) where more details are explained.
-- Removed support for Python 3.10 (Python 3.11–3.14 are supported).
+- Removed support for Python 3.10 (Python 3.11–3.14 are supported; see the [FAQ](https://picassosr.readthedocs.io/en/latest/faq.html#faq-python-315) for why not 3.15 yet). Picasso works with pandas 2 (2.3.3 or later) and pandas 3.
 - All docstrings of public functions have been improved to match the NumPy style.
 - Every file Picasso writes records the version of its format (`picasso_format`, now 1.0, as an attribute of .hdf5 files, a key of .yaml files and a header line of drift .txt files) and the version of Picasso that wrote it. Format 1.0 holds every length in nm. Picasso refuses files of a newer major format version and brings files written before 1.0 to the current format (camera pixels become nm, the column `likelihood` is read as `log_likelihood`). See the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#files-format-versions).
 - Loading localizations checks the minimum requirements of the format and names what is missing: the columns `frame`, `x`, `y`, `lpx` and `lpy` and the metadata keys `Width`, `Height`, `Frames` and `Pixelsize`. `picasso.io.validate_locs` runs the same check, e.g., before saving files from other software. A file that lacks only `Pixelsize` raises `picasso.io.MissingPixelsizeError`, and the GUIs ask for the pixel size. See the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#files-minimum-requirements).
@@ -73,6 +73,8 @@ Last change: 22-OCT-2026 CEST
 - Fixed: DBSCAN, HDBSCAN and SMLM clusterer saved the cluster areas as `*_centers_areas.csv` instead of `*_areas.csv` when the cluster centers were saved, too.
 - Fixed: *Export FOV as .ims* ignored the image extents of the loaded metadata and used only the last channel's metadata.
 - Fixed: the `locs` column of saved pick properties held the number of binding events (the same as `n_events`) instead of the number of localizations in the pick (`picasso.postprocess.pick_kinetics`, `pick_properties`).
+- Fixed: estimating the mean bright and dark times (`picasso.lib.fit_cum_exp`, `estimate_kinetic_rate`) sorted the given values in place, so the localizations returned by `picasso.postprocess.pick_kinetics` and saved by *Analyze clusters* had their `len` and `dark` values reordered, no longer belonging to their localizations.
+- Fixed: *Apply expression* ignored expressions that assign a column, e.g., `x = x * 2` (only in-place ones such as `x *= 2` worked).
 - Fixed: scale bar in 3D animations.
 - Fixed: *Align channels* (RCC) failed for channels with different image sizes.
 - Fixed: Render's `Export ROI for Imaris` ignored the position of the .ims movie that localizations were loaded from with `File > Open movie` (single channel), placing the export at the origin instead of over the movie.

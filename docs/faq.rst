@@ -40,7 +40,8 @@ Which installer should I use?
 - **macOS:** the one-click installer runs on Apple Silicon (M1 and later)
   only. On an Intel Mac, install Picasso with pip.
 - **Linux, scripts and notebooks:** ``pip install picassosr`` in an
-  environment with Python 3.11 to 3.14.
+  environment with Python 3.11 to 3.14 (not 3.15 yet, see
+  :ref:`faq-python-315`).
 
 See :doc:`getting-started/installation`.
 
@@ -70,6 +71,37 @@ Install Picasso into a new environment with Python 3.11 to 3.14, e.g.,
 ``conda create -n picasso python=3.13``, then ``pip install picassosr``:
 packages of other software in the same environment can conflict with
 Picasso's.
+
+.. _faq-python-315:
+
+Why is Python 3.15 not supported yet?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Picasso's own code runs on Python 3.15, but it cannot be installed there with
+pip yet, and part of it would not work:
+
+- **Dependencies without Python 3.15 packages.** h5py, numexpr, ndindex and
+  PyYAML do not publish ready-made packages (wheels) for Python 3.15 yet, so
+  pip tries to build them from their source code. That needs a C/C++ compiler
+  and, for h5py, the HDF5 library, and usually fails with:
+
+  .. code-block:: text
+
+     Failed to build installable wheels for some pyproject.toml based projects
+     ╰─> h5py, numexpr, ndindex
+
+- **No GPU fitting.** CUDA code, such as GPU fitting in Localize, runs on
+  numba-cuda, which NVIDIA only maintains now (new development moved to
+  numba-cuda-mlir) and which will not support Python 3.15.
+
+Moreover, ``pip install picassosr`` with Python 3.15 falls back to Picasso
+0.8.8, the last version that did not declare which Python versions it
+supports, and then fails to build its outdated dependencies (e.g., NumPy
+1.24).
+
+Use Python 3.14 (``conda create -n picasso python=3.14``) or the one-click
+installer. Picasso will support Python 3.15 once these packages are available
+for it.
 
 Which version of Picasso am I running?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
