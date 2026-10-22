@@ -44,6 +44,10 @@ Picasso
 
       Python API
 
+Picasso started as the analysis software for DNA-PAINT. While it remains our
+focus, most of Picasso can be used in other SMLM modalities, such as (d)STORM
+or PALM, see :ref:`faq-other-smlm`.
+
 Picasso is complemented by our `Nature Protocols publication
 <https://doi.org/10.1038/nprot.2017.024>`__. This documentation covers all
 updates since then.

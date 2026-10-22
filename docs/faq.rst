@@ -11,6 +11,23 @@ one with the log file attached, see :ref:`faq-reporting`.
 Installing and starting
 -----------------------
 
+.. _faq-other-smlm:
+
+Can I use Picasso for STORM, PALM or other SMLM data?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Yes. Picasso started as the analysis software for DNA-PAINT, and DNA-PAINT is
+still where many new features come from, but the core workflow is not specific
+to it: Localize fits any movie of blinking single molecules, and Filter,
+Render, Average and SPINNA work with localizations from any SMLM technique,
+including drift correction, clustering, 3D and multi-channel analysis.
+Localizations from other software can be imported, see
+:ref:`faq-import`.
+
+A few tools build on DNA-PAINT and are of little use otherwise: Design
+(DNA origami docking sites), Simulate (DNA-PAINT acquisitions) and the
+kinetics-based analyses such as qPAINT.
+
 Which installer should I use?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -148,6 +165,8 @@ folder closer to the drive, e.g., ``C:\data``, or shorten the folder and file
 names. Alternatively, an administrator can `enable long paths in Windows
 <https://learn.microsoft.com/en-us/windows/win32/fileio/maximum-file-path-limitation>`__.
 Even then, a single folder or file name may have at most 255 characters.
+
+.. _faq-import:
 
 How do I open localizations from other software?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
