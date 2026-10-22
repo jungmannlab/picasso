@@ -34,6 +34,11 @@ _TEST_HOME = tempfile.mkdtemp(prefix="picasso-test-home-")
 atexit.register(shutil.rmtree, _TEST_HOME, ignore_errors=True)
 os.environ["HOME"] = os.environ["USERPROFILE"] = _TEST_HOME
 
+# The tests name their data relative to the repository root
+# ("./tests/data/..."), so run from there whichever folder pytest was started
+# in (``cd tests && pytest`` would otherwise find none of it).
+os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 import pytest  # noqa: E402
