@@ -13607,8 +13607,8 @@ class Window(QtWidgets.QMainWindow):
                         zfit.calibrate_z(
                             locs,
                             self.info + [identification | self.camera_info],
-                            step,
-                            magnification,
+                            d=step,
+                            magnification_factor=magnification,
                             path=path,
                             frame_bounds=self.frame_range,
                             frames_per_step=frames_per_step,
@@ -13788,7 +13788,7 @@ class Window(QtWidgets.QMainWindow):
             undrift_locs, new_info, drift = aim.aim(
                 self.locs,
                 self.extra_info,
-                aim_segmentation,
+                segmentation=aim_segmentation,
                 progress=None,
             )
             self.locs = undrift_locs
@@ -13825,8 +13825,8 @@ class Window(QtWidgets.QMainWindow):
             )
             self.locs, self.extra_info, fiducials_drift = (
                 postprocess.undrift_from_fiducials(
-                    locs=self.locs,
-                    info=self.extra_info,
+                    self.locs,
+                    self.extra_info,
                     picks=fiducial_picks,
                     pick_size=box,  # box is the diameter (nm)
                 )

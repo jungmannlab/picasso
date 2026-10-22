@@ -175,7 +175,7 @@ def test_saved_steps_replay_to_the_same_result(
         "0.0 < lpx < 39.0",
     ]
     assert info[-1]["sx"] == [104.0, 156.0]
-    replayed, *_ = lib.apply_filter_steps(locs, info)
+    replayed, *_ = lib.apply_filter_steps(locs, recipe=info)
     np.testing.assert_array_equal(replayed["frame"], saved["frame"])
     np.testing.assert_array_equal(replayed["photons"], saved["photons"])
 

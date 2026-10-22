@@ -219,8 +219,8 @@ def synthetic_picked_locs_2d(synthetic_fiducials_2d):
     return postprocess.picked_locs(
         locs_,
         info_,
-        SYNTH_PICKS,
-        "Circle",
+        picks=SYNTH_PICKS,
+        pick_shape="Circle",
         pick_size=SYNTH_PICK_DIAMETER,
         add_group=False,
     )
@@ -232,8 +232,8 @@ def synthetic_picked_locs_3d(synthetic_fiducials_3d):
     return postprocess.picked_locs(
         locs_,
         info_,
-        SYNTH_PICKS,
-        "Circle",
+        picks=SYNTH_PICKS,
+        pick_shape="Circle",
         pick_size=SYNTH_PICK_DIAMETER,
         add_group=False,
     )
@@ -320,13 +320,15 @@ def test_undrift_needs_four_segments(locs, info, segmentation, message):
     which needs 4 of them; fewer used to fail deep inside RCC."""
     assert info[0]["Frames"] == 1000
     with pytest.raises(ValueError, match=message):
-        postprocess.undrift(locs, info, segmentation, display=False)
+        postprocess.undrift(
+            locs, info, segmentation=segmentation, display=False
+        )
 
 
 def test_undrift_of_a_movie_too_short_to_segment(locs, info):
     short = [{**info[0], "Frames": 3}, *info[1:]]
     with pytest.raises(ValueError, match="needs at least 4") as error:
-        postprocess.undrift(locs, short, 1, display=False)
+        postprocess.undrift(locs, short, segmentation=1, display=False)
     assert "Use a segmentation" not in str(error.value)
 
 
@@ -375,9 +377,13 @@ def test_segment_total_count_matches_locs(synthetic_fiducials_2d):
 
 
 def test_rcc_smoke(locs, info):
-    drift, undrifted = postprocess.undrift(
+    undrifted, new_info, drift = postprocess.undrift(
         locs, info, segmentation=SEGMENTATION, display=False
     )
+    # the input metadata is copied, not appended to
+    assert len(new_info) == len(info) + 1
+    assert new_info[-1]["Step"] == "Undrift"
+    assert new_info[-1]["Segmentation"] == SEGMENTATION
     n_frames = lib.get_from_metadata(info, "Frames")
     assert isinstance(drift, pd.DataFrame)
     assert {"x", "y"}.issubset(drift.columns)
@@ -391,7 +397,7 @@ def test_rcc_recovers_injected_drift(
     synthetic_fiducials_2d, injected_drift_2d
 ):
     locs_, info_ = synthetic_fiducials_2d
-    drift, _ = postprocess.undrift(
+    _, _, drift = postprocess.undrift(
         locs_, info_, segmentation=SEGMENTATION, display=False
     )
     _assert_drift_recovers(drift, injected_drift_2d, tol=TOL_RCC)
@@ -534,7 +540,7 @@ def test_undrift_from_picked_smoke(locs, info, picks_grid):
     pl = postprocess.picked_locs(
         locs,
         info,
-        picks_grid,
+        picks=picks_grid,
         pick_shape="Circle",
         pick_size=400.0,
     )
@@ -585,8 +591,8 @@ def test_undrift_from_picked_interpolates_missing_frames(
     pl = postprocess.picked_locs(
         locs_gap,
         info_,
-        SYNTH_PICKS,
-        "Circle",
+        picks=SYNTH_PICKS,
+        pick_shape="Circle",
         pick_size=SYNTH_PICK_DIAMETER,
         add_group=False,
     )
@@ -704,7 +710,11 @@ def test_undrift_from_picked_needs_no_picks_by_frames_table():
 
 def test_apply_drift_dataframe_2d(synthetic_fiducials_2d, injected_drift_2d):
     locs_, info_ = synthetic_fiducials_2d
-    out = postprocess.apply_drift(locs_.copy(), info_, drift=injected_drift_2d)
+    out, new_info = postprocess.apply_drift(
+        locs_.copy(), info_, drift=injected_drift_2d
+    )
+    assert len(new_info) == len(info_) + 1
+    assert new_info[-1]["Step"] == "Apply drift"
     # Each loc was generated as pick + drift + noise; subtracting drift
     # leaves pick + noise. SYNTH_PICKS sit at x in {10, 30, 50} camera
     # pixels, so each x must land within a few sigma of one of those
@@ -716,7 +726,9 @@ def test_apply_drift_dataframe_2d(synthetic_fiducials_2d, injected_drift_2d):
 
 def test_apply_drift_dataframe_3d(synthetic_fiducials_3d, injected_drift_3d):
     locs_, info_ = synthetic_fiducials_3d
-    out = postprocess.apply_drift(locs_.copy(), info_, drift=injected_drift_3d)
+    out, _ = postprocess.apply_drift(
+        locs_.copy(), info_, drift=injected_drift_3d
+    )
     # After undrifting z, residual z should be ~ noise (sigma 6.5 nm).
     assert out["z"].std() < 0.1 * PIXELSIZE
 
@@ -728,8 +740,8 @@ def test_apply_drift_ndarray_matches_dataframe(
     drift_arr = np.column_stack(
         [injected_drift_2d["x"], injected_drift_2d["y"]]
     )
-    out_arr = postprocess.apply_drift(locs_.copy(), info_, drift=drift_arr)
-    out_df = postprocess.apply_drift(
+    out_arr, _ = postprocess.apply_drift(locs_.copy(), info_, drift=drift_arr)
+    out_df, _ = postprocess.apply_drift(
         locs_.copy(), info_, drift=injected_drift_2d
     )
     np.testing.assert_allclose(out_arr["x"], out_df["x"])
@@ -747,7 +759,7 @@ def test_apply_drift_ndarray_3d_applies_z(
             injected_drift_3d["z"],
         ]
     )
-    out = postprocess.apply_drift(locs_.copy(), info_, drift=drift_arr)
+    out, _ = postprocess.apply_drift(locs_.copy(), info_, drift=drift_arr)
     assert out["z"].std() < 0.1 * PIXELSIZE
 
 
@@ -1189,7 +1201,7 @@ def _aim_adapter(locs, info):
 
 
 def _rcc_adapter(locs, info):
-    drift, new_locs = postprocess.undrift(
+    new_locs, _, drift = postprocess.undrift(
         locs, info, segmentation=SEGMENTATION, display=False
     )
     return new_locs, drift
@@ -1199,13 +1211,13 @@ def _from_picked_adapter(locs, info):
     pl = postprocess.picked_locs(
         locs,
         info,
-        SYNTH_PICKS,
-        "Circle",
+        picks=SYNTH_PICKS,
+        pick_shape="Circle",
         pick_size=SYNTH_PICK_DIAMETER,
         add_group=False,
     )
     drift = postprocess.undrift_from_picked(pl, info)
-    new_locs = postprocess.apply_drift(locs.copy(), info, drift=drift)
+    new_locs, _ = postprocess.apply_drift(locs.copy(), info, drift=drift)
     return new_locs, drift
 
 

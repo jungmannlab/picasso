@@ -2153,7 +2153,10 @@ def _run_g5m_group_3D(
             )
         locs_group = locs_group.copy()
         locs_group["lpz"] = zfit.axial_localization_precision(
-            locs_group, [{"Pixelsize": pixelsize}], calibration, "gausslq"
+            locs_group,
+            [{"Pixelsize": pixelsize}],
+            calibration=calibration,
+            fitting_method="gausslq",
         )
     # check that the number of localizations is within the limits
     n_locs = len(locs_group)
@@ -3626,7 +3629,7 @@ def g5m(
     asynch: bool = True,
     group_column: Literal["group", "group_input"] = "group",
     progress: lib.Progress | Literal["console"] | None = None,
-) -> tuple[pd.DataFrame, pd.DataFrame, list[dict]]:
+) -> tuple[pd.DataFrame | None, list[dict], pd.DataFrame | None]:
     """Run G5M with or without multiprocessing. The function returns
     the centers of the G5M components and localizations with assigned
     cluster labels.
@@ -3720,13 +3723,16 @@ def g5m(
         localization precision of the component) unitless. The
         log-likelihoods (``mol_log_likelihood``,
         ``group_log_likelihood``) are log densities per nm (squared or
-        cubed).
+        cubed). None if no molecules were found.
+    info : list of dicts
+        Metadata of both ``centers`` and ``clustered_locs``: ``info``
+        with an entry recording the G5M run appended, see
+        ``lib.append_metadata``.
     clustered_locs : pd.DataFrame
         Localizations with assigned cluster labels, based on the G5M
         components, and their ``log_likelihood`` under the G5M (a log
-        density per nm squared or cubed).
-    info : list
-        Updated information dictionaries.
+        density per nm squared or cubed). None if no molecules were
+        found.
     """
     _validate_g5m_args(loc_prec_handle, sigma_bounds, group_column, mode, locs)
     locs = _resolve_group_column(locs, group_column)
@@ -3765,22 +3771,7 @@ def g5m(
             covariance_type=covariance_type,
         )
     # stack centers to form a pd.DataFrame in the format of localizations
-    if len(centers):
-        centers = pd.concat(centers, ignore_index=True)
-    else:  # no molecules found, return None
-        return None, None, info
-    # assing group ids to the clustered localizations
-    max_label = 0
-    for i, clustered_locs_ in enumerate(clustered_locs):
-        clustered_locs_["group"] += max_label
-        max_label = clustered_locs_["group"].max() + 1
-        clustered_locs[i] = clustered_locs_
-    clustered_locs = pd.concat(clustered_locs, ignore_index=True)
-
-    # update info
-    new_info = _g5m_info(
-        locs,
-        centers,
+    entry_args = (
         min_locs,
         max_rounds_without_best_bic,
         bootstrap_check,
@@ -3790,9 +3781,23 @@ def g5m(
         mode,
         calibration,
     )
-    info = info + [new_info]
+    if len(centers):
+        centers = pd.concat(centers, ignore_index=True)
+    else:  # no molecules found, return None
+        entry = _g5m_info(locs, centers, *entry_args)
+        return None, lib.append_metadata(info, entry), None
+    # assing group ids to the clustered localizations
+    max_label = 0
+    for i, clustered_locs_ in enumerate(clustered_locs):
+        clustered_locs_["group"] += max_label
+        max_label = clustered_locs_["group"].max() + 1
+        clustered_locs[i] = clustered_locs_
+    clustered_locs = pd.concat(clustered_locs, ignore_index=True)
+
+    # update info
+    info = lib.append_metadata(info, _g5m_info(locs, centers, *entry_args))
     if postprocess:
         centers, clustered_locs = _postprocess_g5m(
             centers, clustered_locs, info
         )
-    return centers, clustered_locs, info
+    return centers, info, clustered_locs

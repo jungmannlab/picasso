@@ -9842,7 +9842,8 @@ def _apply_extra_affine(
 
 def check_nena(
     locs: pd.DataFrame,
-    info: None,
+    info: list[dict] | None = None,
+    *,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> float:
     """Calculate the NeNA (experimental localization precision) from
@@ -9852,8 +9853,9 @@ def check_nena(
     ----------
     locs : pd.DataFrame
         Data frame containing the localized spots.
-    info : None
-        Not used.
+    info : list of dicts or None, optional
+        Metadata of ``locs``. Not used; accepted so that the call
+        matches the other functions on localizations. Default is None.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -9894,7 +9896,7 @@ def check_kinetics(locs: pd.DataFrame, info: list[dict]) -> float:
         The mean length of binding events in frames.
     """
     locs = locs.iloc[0:MAX_LOCS]
-    locs = postprocess.link(locs, info=info)
+    locs, _ = postprocess.link(locs, info)
     len_mean = locs.len.mean()
     _log.info("Mean length of the binding events: %.2f frames.", len_mean)
     return len_mean
@@ -9903,6 +9905,7 @@ def check_kinetics(locs: pd.DataFrame, info: list[dict]) -> float:
 def check_drift(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[float, float]:
     """Estimate the drift of localizations in x and y directions.
@@ -9935,10 +9938,10 @@ def check_drift(
     segmentation = max(1, int(n_frames // 10))
 
     _log.info("Estimating drift with segmentation %d.", segmentation)
-    drift, locs = postprocess.undrift(
+    _, _, drift = postprocess.undrift(
         locs,
         info,
-        segmentation,
+        segmentation=segmentation,
         display=False,
         progress=progress,
     )

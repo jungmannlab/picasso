@@ -345,7 +345,7 @@ def test_link_all_channels_skips_linked_ones(
     window, qt_offscreen, tmp_path, monkeypatch
 ):
     view = window.view
-    linked = gui_render.postprocess.link(_locs(1), _info(), r_max=26.0)
+    linked, _ = gui_render.postprocess.link(_locs(1), _info(), r_max=26.0)
     view.add(str(tmp_path / "linked.hdf5"), linked, _info(), render_=False)
     messages = _link_all_channels(view, qt_offscreen, monkeypatch)
     assert "len" in view.locs[0].columns

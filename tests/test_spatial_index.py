@@ -97,13 +97,13 @@ class TestQueryCircle:
         ]
         diameter = 5.0 * PS
         via_blocks = postprocess.picked_locs(
-            locs, info, picks, "Circle", pick_size=diameter
+            locs, info, picks=picks, pick_shape="Circle", pick_size=diameter
         )
         via_pyramid = postprocess.picked_locs(
             locs,
             info,
-            picks,
-            "Circle",
+            picks=picks,
+            pick_shape="Circle",
             pick_size=diameter,
             index_blocks=pyramid,
         )

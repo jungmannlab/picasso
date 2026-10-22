@@ -335,7 +335,7 @@ default) and saves three files:
       spt.save_analysis("movie_locs_tracks", result)  # CSV and YAML files
 
       # the steps one by one
-      jumps = spt.jump_distances(tracked, info)        # nm
+      jumps = spt.jump_distances(tracked)              # nm
       fit = spt.fit_jump_distances(jumps, frame_time=20, n_populations=2)
       fig = spt.plot_jump_distances(jumps, fit)
       fig.savefig("jump_distances.png")

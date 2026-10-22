@@ -43,7 +43,12 @@ the current picks; the boxes you drew yourself are kept as drawn. See
       from picasso import postprocess
 
       new_picks = postprocess.pick_similar(
-          locs, info, picks, "Circle", pick_size=diameter, std_range=2.0
+          locs,
+          info,
+          picks=picks,
+          pick_shape="Circle",
+          pick_size=diameter,
+          std_range=2.0,
       )
 
 
@@ -63,7 +68,7 @@ separate or all channels simultaneously.
 
    .. code-block:: python
 
-      locs = postprocess.remove_locs_in_picks(
+      locs, info = postprocess.remove_locs_in_picks(
           locs, info, picks=picks, pick_shape="Circle", pick_size=diameter
       )
 
@@ -152,7 +157,9 @@ three columns: frame, on/off (1 or 0) and photons (as integers).
       import pandas as pd
       from picasso import lib, postprocess
 
-      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=diameter)
+      picked = postprocess.picked_locs(
+          locs, info, picks=picks, pick_shape="Circle", pick_size=diameter
+      )
       fig = lib.plot_trace(pd.concat(picked, ignore_index=True), info)
 
 
@@ -283,7 +290,7 @@ button) pans, and a double click resets the zoom.
       locs, info = io.load_locs("movie_locs.hdf5")
       image = masking.generate_image(locs, info, disp_px_size=300, blur=500)   # nm
       mask, threshold = masking.mask_image(image, "otsu")   # or 0.5, "li", "local_mean", ...
-      locs_in, locs_out = masking.mask_locs(locs, info, mask)
+      locs_in, locs_out = masking.mask_locs(locs, info, mask=mask)
 
       io.save_locs("movie_locs_mask_in.hdf5", locs_in, info)
       io.save_locs("movie_locs_mask_out.hdf5", locs_out, info)

@@ -5707,6 +5707,7 @@ def save_locs(
     path: str,
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     render_index: bool | str | object = "auto",
 ) -> None:
     """Save localization data to an HDF5 file.
@@ -5984,6 +5985,7 @@ def _check_dark_times(
 def validate_locs(
     locs: pd.DataFrame,
     info: list[dict] | dict,
+    *,
     path: str | None = None,
 ) -> None:
     """Check that localizations and their metadata meet the minimum
@@ -6304,7 +6306,7 @@ def load_locs(
     check_info = info
     if format_version is None and pixelsize is not None:
         check_info = info + [{"Pixelsize": float(pixelsize)}]
-    validate_locs(locs, check_info, path)
+    validate_locs(locs, check_info, path=path)
     if format_version is None:
         locs, info = _upgrade_legacy_locs(locs, info, pixelsize, path)
     _check_dark_times(locs, info, format_version, path)
@@ -7789,8 +7791,9 @@ def export_pyme(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
 
 def export_pyme_multi(
     path: str,
-    locs_list: list[pd.DataFrame],
-    info_list: list[list[dict]],
+    locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+    *,
     channel_names: list[str] | None = None,
 ) -> None:
     """Export one or more channels as a single PyME ``.hdf`` file that
@@ -7835,9 +7838,9 @@ def export_pyme_multi(
     path : str
         The path where the file will be saved. The ``.hdf`` extension
         is enforced, as PyME does not recognize ``.hdf5`` files.
-    locs_list : list of pd.DataFrames
+    locs : list of pd.DataFrames
         The localizations of each channel.
-    info_list : list of lists of dicts
+    infos : list of lists of dicts
         Metadata of each channel.
     channel_names : list of strs or None, optional
         Names of the channels, stored as ``Picasso.ChannelNames``.
@@ -7850,13 +7853,13 @@ def export_pyme_multi(
     """
     import tables
 
-    if not len(locs_list) or len(locs_list) != len(info_list):
+    if not len(locs) or len(locs) != len(infos):
         raise ValueError(
             "Provide the localizations and the metadata of each channel."
         )
     pixelsizes = [
         float(lib.get_from_metadata(info, "Pixelsize", raise_error=True))
-        for info in info_list
+        for info in infos
     ]
     if not np.allclose(pixelsizes, pixelsizes[0]):
         raise ValueError(
@@ -7867,8 +7870,8 @@ def export_pyme_multi(
 
     path = os.path.splitext(path)[0] + ".hdf"
     tables_ = [
-        _pyme_channel_table(locs, info, pixelsize, probe)
-        for probe, (locs, info) in enumerate(zip(locs_list, info_list))
+        _pyme_channel_table(locs_, info, pixelsize, probe)
+        for probe, (locs_, info) in enumerate(zip(locs, infos))
     ]
     # only the columns present in all channels
     records = pd.concat(tables_, join="inner", ignore_index=True)
@@ -7878,7 +7881,7 @@ def export_pyme_multi(
         """Size of the camera image along x (0) or y (1), i.e., the
         canvas without its translation (see lib.fit_canvas)."""
         sizes = []
-        for info in info_list:
+        for info in infos:
             size = lib.get_from_metadata(info, lib.CAMERA_SIZE_KEYS[axis])
             if size is None:
                 size = lib.get_from_metadata(info, ("Width", "Height")[axis])
@@ -7897,7 +7900,7 @@ def export_pyme_multi(
         metadata["Camera.ROIHeight"] = height
     try:
         metadata["Picasso.Info"] = json.dumps(
-            [list(info) for info in info_list],
+            [list(info) for info in infos],
             default=_json_default,
             ensure_ascii=True,
         )

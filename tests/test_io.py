@@ -1355,7 +1355,10 @@ class TestPyMERoundtrip:
         info_b = self._info() + [{"Channel tag": "b"}]
         path = tmp_path / "two.hdf"
         io.export_pyme_multi(
-            str(path), [locs_a, locs_b], [info_a, info_b], ["a", "b"]
+            str(path),
+            [locs_a, locs_b],
+            [info_a, info_b],
+            channel_names=["a", "b"],
         )
 
         locs, info = io.import_pyme(str(path))

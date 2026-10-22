@@ -130,8 +130,9 @@ def test_link_merges_consecutive_localizations(locs, locs_path, monkeypatch):
     linked, info = io.load_locs(_out(locs_path, "_link.hdf5"))
     assert 0 < len(linked) < len(locs)
     assert linked["len"].sum() >= len(linked)
-    assert info[-1]["Maximum Distance"] == 50
-    assert info[-1]["Maximum Transient Dark Time"] == 2
+    assert info[-1]["Step"] == "Link"
+    assert info[-1]["Max. distance (nm)"] == 50
+    assert info[-1]["Max. transient dark frames"] == 2
 
 
 def test_dark_times_of_linked_localizations(locs_path, monkeypatch):
@@ -236,7 +237,7 @@ def test_smlm_cluster_reads_the_frame_analysis_switch(
 ):
     recorded = {}
 
-    def cluster(locs, **params):
+    def cluster(locs, info=None, **params):
         recorded.update(params)
         raise SystemExit  # the arguments are all that is checked
 
@@ -332,6 +333,7 @@ def test_undrift_rcc_writes_the_drift(locs, locs_path, monkeypatch):
     drift = io.load_drift(_out(locs_path, "_drift.txt"))
     assert len(undrifted) == len(locs)
     assert len(drift) == info[0]["Frames"]
+    assert info[-1]["Step"] == "Undrift"
     assert info[-1]["Segmentation"] == 200
 
 
@@ -348,6 +350,7 @@ def test_undrift_from_a_drift_file(
     undrifted, undrift_info = io.load_locs(_out(locs_path, "_undrift.hdf5"))
     assert np.allclose(undrifted["x"], locs["x"] - 5.0, atol=1e-3)
     assert np.allclose(undrifted["y"], locs["y"] + 3.0, atol=1e-3)
+    assert undrift_info[-1]["Step"] == "Apply drift"
     assert undrift_info[-1]["From File"] == drift_path
 
 
@@ -416,7 +419,10 @@ def test_undrift_fiducials_of_a_short_movie(info, tmp_path, monkeypatch):
     undrifted, undrift_info = io.load_locs(
         _out(path, "_undrift_fiducials.hdf5")
     )
-    assert undrift_info[-1]["pre-RCC segmentation"] == 250
+    # the pre-RCC entry, then the one of the fiducials
+    assert undrift_info[-2]["Step"] == "Undrift"
+    assert undrift_info[-2]["Segmentation"] == 250
+    assert undrift_info[-1]["Step"] == "Undrift from picked"
     near = (np.abs(undrifted["x"] - 1000) < 200) & (
         np.abs(undrifted["y"] - 1000) < 200
     )

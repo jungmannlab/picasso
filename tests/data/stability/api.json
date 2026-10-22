@@ -153,6 +153,7 @@
   "field_of_view",
   "get_from_metadata",
   "step_info",
+  "append_metadata",
   "overwrite_metadata",
   "extract_filter_recipe",
   "extract_filter_steps",

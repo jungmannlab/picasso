@@ -116,7 +116,7 @@ def assert_phases(tracker: RecordingProgress, labels=None) -> None:
 
 def _picked(locs, info):
     return postprocess.picked_locs(
-        locs, info, PICKS, "Circle", pick_size=PICK_DIAMETER
+        locs, info, picks=PICKS, pick_shape="Circle", pick_size=PICK_DIAMETER
     )
 
 
@@ -181,14 +181,24 @@ CASES = [
     (
         "picked_locs",
         lambda l, i, p: postprocess.picked_locs(
-            l, i, PICKS, "Circle", pick_size=PICK_DIAMETER, progress=p
+            l,
+            i,
+            picks=PICKS,
+            pick_shape="Circle",
+            pick_size=PICK_DIAMETER,
+            progress=p,
         ),
         ["Picking localizations"],
     ),
     (
         "picked_locs_square",
         lambda l, i, p: postprocess.picked_locs(
-            l, i, PICKS, "Square", pick_size=PICK_DIAMETER, progress=p
+            l,
+            i,
+            picks=PICKS,
+            pick_shape="Square",
+            pick_size=PICK_DIAMETER,
+            progress=p,
         ),
         ["Picking localizations"],
     ),
@@ -240,7 +250,7 @@ CASES = [
     (
         "undrift",
         lambda l, i, p: postprocess.undrift(
-            l, i, SEGMENTATION, display=False, progress=p
+            l, i, segmentation=SEGMENTATION, display=False, progress=p
         ),
         ["Generating segments", "Correlating image pairs"],
     ),
@@ -261,7 +271,7 @@ CASES = [
         lambda l, i, p: postprocess.frc_rois(
             l,
             i,
-            ((10 * PX, 10 * PX), (20 * PX, 20 * PX)),
+            viewport=((10 * PX, 10 * PX), (20 * PX, 20 * PX)),
             n_rois=4,
             roi_size=2 * PX,
             min_locs=20,
@@ -274,7 +284,7 @@ CASES = [
         lambda l, i, p: postprocess.cbc(
             _cbc_channel(300, 1),
             CBC_INFO,
-            _cbc_channel(200, 2),
+            partner_locs=_cbc_channel(200, 2),
             chunk_size=100,
             progress=p,
         ),
@@ -443,7 +453,12 @@ def test_tracker_sees_each_phase_end(locs, info, name, run, labels):
 def test_picked_locs_counts_picks(locs, info):
     tracker = RecordingProgress()
     postprocess.picked_locs(
-        locs, info, PICKS, "Circle", pick_size=PICK_DIAMETER, progress=tracker
+        locs,
+        info,
+        picks=PICKS,
+        pick_shape="Circle",
+        pick_size=PICK_DIAMETER,
+        progress=tracker,
     )
     assert tracker.phases[0].maximum == len(PICKS)
     assert tracker.phases[0].values == list(range(len(PICKS) + 1)) + [
@@ -454,7 +469,7 @@ def test_picked_locs_counts_picks(locs, info):
 def test_undrift_maxima(locs, info):
     tracker = RecordingProgress()
     postprocess.undrift(
-        locs, info, SEGMENTATION, display=False, progress=tracker
+        locs, info, segmentation=SEGMENTATION, display=False, progress=tracker
     )
     n_seg = postprocess.n_segments(info, SEGMENTATION)
     assert [p.maximum for p in tracker.phases] == [
@@ -506,7 +521,7 @@ def test_nested_calls_keep_the_tracker_open(locs, info):
     must not close it."""
     tracker = RecordingProgress()
     postprocess.undrift(
-        locs, info, SEGMENTATION, display=False, progress=tracker
+        locs, info, segmentation=SEGMENTATION, display=False, progress=tracker
     )
     assert not tracker.closed
 

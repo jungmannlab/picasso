@@ -838,7 +838,10 @@ class SubclusterNum(lib.Dialog):
         dist_sparse = self.distance_sparse.value()
         mols = self.window.materialize_filtered()
         clustered_nevents, sparse_nevents = clusterer.test_subclustering(
-            mols, self.window.info, dist_clustered, dist_sparse
+            mols,
+            self.window.info,
+            clustering_dist=dist_clustered,
+            sparse_dist=dist_sparse,
         )
         if path is not None:
             len_max = max(len(clustered_nevents), len(sparse_nevents))

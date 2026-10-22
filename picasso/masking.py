@@ -29,6 +29,7 @@ __all__ = ["mask_locs", "generate_image", "mask_image", "binary_mask"]
 def mask_locs(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     mask: lib.BoolArray2D,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Mask localizations given a binary mask.
@@ -61,7 +62,7 @@ def mask_locs(
 
 
 def generate_image(
-    locs: pd.DataFrame, info: list[dict], disp_px_size: float, blur: float
+    locs: pd.DataFrame, info: list[dict], *, disp_px_size: float, blur: float
 ) -> lib.FloatArray2D:
     """Generate a normalized (values from 0 to 1) image from
     localizations used to make a mask.

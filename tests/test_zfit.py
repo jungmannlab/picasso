@@ -839,7 +839,10 @@ class TestAxialLocalizationPrecision:
 
     def test_returns_one_per_loc(self, fitted_locs, info):
         lpz = zfit.axial_localization_precision(
-            fitted_locs, info, dict(CALIB_3D), fitting_method="gausslq"
+            fitted_locs,
+            info,
+            calibration=dict(CALIB_3D),
+            fitting_method="gausslq",
         )
         assert lpz.shape == (len(fitted_locs),)
         assert (lpz > 0).all()
@@ -850,7 +853,7 @@ class TestAxialLocalizationPrecision:
             zfit.axial_localization_precision(
                 fitted_locs,
                 info,
-                dict(CALIB_3D),
+                calibration=dict(CALIB_3D),
                 modality="not_astigmatic",
             )
 
@@ -866,19 +869,28 @@ class TestAxialLocalizationPrecision:
         locs2["sx_unc"] = 10.0
         locs2["sy_unc"] = 10.0
         lpz_with = zfit.axial_localization_precision(
-            locs2, info, dict(CALIB_3D), fitting_method="gaussmle"
+            locs2, info, calibration=dict(CALIB_3D), fitting_method="gaussmle"
         )
         lpz_without = zfit.axial_localization_precision(
-            fitted_locs, info, dict(CALIB_3D), fitting_method="gaussmle"
+            fitted_locs,
+            info,
+            calibration=dict(CALIB_3D),
+            fitting_method="gaussmle",
         )
         assert lpz_with.mean() > lpz_without.mean()
 
     def test_gausslq_and_gaussmle_paths_both_finite(self, fitted_locs, info):
         lpz_lq = zfit.axial_localization_precision(
-            fitted_locs, info, dict(CALIB_3D), fitting_method="gausslq"
+            fitted_locs,
+            info,
+            calibration=dict(CALIB_3D),
+            fitting_method="gausslq",
         )
         lpz_mle = zfit.axial_localization_precision(
-            fitted_locs, info, dict(CALIB_3D), fitting_method="gaussmle"
+            fitted_locs,
+            info,
+            calibration=dict(CALIB_3D),
+            fitting_method="gaussmle",
         )
         assert np.all(np.isfinite(lpz_lq))
         assert np.all(np.isfinite(lpz_mle))
@@ -886,7 +898,10 @@ class TestAxialLocalizationPrecision:
     def test_invalid_fitting_method_raises(self, fitted_locs, info):
         with pytest.raises(AssertionError):
             zfit.axial_localization_precision_astig(
-                fitted_locs, info, dict(CALIB_3D), fitting_method="bogus"
+                fitted_locs,
+                info,
+                calibration=dict(CALIB_3D),
+                fitting_method="bogus",
             )
 
 
@@ -913,7 +928,7 @@ class TestAxialLocalizationPrecisionAstig:
         photons = np.array([500.0, 2000.0, 10000.0])
         locs = self._make_locs(photons)
         lpz = zfit.axial_localization_precision_astig(
-            locs, info, dict(CALIB_3D), fitting_method="gausslq"
+            locs, info, calibration=dict(CALIB_3D), fitting_method="gausslq"
         )
         # Strict monotonic decrease in lpz as photons grow
         assert lpz[0] > lpz[1] > lpz[2]
@@ -976,7 +991,7 @@ class TestCalibrateZ:
     def test_returns_required_keys(self, bead_stack, monkeypatch):
         monkeypatch.setattr("matplotlib.pyplot.show", lambda *a, **k: None)
         locs, info, d = bead_stack
-        calib = zfit.calibrate_z(locs, info, d, magnification_factor=0.79)
+        calib = zfit.calibrate_z(locs, info, d=d, magnification_factor=0.79)
         for key in [
             "X Coefficients",
             "Y Coefficients",
@@ -1013,7 +1028,7 @@ class TestCalibrateZ:
             }
         ]
 
-        calib = zfit.calibrate_z(locs, info, d, magnification_factor=0.79)
+        calib = zfit.calibrate_z(locs, info, d=d, magnification_factor=0.79)
 
         assert calib["Identification"] == parameters.to_info()
 
@@ -1025,7 +1040,7 @@ class TestCalibrateZ:
         within 0.1 camera pixels."""
         monkeypatch.setattr("matplotlib.pyplot.show", lambda *a, **k: None)
         locs, info, d = bead_stack
-        calib = zfit.calibrate_z(locs, info, d, magnification_factor=0.79)
+        calib = zfit.calibrate_z(locs, info, d=d, magnification_factor=0.79)
         cx = np.array(calib["X Coefficients"])
         cy = np.array(calib["Y Coefficients"])
         # at z=0 (after recentering), sx and sy should both be near the
@@ -1078,7 +1093,11 @@ class TestCalibrateZ:
             {"Frames": n_frames, "Pixelsize": 130, "Width": 32, "Height": 32}
         ]
         calib = zfit.calibrate_z(
-            pd.DataFrame(rows), info, d, 0.79, z_binning=z_binning
+            pd.DataFrame(rows),
+            info,
+            d=d,
+            magnification_factor=0.79,
+            z_binning=z_binning,
         )
         cx = np.array(calib["X Coefficients"])
         cy = np.array(calib["Y Coefficients"])
@@ -1100,7 +1119,7 @@ class TestCalibrateZ:
         locs, info, d = bead_stack
         out_path = tmp_path / "calib.yaml"
         calib = zfit.calibrate_z(
-            locs, info, d, magnification_factor=0.79, path=str(out_path)
+            locs, info, d=d, magnification_factor=0.79, path=str(out_path)
         )
         assert out_path.exists()
         png_path = tmp_path / "calib.png"
@@ -1126,7 +1145,7 @@ class TestCalibrateZ:
         locs, info, d = bead_stack
         out_path = tmp_path / "calib.yaml"
         calib = zfit.calibrate_z(
-            locs, info, d, magnification_factor=0.79, path=str(out_path)
+            locs, info, d=d, magnification_factor=0.79, path=str(out_path)
         )
         assert out_path.exists()
         assert out_path.stat().st_size > 0
@@ -1186,14 +1205,20 @@ class TestCalibrateZBinning:
 
     def test_binning_of_one_is_the_default(self, bead_stack):
         locs, info = bead_stack
-        default = zfit.calibrate_z(locs, info, self.D, 0.79)
-        explicit = zfit.calibrate_z(locs, info, self.D, 0.79, z_binning=1)
+        default = zfit.calibrate_z(
+            locs, info, d=self.D, magnification_factor=0.79
+        )
+        explicit = zfit.calibrate_z(
+            locs, info, d=self.D, magnification_factor=0.79, z_binning=1
+        )
         assert explicit == default
         assert default["Z binning"] == 1
 
     def test_binned_calibration_is_recorded_and_accurate(self, bead_stack):
         locs, info = bead_stack
-        calib = zfit.calibrate_z(locs, info, self.D, 0.79, z_binning=5)
+        calib = zfit.calibrate_z(
+            locs, info, d=self.D, magnification_factor=0.79, z_binning=5
+        )
         assert calib["Z binning"] == 5
         # the stage step stays the raw one; only the fit points are binned
         assert calib["Step size in nm"] == self.D
@@ -1216,7 +1241,9 @@ class TestCalibrateZBinning:
         locs, info = bead_stack
         # 50 steps in bins of 8 leaves 6 bins, too few for a 6th-order fit
         with pytest.raises(ValueError, match="at least 7"):
-            zfit.calibrate_z(locs, info, self.D, 0.79, z_binning=8)
+            zfit.calibrate_z(
+                locs, info, d=self.D, magnification_factor=0.79, z_binning=8
+            )
 
 
 class TestCalibrateZFrameBounds:
@@ -1284,12 +1311,12 @@ class TestCalibrateZFrameBounds:
         ``frame_bounds=None`` (all frames used)."""
         locs, info = bead_stack
         calib_none = zfit.calibrate_z(
-            locs, info, self.D, magnification_factor=0.79, frame_bounds=None
+            locs, info, d=self.D, magnification_factor=0.79, frame_bounds=None
         )
         calib_nn = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(None, None),
         )
@@ -1305,12 +1332,12 @@ class TestCalibrateZFrameBounds:
         unbounded calibration."""
         locs, info = bead_stack
         calib_none = zfit.calibrate_z(
-            locs, info, self.D, magnification_factor=0.79
+            locs, info, d=self.D, magnification_factor=0.79
         )
         calib_full = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(0, self.N_FRAMES - 1),
         )
@@ -1329,7 +1356,7 @@ class TestCalibrateZFrameBounds:
         zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(10, 39),
         )
@@ -1344,7 +1371,7 @@ class TestCalibrateZFrameBounds:
         zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=[(10, 19), (30, 39)],
         )
@@ -1357,14 +1384,14 @@ class TestCalibrateZFrameBounds:
         calib_flat = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(10, 39),
         )
         calib_list = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=[(10, 39)],
         )
@@ -1383,7 +1410,7 @@ class TestCalibrateZFrameBounds:
         zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(None, 29),  # frames 0..29
         )
@@ -1392,7 +1419,7 @@ class TestCalibrateZFrameBounds:
         zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(20, None),  # frames 20..49
         )
@@ -1407,7 +1434,7 @@ class TestCalibrateZFrameBounds:
         calib = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(10, self.N_FRAMES - 1),
         )
@@ -1425,14 +1452,14 @@ class TestCalibrateZFrameBounds:
         calib_full = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=bounds,
         )
         calib_pre = zfit.calibrate_z(
             pre_filtered,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=bounds,
         )
@@ -1447,12 +1474,12 @@ class TestCalibrateZFrameBounds:
         """Restricting the frames must actually change the fit."""
         locs, info = bead_stack
         calib_none = zfit.calibrate_z(
-            locs, info, self.D, magnification_factor=0.79
+            locs, info, d=self.D, magnification_factor=0.79
         )
         calib_bounded = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(10, 39),
         )
@@ -1465,12 +1492,14 @@ class TestCalibrateZFrameBounds:
         calib = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(10, 39),
         )
         assert calib["Frame bounds"] == (10, 39)
-        calib = zfit.calibrate_z(locs, info, self.D, magnification_factor=0.79)
+        calib = zfit.calibrate_z(
+            locs, info, d=self.D, magnification_factor=0.79
+        )
         assert calib["Frame bounds"] is None
 
 
@@ -1558,7 +1587,7 @@ class TestCalibrateZFramesPerStep:
         calib = zfit.calibrate_z(
             locs,
             info,
-            d,
+            d=d,
             magnification_factor=0.79,
             frames_per_step=4,
             frame_order="fov",
@@ -1570,7 +1599,7 @@ class TestCalibrateZFramesPerStep:
         """Omitting the new arguments must default to one frame per z
         position and the 'fov' order, preserving the classic behavior."""
         locs, info, d = self._make_stack(1, "fov")
-        calib = zfit.calibrate_z(locs, info, d, magnification_factor=0.79)
+        calib = zfit.calibrate_z(locs, info, d=d, magnification_factor=0.79)
         assert calib["Frames per step"] == 1
         assert calib["Frame order"] == "fov"
 
@@ -1579,7 +1608,9 @@ class TestCalibrateZFramesPerStep:
         calibration whether stored as one frame per position or spread
         over several frames, in either acquisition order."""
         base_locs, base_info, d = self._make_stack(1, "fov")
-        base = zfit.calibrate_z(base_locs, base_info, d, 0.79)
+        base = zfit.calibrate_z(
+            base_locs, base_info, d=d, magnification_factor=0.79
+        )
 
         for frames_per_step in (4, 5):
             for order in ("fov", "z"):
@@ -1587,7 +1618,7 @@ class TestCalibrateZFramesPerStep:
                 calib = zfit.calibrate_z(
                     locs,
                     info,
-                    d,
+                    d=d,
                     magnification_factor=0.79,
                     frames_per_step=frames_per_step,
                     frame_order=order,
@@ -1647,7 +1678,7 @@ class TestCalibrateZFramesPerStep:
         calib = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frames_per_step=n_fov,
             frame_order="z",
@@ -1671,7 +1702,7 @@ class TestCalibrateZFramesPerStep:
         zfit.calibrate_z(
             locs,
             info,
-            d,
+            d=d,
             magnification_factor=0.79,
             frames_per_step=4,
             frame_order="z",
@@ -1687,7 +1718,7 @@ class TestCalibrateZFramesPerStep:
         calib = zfit.calibrate_z(
             locs,
             info,
-            d,
+            d=d,
             magnification_factor=0.79,
             frames_per_step=5,
             frame_order="z",
@@ -1719,7 +1750,7 @@ class TestCalibrateZFramesPerStep:
         calib = zfit.calibrate_z(
             locs,
             info,
-            d,
+            d=d,
             magnification_factor=0.79,
             frames_per_step=3,
             frame_order="fov",
@@ -1737,7 +1768,7 @@ class TestCalibrateZFramesPerStep:
             zfit.calibrate_z(
                 locs,
                 info,
-                d,
+                d=d,
                 magnification_factor=0.79,
                 frames_per_step=10,
             )
@@ -1748,7 +1779,7 @@ class TestCalibrateZFramesPerStep:
         calib = zfit.calibrate_z(
             locs,
             info,
-            d,
+            d=d,
             magnification_factor=0.79,
             path=str(out_path),
             frames_per_step=4,
@@ -1769,7 +1800,7 @@ class TestCalibrateZFramesPerStep:
         zfit.calibrate_z(
             locs,
             info,
-            d,
+            d=d,
             magnification_factor=0.79,
             frames_per_step=4,
             frame_order="fov",

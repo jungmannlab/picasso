@@ -2565,7 +2565,7 @@ class TestMasking:
 
     def test_mask_locs_partitions_input(self, locs, info, image):
         mask, _ = masking.mask_image(image, method="otsu")
-        locs_in, locs_out = masking.mask_locs(locs, info, mask)
+        locs_in, locs_out = masking.mask_locs(locs, info, mask=mask)
         assert len(locs_in) + len(locs_out) == len(locs)
         # in / out are disjoint
         assert set(locs_in.index).isdisjoint(set(locs_out.index))

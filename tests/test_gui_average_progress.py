@@ -51,7 +51,7 @@ def test_the_worker_reports_iterations_and_previews(monkeypatch):
             progress.set_value(2)
             locs["x"] += 1  # the working DataFrame keeps changing
             iteration_callback(it + 1, locs)
-        return locs
+        return locs, info
 
     monkeypatch.setattr(average, "average", fake_average)
     worker = gui_average.Worker(_locs(), [{}], 5.0, 2)

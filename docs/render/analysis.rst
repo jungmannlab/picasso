@@ -92,13 +92,13 @@ summary of the user guide.
 
       locs, info = io.load_locs("movie_locs.hdf5")
 
-      clustered, _ = clusterer.dbscan(
-          locs, radius=20.0, min_samples=4,   # radius in nm
+      clustered, clustered_info = clusterer.dbscan(
+          locs, info, radius=20.0, min_samples=4,   # radius in nm
       )
-      molecules, clustered, info = g5m.g5m(
-          clustered, info, min_locs=10, progress="console"
+      molecules, molecules_info, clustered = g5m.g5m(
+          clustered, clustered_info, min_locs=10, progress="console"
       )
-      io.save_locs("movie_molmap.hdf5", molecules, info)
+      io.save_locs("movie_molmap.hdf5", molecules, molecules_info)
 
 
 .. _render-g5m-preprocessing:
@@ -324,10 +324,10 @@ are removed.
 
       locs, info = io.load_locs("movie_locs.hdf5")
 
-      clustered, cluster_info = clusterer.dbscan(
-          locs, radius=20.0, min_samples=10, min_locs=10
+      clustered, clustered_info = clusterer.dbscan(
+          locs, info, radius=20.0, min_samples=10, min_locs=10
       )
-      io.save_locs("movie_locs_dbscan.hdf5", clustered, info + [cluster_info])
+      io.save_locs("movie_locs_dbscan.hdf5", clustered, clustered_info)
 
 
 .. _render-hdbscan:
@@ -369,10 +369,10 @@ z are treated alike (no separate z radius).
 
    .. code-block:: python
 
-      clustered, cluster_info = clusterer.hdbscan(
-          locs, min_cluster_size=10, min_samples=10
+      clustered, clustered_info = clusterer.hdbscan(
+          locs, info, min_cluster_size=10, min_samples=10
       )
-      io.save_locs("movie_locs_hdbscan.hdf5", clustered, info + [cluster_info])
+      io.save_locs("movie_locs_hdbscan.hdf5", clustered, clustered_info)
 
 
 .. _render-smlm-clusterer:
@@ -429,13 +429,15 @@ Basic frame analysis
 
    .. code-block:: python
 
-      clustered, cluster_info = clusterer.cluster(
-          locs, radius_xy=20.0, min_locs=10, frame_analysis=True,
+      clustered, clustered_info = clusterer.cluster(
+          locs, info, radius_xy=20.0, min_locs=10, frame_analysis=True,
           radius_z=None, progress="console",
       )
-      centers = clusterer.find_cluster_centers(clustered, progress="console")
-      io.save_locs("movie_locs_clusters.hdf5", clustered, info + [cluster_info])
-      io.save_locs("movie_locs_cluster_centers.hdf5", centers, info + [cluster_info])
+      centers, centers_info = clusterer.find_cluster_centers(
+          clustered, clustered_info, progress="console"
+      )
+      io.save_locs("movie_locs_clusters.hdf5", clustered, clustered_info)
+      io.save_locs("movie_locs_cluster_centers.hdf5", centers, centers_info)
 
 
 .. _render-test-clusterer:
@@ -595,12 +597,19 @@ column, for example in Filter or by rendering by property (see
       locs_b, info_b = io.load_locs("channelB_locs.hdf5")
 
       locs_a, info_a = postprocess.cbc(
-          locs_a, info_a, locs_b, partner_names="B", r_max=200, steps=100
+          locs_a,
+          info_a,
+          partner_locs=locs_b,
+          partner_names="B",
+          r_max=200,
+          steps=100,
       )  # new column "cbc_B"
       io.save_locs("channelA_locs_cbc.hdf5", locs_a, info_a)
 
       # the other direction differs
-      locs_b, info_b = postprocess.cbc(locs_b, info_b, locs_a, partner_names="A")
+      locs_b, info_b = postprocess.cbc(
+          locs_b, info_b, partner_locs=locs_a, partner_names="A"
+      )
 
       # all pairs of channels, both directions; channel i gets a column
       # "cbc_<name>" for every other channel
@@ -734,7 +743,14 @@ The dialog shows these settings when ``3D (x, y and z)`` is ticked:
       picks, shape, size = io.load_picks("picks.yaml")
 
       result = postprocess.ripley_h(
-          locs, info, picks, shape, size, r_max=500, steps=100, n_simulations=99
+          locs,
+          info,
+          picks=picks,
+          pick_shape=shape,
+          pick_size=size,
+          r_max=500,
+          steps=100,
+          n_simulations=99,
       )
       result["r"]  # radii (nm)
       result["h_mean"]  # mean H over the picks (nm)
@@ -748,9 +764,9 @@ The dialog shows these settings when ``3D (x, y and z)`` is ticked:
       result_3d = postprocess.ripley_h(
           locs,
           info,
-          picks,
-          shape,
-          size,
+          picks=picks,
+          pick_shape=shape,
+          pick_size=size,
           r_max=200,
           use_z=True,
           z_range=(-300, 300),
@@ -809,7 +825,14 @@ range and volume).
       picks, shape, size = io.load_picks("picks.yaml")
 
       result = postprocess.rdf(
-          locs, info, picks, shape, size, r_max=500, steps=50, n_simulations=99
+          locs,
+          info,
+          picks=picks,
+          pick_shape=shape,
+          pick_size=size,
+          r_max=500,
+          steps=50,
+          n_simulations=99,
       )
       result["r"]  # ring centers (nm)
       result["g_mean"]  # mean g(r) over the picks
@@ -892,9 +915,9 @@ region extends over the z range of the molecules of both channels.
       result = postprocess.rdf(
           locs_a,
           info_a,
-          picks,
-          shape,
-          size,
+          picks=picks,
+          pick_shape=shape,
+          pick_size=size,
           partner_locs=locs_b,
           cross_null="shift",
           r_max=300,

@@ -133,6 +133,35 @@ The functions and classes on the Python API pages (each module's ``__all__``), t
 
     $ python tests/regen_stability_snapshots.py
 
+Functions on Localizations
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A public function on localizations takes them and their metadata first, ``f(locs, info, *, ...)`` (lists for several channels, ``f(locs, infos, *, ...)``), and every other argument after a ``*``, so that it is passed by name. Writers take the path first, ``f(path, locs, info, *, ...)``. Make ``info`` optional (``info: list[dict] | None = None``) if the function does not need it.
+
+A function that returns new localizations (a processing step) returns ``locs, info`` first and further results after them. ``info`` is the complete metadata of the result: the input metadata with one entry recording the step appended by ``lib.append_metadata``, which copies the entries, so that the caller's metadata is not modified::
+
+    def my_step(
+        locs: pd.DataFrame,
+        info: list[dict] | None = None,
+        *,
+        radius: float = 10.0,
+    ) -> tuple[pd.DataFrame, list[dict]]:
+        """...
+
+        Returns
+        -------
+        locs : pd.DataFrame
+            ...
+        info : list of dicts
+            Metadata of ``locs``: ``info`` with an entry recording the
+            step appended, see ``lib.append_metadata``.
+        """
+        ...
+        entry = lib.step_info("My step", **{"Radius (nm)": radius})
+        return locs, lib.append_metadata(info, entry)
+
+Use ``lib.step_info`` for the entry, so that it records the Picasso version and the step. Functions that select localizations rather than process them (e.g., ``postprocess.picked_locs``, ``masking.mask_locs``) return no metadata, and ``lib.fit_canvas`` updates the canvas of the metadata it is given in place. A loop that calls a step many times (e.g., once per pick) calls a private core function that skips the metadata. ``tests/test_locs_info_api.py`` checks the signatures of all public functions and the metadata of the steps.
+
 Reporting Progress
 ^^^^^^^^^^^^^^^^^^
 

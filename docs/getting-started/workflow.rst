@@ -502,8 +502,12 @@ link localizations into binding events and compute their dark times:
    locs, info = io.load_locs("testdata_locs.hdf5")
 
    # Link localizations and calculate dark times
-   linked_locs = postprocess.link(locs, info, r_max=10, max_dark_time=1)
-   linked_locs = postprocess.compute_dark_times(linked_locs)
+   linked_locs, linked_info = postprocess.link(
+       locs, info, r_max=10, max_dark_time=1
+   )
+   linked_locs, linked_info = postprocess.compute_dark_times(
+       linked_locs, linked_info
+   )
 
    print(f"Average bright time {linked_locs['n'].mean():.2f} frames")
    print(f"Average dark time {linked_locs['dark'].mean():.2f} frames")

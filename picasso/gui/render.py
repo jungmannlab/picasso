@@ -4645,14 +4645,14 @@ class TestClustererDialog(lib.Dialog):
         elif clusterer_name == "G5M":
             locs, _ = clusterer.dbscan(locs, **params["DBSCAN"])
             info = self.window.view.infos[self.channels.currentIndex()]
-            centers, locs, _ = g5m.g5m(locs, info, **params["G5M"])
+            centers, _, locs = g5m.g5m(locs, info, **params["G5M"])
 
         if len(locs):
             self.view.group_color = render.get_group_color(locs)
 
         # calculate cluster centers
         if clusterer_name != "G5M":  # G5M found centers already
-            centers = clusterer.find_cluster_centers(locs)
+            centers, _ = clusterer.find_cluster_centers(locs)
         return locs, centers
 
     def get_cluster_params(self) -> dict:
@@ -4845,7 +4845,7 @@ class TestClustererDialog(lib.Dialog):
             def job(progress: lib.TaskProgress) -> None:
                 lib.start_phase(progress, "Applying DBSCAN...", 0)
                 clustered, _ = clusterer.dbscan(locs, **params["DBSCAN"])
-                centers, clustered_locs, new_info = g5m.g5m(
+                centers, new_info, clustered_locs = g5m.g5m(
                     clustered,
                     info,
                     **params["G5M"],
@@ -6145,7 +6145,7 @@ class InfoDialog(lib.Dialog):
 
             # calculate frc
             self.frc_result = postprocess.frc(
-                locs, info, self.window.view.viewport
+                locs, info, viewport=self.window.view.viewport
             )
             if path:  # save images
                 base, ext = os.path.splitext(path)
@@ -6195,7 +6195,7 @@ class InfoDialog(lib.Dialog):
             return postprocess.frc_rois(
                 locs,
                 info,
-                viewport,
+                viewport=viewport,
                 n_rois=n_rois,
                 roi_size=roi_size,
                 min_locs=min_locs,
@@ -7262,7 +7262,7 @@ class MaskSettingsDialog(lib.Dialog):
         locs_in, locs_out = masking.mask_locs(
             locs,
             self.infos[self.channel],
-            self.mask,
+            mask=self.mask,
         )
         self.index_locs.append(locs_in)  # locs in the mask
         self.index_locs_out.append(locs_out)  # locs outside the mask
@@ -12460,7 +12460,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             def align():
                 return postprocess.align(locs, infos, method="rcc")
 
-        self.locs = lib.run_with_status(align, "Aligning channels...", self)
+        # the metadata is not updated: Render records its own state when
+        # saving
+        self.locs, _ = lib.run_with_status(align, "Aligning channels...", self)
         if not keep_non_overlapping_setting():
             try:
                 self.locs = postprocess.remove_non_overlapping_locs(self.locs)
@@ -12490,7 +12492,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             "Combining localizations in picks", 0, 0, self
         )
         try:
-            self.locs[channel] = postprocess.combine_locs_in_picks(
+            self.locs[channel], _ = postprocess.combine_locs_in_picks(
                 self.locs[channel],
                 self.infos[channel],
                 picks=self._picks,
@@ -12546,24 +12548,20 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                     )
                 # cancellation point
                 lib.start_phase(progress, description, 0)
-                linked_locs = postprocess.link(
+                linked_locs, linked_info = postprocess.link(
                     locs, info, r_max=r_max, max_dark_time=max_dark
                 )
-                results.append((c, linked_locs))
+                results.append((c, linked_locs, linked_info))
             return results
 
-        link_info = {
-            **lib.step_info("Render : Link"),
-            "Max. distance (nm)": r_max,
-            "Max. transient dark frames": max_dark,
-        }
-
         def apply(results: list[tuple]) -> None:
-            for c, linked_locs in results:
+            for c, linked_locs, linked_info in results:
                 self.locs[c] = linked_locs
-                # new list, the old one may be shared with linked windows
-                self.infos[c] = self.infos[c] + [dict(link_info)]
-            grouped = [locs for _, locs in results if "group" in locs.columns]
+                # a new list, the old one may be shared with linked windows
+                self.infos[c] = linked_info
+            grouped = [
+                locs for _, locs, _ in results if "group" in locs.columns
+            ]
             if grouped:
                 self.group_color = render.get_group_color(
                     grouped[-1], shuffle=True
@@ -12608,10 +12606,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         r_max, max_dark, ok = LinkDialog.getParams(max_dark_time=0)  # nm
         if not ok:
             return
-        locs = self.locs[channel]
-        locs = lib.run_with_status(
+        locs, info = self.locs[channel], self.infos[channel]
+        locs, info = lib.run_with_status(
             lambda: postprocess.select_binding_event_cores(
-                locs, r_max=r_max, max_dark_time=max_dark
+                locs, info, r_max=r_max, max_dark_time=max_dark
             ),
             "Selecting binding event cores...",
             self,
@@ -12628,14 +12626,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             )
             return
         self.locs[channel] = locs
-        # new list, the old one may be shared with linked windows
-        self.infos[channel] = self.infos[channel] + [
-            {
-                **lib.step_info("Render : Binding event cores"),
-                "Max. distance (nm)": r_max,
-                "Max. transient dark frames": max_dark,
-            }
-        ]
+        # a new list, the old one may be shared with linked windows
+        self.infos[channel] = info
         self.group_color = render.get_group_color(locs, shuffle=True)
         self.update_scene(resample_locs=True)
 
@@ -12751,10 +12743,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             lib.start_phase(
                 progress, "Applying DBSCAN. This may take a while.", 0
             )
-            clustered_locs, dbscan_info = clusterer.dbscan(
+            clustered_locs, clustered_info = clusterer.dbscan(
                 locs,
-                radius,
-                min_density,
+                info,
+                radius=radius,
+                min_samples=min_density,
                 min_locs=min_locs,
                 radius_z=radius_z,
             )
@@ -12762,7 +12755,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 progress,
                 path,
                 clustered_locs,
-                info + [dbscan_info],
+                clustered_info,
                 save_centers,
                 save_areas,
             )
@@ -12870,17 +12863,18 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             lib.start_phase(
                 progress, "Applying HDBSCAN. This may take a while.", 0
             )
-            clustered_locs, hdbscan_info = clusterer.hdbscan(
+            clustered_locs, clustered_info = clusterer.hdbscan(
                 locs,
-                min_cluster,
-                min_samples,
+                info,
+                min_cluster_size=min_cluster,
+                min_samples=min_samples,
                 cluster_eps=cluster_eps,
             )
             self._save_clusters(
                 progress,
                 path,
                 clustered_locs,
-                info + [hdbscan_info],
+                clustered_info,
                 save_centers,
                 save_areas,
             )
@@ -12992,11 +12986,12 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         info = self.infos[channel]
 
         def job(progress: lib.TaskProgress) -> None:
-            clustered_locs, new_info = clusterer.cluster(
+            clustered_locs, clustered_info = clusterer.cluster(
                 locs,
-                radius_xy,
-                min_locs,
-                frame_analysis,
+                info,
+                radius_xy=radius_xy,
+                min_locs=min_locs,
+                frame_analysis=frame_analysis,
                 radius_z=radius_z,
                 progress=progress,
             )
@@ -13004,7 +12999,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 progress,
                 path,
                 clustered_locs,
-                info + [new_info],
+                clustered_info,
                 save_centers,
                 save_areas,
             )
@@ -13042,11 +13037,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         io.save_locs(path, clustered_locs, info)
         base = os.path.splitext(path)[0]
         if save_centers:
-            centers = clusterer.find_cluster_centers(
-                clustered_locs, progress=progress
+            centers, centers_info = clusterer.find_cluster_centers(
+                clustered_locs, info, progress=progress
             )
             progress.check_canceled()
-            io.save_locs(base + "_centers.hdf5", centers, info)
+            io.save_locs(base + "_centers.hdf5", centers, centers_info)
         if save_areas:
             areas = clusterer.cluster_areas(
                 clustered_locs, info, progress=progress
@@ -13204,7 +13199,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         info = self.infos[channel]
 
         def job(progress: lib.TaskProgress) -> Callable | None:
-            g5m_centers, clustered_locs, new_info = g5m.g5m(
+            g5m_centers, new_info, clustered_locs = g5m.g5m(
                 locs=locs,
                 info=info,
                 min_locs=params["min_locs"],
@@ -13245,7 +13240,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 )
                 # automatically save rel_sigma plot
                 lib.plot_rel_sigma_check(
-                    g5m_centers, new_info, base + "_relsigma_check.png"
+                    g5m_centers, new_info, path=base + "_relsigma_check.png"
                 )
 
             return plot_checks
@@ -15953,7 +15948,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                     new_locs, new_info = postprocess.cbc(
                         locs[0],
                         infos[0],
-                        locs[1],
+                        partner_locs=locs[1],
                         partner_names=names[pair[1]],
                         progress=progress,
                         **kwargs,
@@ -16067,9 +16062,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 result = spec["compute"](
                     locs,
                     info,
-                    picks,
-                    pick_shape,
-                    pick_size,
+                    picks=picks,
+                    pick_shape=pick_shape,
+                    pick_size=pick_size,
                     progress=progress,
                     **kwargs,
                 )
@@ -16801,13 +16796,13 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         dark = np.empty(len(clustered_locs))
         for i, pick_locs in enumerate(clustered_locs):
             if "len" not in pick_locs.columns:
-                pick_locs = postprocess.link(
+                pick_locs, _ = postprocess.link(
                     pick_locs,
                     self.infos[channel],
                     r_max=r_max,
                     max_dark_time=max_dark,
                 )
-            pick_locs = postprocess.compute_dark_times(pick_locs)
+            pick_locs, _ = postprocess.compute_dark_times(pick_locs)
             dark[i] = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
             out_locs.append(pick_locs)
             progress.set_value(i + 1)
@@ -17537,9 +17532,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             Index of the channel were localizations are removed.
         """
         locs = self.locs[channel]
-        locs = postprocess.remove_locs_in_picks(
-            locs=locs,
-            info=self.infos[channel],
+        # the metadata is not updated: Render records its own state when
+        # saving
+        locs, _ = postprocess.remove_locs_in_picks(
+            locs,
+            self.infos[channel],
             picks=self._picks,
             pick_shape=self._pick_shape,
             pick_size=self._pick_size,
@@ -18491,10 +18488,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             for c, locs, info in jobs:
                 # the undrifted locs are ignored, since _apply_drift
                 # assigns them together with the drift attributes
-                drift, _ = postprocess.undrift(
+                _, _, drift = postprocess.undrift(
                     locs,
                     info,
-                    segmentation,
+                    segmentation=segmentation,
                     display=False,
                     progress=progress,
                 )
@@ -18694,7 +18691,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         drift["y"] = -drift["y"]
         if "z" in drift.columns:
             drift["z"] = -drift["z"]
-        self.locs[channel] = postprocess.apply_drift(
+        self.locs[channel], _ = postprocess.apply_drift(
             self.locs[channel], self.infos[channel], drift=drift
         )
         self.invalidate_locs_index(channel)
@@ -18751,8 +18748,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
     def _apply_drift(self, channel: int, drift: pd.DataFrame) -> None:
         """Shift localizations in a given channel based on drift from a
-        .txt file."""
-        self.locs[channel] = postprocess.apply_drift(
+        .txt file. The drift is recorded in the metadata on saving
+        (``Last driftfile``)."""
+        self.locs[channel], _ = postprocess.apply_drift(
             self.locs[channel], self.infos[channel], drift=drift
         )
         self._drift[channel] = drift
@@ -18820,9 +18818,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if not ok:
             return
 
-        self.locs[0], self.infos[0][0] = lib.unfold_localizations_square(
-            locs=locs,
-            info=self.infos[0][0],
+        self.locs[0], self.infos[0] = lib.unfold_localizations_square(
+            locs,
+            self.infos[0],
             n_square=n_square,
             spacing=spacing,
         )

@@ -77,6 +77,7 @@ def _identification_from_info(info: list[dict]) -> dict | None:
 def calibrate_z(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     d: float,
     magnification_factor: float,
     path: str | None = None,
@@ -928,8 +929,9 @@ def zfit(
         Localizations with columns 'z', 'd_zcalib', and 'lpz' appended.
         If processing is aborted, returns None.
     info : list of dicts
-        Updated info with the z fitting parameters attached. If
-        processing is aborted, returns None.
+        Metadata of ``locs``: ``info`` with an entry recording the z
+        fitting appended, see ``lib.append_metadata``. If processing is
+        aborted, returns None.
     """
     assert fitting_method in ["gausslq", "gaussmle"], "Invalid fitting method."
     assert filter >= 0, "Filter must be non-negative."
@@ -1062,8 +1064,7 @@ def _apply_lateral_transforms_and_build_info(
     recorded = {
         k: v for k, v in calibration.items() if k != io.FORMAT_VERSION_ATTR
     }
-    new_info = info + [new_info | recorded]
-    return locs, new_info
+    return locs, lib.append_metadata(info, new_info | recorded)
 
 
 def _zfit(
@@ -1188,6 +1189,7 @@ def filter_z_fits(locs: pd.DataFrame, range: int) -> pd.DataFrame:
 def axial_localization_precision(
     locs: np.recarray,
     info: list[dict],
+    *,
     calibration: dict,
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
     modality: Literal["astigmatic"] = "astigmatic",
@@ -1222,7 +1224,7 @@ def axial_localization_precision(
             "Currently only 'astigmatic' modality is supported."
         )
     lpz = axial_localization_precision_astig(
-        locs, info, calibration, fitting_method
+        locs, info, calibration=calibration, fitting_method=fitting_method
     )
     return lpz
 
@@ -1230,6 +1232,7 @@ def axial_localization_precision(
 def axial_localization_precision_astig(
     locs: np.recarray,
     info: list[dict],
+    *,
     calibration: dict,
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
 ) -> lib.FloatArray1D:

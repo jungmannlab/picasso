@@ -2762,8 +2762,10 @@ class TestAstigmatism:
         suggested = _save_file(monkeypatch, path)
         built = []
 
-        def calibrate_z(locs, info, step, magnification, path, **kwargs):
-            built.append((len(locs), step, path, kwargs))
+        def calibrate_z(
+            locs, info, *, d, magnification_factor, path, **kwargs
+        ):
+            built.append((len(locs), d, path, kwargs))
 
         monkeypatch.setattr(gui_localize.zfit, "calibrate_z", calibrate_z)
         loaded.localize(calibrate_z=True)

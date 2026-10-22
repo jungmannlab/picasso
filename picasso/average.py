@@ -272,7 +272,8 @@ def prepare_locs_for_save(
     locs : pd.DataFrame
         Copy of the localizations, shifted to positive coordinates.
     new_info : list of dicts
-        Updated metadata with new width and height.
+        ``info`` with an entry recording the averaging appended, see
+        ``lib.append_metadata``.
     """
     width, height = lib.field_of_view(info)
     cx = width / 2
@@ -282,13 +283,18 @@ def prepare_locs_for_save(
     locs = locs.copy()
     locs["x"] += cx
     locs["y"] += cy
-    avg_info = lib.step_info("Average")
+    return locs, lib.append_metadata(info, _average_entry(params))
+
+
+def _average_entry(params: dict) -> dict:
+    """Metadata entry recording the averaging with ``params`` (see
+    ``prepare_locs_for_save``)."""
+    entry = lib.step_info("Average")
     if "disp_px_size" in params:
-        avg_info["Display pixel size (nm)"] = params["disp_px_size"]
+        entry["Display pixel size (nm)"] = params["disp_px_size"]
     if "it" in params:
-        avg_info["Iterations"] = params["it"]
-    new_info = info + [avg_info]
-    return locs, new_info
+        entry["Iterations"] = params["it"]
+    return entry
 
 
 class AveragePool:
@@ -426,11 +432,10 @@ def _finalize_average(
 ):
     if aborted:
         return None
+    params = {"disp_px_size": display_pixel_size, "it": iterations}
     if return_shifted_locs:
-        params = {"disp_px_size": display_pixel_size, "it": iterations}
-        locs, info = prepare_locs_for_save(locs, info, params)
-        return locs, info
-    return locs
+        return prepare_locs_for_save(locs, info, params)
+    return locs, lib.append_metadata(info, _average_entry(params))
 
 
 #: Seconds between two polls of the workers while a round of alignment
@@ -478,7 +483,7 @@ def average(
     iteration_callback: Callable[[int, pd.DataFrame], None] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     pool: AveragePool | None = None,
-) -> pd.DataFrame | tuple[pd.DataFrame, list[dict]] | None:
+) -> tuple[pd.DataFrame, list[dict]] | None:
     """Average super-resolution images of particles by alignment and rotation.
 
     Builds the group index and applies per-group center-of-mass alignment
@@ -497,9 +502,9 @@ def average(
     iterations : int, optional
         Number of averaging iterations (default=3).
     return_shifted_locs : bool, optional
-        If True, return localizations shifted to positive coordinates
-        and updated metadata. If False, only localizations are returned
-        without shifts.
+        If True, the returned localizations are shifted from (0, 0) to
+        the center of the field of view, so that they can be saved.
+        Default is False.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -530,14 +535,16 @@ def average(
 
     Returns
     -------
-    locs_averaged : pd.DataFrame or None
-        Averaged localizations with coordinates centered at (0, 0).
-        Returns ``None`` if the process was aborted via
-        ``abort_callback``. If ``return_shifted_locs`` is True, the
-        localizations are shifted towards the center of the FOV.
-    info : list of dicts, optional
-        If ``return_shifted_locs`` is True, updated metadata with the
-        average info is returned.
+    locs_averaged : pd.DataFrame
+        Averaged localizations with coordinates centered at (0, 0), or
+        at the center of the field of view if ``return_shifted_locs`` is
+        True.
+    info : list of dicts
+        Metadata of the averaged localizations: ``info`` with an entry
+        recording the averaging appended, see ``lib.append_metadata``.
+
+    None is returned instead of the tuple if the averaging was aborted
+    via ``abort_callback``.
     """
     assert (
         "group" in locs.columns

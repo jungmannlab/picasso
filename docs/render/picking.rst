@@ -138,11 +138,18 @@ See :doc:`menu-tools` for the other pick utilities.
 
       picks = [(15639.0, 11453.0), (17030.0, 12051.0)]   # centers, nm
       diameter = 100.0                                   # nm
-      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=diameter)
+      picked = postprocess.picked_locs(
+          locs, info, picks=picks, pick_shape="Circle", pick_size=diameter
+      )
 
       # Pick similar
       picks += postprocess.pick_similar(
-          locs, info, picks, "Circle", pick_size=diameter, std_range=2.0
+          locs,
+          info,
+          picks=picks,
+          pick_shape="Circle",
+          pick_size=diameter,
+          std_range=2.0,
       )
 
       # Save picked localizations (one "group" per pick) and the pick regions

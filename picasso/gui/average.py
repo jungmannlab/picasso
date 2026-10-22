@@ -172,7 +172,8 @@ class Worker(QtCore.QThread):
             self.was_aborted = True
             self.aborted.emit()
         else:
-            self.locs = result
+            # the window records the averaging in its metadata on saving
+            self.locs, _ = result
 
 
 class ParametersDialog(lib.Dialog):

@@ -93,7 +93,9 @@ also editable via ``File > Picasso settings`` in any module).
       import pandas as pd
       from picasso import postprocess
 
-      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=diameter)
+      picked = postprocess.picked_locs(
+          locs, info, picks=picks, pick_shape="Circle", pick_size=diameter
+      )
       io.save_locs("movie_locs_picked.hdf5", pd.concat(picked, ignore_index=True), info)
 
 

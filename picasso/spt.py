@@ -263,8 +263,8 @@ def _link_tracks_kernel(
 def link_tracks(
     locs: pd.DataFrame,
     info: list[dict],
-    max_jump: float,
     *,
+    max_jump: float,
     max_gap: int = MAX_GAP,
     min_length: int = MIN_LENGTH,
     frame_time: float | None = None,
@@ -317,8 +317,9 @@ def link_tracks(
         in the ``group`` column (consecutive integers in the order of
         the tracks' first frames). If ``locs`` had a ``group`` column,
         it is kept in ``group_input``.
-    new_info : list of dicts
-        ``info`` with an entry describing the tracking appended.
+    info : list of dicts
+        Metadata of ``tracked_locs``: ``info`` with an entry describing
+        the tracking appended, see ``lib.append_metadata``.
 
     Raises
     ------
@@ -389,7 +390,7 @@ def link_tracks(
         entry["Input groups kept in"] = "group_input"
     if frame_time is not None:
         entry[FRAME_TIME_KEY] = float(frame_time)
-    return tracked, info + [entry]
+    return tracked, lib.append_metadata(info, entry)
 
 
 def tracking_info(info: list[dict] | None) -> dict | None:

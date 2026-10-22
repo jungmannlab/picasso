@@ -216,11 +216,30 @@ neither has one. ``lateral-calibrate`` requires ``-px/--pixelsize``.
 ``localize --qe`` is accepted and ignored.
 
 **Other changes:** ``align`` repeats the RCC alignment until the shifts
-converge, as Render does. The metadata key ``Radius`` written by ``density``
-is ``Radius (nm)``, and ``undrift-fiducials`` records ``Pick diameter (nm)``
-instead of ``Pick radius (nm)``. ``picasso server`` needs the ``server`` extra
+converge, as Render does. ``undrift --from-file`` also corrects z if the drift
+file has it. ``picasso server`` needs the ``server`` extra
 when Picasso is installed with pip (see :ref:`migration-installing`) and
 accepts connections from other computers only with ``--network``.
+
+**The metadata the commands write** comes from the Python functions they run
+(see :ref:`migration-python-locs-info`), so a command records the same as a
+script, and some keys changed. Scripts that read these keys from the
+metadata need the new ones:
+
+- ``link``: ``Max. distance (nm)`` and ``Max. transient dark frames``
+  (were ``Maximum Distance`` and ``Maximum Transient Dark Time``).
+- ``undrift``: ``Segmentation`` (RCC) as before, and no ``Drift X`` and
+  ``Drift Y`` (the drift is saved in the drift file). With ``--from-file``,
+  the step is ``Apply drift`` with ``From File``.
+- ``undrift-fiducials``: two entries, one for the RCC before picking the
+  fiducials (``Segmentation``, was ``pre-RCC segmentation``) and one for the
+  fiducials (``Number of picks``, ``Pick shape`` and ``Pick diameter (nm)``,
+  was ``Pick radius (nm)``).
+- ``density``: ``Radius (nm)`` (was ``Radius``).
+- ``align``: the shift subtracted from each file (``Shift x (nm)``,
+  ``Shift y (nm)``) and the method, besides ``Files``.
+- ``dbscan``, ``hdbscan`` and ``smlm-cluster``: the cluster centers have one
+  more entry, ``Cluster centers``.
 
 .. _migration-results:
 
@@ -259,7 +278,9 @@ fit fail with an error (e.g., a ``TypeError`` for a removed argument or an
 wrong results instead: **numbers in camera pixels are taken as nm**, and a
 **pixel size passed positionally** to a function that lost its ``pixelsize``
 lands in the next argument (see :ref:`migration-python-units`). Check every
-length your script passes.
+length your script passes. Also, the functions on localizations take only
+``locs`` and ``info`` positionally and return the metadata of their result
+(see :ref:`migration-python-locs-info`).
 
 .. _migration-python-units:
 
@@ -288,7 +309,7 @@ pixel size, and remove any conversion of the columns to nm it does itself:
    :caption: Picasso 1.0
 
    x_nm = locs.x
-   linked = postprocess.link(locs, info, r_max=20)
+   linked, linked_info = postprocess.link(locs, info, r_max=20)
    width_nm, height_nm = lib.field_of_view(info)  # Width, Height times Pixelsize
 
 The arguments that took camera pixels, with their defaults:
@@ -355,9 +376,10 @@ only to convert between camera pixels and nm lost it:
 ``render.draw_scalebar``, ``draw_points`` and ``spinna.coords_to_locs``.
 Remove it from your calls. **Watch out for positional calls:** the pixel size
 then lands in the next argument without an error, e.g.,
-``clusterer.dbscan(locs, radius, min_samples, min_locs, 130)`` sets
-``radius_z`` to 130 nm, and ``clusterer.hdbscan(locs, min_cluster_size,
-min_samples, 130)`` sets ``cluster_eps`` to 130 nm.
+``render.draw_scalebar(image, viewport, 500, 130)`` passes 130 as
+``display_length``. The clustering functions take their parameters by name
+only (see :ref:`migration-python-locs-info`), so positional calls of them fail
+with a ``TypeError``.
 
 .. code-block:: python
    :caption: Picasso 0.11
@@ -371,9 +393,13 @@ min_samples, 130)`` sets ``cluster_eps`` to 130 nm.
 .. code-block:: python
    :caption: Picasso 1.0
 
-   linked = postprocess.link(locs, info, r_max=6.5)
-   clustered, cluster_info = clusterer.cluster(locs, 20, 10, True, radius_z=50)
-   centers = clusterer.find_cluster_centers(clustered)
+   linked, linked_info = postprocess.link(locs, info, r_max=6.5)
+   clustered, clustered_info = clusterer.cluster(
+       locs, info, radius_xy=20, min_locs=10, frame_analysis=True, radius_z=50
+   )
+   centers, centers_info = clusterer.find_cluster_centers(
+       clustered, clustered_info
+   )
 
 .. _migration-python-picks:
 
@@ -393,13 +419,107 @@ Render and the pick region files do. ``picasso.postprocess.picked_locs`` and
    :caption: Picasso 1.0
 
    picks, shape, size = io.load_picks("locs_picks.yaml")  # positions and size in nm
-   picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=200)
+   picked = postprocess.picked_locs(
+       locs, info, picks=picks, pick_shape="Circle", pick_size=200
+   )
 
 The functions of ``picasso.nanotron`` take ``pick_diameter`` (nm) instead of
 ``radius`` and ``pick_radius``. ``picasso.io.load_picks`` returns the
 positions and the size in nm; its ``pixelsize`` argument is only needed for
 pick files written before 1.0, which it converts (in 0.11, it converted the
 size to camera pixels).
+
+.. _migration-python-locs-info:
+
+Localizations, metadata and the other arguments
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The functions on localizations share one pattern (see :ref:`api-locs-info`):
+
+- **Only the localizations and their metadata are positional**,
+  ``f(locs, info, *, ...)`` (``f(locs, infos, *, ...)`` for several channels;
+  writers such as ``io.save_locs`` take the path first). Pass every other
+  argument by name; positional calls fail with a ``TypeError``, e.g.,
+  ``postprocess.link(locs, info, 10, 3)``, ``postprocess.undrift(locs, info,
+  1000)`` or ``zfit.calibrate_z(locs, info, 10, 0.79)``. Functions that do
+  not need the metadata take ``info=None``, so it can be left out, e.g.,
+  ``clusterer.dbscan(locs, radius=20, min_samples=4)``.
+- **Functions that return new localizations return their metadata, too**: the
+  complete metadata of the result, i.e., ``info`` with an entry recording the
+  step appended, ready to be saved. ``info`` itself is not modified. Further
+  results come after the localizations and the metadata. To record a step of
+  your own, use ``lib.append_metadata``.
+
+The functions whose results changed:
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 30 30
+
+   * - Function
+     - Picasso 0.11 returned
+     - Picasso 1.0 returns
+   * - ``postprocess.link``, ``select_binding_event_cores``,
+       ``combine_locs_in_picks``, ``remove_locs_in_picks``,
+       ``compute_dark_times``, ``compute_local_density``, ``apply_drift``
+     - ``locs``
+     - ``locs, info``
+   * - ``postprocess.undrift``
+     - ``drift, locs``
+     - ``locs, info, drift``
+   * - ``postprocess.align``, ``align_rcc``, ``align_from_picked``
+     - ``locs`` or ``locs, shifts``
+     - ``locs, infos`` or ``locs, infos, shifts``
+   * - ``clusterer.cluster``, ``dbscan``, ``hdbscan``
+     - ``locs, entry`` (one dictionary)
+     - ``locs, info`` (the whole list)
+   * - ``clusterer.find_cluster_centers``
+     - ``centers``
+     - ``centers, info``
+   * - ``g5m.g5m``
+     - ``centers, clustered_locs, info``
+     - ``centers, info, clustered_locs``
+   * - ``average.average``
+     - ``locs``, or ``locs, info`` with ``return_shifted_locs=True``
+     - ``locs, info``
+   * - ``lib.apply_filter_steps``
+     - ``locs, ranges, to_remove, missing``
+     - ``locs, info, missing``
+
+``aim.aim``, ``postprocess.undrift_from_fiducials``, ``zfit.zfit``,
+``lib.unfold_localizations_square`` and the other functions that returned
+the metadata in 0.11 return it as before, ``unfold_localizations_square``
+with an entry recording the unfolding.
+
+``lib.apply_filter_steps`` takes the metadata of the localizations as
+``info`` and the metadata with the filter steps as ``recipe``; in 0.11, the
+filter steps came second. ``postprocess.remove_locs_in_picks`` and
+``compute_dark_times`` no longer modify the localizations passed to them.
+
+.. code-block:: python
+   :caption: Picasso 0.11
+
+   drift, undrifted = postprocess.undrift(locs, info, 1000)
+   linked = postprocess.link(undrifted, info, 0.05, 3)
+   info.append({"Generated by": "Picasso Link", "Maximum Distance": 0.05})
+   clustered, dbscan_info = clusterer.dbscan(linked, 0.15, 4)
+   io.save_locs("locs_dbscan.hdf5", clustered, info + [dbscan_info])
+   filtered, ranges, to_remove, missing = lib.apply_filter_steps(
+       locs, filter_info
+   )
+
+.. code-block:: python
+   :caption: Picasso 1.0
+
+   undrifted, info, drift = postprocess.undrift(
+       locs, info, segmentation=1000
+   )
+   linked, info = postprocess.link(undrifted, info, r_max=6.5, max_dark_time=3)
+   clustered, info = clusterer.dbscan(linked, info, radius=20, min_samples=4)
+   io.save_locs("locs_dbscan.hdf5", clustered, info)  # with all three steps
+   filtered, filtered_info, missing = lib.apply_filter_steps(
+       locs, info, recipe=filter_info
+   )
 
 .. _migration-python-localize:
 
@@ -644,7 +764,10 @@ several steps:
        movie, camera_info=camera_info, identification_parameters=parameters,
        progress="console",
    )
-   picked = postprocess.picked_locs(locs, info, picks, "Circle", 200, progress="console")
+   picked = postprocess.picked_locs(
+       locs, info, picks=picks, pick_shape="Circle", pick_size=200,
+       progress="console",
+   )
 
 - ``picasso.io.load_locs``, ``load_movie``, ``load_movie_all``, ``load_tif``
   and ``load_tif_concatenated`` take a tracker instead of a function called
@@ -689,7 +812,7 @@ Postprocessing
 .. code-block:: python
    :caption: Picasso 1.0
 
-   aligned, (shift_x, shift_y) = postprocess.align(
+   aligned, aligned_infos, (shift_x, shift_y) = postprocess.align(
        [locs1, locs2], [info1, info2], method="picked",
        picks=picks, pick_shape="Circle", pick_size=200, return_shifts=True,
    )
@@ -704,8 +827,8 @@ exactly:
 .. code-block:: python
 
    pixelsize = lib.get_from_metadata(info, "Pixelsize")
-   drift, locs = postprocess.undrift(
-       locs, info, 1000, display=False,
+   locs, info, drift = postprocess.undrift(
+       locs, info, segmentation=1000, display=False,
        disp_px_size=pixelsize, max_shift=32 * pixelsize,
    )
 

@@ -476,7 +476,7 @@ class TestAutoSelection:
 
     def test_auto_selects_rotated_for_3d_astigmatism_with_angle(self, info):
         locs = _rotated_cluster(30.0)
-        _, _, out_info = g5m.g5m(
+        _, out_info, _ = g5m.g5m(
             locs,
             info,
             min_locs=20,
@@ -487,7 +487,7 @@ class TestAutoSelection:
         assert out_info[-1]["Covariance type"] == "rotated"
 
     def test_auto_keeps_diagonal_without_angle(self, dbscan_locs_3d, info):
-        _, _, out_info = g5m.g5m(
+        _, out_info, _ = g5m.g5m(
             dbscan_locs_3d,
             info,
             min_locs=5,
@@ -499,7 +499,7 @@ class TestAutoSelection:
 
     def test_auto_keeps_diagonal_for_spline_even_with_angle(self, info):
         locs = _rotated_cluster(30.0)
-        _, _, out_info = g5m.g5m(
+        _, out_info, _ = g5m.g5m(
             locs,
             info,
             min_locs=20,
@@ -517,7 +517,7 @@ class TestAutoSelection:
         # rotated G5M model is 3D only
         locs = dbscan_locs.copy()
         locs["angle"] = 30.0
-        _, _, out_info = g5m.g5m(
+        _, out_info, _ = g5m.g5m(
             locs, info, min_locs=5, asynch=False, postprocess=False
         )
         assert out_info[-1]["Covariance type"] == "spherical"
@@ -525,7 +525,7 @@ class TestAutoSelection:
     def test_diagonal_forces_old_model_on_angle_carrying_data(self, info):
         """The explicit escape hatch for reproducing earlier results."""
         locs = _rotated_cluster(30.0)
-        mols, _, out_info = g5m.g5m(
+        mols, out_info, _ = g5m.g5m(
             locs,
             info,
             min_locs=20,
@@ -645,7 +645,7 @@ class TestOutputContract:
         from picasso import lib
 
         locs = _rotated_cluster(30.0)
-        mols, _, out_info = g5m.g5m(
+        mols, out_info, _ = g5m.g5m(
             locs,
             info,
             min_locs=20,
@@ -655,7 +655,7 @@ class TestOutputContract:
             postprocess=False,
         )
         path = tmp_path / "relsigma.png"
-        lib.plot_rel_sigma_check(mols, out_info, str(path))
+        lib.plot_rel_sigma_check(mols, out_info, path=str(path))
         assert path.exists() and path.stat().st_size > 0
 
     def test_no_nan_and_survives_save_round_trip(self, info, tmp_path):
@@ -665,7 +665,7 @@ class TestOutputContract:
         from picasso import io
 
         locs = _rotated_cluster(30.0)
-        mols, _, out_info = g5m.g5m(
+        mols, out_info, _ = g5m.g5m(
             locs,
             info,
             min_locs=20,
@@ -709,7 +709,7 @@ class TestOutputContract:
             }
         ]
         locs = _rotated_cluster(30.0)
-        mols, _, out_info = g5m.g5m(
+        mols, out_info, _ = g5m.g5m(
             locs,
             info,
             min_locs=20,
@@ -1049,7 +1049,7 @@ class TestBootstrap:
         assert np.isfinite(sem).all() and (sem > 0).all()
 
     def test_bootstrap_end_to_end_for_rotated(self, info):
-        mols, _, out_info = g5m.g5m(
+        mols, out_info, _ = g5m.g5m(
             _rotated_cluster(30.0),
             info,
             min_locs=20,
@@ -1131,7 +1131,7 @@ class TestG5M:
         assert (mols["p_val"] >= 0).all() and (mols["p_val"] <= 1).all()
 
     def test_g5m_2d_global_loc_prec(self, dbscan_locs, info):
-        mols, _, out_info = g5m.g5m(
+        mols, out_info, _ = g5m.g5m(
             dbscan_locs,
             info,
             min_locs=5,
@@ -1175,7 +1175,7 @@ class TestG5M3D:
     def test_g5m_3d_spline_no_calibration(self, dbscan_locs_3d, info):
         # spline mode uses the plain diagonal 3D model and reads lpz
         # directly from the locs, so no calibration is required
-        mols, _, out_info = g5m.g5m(
+        mols, out_info, _ = g5m.g5m(
             dbscan_locs_3d,
             info,
             min_locs=5,

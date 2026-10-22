@@ -265,7 +265,7 @@ class TestAverageParticles:
         return [{"Width": 256, "Height": 256, "Pixelsize": 130}]
 
     def test_returns_dataframe_of_same_length(self, sample_locs, sample_info):
-        result = average.average(
+        result, new_info = average.average(
             sample_locs,
             sample_info,
             display_pixel_size=65,
@@ -275,9 +275,12 @@ class TestAverageParticles:
         assert isinstance(result, pd.DataFrame)
         assert len(result) == len(sample_locs)
         assert {"x", "y", "group"}.issubset(result.columns)
+        # metadata of the averaged locs, the input info left untouched
+        assert len(new_info) == len(sample_info) + 1
+        assert new_info[-1]["Step"] == "Average"
 
     def test_output_centered_around_origin(self, sample_locs, sample_info):
-        result = average.average(
+        result, _ = average.average(
             sample_locs,
             sample_info,
             display_pixel_size=65,
@@ -295,13 +298,13 @@ class TestAverageParticles:
             df.groupby("group")[["x", "y"]].std().to_numpy().mean()
         )
 
-        result1 = average.average(
+        result1, _ = average.average(
             sample_locs.copy(),
             sample_info,
             display_pixel_size=65,
             iterations=1,
         )
-        result3 = average.average(
+        result3, _ = average.average(
             sample_locs.copy(),
             sample_info,
             display_pixel_size=65,
@@ -335,7 +338,7 @@ class TestAverageParticles:
         def on_iteration(done, locs):
             calls.append((done, locs.copy()))
 
-        result = average.average(
+        result, _ = average.average(
             sample_locs,
             sample_info,
             display_pixel_size=65,
@@ -381,7 +384,7 @@ class TestAverageParticles:
                     pool=pool,
                 )
             assert not pool.closed
-            result = average.average(
+            result, _ = average.average(
                 sample_locs,
                 sample_info,
                 display_pixel_size=65,

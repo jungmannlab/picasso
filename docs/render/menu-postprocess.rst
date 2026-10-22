@@ -119,7 +119,8 @@ distance between them (250 nm by default).
    :icon: code
    :class-container: api-example
 
-   ``spacing`` is in nm (250 nm by default).
+   ``spacing`` is in nm (250 nm by default). The returned metadata has the
+   new field of view.
 
    .. code-block:: python
 
@@ -164,9 +165,12 @@ channel with the same parameters. Channels that are already linked are skipped.
 
       locs, info = io.load_locs("movie_locs.hdf5")
 
-      linked = postprocess.link(locs, info, r_max=10.0, max_dark_time=3)
-      linked = postprocess.compute_dark_times(linked)
+      linked, linked_info = postprocess.link(
+          locs, info, r_max=10.0, max_dark_time=3
+      )
+      linked, linked_info = postprocess.compute_dark_times(linked, linked_info)
       print(linked["len"].mean(), linked["dark"].mean())   # frames
+      io.save_locs("movie_locs_link.hdf5", linked, linked_info)
 
 
 .. _render-select-central-frames:
@@ -195,8 +199,8 @@ always end up in separate events.
 
    .. code-block:: python
 
-      cores = postprocess.select_binding_event_cores(
-          locs, r_max=10.0, max_dark_time=3, min_n_locs=3
+      cores, cores_info = postprocess.select_binding_event_cores(
+          locs, info, r_max=10.0, max_dark_time=3, min_n_locs=3
       )
 
 
@@ -232,18 +236,21 @@ overlap at all, all localizations are kept and a warning is shown.
    circle size is the diameter. Pass ``keep_non_overlapping=False`` to remove
    the localizations outside the overlap of the aligned channels;
    ``remove_non_overlapping_locs`` does the same for channels aligned
-   otherwise, and ``overlap_region`` returns the overlap.
+   otherwise, and ``overlap_region`` returns the overlap. The metadata of
+   each aligned channel records the shift subtracted from it.
 
    .. code-block:: python
 
-      aligned = postprocess.align([locs_ch1, locs_ch2], [info_ch1, info_ch2])   # RCC
-      aligned = postprocess.align(
+      aligned, aligned_infos = postprocess.align(
+          [locs_ch1, locs_ch2], [info_ch1, info_ch2]
+      )  # RCC
+      aligned, aligned_infos = postprocess.align(
           [locs_ch1, locs_ch2], [info_ch1, info_ch2],
           method="picked", picks=picks, pick_shape="Circle", pick_size=2 * radius,
       )
       # remove the localizations outside the overlap of the channels and
       # get the shift of each channel (nm)
-      aligned, (shift_x, shift_y) = postprocess.align(
+      aligned, aligned_infos, (shift_x, shift_y) = postprocess.align(
           [locs_ch1, locs_ch2], [info_ch1, info_ch2],
           keep_non_overlapping=False, return_shifts=True,
       )
@@ -433,7 +440,7 @@ distance or dark-time limit.
 
    .. code-block:: python
 
-      combined = postprocess.combine_locs_in_picks(
+      combined, combined_info = postprocess.combine_locs_in_picks(
           locs, info, picks=picks, pick_shape="Circle", pick_size=2 * radius
       )
 

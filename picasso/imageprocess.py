@@ -280,8 +280,8 @@ def find_fiducials(
     picked_locs = postprocess.picked_locs(
         locs,
         info,
-        picks,
-        "Circle",
+        picks=picks,
+        pick_shape="Circle",
         pick_size=box,
         add_group=False,
     )

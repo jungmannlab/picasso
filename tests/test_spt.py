@@ -129,7 +129,7 @@ def test_link_sparse_particles_gives_pure_tracks():
 )
 def test_link_bridges_gaps_up_to_max_gap(frames, max_gap, n_tracks):
     locs = _locs(frames, [0.0, 0.1, 0.2, 0.3])
-    tracked, _ = spt.link_tracks(locs, _info(), 1.0, max_gap=max_gap)
+    tracked, _ = spt.link_tracks(locs, _info(), max_jump=1.0, max_gap=max_gap)
     assert tracked["group"].nunique() == n_tracks
 
 
@@ -138,7 +138,7 @@ def test_link_resolves_conflicts_globally():
     continues there, although the end at x = 0 comes first and has 0.9
     in reach. 1.95 then starts a new track."""
     locs = _locs([0, 0, 1, 1], [0.0, 1.0, 0.9, 1.95])
-    tracked, _ = spt.link_tracks(locs, _info(), 1.0, min_length=1)
+    tracked, _ = spt.link_tracks(locs, _info(), max_jump=1.0, min_length=1)
     assert _track_of(tracked, 1, 0.9) == _track_of(tracked, 0, 1.0)
     assert _track_of(tracked, 1, 1.95) not in (
         _track_of(tracked, 0, 0.0),
@@ -149,7 +149,9 @@ def test_link_resolves_conflicts_globally():
 
 def test_link_tie_goes_to_the_track_that_skipped_fewer_frames():
     locs = _locs([0, 1, 2], [0.0, 10.0, 5.0])
-    tracked, _ = spt.link_tracks(locs, _info(), 5.0, max_gap=1, min_length=1)
+    tracked, _ = spt.link_tracks(
+        locs, _info(), max_jump=5.0, max_gap=1, min_length=1
+    )
     assert _track_of(tracked, 2, 5.0) == _track_of(tracked, 1, 10.0)
     assert _track_of(tracked, 2, 5.0) != _track_of(tracked, 0, 0.0)
 
@@ -158,7 +160,9 @@ def test_link_tie_goes_to_the_track_that_skipped_fewer_frames():
 def test_link_never_links_within_a_frame(min_length):
     """Also not in the last frame (unlike ``postprocess.link``)."""
     locs = _locs([0, 1, 1, 1], [0.0, 0.1, 0.2, 0.25])
-    tracked, _ = spt.link_tracks(locs, _info(), 1.0, min_length=min_length)
+    tracked, _ = spt.link_tracks(
+        locs, _info(), max_jump=1.0, min_length=min_length
+    )
     assert not tracked.duplicated(["group", "frame"]).any()
     if min_length == 1:
         assert tracked["group"].nunique() == 3
@@ -174,33 +178,35 @@ def test_link_respects_input_groups():
         [0.0, 2.0, 0.9, 1.1, 2.0, 0.0],
         group=np.array([0, 1, 0, 1, 0, 1], dtype=np.int32),
     )
-    tracked, info = spt.link_tracks(locs, _info(), 1.5)
+    tracked, info = spt.link_tracks(locs, _info(), max_jump=1.5)
     assert tracked["group"].nunique() == 2
     for _, track in tracked.groupby("group"):
         assert track["group_input"].nunique() == 1
     assert info[-1]["Input groups kept in"] == "group_input"
     # without the groups, the closer localizations are linked instead
-    plain, _ = spt.link_tracks(locs.drop(columns="group"), _info(), 1.5)
+    plain, _ = spt.link_tracks(
+        locs.drop(columns="group"), _info(), max_jump=1.5
+    )
     assert "group_input" not in plain.columns
 
 
 def test_link_min_length_removes_short_tracks():
     locs = _locs([0, 1, 2, 5, 6, 9], [0.0, 0.1, 0.2, 50.0, 50.1, 90.0])
-    tracked, info = spt.link_tracks(locs, _info(), 1.0, min_length=3)
+    tracked, info = spt.link_tracks(locs, _info(), max_jump=1.0, min_length=3)
     assert len(tracked) == 3
     assert tracked["group"].unique().tolist() == [0]
     assert info[-1]["Number of tracks"] == 1
-    tracked, _ = spt.link_tracks(locs, _info(), 1.0, min_length=1)
+    tracked, _ = spt.link_tracks(locs, _info(), max_jump=1.0, min_length=1)
     assert tracked["group"].nunique() == 3
 
 
 def test_link_empty_and_single_frame():
-    empty, info = spt.link_tracks(_locs([], []), _info(), 1.0)
+    empty, info = spt.link_tracks(_locs([], []), _info(), max_jump=1.0)
     assert len(empty) == 0 and "group" in empty.columns
     assert info[-1]["Number of tracks"] == 0
     single = _locs([0, 0, 0], [0.0, 0.5, 1.0])
-    assert len(spt.link_tracks(single, _info(), 1.0)[0]) == 0
-    tracked, _ = spt.link_tracks(single, _info(), 1.0, min_length=1)
+    assert len(spt.link_tracks(single, _info(), max_jump=1.0)[0]) == 0
+    tracked, _ = spt.link_tracks(single, _info(), max_jump=1.0, min_length=1)
     assert tracked["group"].nunique() == 3
 
 
@@ -209,7 +215,12 @@ def test_link_keeps_input_and_records_parameters():
     before = locs.copy()
     info = _info()
     tracked, new_info = spt.link_tracks(
-        locs, info, 300.0, max_gap=2, min_length=4, frame_time=FRAME_TIME
+        locs,
+        info,
+        max_jump=300.0,
+        max_gap=2,
+        min_length=4,
+        frame_time=FRAME_TIME,
     )
     pd.testing.assert_frame_equal(locs, before)
     assert len(info) == 1  # not modified either
@@ -251,7 +262,7 @@ def test_max_jump_nm():
 def test_is_tracked():
     locs = _brownian(n_particles=5)
     assert not spt.is_tracked(locs, _info())
-    tracked, info = spt.link_tracks(locs, _info(), 300.0)
+    tracked, info = spt.link_tracks(locs, _info(), max_jump=300.0)
     assert spt.is_tracked(tracked, info)
     # group overwritten, e.g., by clustering: several locs per frame
     regrouped = tracked.assign(group=np.int32(0))
@@ -261,7 +272,7 @@ def test_is_tracked():
 
 def test_track_segments():
     locs = _locs([0, 1, 2, 0, 1], [0.0, 1.0, 2.0, 10.0, 11.0])
-    tracked, _ = spt.link_tracks(locs, _info(), 1.5)
+    tracked, _ = spt.link_tracks(locs, _info(), max_jump=1.5)
     segments, track_id, start_row = spt.track_segments(tracked)
     assert segments.shape == (3, 4)
     assert np.all(np.diff(track_id) >= 0)
@@ -305,7 +316,7 @@ def test_ensemble_msd_is_pooled_over_pairs():
 
 def test_msd_fit_recovers_D_and_sigma():
     locs = _brownian(n_particles=400, n_frames=40, D=0.1, sigma=30.0)
-    tracked, info = spt.link_tracks(locs, _info(), 400.0)
+    tracked, info = spt.link_tracks(locs, _info(), max_jump=400.0)
     result = spt.msd(tracked, info, frame_time=FRAME_TIME)
     fit = spt.fit_msd(result["tau"], result["msd"], n_fit=4)
     assert fit["D"] == pytest.approx(0.1, rel=0.05)
@@ -480,7 +491,7 @@ def test_track_table():
 def test_analyze_tracks_and_save(tmp_path):
     locs = _brownian(n_particles=200, n_frames=20, D=0.1, sigma=20.0)
     tracked, info = spt.link_tracks(
-        locs, _info(), 400.0, frame_time=FRAME_TIME
+        locs, _info(), max_jump=400.0, frame_time=FRAME_TIME
     )
     result = spt.analyze_tracks(tracked, info, n_populations=(1, 2))
     assert result["n_tracks"] == 200
@@ -511,7 +522,7 @@ def test_analyze_tracks_and_save(tmp_path):
 
 def test_analyze_tracks_options():
     locs = _brownian(n_particles=50, n_frames=10)
-    tracked, info = spt.link_tracks(locs, _info(), 400.0)
+    tracked, info = spt.link_tracks(locs, _info(), max_jump=400.0)
     result = spt.analyze_tracks(
         tracked,
         info,
@@ -536,7 +547,7 @@ def test_analyze_tracks_options():
             tracked, info, frame_time=FRAME_TIME, max_lag=3, n_fit=4
         )
     # too few jumps for a fit: reported, not raised
-    few, few_info = spt.link_tracks(locs.iloc[:6], _info(), 400.0)
+    few, few_info = spt.link_tracks(locs.iloc[:6], _info(), max_jump=400.0)
     result = spt.analyze_tracks(
         few, few_info, frame_time=FRAME_TIME, n_populations=3
     )
@@ -546,7 +557,7 @@ def test_analyze_tracks_options():
 
 def test_plots():
     locs = _brownian(n_particles=50, n_frames=10)
-    tracked, info = spt.link_tracks(locs, _info(), 400.0)
+    tracked, info = spt.link_tracks(locs, _info(), max_jump=400.0)
     result = spt.analyze_tracks(tracked, info, frame_time=FRAME_TIME)
     fig = spt.plot_msd(result["msd"], result["msd_fit"])
     assert "D =" in fig.axes[0].get_title()
@@ -625,7 +636,7 @@ class _PhaseRecorder(lib.MockProgress):
 
 def test_analyze_tracks_progress(capsys):
     locs = _brownian(n_particles=50, n_frames=10)
-    tracked, info = spt.link_tracks(locs, _info(), 400.0)
+    tracked, info = spt.link_tracks(locs, _info(), max_jump=400.0)
     recorder = _PhaseRecorder()
     spt.analyze_tracks(
         tracked,

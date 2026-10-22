@@ -934,6 +934,7 @@ def intersection_max_z(
 def aim(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     segmentation: int = 100,
     intersect_d: float = 20.0,
     roi_r: float = 60.0,
@@ -966,8 +967,9 @@ def aim(
     -------
     locs : pd.DataFrame
         Undrifted localizations.
-    new_info : list of 1 dict
-        Updated metadata.
+    info : list of dicts
+        Metadata of the undrifted localizations: ``info`` with an entry
+        recording the undrifting appended, see ``lib.append_metadata``.
     drift : pd.DataFrame
         Drift in x and y directions (and z if applicable), in nm.
     """
@@ -1101,11 +1103,10 @@ def _aim(
     locs["y"] = y_pdc
     if "z" in locs.columns:
         locs["z"] = z_pdc
-    new_info = {
+    entry = {
         **lib.step_info("AIM"),
         "Intersect distance (nm)": intersect_d,
         "Segmentation": segmentation,
         "Search regions radius (nm)": roi_r,
     }
-    new_info = info + [new_info]
-    return locs, new_info, drift
+    return locs, lib.append_metadata(info, entry), drift

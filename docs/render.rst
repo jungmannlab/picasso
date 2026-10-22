@@ -163,12 +163,16 @@ events (`Jungmann et al., Nature Methods, 2016 <https://doi.org/10.1038/nmeth.38
       diameter = 100.0                          # pick diameter (nm)
 
       # Calibration on picks of structures with n_sites binding sites
-      calib = postprocess.picked_locs(locs, info, calib_picks, "Circle", pick_size=diameter)
+      calib = postprocess.picked_locs(
+          locs, info, picks=calib_picks, pick_shape="Circle", pick_size=diameter
+      )
       props = postprocess.pick_properties(calib, info, max_dark_time=3, influx_rate=1.0)
       influx_rate = (1 / (props["dark_mean"] * n_sites)).mean()
 
       # Counting
-      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=diameter)
+      picked = postprocess.picked_locs(
+          locs, info, picks=picks, pick_shape="Circle", pick_size=diameter
+      )
       props = postprocess.pick_properties(
           picked, info, max_dark_time=3, influx_rate=influx_rate
       )

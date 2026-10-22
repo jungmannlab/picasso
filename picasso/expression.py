@@ -43,7 +43,7 @@ NaN are False, so ``photons > 500`` removes localizations whose
 from __future__ import annotations
 
 import ast
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from typing import Any
 
 import numpy as np
@@ -449,39 +449,96 @@ def variables_from_info(info: list[dict] | dict | None) -> dict[str, float]:
 
 def filter_locs(
     locs: pd.DataFrame,
-    expression: str,
-    info: list[dict] | dict | None = None,
-) -> pd.DataFrame:
-    """Keep the localizations that satisfy a condition.
+    info: list[dict] | None = None,
+    *,
+    conditions: str | Sequence[str],
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Keep the localizations that satisfy one or more conditions.
 
-    Statistics such as ``median(photons)`` are computed over ``locs``.
+    The conditions are applied in the given order, so statistics such
+    as ``median(photons)`` are computed over the localizations that the
+    conditions before kept.
 
     Parameters
     ----------
     locs : pd.DataFrame
         Localizations.
-    expression : str
-        Condition, e.g. ``"photons > 500 and lpx < 10"``.
-        See the module docstring for the syntax.
-    info : list of dicts, dict or None, optional
-        Metadata of ``locs``; provides ``pixelsize``. Default None.
+    info : list of dicts or None, optional
+        Metadata of ``locs``; provides ``pixelsize`` and is carried over
+        into the returned metadata. Default is None.
+    conditions : str or sequence of str
+        Condition, e.g. ``"photons > 500 and lpx < 10"``, or several
+        conditions, applied in order. See the module docstring for the
+        syntax.
 
     Returns
     -------
     filtered_locs : pd.DataFrame
-        Localizations that satisfy the condition, with a new index.
+        Localizations that satisfy the conditions, with a new index.
+    info : list of dicts
+        Metadata of ``filtered_locs``: ``info`` with a Filter entry
+        appended (see ``lib.append_metadata``), which lists the
+        conditions under ``"Filter steps"``, so that
+        ``lib.apply_filter_steps`` can replay them, and the limits of
+        each range condition (``"100 < sx < 160"``) as
+        ``column: [min, max]``, as Picasso: Filter records them.
 
     Raises
     ------
     ExpressionError
-        If the expression is not a valid condition on ``locs``.
+        If a condition is not a valid condition on ``locs``.
 
     Examples
     --------
-    >>> locs = filter_locs(locs, "photons > median(photons)", info)
+    >>> locs, info = filter_locs(
+    ...     locs, info, conditions=["photons > median(photons)", "lpx < 10"]
+    ... )
     """
-    keep = condition(expression, locs, variables_from_info(info))
-    return locs[keep].reset_index(drop=True)
+    if isinstance(conditions, str):
+        conditions = [conditions]
+    conditions = list(conditions)
+    variables = variables_from_info(info)
+    for expression in conditions:
+        keep = condition(expression, locs, variables)
+        locs = locs[keep].reset_index(drop=True)
+    return locs, lib.append_metadata(info, filter_entry(conditions))
+
+
+def filter_entry(
+    conditions: Sequence[str], removed_columns: Sequence[str] = ()
+) -> dict:
+    """Metadata entry recording a Filter step, as Picasso: Filter,
+    ``picasso filter`` and :func:`filter_locs` write it.
+
+    Parameters
+    ----------
+    conditions : sequence of str
+        Conditions applied, in order; listed under ``"Filter steps"``.
+        The limits of each range condition (``"100 < sx < 160"``) are
+        also stored as ``column: [min, max]`` (intersected if a column
+        is limited more than once), which is all that Picasso before 1.0
+        reads.
+    removed_columns : sequence of str, optional
+        Columns removed by the step, listed under ``"Removed columns"``
+        if any. Default is ().
+
+    Returns
+    -------
+    entry : dict
+        The metadata entry, see ``lib.step_info``.
+    """
+    entry = lib.step_info("Filter")
+    for expression in conditions:
+        if column_range := parse_range(expression):
+            column, vmin, vmax = column_range
+            if column in entry:
+                vmin = max(vmin, entry[column][0])
+                vmax = min(vmax, entry[column][1])
+            entry[column] = [vmin, vmax]
+    if removed_columns:
+        entry["Removed columns"] = list(removed_columns)
+    entry[lib.FILTER_STEPS_KEY] = list(conditions)
+    return entry
 
 
 def range_expression(

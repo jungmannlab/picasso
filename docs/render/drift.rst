@@ -116,9 +116,11 @@ the picks are interpolated linearly. For an example, see Fig. 4 of
       from picasso import io, postprocess
 
       locs, info = io.load_locs("movie_locs_aim.hdf5")
-      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=diameter)
+      picked = postprocess.picked_locs(
+          locs, info, picks=picks, pick_shape="Circle", pick_size=diameter
+      )
       drift = postprocess.undrift_from_picked(picked, info)    # columns x, y (and z)
-      locs = postprocess.apply_drift(locs, info, drift=drift)
+      locs, info = postprocess.apply_drift(locs, info, drift=drift)
 
       # or, with automatically picked fiducials
       locs, info, drift = postprocess.undrift_from_fiducials(locs, info)
@@ -149,11 +151,11 @@ tend to diverge. RCC can only correct x and y coordinates (not 3D).
    :icon: code
    :class-container: api-example
 
-   Note that the drift is returned first.
-
    .. code-block:: python
 
-      drift, locs = postprocess.undrift(locs, info, segmentation=1000, display=False)
+      locs, info, drift = postprocess.undrift(
+          locs, info, segmentation=1000, display=False
+      )
 
 
 .. _render-drift-tools:
@@ -210,7 +212,7 @@ for all with
 
       from picasso import io, postprocess
 
-      drift = io.load_drift("movie_locs_drift.txt")                 # nm
-      locs = postprocess.apply_drift(locs, info, drift=drift)     # apply
-      locs = postprocess.apply_drift(locs, info, drift=-drift)    # undo
-      fig = postprocess.plot_drift(drift)                         # show
+      drift = io.load_drift("movie_locs_drift.txt")                     # nm
+      locs, info = postprocess.apply_drift(locs, info, drift=drift)   # apply
+      locs, info = postprocess.apply_drift(locs, info, drift=-drift)  # undo
+      fig = postprocess.plot_drift(drift)                             # show

@@ -449,6 +449,7 @@ def _picked_brush_locs(
 def picked_locs(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     picks: list[tuple],
     pick_shape: Literal[
         "Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"
@@ -565,6 +566,7 @@ def picked_locs(
 def pick_similar(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     picks: list[tuple],
     pick_shape: Literal["Circle", "Rectangle", "Square", "Box"] = "Circle",
     pick_size: float = None,
@@ -2145,7 +2147,7 @@ def remove_locs_in_picks(
     ],
     pick_size: float | None = None,
     index_blocks: tuple = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Remove localizations in picks.
 
     Parameters
@@ -2173,6 +2175,9 @@ def remove_locs_in_picks(
     -------
     locs : pd.DataFrame
         Localizations with localizations in picks removed.
+    info : list of dicts
+        Metadata of the remaining localizations: ``info`` with an entry
+        recording the removal appended, see ``lib.append_metadata``.
     """
     assert (
         pick_shape in lib.PICK_SHAPES
@@ -2184,8 +2189,8 @@ def remove_locs_in_picks(
     if pick_shape != "Circle":
         index_blocks = None  # ignore index blocks, only used for circle picks
     all_picked_locs = picked_locs(
-        locs=locs,
-        info=info,
+        locs,
+        info,
         picks=picks,
         pick_shape=pick_shape,
         pick_size=pick_size,
@@ -2194,8 +2199,31 @@ def remove_locs_in_picks(
     )
     # store indices of picked locs
     idx = np.concatenate([_.index for _ in all_picked_locs])
-    locs.drop(index=idx, inplace=True)
-    return locs
+    locs = locs.drop(index=idx)
+    entry = _picks_entry(
+        "Remove picked localizations", picks, pick_shape, pick_size
+    )
+    return locs, lib.append_metadata(info, entry)
+
+
+def _picks_entry(
+    step: str,
+    picks: list[tuple],
+    pick_shape: str,
+    pick_size: float | None,
+) -> dict:
+    """Metadata entry recording a step on picked localizations: the
+    number, shape and size of the picks (the diameter for circles)."""
+    entry = {
+        **lib.step_info(step),
+        "Number of picks": len(picks),
+        "Pick shape": pick_shape,
+    }
+    if pick_shape == "Circle":
+        entry["Pick diameter (nm)"] = float(pick_size)
+    elif pick_size is not None:
+        entry["Pick size (nm)"] = float(pick_size)
+    return entry
 
 
 @numba.jit(nopython=True, nogil=True)
@@ -2353,6 +2381,7 @@ def _distance_histogram(  # noqa: C901
 def distance_histogram(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     bin_size: float,
     r_max: float,
 ) -> lib.IntArray1D:
@@ -2406,7 +2435,8 @@ def distance_histogram(
 
 def nena(
     locs: pd.DataFrame,
-    info: any = None,
+    info: list[dict] | None = None,
+    *,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[dict, float]:
     """Calculate NeNA - experimental estimate of localization
@@ -2418,8 +2448,9 @@ def nena(
     ----------
     locs : pd.DataFrame
         Localizations.
-    info : any
-        Metadata of the localizations. Not used.
+    info : list of dicts or None, optional
+        Metadata of ``locs``. Not used; accepted so that the call
+        matches the other functions on localizations. Default is None.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -2724,8 +2755,8 @@ def plot_frc(
 def frc(
     locs: pd.DataFrame,
     info: list[dict],
-    viewport: tuple[tuple[float, float], tuple[float, float]],
     *,
+    viewport: tuple[tuple[float, float], tuple[float, float]],
     random_seed: int = 42,
     lp: float | None = None,
 ) -> dict:
@@ -2807,8 +2838,8 @@ def frc(
 def frc_rois(
     locs: pd.DataFrame,
     info: list[dict],
-    viewport: tuple[tuple[float, float], tuple[float, float]],
     *,
+    viewport: tuple[tuple[float, float], tuple[float, float]],
     n_rois: int = 30,
     roi_size: float = 5000.0,
     min_locs: int = 1000,
@@ -2882,7 +2913,7 @@ def frc_rois(
             frc_result = frc(
                 locs.loc[in_roi],
                 info,
-                ((y0, x0), (y1, x1)),
+                viewport=((y0, x0), (y1, x1)),
                 random_seed=random_seed,
                 lp=lp,
             )
@@ -3024,6 +3055,7 @@ def _frc(
 def pair_correlation(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     bin_size: float,
     r_max: float,
 ) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
@@ -3051,7 +3083,7 @@ def pair_correlation(
     pc : lib.FloatArray1D
         Pair correlation function (1/nm^2).
     """
-    dh = distance_histogram(locs, info, bin_size, r_max)
+    dh = distance_histogram(locs, info, bin_size=bin_size, r_max=r_max)
     # Start with r-> otherwise area will be 0
     bins_lower = np.arange(bin_size, r_max + bin_size, bin_size)
 
@@ -3104,8 +3136,9 @@ def _local_density(
 def compute_local_density(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     radius: float,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Compute the local density of localizations in blocks around
     each localization.
 
@@ -3122,6 +3155,9 @@ def compute_local_density(
     -------
     locs : pd.DataFrame
         Localizations with added 'density' field/column.
+    info : list of dicts
+        Metadata of ``locs``: ``info`` with an entry recording the step
+        appended, see ``lib.append_metadata``.
     """
     locs, size, x_index, y_index, block_starts, block_ends, K, L = (
         get_index_blocks(locs, info, radius)
@@ -3148,7 +3184,8 @@ def compute_local_density(
         futures = [executor.submit(_local_density, *_) for _ in args]
     density = np.sum([future.result() for future in futures], axis=0)
     locs["density"] = density
-    return locs
+    entry = lib.step_info("Density", **{"Radius (nm)": radius})
+    return locs, lib.append_metadata(info, entry)
 
 
 def evaluate_picks(
@@ -3247,10 +3284,10 @@ def evaluate_picks(
                     np.mean((pick_locs["z"] - pick_locs["z"].mean()) ** 2)
                 )
             if "len" not in pick_locs.columns:
-                pick_locs = link(
+                pick_locs = _link(
                     pick_locs, info, r_max=999999, max_dark_time=max_dark_time
                 )
-            pick_locs = compute_dark_times(pick_locs)
+            pick_locs = _compute_dark_times(pick_locs)
             n_events[i] = len(pick_locs)  # linked locs are binding events
             length[i] = lib.estimate_kinetic_rate(pick_locs["len"].to_numpy())
             dark[i] = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
@@ -3271,7 +3308,7 @@ def _pick_kinetics_single(
     if not len(pick_locs):
         return None
     if "len" not in pick_locs.columns:
-        pick_locs = link(
+        pick_locs = _link(
             pick_locs,
             info,
             r_max=999999,  # link all locs in the pick
@@ -3279,7 +3316,7 @@ def _pick_kinetics_single(
         )
     if not len(pick_locs):
         return None
-    pick_locs = compute_dark_times(pick_locs)
+    pick_locs = _compute_dark_times(pick_locs)
     if not len(pick_locs):
         return None
     try:
@@ -3453,14 +3490,19 @@ def pick_properties(
 
 def compute_dark_times(
     locs: pd.DataFrame,
+    info: list[dict] | None = None,
+    *,
     group: lib.IntArray1D | None = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Compute dark time for each binding event.
 
     Parameters
     ----------
     locs : pd.DataFrame
         Localizations that were linked, i.e., binding events.
+    info : list of dicts or None, optional
+        Metadata of ``locs``, carried over into the returned metadata.
+        Default is None.
     group : lib.IntArray1D, optional
         Grouping array for binding events. If None, all binding events
         are considered to be in the same group.
@@ -3473,15 +3515,28 @@ def compute_dark_times(
         ``dark_times`` for the convention). Binding events that are not
         preceded by another binding event in the same group are
         removed.
+    info : list of dicts
+        Metadata of ``locs``: ``info`` with an entry recording the step
+        (``"Step": "Dark"``) appended, see ``lib.append_metadata``.
+        ``io.load_locs`` reads the Picasso version of this entry to
+        tell the dark-time convention.
     """
+    locs = _compute_dark_times(locs, group)
+    return locs, lib.append_metadata(info, lib.step_info("Dark"))
+
+
+def _compute_dark_times(
+    locs: pd.DataFrame, group: lib.IntArray1D | None = None
+) -> pd.DataFrame:
+    """The binding events with dark times of ``compute_dark_times``,
+    without the metadata (for loops over picks)."""
     if "len" not in locs.columns:
         raise AttributeError(
             "Length not found. Please link localizations first."
         )
     dark = dark_times(locs, group)
-    locs["dark"] = np.int32(dark)
-    locs = locs[locs.dark != -1]
-    return locs
+    locs = locs.assign(dark=np.int32(dark))
+    return locs[locs.dark != -1]
 
 
 def dark_times(
@@ -3565,11 +3620,12 @@ def _dark_times(
 def link(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     r_max: float = 10.0,
     max_dark_time: int = 3,
     combine_mode: Literal["average", "refit"] = "average",
     remove_ambiguous_lengths: bool = True,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Link localizations, i.e., group them into binding events based
     on their spatiotemporal proximity.
 
@@ -3604,7 +3660,39 @@ def link(
         frame (``last_frame - first_frame + 1``), including frames
         bridged by ``max_dark_time``. See ``dark_times`` for the
         matching dark time convention.
+    info : list of dicts
+        Metadata of the linked localizations: ``info`` with an entry
+        recording the linking appended, see ``lib.append_metadata``.
     """
+    linked_locs = _link(
+        locs,
+        info,
+        r_max,
+        max_dark_time,
+        combine_mode=combine_mode,
+        remove_ambiguous_lengths=remove_ambiguous_lengths,
+    )
+    entry = lib.step_info(
+        "Link",
+        **{
+            "Max. distance (nm)": r_max,
+            "Max. transient dark frames": max_dark_time,
+            "Removed ambiguous lengths": remove_ambiguous_lengths,
+        },
+    )
+    return linked_locs, lib.append_metadata(info, entry)
+
+
+def _link(
+    locs: pd.DataFrame,
+    info: list[dict],
+    r_max: float,
+    max_dark_time: int,
+    combine_mode: Literal["average", "refit"] = "average",
+    remove_ambiguous_lengths: bool = True,
+) -> pd.DataFrame:
+    """The linked localizations of ``link``, without the metadata (for
+    loops over picks, which need no metadata of their own)."""
     if len(locs) == 0:  # special case of an empty localization list
         linked_locs = locs.copy()
         if "frame" in locs.columns:
@@ -3638,10 +3726,12 @@ def link(
 
 def select_binding_event_cores(
     locs: pd.DataFrame,
+    info: list[dict] | None = None,
+    *,
     r_max: float = 10.0,
     max_dark_time: int = 0,
     min_n_locs: int = 3,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Select the localizations in the temporal centers of binding
     events.
 
@@ -3663,6 +3753,9 @@ def select_binding_event_cores(
     ----------
     locs : pd.DataFrame
         Localizations.
+    info : list of dicts or None, optional
+        Metadata of ``locs``, carried over into the returned metadata.
+        Default is None.
     r_max : float, optional
         Maximum distance (nm) between localizations to be considered as
         originating from the same binding event. Default is 10.
@@ -3683,10 +3776,23 @@ def select_binding_event_cores(
         column assigned uniquely to each binding event. If ``locs`` was
         already grouped, the previous grouping is kept in
         'group_input'.
+    info : list of dicts
+        Metadata of ``out_locs``: ``info`` with an entry recording the
+        selection appended, see ``lib.append_metadata``.
     """
+    entry = lib.step_info(
+        "Binding event cores",
+        **{
+            "Max. distance (nm)": r_max,
+            "Max. transient dark frames": max_dark_time,
+            "Min. localizations per event": min_n_locs,
+        },
+    )
+    info = lib.append_metadata(info, entry)
     out_locs = locs.sort_values(kind="quicksort", by="frame")
     if len(out_locs) == 0:
-        return lib.append_group(out_locs.copy(), np.array([], dtype=np.int32))
+        empty = np.array([], dtype=np.int32)
+        return lib.append_group(out_locs.copy(), empty), info
 
     if "group" in out_locs.columns:
         group = out_locs["group"].to_numpy()
@@ -3714,7 +3820,7 @@ def select_binding_event_cores(
     out_locs = out_locs[keep].copy()
     # relabel the surviving events with consecutive group ids
     event_id = np.unique(link_group[keep], return_inverse=True)[1]
-    return lib.append_group(out_locs, event_id.astype(np.int32))
+    return lib.append_group(out_locs, event_id.astype(np.int32)), info
 
 
 def combine_locs_in_picks(
@@ -3728,8 +3834,9 @@ def combine_locs_in_picks(
     pick_size: float | None = None,
     index_blocks: tuple | None = None,
     progress: lib.Progress | Literal["console"] | None = None,
-) -> pd.DataFrame:
-    """Combine localizations in picked regions.
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Combine localizations in picked regions, i.e., link all
+    localizations in each pick into one.
 
     Parameters
     ----------
@@ -3764,6 +3871,9 @@ def combine_locs_in_picks(
     out_locs : pd.DataFrame
         Localizations after combining localizations in the picked
         regions.
+    info : list of dicts
+        Metadata of ``out_locs``: ``info`` with an entry recording the
+        combining appended, see ``lib.append_metadata``.
     """
     assert (
         pick_shape in lib.PICK_SHAPES
@@ -3776,8 +3886,8 @@ def combine_locs_in_picks(
         progress, "Picking localizations", unit="pick"
     ) as progress:
         pl = picked_locs(
-            locs=locs,
-            info=info,
+            locs,
+            info,
             picks=picks,
             pick_shape=pick_shape,
             pick_size=pick_size,
@@ -3793,7 +3903,7 @@ def combine_locs_in_picks(
         progress.set_value(0)
         out_locs = []
         for i, pick_locs in enumerate(pl):
-            pick_locs_out = link(
+            pick_locs_out = _link(
                 pick_locs,
                 info,
                 r_max=r_max,
@@ -3805,7 +3915,8 @@ def combine_locs_in_picks(
             progress.set_value(i + 1)
         progress.set_value(len(pl))
     out_locs = pd.concat(out_locs, ignore_index=True)
-    return out_locs
+    entry = _picks_entry("Combine picks", picks, pick_shape, pick_size)
+    return out_locs, lib.append_metadata(info, entry)
 
 
 @numba.jit(nopython=True)
@@ -4276,13 +4387,13 @@ def segment(
 def undrift(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     segmentation: int,
     display: bool = True,
     progress: lib.Progress | Literal["console"] | None = None,
-    *,
     disp_px_size: float = UNDRIFT_PIXEL_SIZE,
     max_shift: float = UNDRIFT_MAX_SHIFT,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+) -> tuple[pd.DataFrame, list[dict], pd.DataFrame]:
     """Undrift by RCC. See Wang, Schnitzbauer, et al. Optics Express,
     2014.
 
@@ -4311,11 +4422,14 @@ def undrift(
 
     Returns
     -------
-    drift : pd.DataFrame
-        Estimated drift (nm) as a DataFrame with columns 'x' and 'y'.
     locs : pd.DataFrame
         Undrifted localization list with the drift applied to the 'x'
         and 'y' coordinates.
+    info : list of dicts
+        Metadata of the undrifted localizations: ``info`` with an entry
+        recording the undrifting appended, see ``lib.append_metadata``.
+    drift : pd.DataFrame
+        Estimated drift (nm) as a DataFrame with columns 'x' and 'y'.
 
     Raises
     ------
@@ -4372,13 +4486,23 @@ def undrift(
     if display:
         plot_drift(drift)
         plt.show()
-    locs = apply_drift(locs, info, drift=drift)
-    return drift, locs
+    locs = _apply_drift(locs, drift)
+    entry = lib.step_info(
+        "Undrift",
+        **{
+            "Method": "RCC",
+            "Segmentation": segmentation,
+            "Display pixel size (nm)": disp_px_size,
+            "Max. shift (nm)": max_shift,
+        },
+    )
+    return locs, lib.append_metadata(info, entry), drift
 
 
 def undrift_from_fiducials(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     picks: list[tuple] | None = None,
     pick_size: float | None = None,
     pick_shape: Literal[
@@ -4434,8 +4558,9 @@ def undrift_from_fiducials(
     -------
     locs : pd.DataFrame
         Undrifted localizations.
-    new_info : list of dicts
-        Updated metadata.
+    info : list of dicts
+        Metadata of the undrifted localizations: ``info`` with an entry
+        recording the undrifting appended, see ``lib.append_metadata``.
     drift : pd.DataFrame
         Drift in x and y (and optionally z) directions, in nm.
 
@@ -4486,8 +4611,8 @@ def undrift_from_fiducials(
         pl = picked_locs(
             locs,
             info,
-            picks,
-            pick_shape,
+            picks=picks,
+            pick_shape=pick_shape,
             pick_size=pick_size,
             add_group=False,
             index_blocks=index_blocks,
@@ -4501,20 +4626,10 @@ def undrift_from_fiducials(
         progress.set_value(0)
     if not undrift_z:
         drift = drift.drop(columns="z", errors="ignore")
-    locs = apply_drift(locs, info, drift=drift)
+    locs = _apply_drift(locs, drift)
 
-    pick_info = {
-        **lib.step_info("Undrift from picked"),
-        "Number of picks": len(picks),
-        "Pick shape": pick_shape,
-    }
-    if pick_shape == "Circle":
-        pick_info["Pick diameter (nm)"] = float(pick_size)
-    elif pick_size is not None:
-        pick_info["Pick size (nm)"] = float(pick_size)
-    new_info = info + [pick_info]
-
-    return locs, new_info, drift
+    entry = _picks_entry("Undrift from picked", picks, pick_shape, pick_size)
+    return locs, lib.append_metadata(info, entry), drift
 
 
 def undrift_from_picked(
@@ -4670,9 +4785,10 @@ def apply_drift(
     info: list[dict],
     *,
     drift: pd.DataFrame | lib.FloatArray2D,
-):
+) -> tuple[pd.DataFrame, list[dict]]:
     """Convenience function to apply drift to localizations. Runs checks
-    to ensure correct formats.
+    to ensure correct formats. The coordinates of ``locs`` are shifted
+    in place, i.e., the returned localizations are ``locs`` itself.
 
     Parameters
     ----------
@@ -4691,6 +4807,9 @@ def apply_drift(
     locs : pd.DataFrame
         Localizations with drift applied to the 'x' and 'y' coordinates
         (and 'z' if it exists in the drift).
+    info : list of dicts
+        Metadata of ``locs``: ``info`` with an entry recording the step
+        appended, see ``lib.append_metadata``.
     """
     assert isinstance(
         drift, (pd.DataFrame, np.ndarray)
@@ -4712,7 +4831,8 @@ def apply_drift(
             drift,
             columns=["x", "y"] + (["z"] if drift.shape[1] == 3 else []),
         )
-    return _apply_drift(locs, drift)
+    entry = lib.step_info("Apply drift")
+    return _apply_drift(locs, drift), lib.append_metadata(info, entry)
 
 
 def plot_drift(
@@ -4805,7 +4925,10 @@ def align(
     display: bool = False,
     return_shifts: bool = False,
     keep_non_overlapping: bool = True,
-) -> list[pd.DataFrame] | tuple[list[pd.DataFrame], tuple]:
+) -> (
+    tuple[list[pd.DataFrame], list[list[dict]]]
+    | tuple[list[pd.DataFrame], list[list[dict]], tuple]
+):
     """Align localizations from multiple channels (one per element in
     ``locs``).
 
@@ -4854,6 +4977,11 @@ def align(
     -------
     locs : list of pd.DataFrames
         Aligned localizations of each channel.
+    infos : list of lists of dicts
+        Metadata of each aligned channel: its ``infos`` element with an
+        entry recording the alignment (the method and the shift
+        subtracted from the channel) appended, see
+        ``lib.append_metadata``.
     shifts : tuple of np.ndarrays
         ``(shift_x, shift_y)``, or ``(shift_x, shift_y, shift_z)`` if
         z is aligned too (picked regions only). Each
@@ -4873,7 +5001,7 @@ def align(
             raise ValueError(
                 "picks are only used with method='picked', not 'rcc'."
             )
-        locs, shifts = align_rcc(
+        locs, infos, shifts = align_rcc(
             locs,
             infos,
             display=display,
@@ -4883,7 +5011,7 @@ def align(
     elif method == "picked":
         if picks is None:
             raise ValueError("method='picked' requires picks.")
-        locs, shifts = align_from_picked(
+        locs, infos, shifts = align_from_picked(
             locs,
             infos,
             picks=picks,
@@ -4898,8 +5026,23 @@ def align(
             f"Unknown alignment method {method!r}, use 'rcc' or 'picked'."
         )
     if return_shifts:
-        return locs, shifts
-    return locs
+        return locs, infos, shifts
+    return locs, infos
+
+
+def _aligned_infos(
+    infos: list[list[dict]], shifts: tuple, entry: dict
+) -> list[list[dict]]:
+    """Metadata of aligned channels: each element of ``infos`` with a
+    copy of ``entry`` appended that also holds the shift subtracted
+    from the channel (nm)."""
+    new_infos = []
+    for i, info in enumerate(infos):
+        channel_entry = dict(entry)
+        for axis, shift in zip("xyz", shifts):
+            channel_entry[f"Shift {axis} (nm)"] = float(shift[i])
+        new_infos.append(lib.append_metadata(info, channel_entry))
+    return new_infos
 
 
 def _rcc_shifts(
@@ -4951,11 +5094,14 @@ def _rcc_shifts(
 def align_rcc(
     locs: list[pd.DataFrame],
     infos: list[list[dict]],
+    *,
     display: bool = False,
     return_shifts: bool = False,
-    *,
     keep_non_overlapping: bool = True,
-) -> list[pd.DataFrame] | tuple[list[pd.DataFrame], tuple]:
+) -> (
+    tuple[list[pd.DataFrame], list[list[dict]]]
+    | tuple[list[pd.DataFrame], list[list[dict]], tuple]
+):
     """Align localizations from multiple channels (one per each element
     in `locs`) by calculating the shifts between the rendered images
     using RCC. The RCC is repeated until the shifts converge (at most
@@ -4984,6 +5130,10 @@ def align_rcc(
     locs : list of pd.DataFrames
         Aligned localizations with the shifts applied to the 'x' and
         'y' coordinates.
+    infos : list of lists of dicts
+        Metadata of each aligned channel: its ``infos`` element with an
+        entry recording the alignment (and the shift subtracted from the
+        channel) appended, see ``lib.append_metadata``.
     shifts : tuple of np.ndarrays
         ``(shift_x, shift_y)``. Each array holds the total shift
         subtracted from each channel, in nm. Returned only if
@@ -5028,14 +5178,22 @@ def align_rcc(
 
     if not keep_non_overlapping:
         locs = remove_non_overlapping_locs(locs)
+    shifts = (total_x, total_y)
+    entry = lib.step_info(
+        "Align",
+        **{
+            "Method": "RCC",
+            "Remove non-overlapping": not keep_non_overlapping,
+        },
+    )
+    infos = _aligned_infos(infos, shifts, entry)
     if return_shifts:
-        return locs, (total_x, total_y)
-    else:
-        return locs
+        return locs, infos, shifts
+    return locs, infos
 
 
 def align_from_picked(
-    all_locs: list[pd.DataFrame],
+    locs: list[pd.DataFrame],
     infos: list[list[dict]],
     *,
     picks: list[tuple],
@@ -5046,17 +5204,20 @@ def align_from_picked(
     return_shifts: bool = False,
     index_blocks: list[tuple | None] | None = None,
     keep_non_overlapping: bool = True,
+) -> (
+    tuple[list[pd.DataFrame], list[list[dict]]]
+    | tuple[list[pd.DataFrame], list[list[dict]], tuple]
 ):
     """Align localizations from multiple channels using picked
     localizations. The input DataFrames are not modified.
 
     Parameters
     ----------
-    all_locs : list of pd.DataFrames
+    locs : list of pd.DataFrames
         List of localization datasets.
     infos : list of list of dicts
         List of metadata dictionaries corresponding to each localization
-        dataset in `all_locs`.
+        dataset in ``locs``.
     picks : list of (2,) tuples
         Coordinates of picked regions as (x, y) tuples. See
         ``io.load_picks``.
@@ -5072,7 +5233,7 @@ def align_from_picked(
         Default is False.
     index_blocks : list of tuple or None, optional
         Per-channel precomputed spatial indices (one entry per dataset
-        in ``all_locs``, aligned by position) as returned by
+        in ``locs``, aligned by position) as returned by
         ``get_index_blocks``. Each entry may be ``None`` to recompute
         for that channel. Used to skip re-indexing inside circular
         ``picked_locs``. Ignored for non-circular pick shapes. Default
@@ -5089,10 +5250,15 @@ def align_from_picked(
         List of aligned localization datasets, where the localizations
         have been shifted according to the average shift calculated from
         the picked localizations.
+    infos : list of lists of dicts
+        Metadata of each aligned channel: its ``infos`` element with an
+        entry recording the alignment (the picks and the shift
+        subtracted from the channel) appended, see
+        ``lib.append_metadata``.
     shifts : tuple of np.ndarrays
         ``(shift_x, shift_y)``, or ``(shift_x, shift_y, shift_z)`` if
         all channels have z. Each array holds the shift
-        subtracted from each dataset in ``all_locs``, calculated as the
+        subtracted from each dataset in ``locs``, calculated as the
         average shift from the picked localizations, in nm. Returned
         only if ``return_shifts`` is True.
 
@@ -5109,12 +5275,17 @@ def align_from_picked(
         assert (
             pick_size is not None
         ), "pick_size must be provided when picks is a list of coordinates"
-    ib_list = (
-        index_blocks if index_blocks is not None else [None] * len(all_locs)
-    )
+    ib_list = index_blocks if index_blocks is not None else [None] * len(locs)
     pl = [
-        picked_locs(locs, i, picks, pick_shape, pick_size, index_blocks=ib)
-        for locs, i, ib in zip(all_locs, infos, ib_list)
+        picked_locs(
+            locs_,
+            info,
+            picks=picks,
+            pick_shape=pick_shape,
+            pick_size=pick_size,
+            index_blocks=ib,
+        )
+        for locs_, info, ib in zip(locs, infos, ib_list)
     ]
     dy = _shifts_from_picked_coordinate(pl, coordinate="y")
     dx = _shifts_from_picked_coordinate(pl, coordinate="x")
@@ -5131,7 +5302,7 @@ def align_from_picked(
 
     # align each channel
     aligned_locs = []
-    for i, locs_ in enumerate(all_locs):
+    for i, locs_ in enumerate(locs):
         locs_ = locs_.copy()
         locs_["x"] -= shifts[0][i]
         locs_["y"] -= shifts[1][i]
@@ -5140,11 +5311,13 @@ def align_from_picked(
         aligned_locs.append(locs_)
     if not keep_non_overlapping:
         aligned_locs = remove_non_overlapping_locs(aligned_locs)
-
+    entry = _picks_entry("Align", picks, pick_shape, pick_size)
+    entry["Method"] = "Picked"
+    entry["Remove non-overlapping"] = not keep_non_overlapping
+    infos = _aligned_infos(infos, shifts, entry)
     if return_shifts:
-        return aligned_locs, shifts
-    else:
-        return aligned_locs
+        return aligned_locs, infos, shifts
+    return aligned_locs, infos
 
 
 def overlap_region(
@@ -5452,6 +5625,7 @@ def _cbc_column(name: str) -> str:
 def cbc(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     partner_locs: pd.DataFrame | list[pd.DataFrame],
     partner_names: str | list[str] | None = None,
     r_max: float = 200.0,
@@ -5535,8 +5709,9 @@ def cbc(
         (float32), without the localizations where the CBC is not
         defined if ``remove_undefined``.
     info : list of dicts
-        Metadata of the input localizations with a new entry describing
-        the CBC parameters.
+        Metadata of the returned localizations: ``info`` with an entry
+        recording the CBC parameters appended, see
+        ``lib.append_metadata``.
 
     Raises
     ------
@@ -5610,6 +5785,7 @@ def cbc(
 def cbc_all_pairs(
     locs: list[pd.DataFrame],
     infos: list[list[dict]],
+    *,
     names: list[str] | None = None,
     r_max: float = 200.0,
     steps: int = 100,
@@ -5841,8 +6017,7 @@ def _cbc_channel(
         new_info["Localizations without neighbors removed"] = n_removed
     else:
         new_info["Undefined CBC value"] = float(undefined)
-    new_info = info + [new_info]
-    return locs, new_info
+    return locs, lib.append_metadata(info, new_info)
 
 
 def _cbc_coords(locs: pd.DataFrame, use_z: bool) -> lib.FloatArray2D:
@@ -7034,13 +7209,13 @@ def _simulated_points(
 def ripley_h(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     picks: list[tuple] | None = None,
     pick_shape: (
         Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
         | None
     ) = None,
     pick_size: float | None = None,
-    *,
     r_max: float = 500.0,
     steps: int = 100,
     edge_correction: bool = True,
@@ -7295,13 +7470,13 @@ def ripley_h(
 def rdf(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     picks: list[tuple] | None = None,
     pick_shape: (
         Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
         | None
     ) = None,
     pick_size: float | None = None,
-    *,
     r_max: float = 500.0,
     steps: int = 50,
     edge_correction: bool = True,
@@ -7732,13 +7907,13 @@ def _pair_statistic_regions(result: dict) -> dict:
 def nnd_distributions(
     locs: pd.DataFrame | list[pd.DataFrame],
     info: list[dict],
+    *,
     picks: list[tuple] | None = None,
     pick_shape: (
         Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
         | None
     ) = None,
     pick_size: float | None = None,
-    *,
     names: list[str] | None = None,
     r_max: float = 200.0,
     steps: int = 40,
@@ -8220,6 +8395,7 @@ def _nnd_tables(nnd_result: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
 def resi(
     locs: list[pd.DataFrame],
     infos: list[list[dict]],
+    *,
     radius_xy: float | list[float],
     radius_z: float | list[float] | None = None,
     min_locs: int | list[int] = 10,
@@ -8296,8 +8472,9 @@ def resi(
         indicating which channel each cluster belongs to. The 'group'
         column is renamed to 'cluster_id'.
     resi_info : list of dicts
-        Metadata for the RESI cluster centers, containing clustering
-        parameters for each channel.
+        Metadata of the RESI cluster centers: the metadata of the first
+        channel with an entry recording the clustering parameters of
+        each channel appended, see ``lib.append_metadata``.
 
     Raises
     ------
@@ -8398,8 +8575,9 @@ def _resi(
         min_locs_ = min_locs[i]
 
         # Cluster localizations for this channel
-        clustered_locs, new_info = clusterer.cluster(
+        clustered_locs, clustered_info = clusterer.cluster(
             locs_,
+            info_,
             radius_xy=r_xy,
             min_locs=min_locs_,
             frame_analysis=apply_fa,
@@ -8412,11 +8590,11 @@ def _resi(
             save_path = (
                 os.path.splitext(output_paths[i])[0] + f"{suffix_locs}.hdf5"
             )
-            io.save_locs(save_path, clustered_locs, info_ + [new_info])
+            io.save_locs(save_path, clustered_locs, clustered_info)
 
         # Extract cluster centers from clustered localizations
-        centers = clusterer.find_cluster_centers(
-            clustered_locs, progress=progress
+        centers, centers_info = clusterer.find_cluster_centers(
+            clustered_locs, clustered_info, progress=progress
         )
 
         # Save cluster centers if requested
@@ -8424,7 +8602,7 @@ def _resi(
             save_path = (
                 os.path.splitext(output_paths[i])[0] + f"{suffix_centers}.hdf5"
             )
-            io.save_locs(save_path, centers, info_ + [new_info])
+            io.save_locs(save_path, centers, centers_info)
 
         # Add RESI channel ID to identify which channel this cluster
         # belongs to
@@ -8443,7 +8621,7 @@ def _resi(
     all_resi.drop(columns=["group"], inplace=True)
     all_resi.sort_values(kind="quicksort", by="frame", inplace=True)
 
-    new_info = {
+    entry = {
         **lib.step_info("RESI"),
         "Clustering radius xy (nm) for each channel": [
             float(r) for r in radius_xy
@@ -8452,10 +8630,10 @@ def _resi(
         "Basic frame analysis": apply_fa,
     }
     if ndim == 3:
-        new_info["Clustering radius z (nm) for each channel"] = [
+        entry["Clustering radius z (nm) for each channel"] = [
             float(r) for r in radius_z
         ]
-    new_info = infos[0] + [new_info]
+    new_info = lib.append_metadata(infos[0], entry)
     # Save combined RESI results if output paths are provided
     if resi_path is not None:
         io.save_locs(resi_path, all_resi, new_info)

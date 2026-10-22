@@ -83,6 +83,7 @@ def rotate_img(img: lib.FloatArray2D, angle: float) -> lib.FloatArray2D:
 def roi_to_img(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     pick: int,
     pick_diameter: float,
     disp_px_size: float,
@@ -208,7 +209,7 @@ def prepare_data(
         pick_img = roi_to_img(
             locs,
             info,
-            pick,
+            pick=pick,
             pick_diameter=pick_diameter,
             disp_px_size=disp_px_size,
         )
@@ -242,6 +243,7 @@ def predict_structure(
     mlp: MLPClassifier,
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     pick: int,
     pick_diameter: float,
     disp_px_size: float,

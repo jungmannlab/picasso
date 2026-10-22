@@ -992,7 +992,7 @@ class SPTController:
                 tracked_locs, new_info = spt.link_tracks(
                     locs,
                     info,
-                    max_jump,
+                    max_jump=max_jump,
                     max_gap=params["max_gap"],
                     min_length=params["min_length"],
                     frame_time=params["frame_time"],

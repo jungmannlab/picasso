@@ -310,22 +310,18 @@ def _link(files: str, d_max: float, tolerance: float) -> None:
 
     paths = glob.glob(files)
     if paths:
-        from . import io, lib, postprocess
+        from . import io, postprocess
 
         for path in paths:
             try:
                 locs, info = io.load_locs(path)
             except io.NoMetadataFileError:
                 continue
-            linked_locs = postprocess.link(locs, info, d_max, tolerance)
+            linked_locs, linked_info = postprocess.link(
+                locs, info, r_max=d_max, max_dark_time=tolerance
+            )
             base, ext = os.path.splitext(path)
-            link_info = {
-                "Maximum Distance": d_max,
-                "Maximum Transient Dark Time": tolerance,
-                **lib.step_info("Link"),
-            }
-            info.append(link_info)
-            io.save_locs(base + "_link.hdf5", linked_locs, info)
+            io.save_locs(base + "_link.hdf5", linked_locs, linked_info)
 
 
 def _clusterfilter(
@@ -420,11 +416,6 @@ def _undrift_rcc(
     from . import io, lib, postprocess
 
     paths = glob.glob(files)
-    undrift_info = lib.step_info("Undrift")
-    if fromfile is not None:
-        undrift_info["From File"] = fromfile
-    else:
-        undrift_info["Segmentation"] = segmentation
     for path in paths:
         try:
             locs, info = io.load_locs(path)
@@ -436,8 +427,8 @@ def _undrift_rcc(
             drift = io.load_drift(
                 fromfile, pixelsize=lib.get_from_metadata(info, "Pixelsize")
             )
-            locs.x -= drift.loc[locs.frame, "x"].to_numpy()
-            locs.y -= drift.loc[locs.frame, "y"].to_numpy()
+            locs, info = postprocess.apply_drift(locs, info, drift=drift)
+            info[-1]["From File"] = fromfile
 
             if display:
                 import matplotlib.pyplot as plt
@@ -449,20 +440,16 @@ def _undrift_rcc(
         else:
             print(f"Undrifting file {path}")
             try:
-                drift, locs = postprocess.undrift(
+                locs, info, drift = postprocess.undrift(
                     locs,
                     info,
-                    segmentation,
+                    segmentation=segmentation,
                     display=display,
                     progress="console",
                 )
             except ValueError as e:
                 raise SystemExit(f"{path}: {e}")
 
-            undrift_info["Drift X"] = float(drift["x"].mean())
-            undrift_info["Drift Y"] = float(drift["y"].mean())
-
-        info.append(undrift_info)
         base, ext = os.path.splitext(path)
         io.save_locs(base + "_undrift.hdf5", locs, info)
         io.save_drift(base + "_drift.txt", drift)
@@ -489,9 +476,9 @@ def _undrift_aim(
         locs, new_info, drift = aim.aim(
             locs,
             info,
-            segmentation,
-            intersectdist,
-            roiradius,
+            segmentation=segmentation,
+            intersect_d=intersectdist,
+            roi_r=roiradius,
             progress="console",
         )
         base, ext = os.path.splitext(path)
@@ -526,25 +513,21 @@ def _undrift_fiducials(files: str) -> None:
         print(f"Undrifting file {path}.")
         n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
         segmentation = min(_PRE_RCC_SEGMENTATION, n_frames // 4)
-        undrift_info = lib.step_info("Undrift by fiducials")
         if segmentation >= 1:
-            drift, locs = postprocess.undrift(
-                locs, info, segmentation, display=False, progress="console"
+            locs, info, _ = postprocess.undrift(
+                locs,
+                info,
+                segmentation=segmentation,
+                display=False,
+                progress="console",
             )
-            undrift_info["pre-RCC segmentation"] = segmentation
             print("pre-RCC done.")
         else:  # too short to segment, and too short to drift much
             print("pre-RCC skipped, the movie is too short.")
-        locs, new_info, drift = postprocess.undrift_from_fiducials(
+        locs, info, drift = postprocess.undrift_from_fiducials(
             locs, info, progress="console"
         )
 
-        undrift_info["Drift X"] = float(drift["x"].mean())
-        undrift_info["Drift Y"] = float(drift["y"].mean())
-        undrift_info["Number of picks"] = new_info[-1]["Number of picks"]
-        undrift_info["Pick diameter (nm)"] = new_info[-1]["Pick diameter (nm)"]
-
-        info.append(undrift_info)
         base, ext = os.path.splitext(path)
         io.save_locs(base + "_undrift_fiducials.hdf5", locs, info)
         io.save_drift(base + "_drift_fiducials.txt", drift)
@@ -558,17 +541,14 @@ def _density(files: str, radius: float) -> None:
 
     paths = glob.glob(files)
     if paths:
-        from . import io, lib, postprocess
+        from . import io, postprocess
 
         for path in paths:
             locs, info = io.load_locs(path)
-            locs = postprocess.compute_local_density(locs, info, radius)
+            locs, info = postprocess.compute_local_density(
+                locs, info, radius=radius
+            )
             base, ext = os.path.splitext(path)
-            density_info = {
-                **lib.step_info("Density"),
-                "Radius (nm)": radius,
-            }
-            info.append(density_info)
             io.save_locs(base + "_density.hdf5", locs, info)
 
 
@@ -580,29 +560,19 @@ def _filter(files: str, conditions: list[str]) -> None:
 
     paths = glob.glob(files)
     if paths:
-        from . import io, lib, expression
+        from . import io, expression
 
         conditions = [c.strip() for c in conditions]
         for path in paths:
             locs, info = io.load_locs(path)
             n_before = len(locs)
             try:
-                for condition in conditions:
-                    locs = expression.filter_locs(locs, condition, info)
+                locs, info = expression.filter_locs(
+                    locs, info, conditions=conditions
+                )
             except expression.ExpressionError as e:
                 raise SystemExit(f"{path}: {e}")
             print(f"{path}: kept {len(locs):,} of {n_before:,} localizations.")
-            filter_info = lib.step_info("Filter")
-            # column limits as Filter records them, for older Picasso
-            for condition in conditions:
-                if column_range := expression.parse_range(condition):
-                    column, vmin, vmax = column_range
-                    if column in filter_info:
-                        vmin = max(vmin, filter_info[column][0])
-                        vmax = min(vmax, filter_info[column][1])
-                    filter_info[column] = [vmin, vmax]
-            filter_info[lib.FILTER_STEPS_KEY] = conditions
-            info.append(filter_info)
             base, _ = os.path.splitext(path)
             io.save_locs(base + "_filter.hdf5", locs, info)
 
@@ -624,17 +594,19 @@ def _dbscan(
         for path in paths:
             print("Loading {} ...".format(path))
             locs, info = io.load_locs(path)
-            locs, dbscan_info = clusterer.dbscan(
+            locs, info = clusterer.dbscan(
                 locs,
-                radius,
-                min_density,
+                info,
+                radius=radius,
+                min_samples=min_density,
                 radius_z=radius_z,
             )
-            clusters = clusterer.find_cluster_centers(locs, progress="console")
+            clusters, clusters_info = clusterer.find_cluster_centers(
+                locs, info, progress="console"
+            )
             base, _ = os.path.splitext(path)
-            info.append(dbscan_info)
             io.save_locs(base + "_dbscan.hdf5", locs, info)
-            io.save_locs(base + "_dbclusters.hdf5", clusters, info)
+            io.save_locs(base + "_dbclusters.hdf5", clusters, clusters_info)
             print(
                 "Clustering executed. Results are saved in: \n"
                 f"{base}_dbscan.hdf5\n"
@@ -658,14 +630,18 @@ def _hdbscan(
         for path in paths:
             print("Loading {} ...".format(path))
             locs, info = io.load_locs(path)
-            locs, hdbscan_info = clusterer.hdbscan(
-                locs, min_cluster, min_samples
+            locs, info = clusterer.hdbscan(
+                locs,
+                info,
+                min_cluster_size=min_cluster,
+                min_samples=min_samples,
             )
-            clusters = clusterer.find_cluster_centers(locs, progress="console")
+            clusters, clusters_info = clusterer.find_cluster_centers(
+                locs, info, progress="console"
+            )
             base, ext = os.path.splitext(path)
-            info.append(hdbscan_info)
             io.save_locs(base + "_hdbscan.hdf5", locs, info)
-            io.save_locs(base + "_hdbclusters.hdf5", clusters, info)
+            io.save_locs(base + "_hdbclusters.hdf5", clusters, clusters_info)
             print(
                 "Clustering executed. Results are saved in: \n"
                 f"{base}_hdbscan.hdf5\n"
@@ -697,14 +673,17 @@ def _smlm_clusterer(
         for path in paths:
             print("Loading {} ...".format(path))
             locs, info = io.load_locs(path)
-            locs, smlm_cluster_info = clusterer.cluster(
-                locs, **params, progress="console"
+            locs, info = clusterer.cluster(
+                locs, info, **params, progress="console"
             )
-            clusters = clusterer.find_cluster_centers(locs, progress="console")
+            clusters, clusters_info = clusterer.find_cluster_centers(
+                locs, info, progress="console"
+            )
             base, ext = os.path.splitext(path)
-            info.append(smlm_cluster_info)
             io.save_locs(base + "_clusters.hdf5", locs, info)
-            io.save_locs(base + "_cluster_centers.hdf5", clusters, info)
+            io.save_locs(
+                base + "_cluster_centers.hdf5", clusters, clusters_info
+            )
             print(
                 "Clustering executed. Results are saved in: \n"
                 f"{base}_clusters.hdf5\n"
@@ -813,7 +792,7 @@ def _cbc(
             locs, info = postprocess.cbc(
                 all_locs[0],
                 all_infos[0],
-                all_locs[1:],
+                partner_locs=all_locs[1:],
                 partner_names=names[1:],
                 **kwargs,
             )
@@ -938,9 +917,9 @@ def _pair_statistic(
                 result = compute(
                     locs,
                     info,
-                    picks,
-                    shape,
-                    size,
+                    picks=picks,
+                    pick_shape=shape,
+                    pick_size=size,
                     r_max=r_max,
                     steps=steps,
                     edge_correction=edge_correction,
@@ -1029,9 +1008,9 @@ def _nnd(
             result = postprocess.nnd_distributions(
                 list(all_locs),
                 infos[0],
-                picks,
-                shape,
-                size,
+                picks=picks,
+                pick_shape=shape,
+                pick_size=size,
                 names=names,
                 r_max=r_max,
                 steps=steps,
@@ -1208,7 +1187,7 @@ def _track(
             tracked, new_info = spt.link_tracks(
                 locs,
                 info,
-                max_jump,
+                max_jump=max_jump,
                 max_gap=max_gap,
                 min_length=min_length,
                 frame_time=frame_time,
@@ -1323,14 +1302,12 @@ def _dark(files: str) -> None:
 
     paths = glob.glob(files)
     if paths:
-        from . import io, lib, postprocess
+        from . import io, postprocess
 
         for path in paths:
             locs, info = io.load_locs(path)
-            locs = postprocess.compute_dark_times(locs)
+            locs, info = postprocess.compute_dark_times(locs, info)
             base, ext = os.path.splitext(path)
-            d_info = lib.step_info("Dark")
-            info.append(d_info)
             io.save_locs(base + "_dark.hdf5", locs, info)
 
 
@@ -1342,7 +1319,6 @@ def _align(
     outside the region where all aligned files overlap are removed."""
     from glob import glob
     from itertools import chain
-    from . import lib
     from .io import load_locs, save_locs
     from .postprocess import align
     from os.path import splitext
@@ -1354,20 +1330,15 @@ def _align(
     locs_infos = [load_locs(_) for _ in files]
     locs = [_[0] for _ in locs_infos]
     infos = [_[1] for _ in locs_infos]
-    aligned_locs = align(
+    aligned_locs, aligned_infos = align(
         locs,
         infos,
         method="rcc",
         display=display,
         keep_non_overlapping=not remove_non_overlapping,
     )
-    align_info = {
-        **lib.step_info("Align"),
-        "Files": files,
-        "Remove non-overlapping": remove_non_overlapping,
-    }
-    for file, locs_, info in zip(files, aligned_locs, infos):
-        info.append(align_info)
+    for file, locs_, info in zip(files, aligned_locs, aligned_infos):
+        info[-1]["Files"] = files
         base, ext = splitext(file)
         save_locs(base + "_align.hdf5", locs_, info)
 
@@ -1518,7 +1489,9 @@ def _pair_correlation(files: str, bin_size: float, r_max: float) -> None:
             print("Loading {}...".format(path))
             locs, info = load_locs(path)
             print("Calculating pair-correlation...")
-            bins_lower, pc = pair_correlation(locs, info, bin_size, r_max)
+            bins_lower, pc = pair_correlation(
+                locs, info, bin_size=bin_size, r_max=r_max
+            )
             plot(bins_lower - bin_size / 2, pc)
             xlabel("r (nm)")
             ylabel("pair-correlation (nm^-2)")
@@ -4541,7 +4514,7 @@ def _g5m(
             calib = load_calibration(
                 calibration, pixelsize=get_from_metadata(info, "Pixelsize")
             )
-        mols, _, g5m_info = g5m(
+        mols, g5m_info, _ = g5m(
             locs,
             info,
             min_locs=min_locs,

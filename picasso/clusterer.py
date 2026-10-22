@@ -416,12 +416,14 @@ def cluster_3D(
 
 def cluster(
     locs: pd.DataFrame,
+    info: list[dict] | None = None,
+    *,
     radius_xy: float,
     min_locs: int,
     frame_analysis: bool,
     radius_z: float | None = None,
     progress: lib.Progress | Literal["console"] | None = None,
-) -> tuple[pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Cluster localizations from single molecules (SMLM clusterer).
 
     The general workflow is as follows:
@@ -447,6 +449,9 @@ def cluster(
     ----------
     locs : pd.DataFrame
         Localizations to be clustered.
+    info : list of dicts or None, optional
+        Metadata of ``locs``, carried over into the returned metadata.
+        Default is None.
     radius_xy : float
         Clustering radius in xy plane (nm).
     min_locs : int
@@ -468,8 +473,9 @@ def cluster(
         Clusterered localizations, with column 'group' added, which
         specifies cluster label for each localization. Noise (label -1)
         is removed.
-    info : dict
-        Dictionary containing clustering information.
+    info : list of dicts
+        Metadata of the clustered localizations: ``info`` with an entry
+        recording the clustering appended, see ``lib.append_metadata``.
     """
     locs = locs.copy()
     n_raw = len(locs)
@@ -498,7 +504,7 @@ def cluster(
             )
     locs = extract_valid_labels(locs, labels)
     n_clusters = len(locs)
-    info = {
+    entry = {
         **lib.step_info("SMLM clusterer"),
         "Number of clusters": len(np.unique(locs["group"])),
         "Min. cluster size": min_locs,
@@ -506,11 +512,11 @@ def cluster(
         "Fraction of rejected locs (%)": 100 * (n_raw - n_clusters) / n_raw,
     }
     if "z" in locs.columns:
-        info["Clustering radius xy (nm)"] = radius_xy
-        info["Clustering radius z (nm)"] = radius_z
+        entry["Clustering radius xy (nm)"] = radius_xy
+        entry["Clustering radius z (nm)"] = radius_z
     else:
-        info["Clustering radius (nm)"] = radius_xy
-    return locs, info
+        entry["Clustering radius (nm)"] = radius_xy
+    return locs, lib.append_metadata(info, entry)
 
 
 def _dbscan(
@@ -553,11 +559,13 @@ def _dbscan(
 
 def dbscan(
     locs: pd.DataFrame,
+    info: list[dict] | None = None,
+    *,
     radius: float,
     min_samples: int,
     min_locs: int = 10,
     radius_z: float | None = None,
-) -> tuple[pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Perform DBSCAN on localizations.
 
     See Ester, et al. Inkdd, 1996. (Vol. 96, No. 34, pp. 226-231).
@@ -573,6 +581,9 @@ def dbscan(
     ----------
     locs : pd.DataFrame
         Localizations to be clustered.
+    info : list of dicts or None, optional
+        Metadata of ``locs``, carried over into the returned metadata.
+        Default is None.
     radius : float
         DBSCAN search radius in the xy plane (nm), usually referred to
         as "epsilon".
@@ -593,8 +604,9 @@ def dbscan(
         Clusterered localizations, with column 'group' added, which
         specifies cluster label for each localization. Noise (label -1)
         is removed.
-    info : dict
-        Dictionary containing clustering information.
+    info : list of dicts
+        Metadata of the clustered localizations: ``info`` with an entry
+        recording the clustering appended, see ``lib.append_metadata``.
     """
     locs = locs.copy()
     n_raw = len(locs)
@@ -607,7 +619,7 @@ def dbscan(
     labels = _dbscan(X, radius, min_samples, min_locs)
     locs = extract_valid_labels(locs, labels)
     n_clusters = len(locs)
-    info = {
+    entry = {
         **lib.step_info("DBSCAN"),
         "Number of clusters": len(np.unique(locs["group"])),
         "Radius (nm)": radius,
@@ -616,8 +628,8 @@ def dbscan(
         "Fraction of rejected locs (%)": 100 * (n_raw - n_clusters) / n_raw,
     }
     if "z" in locs.columns and radius_z is not None:
-        info["Radius z (nm)"] = radius_z
-    return locs, info
+        entry["Radius z (nm)"] = radius_z
+    return locs, lib.append_metadata(info, entry)
 
 
 def _hdbscan(
@@ -677,10 +689,12 @@ def _hdbscan(
 
 def hdbscan(
     locs: pd.DataFrame,
+    info: list[dict] | None = None,
+    *,
     min_cluster_size: int,
     min_samples: int,
     cluster_eps: float = 0.0,
-) -> tuple[pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Perform HDBSCAN on localizations.
 
     See Campello, et al. PAKDD, 2013 (DOI: 10.1007/978-3-642-37456-2_14).
@@ -689,6 +703,9 @@ def hdbscan(
     ----------
     locs : pd.DataFrame
         Localizations to be clustered.
+    info : list of dicts or None, optional
+        Metadata of ``locs``, carried over into the returned metadata.
+        Default is None.
     min_cluster_size : int
         Minimum number of localizations in cluster.
     min_samples : int
@@ -704,8 +721,9 @@ def hdbscan(
         Clusterered localizations, with column 'group' added, which
         specifies cluster label for each localization. Noise (label -1)
         is removed.
-    info : dict
-        Dictionary containing clustering information.
+    info : list of dicts
+        Metadata of the clustered localizations: ``info`` with an entry
+        recording the clustering appended, see ``lib.append_metadata``.
 
     Raises
     ------
@@ -724,7 +742,7 @@ def hdbscan(
     )
     locs = extract_valid_labels(locs, labels)
     n_clusters = len(locs)
-    info = {
+    entry = {
         **lib.step_info("HDBSCAN"),
         "Number of clusters": len(np.unique(locs["group"])),
         "Min. cluster": min_cluster_size,
@@ -732,7 +750,7 @@ def hdbscan(
         "Intercluster distance (nm)": cluster_eps,
         "Fraction of rejected locs (%)": 100 * (n_raw - n_clusters) / n_raw,
     }
-    return locs, info
+    return locs, lib.append_metadata(info, entry)
 
 
 def extract_valid_labels(
@@ -928,8 +946,10 @@ def _weighted_z_means(
 
 def find_cluster_centers(
     locs: pd.DataFrame,
+    info: list[dict] | None = None,
+    *,
     progress: lib.Progress | Literal["console"] | None = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Calculate cluster centers.
 
     Aggregations are computed in vectorized pandas/NumPy passes; the
@@ -943,6 +963,9 @@ def find_cluster_centers(
         "frame", "x", "y" and "group" (and "z" for 3D). Any other
         numeric column present is averaged per cluster. Other numeric
         columns are carried over as means.
+    info : list of dicts or None, optional
+        Metadata of ``locs``, carried over into the returned metadata.
+        Default is None.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -959,6 +982,9 @@ def find_cluster_centers(
         precisions (``lpx``, ``lpy``, ``lpz``) in nm, ``area`` and 2D
         ``convexhull`` in nm^2, ``volume`` and 3D ``convexhull`` in
         nm^3.
+    info : list of dicts
+        Metadata of the cluster centers: ``info`` with an entry
+        recording the step appended, see ``lib.append_metadata``.
     """
     has_z = "z" in locs.columns
 
@@ -1027,7 +1053,10 @@ def find_cluster_centers(
             gb["group_input"].first().to_numpy().astype(np.int32)
         )
 
-    return pd.DataFrame(columns)
+    entry = lib.step_info(
+        "Cluster centers", **{"Number of clusters": len(s["unique_groups"])}
+    )
+    return pd.DataFrame(columns), lib.append_metadata(info, entry)
 
 
 def _cluster_area(X: lib.FloatArray2D, lp: float) -> float:
@@ -1076,7 +1105,8 @@ def _cluster_area(X: lib.FloatArray2D, lp: float) -> float:
 
 def cluster_areas(
     locs: pd.DataFrame,
-    info: list[dict],
+    info: list[dict] | None = None,
+    *,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Calculate cluster areas (2D) or volumes (3D).
@@ -1088,8 +1118,9 @@ def cluster_areas(
     ----------
     locs : pd.DataFrame
         Clustered localizations (contain group info).
-    info : list of dict
-        Localization metadata, see `picasso.io.load_locs`.
+    info : list of dicts or None, optional
+        Metadata of ``locs``. Not used; accepted so that the call
+        matches the other functions on localizations. Default is None.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -1136,7 +1167,8 @@ def cluster_areas(
 
 def test_subclustering(
     mols: pd.DataFrame,
-    info: list[dict],
+    info: list[dict] | None = None,
+    *,
     clustering_dist: float = 25,
     sparse_dist: float = 80,
 ) -> tuple[lib.IntArray1D, lib.IntArray1D]:
@@ -1158,8 +1190,9 @@ def test_subclustering(
     ----------
     mols : pd.DataFrame
         List of molecules, must contain n_events.
-    info : list of dict
-        Molecules metadata.
+    info : list of dicts or None, optional
+        Metadata of ``mols``. Not used; accepted so that the call
+        matches the other functions on localizations. Default is None.
     clustering_dist : float, optional
         Maximum distance between molecules (nm) to consider them as
         clustered. Default is 25.
