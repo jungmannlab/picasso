@@ -14,6 +14,7 @@ from __future__ import annotations
 import copy
 import importlib
 import inspect
+import re
 
 import numpy as np
 import pandas as pd
@@ -85,6 +86,41 @@ def test_arguments_after_info_are_keyword_only(name, params):
         not in (inspect.Parameter.KEYWORD_ONLY, inspect.Parameter.VAR_KEYWORD)
     ]
     assert not later, f"{name}: {later} must be keyword-only"
+
+
+def _returned_metadata(fn) -> list[str]:
+    """Names in the Returns section of ``fn``'s docstring that are
+    metadata (``list of dicts`` or ``list of lists of dicts``)."""
+    doc = inspect.getdoc(fn) or ""
+    match = re.search(
+        r"\nReturns\n-+\n(.*?)(?:\n\n[A-Z][A-Za-z ]+\n-+\n|\Z)", doc, re.S
+    )
+    if match is None:
+        return []
+    return re.findall(
+        r"^(\w+) : list of (?:lists of )?dicts", match.group(1), re.M
+    )
+
+
+RETURNING_METADATA = [
+    (name, fn) for name, fn in _public_functions() if _returned_metadata(fn)
+]
+
+
+def test_public_api_has_functions_returning_metadata():
+    # guards the parametrization below against silently testing nothing
+    assert len(RETURNING_METADATA) > 30
+
+
+@pytest.mark.parametrize(
+    "name, fn",
+    RETURNING_METADATA,
+    ids=[name for name, _ in RETURNING_METADATA],
+)
+def test_returned_metadata_is_annotated(name, fn):
+    # the annotation follows the docstring when the return changes
+    annotation = str(inspect.signature(fn).return_annotation)
+    assert "list[dict]" in annotation, f"{name} -> {annotation}"
 
 
 # --- lib.append_metadata ---------------------------------------------------

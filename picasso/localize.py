@@ -2528,7 +2528,7 @@ def identify(
     threaded: bool = True,
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
-) -> tuple[pd.DataFrame, dict] | None:
+) -> tuple[pd.DataFrame, list[dict]] | None:
     """Identify spots in a movie. This function can run in a threaded or
     non-threaded mode.
 
@@ -2867,7 +2867,7 @@ def identify_multichannel_sum(
     order: int = 1,
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
-) -> tuple[pd.DataFrame, dict] | None:
+) -> tuple[pd.DataFrame, list[dict]] | None:
     """Identify spots on the *sum* of registered channels.
 
     The spots are identified on the sum rather than in each channel on its
@@ -5484,7 +5484,7 @@ def fit_gauss_multichannel(
     camera_calibrations: list[dict | None] | None = None,
     *,
     info: list[dict] | None = None,
-) -> pd.DataFrame | None:
+) -> tuple[pd.DataFrame, list[dict]] | None:
     """Fit a spherical Gaussian jointly across several registered channels.
 
     Global fit in the sense of globLoc (Li et al., Nat. Commun. 13, 3133,
@@ -5670,7 +5670,7 @@ def fit_gauss_split_fov(
     camera_calibration: dict | None = None,
     *,
     info: list[dict] | None = None,
-) -> pd.DataFrame | None:
+) -> tuple[pd.DataFrame, list[dict]] | None:
     """Fit a spherical Gaussian jointly across the regions of one movie.
 
     The split-FOV counterpart of :func:`fit_gauss_multichannel`, for channels
@@ -7809,7 +7809,7 @@ def fit_spline_multichannel(
     camera_calibrations: list[dict | None] | None = None,
     *,
     info: list[dict] | None = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Fit a multichannel cubic-spline PSF across several registered channels.
 
     Global fit in the sense of globLoc (Li et al., Nat. Commun. 13, 3133,
@@ -8057,7 +8057,7 @@ def fit_spline_multichannel_ratiometric(
     camera_calibrations: list[dict | None] | None = None,
     *,
     info: list[dict] | None = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Ratiometric multichannel spline fit with photon-ratio color assignment.
 
     Implements globLoc's ratiometric scheme (Li et al., Nat. Commun. 13, 3133,
@@ -8738,7 +8738,7 @@ def fit_spline_split_fov(
     camera_calibration: dict | None = None,
     *,
     info: list[dict] | None = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Fit a split-FOV multichannel spline PSF from a *single* movie.
 
     The rectangular sub-regions of the movie are the channels. Global fit as
