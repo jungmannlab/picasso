@@ -79,7 +79,8 @@ class TestSnapshots:
     def test_snapshot_lists_the_modules_of_the_api_pages(self):
         recorded = json.loads(API_SNAPSHOT.read_text())
         assert "picasso.io" in recorded
-        assert "picasso.fitting.gaussfit" in recorded  # recursive
+        assert "picasso.fitting.precision" in recorded  # recursive
+        assert "picasso.fitting.gaussfit" not in recorded  # reference only
         assert "load_locs" in recorded["picasso.io"]
 
     def test_deprecations_are_recorded(self):

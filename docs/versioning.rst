@@ -24,9 +24,13 @@ What is public
    The functions and classes on the :doc:`api/index` pages, which are the names
    in each module's ``__all__``, with their parameters, defaults, return values
    and units. Everything else may change in any release: names starting with
-   an underscore, names left out of ``__all__``, and the modules that are not
+   an underscore, names left out of ``__all__``, the modules that are not
    on the API pages, e.g., ``picasso.gui``, ``picasso.lib_qt``,
-   ``picasso.server`` and the submodules of ``picasso.render``.
+   ``picasso.server`` and the submodules of ``picasso.render``, and the
+   fitters in ``picasso.fitting``, which the API pages document for
+   reference, except ``picasso.fitting.precision``. Fit with
+   ``picasso.localize.fit`` (or ``fit_spots_gauss`` and
+   ``fit_spots_spline``).
 
 **The files**
    Every Picasso 1.x reads the localization files written by any earlier

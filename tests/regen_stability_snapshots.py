@@ -37,10 +37,16 @@ API_SNAPSHOT = SNAPSHOTS / "api.json"
 CLI_SNAPSHOT = SNAPSHOTS / "cli.json"
 DEPRECATED_SNAPSHOT = SNAPSHOTS / "deprecated.json"
 
+#: Packages listed ``:recursive:`` whose submodules the API pages
+#: document for reference only (docs/versioning.rst), with the
+#: submodules that are public nonetheless
+REFERENCE_ONLY = {"picasso.fitting": ["precision"]}
+
 
 def public_modules() -> list[str]:
-    """The modules on the API pages: those listed in docs/api/index.rst
-    and the submodules of the packages listed ``:recursive:``."""
+    """The public modules: those listed in docs/api/index.rst and the
+    submodules of the packages listed ``:recursive:``, except the
+    submodules of ``REFERENCE_ONLY`` packages that it leaves out."""
     text = (ROOT / "docs" / "api" / "index.rst").read_text()
     modules = []
     for block in re.split(r"\n\.\. autosummary::", text)[1:]:
@@ -53,6 +59,10 @@ def public_modules() -> list[str]:
                     f"{name}.{module.name}"
                     for module in pkgutil.iter_modules([str(package)])
                     if not module.name.startswith("_")
+                    and (
+                        name not in REFERENCE_ONLY
+                        or module.name in REFERENCE_ONLY[name]
+                    )
                 )
     return sorted(set(modules))
 

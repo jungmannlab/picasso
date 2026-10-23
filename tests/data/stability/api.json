@@ -24,51 +24,10 @@
   "variables_from_info"
  ],
  "picasso.fitting": [],
- "picasso.fitting.gaussfit": [
-  "SPHERICAL",
-  "ELLIPTIC",
-  "ROTATED",
-  "MULTI_KIND_SHARED",
-  "MULTI_KIND_DECOUPLED",
-  "n_parameters",
-  "n_parameters_multichannel",
-  "fit_spots",
-  "fit_spots_async",
-  "fit_spots_multichannel",
-  "fit_spots_multichannel_async"
- ],
- "picasso.fitting.gaussfit_cuda": [
-  "fit_spots",
-  "fit_spots_multichannel"
- ],
- "picasso.fitting.lmfit_cuda": [],
  "picasso.fitting.precision": [
   "localization_precision",
   "sigma_uncertainty_lsq",
   "sigma_uncertainty_mle"
- ],
- "picasso.fitting.seeds": [
-  "initial_parameters_gauss",
-  "initial_parameters_gauss_multichannel",
-  "initial_parameters_spline"
- ],
- "picasso.fitting.splinefit": [
-  "KIND_2D",
-  "KIND_3D",
-  "KIND_LINK_XYZ",
-  "FIT_STATE_CONVERGED",
-  "FIT_STATE_MAX_ITERATION",
-  "FIT_STATE_SINGULAR_HESSIAN",
-  "FIT_STATE_NEG_CURVATURE_MLE",
-  "AsyncFit",
-  "fit_spots",
-  "fit_spots_async",
-  "convergence_schedule",
-  "n_workers"
- ],
- "picasso.fitting.splinefit_cuda": [
-  "n_parameters",
-  "fit_spots"
  ],
  "picasso.g5m": [
   "g5m",

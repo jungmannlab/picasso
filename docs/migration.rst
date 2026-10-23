@@ -665,10 +665,14 @@ return ``qe``.
        (camera pixels)
      - ``check_nena(locs, info, progress=...)``, ``check_drift``, in nm.
 
-**The modules** ``picasso.gausslq`` **and** ``picasso.gaussmle`` are removed;
-all fitting is in ``picasso.localize`` and ``picasso.fitting``. The fitting
-methods ``"gausslq"`` and ``"gaussmle"`` of ``localize.fit`` and
-``localize.localize`` are unchanged.
+**The modules** ``picasso.gausslq`` **and** ``picasso.gaussmle`` are removed.
+To fit a movie, use ``localize.fit``: it cuts out the spots, fits them and
+returns the localizations with their precisions in nm, with any method
+(``fitting_method="gausslq"`` or ``"gaussmle"``, unchanged from 0.11, on the
+CPU or the GPU), see the example below. The fitters it runs, in
+``picasso.fitting``, are not part of the public API (see :doc:`versioning`),
+except ``picasso.fitting.precision``. To fit spots you cut out yourself, use
+these replacements of the 0.11 functions:
 
 .. list-table::
    :header-rows: 1
@@ -690,8 +694,8 @@ methods ``"gausslq"`` and ``"gaussmle"`` of ``localize.fit`` and
        ``mle=True``, ``log_likelihood`` and ``iterations`` for MLE fits.
    * - ``gausslq.fit_spots_parallel(spots, asynch=True)``,
        ``gausslq.fits_from_futures``, ``gaussmle.gaussmle_async``
-     - ``fitting.gaussfit.fit_spots_async(model, spots, initial_parameters)``
-       and its ``results()``.
+     - ``localize.fit_spots_gauss(spots)``, which fits in parallel
+       (``parallel=True``) and reports how far it is through ``progress=``.
    * - ``gausslq.localization_precision``, ``gausslq.sigma_uncertainty``,
        ``gaussmle.sigma_uncertainty``
      - ``fitting.precision.localization_precision``,
@@ -705,8 +709,9 @@ The parameters returned by the fits (``theta``) are ordered
 .. code-block:: python
    :caption: Picasso 0.11
 
-   from picasso import gausslq, gaussmle
+   from picasso import gausslq, gaussmle, localize
 
+   spots = localize.get_spots(movie, ids, 7, camera_info)
    theta = gausslq.fit_spots_parallel(spots, asynch=False)
    locs = gausslq.locs_from_fits(ids, theta, 7, em=False)
    theta, crlbs, log_l, iters = gaussmle.gaussmle(spots, eps=0.001, max_it=1000)
@@ -717,6 +722,19 @@ The parameters returned by the fits (``theta``) are ordered
 
    from picasso import localize
 
+   # the movie, the identifications and their metadata (ids_info), as
+   # localize.identify returns them
+   locs, locs_info = localize.fit(
+       movie,
+       ids_info,
+       camera_info=camera_info,
+       identifications=ids,
+       box=7,
+       fitting_method="gausslq",  # or "gaussmle"
+   )
+
+   # or, with the spots cut out by hand
+   spots = localize.get_spots(movie, ids, 7, camera_info)
    theta = localize.fit_spots_gauss(spots)
    locs = localize.locs_from_fits_gauss(ids, theta, 7, em=False, pixelsize=130)
    theta, log_l, iters, _ = localize.fit_spots_gauss(spots, mle=True, return_stats=True)
