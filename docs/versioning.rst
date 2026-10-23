@@ -122,7 +122,8 @@ Picasso may support a version longer, e.g., while a newer one is not yet usable
 with all of Picasso's dependencies. A version past its window may be dropped in
 a minor release; the changelog announces it, and the earlier releases of
 Picasso stay installable for it. The versions supported now are listed in
-``pyproject.toml`` (Python 3.11 to 3.14 in Picasso 1.0).
+``pyproject.toml`` (Python 3.11 to 3.14 in Picasso 1.0; why not 3.15 yet:
+:ref:`faq-python-315`).
 
 .. _versioning-developers:
 

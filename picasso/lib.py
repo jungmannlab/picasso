@@ -1724,7 +1724,9 @@ def fit_cum_exp(data: FloatArray1D) -> dict:
     result : dict
         Contains the best fit parameters and the fitted data.
     """
-    data.sort()
+    # a sorted copy: sorting in place reordered the caller's array, e.g.,
+    # a column of the localizations (read-only from pandas 3 on)
+    data = np.sort(data)
     n = len(data)
     y = np.arange(1, n + 1)
     data_min = data.min()

@@ -20833,8 +20833,16 @@ class Window(QtWidgets.QMainWindow):
                     "Localizations have not been spiraled yet.",
                 )
         else:
-            vars = self.view.locs[channel].columns.to_list()
-            exec(cmd, {k: self.view.locs[channel][k] for k in vars})
+            locs = self.view.locs[channel]
+            code = compile(cmd, "<expression>", "exec")
+            columns = {name: locs[name] for name in locs.columns}
+            exec(code, columns)
+            # write back the columns the expression names: a column
+            # changed in place (e.g., "x += 100") is a copy from pandas 3
+            # on (Copy-on-Write) and a rebound one (e.g., "x = x * 2")
+            # never changed the localizations
+            for name in set(code.co_names).intersection(locs.columns):
+                locs[name] = columns[name]
         # localizations moved beyond the canvas grow it instead of
         # being removed when saving; the columns are replaced with
         # copies since the expression may have changed them in place

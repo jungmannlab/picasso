@@ -242,8 +242,9 @@ def test_summaries_are_read_back_with_their_types(database, helper):
     )
     df = helper.fetch_db()
     assert df["filename"].tolist() == ["a.raw", "b.raw"]  # by date
-    assert str(df["file_created"].dtype) == "datetime64[ns]"
-    assert str(df["entry_created"].dtype) == "datetime64[ns]"
+    # datetimes in any unit (ns in pandas 2, us inferred in pandas 3)
+    assert df["file_created"].dtype.kind == "M"
+    assert df["entry_created"].dtype.kind == "M"
     assert df["file_created"].iloc[0] == datetime(2026, 1, 1, 8, 30, 0, 5)
     assert df["n_locs"].tolist() == [10, 10]
     assert df["nena_nm"].iloc[0] == 4.5
