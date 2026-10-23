@@ -17,7 +17,7 @@ import pandas as pd
 import pytest
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-from picasso import io, lib
+from picasso import io, lib, postprocess
 from picasso.gui import filter as gui_filter
 
 LOCS_PATH = "./tests/data/testdata_locs.hdf5"
@@ -330,3 +330,40 @@ def test_canceled_pixel_size_prompt_loads_nothing(
     assert not window.has_locs
     assert shown == []
     window.close()
+
+
+def test_a_table_without_x_saves_as_groups(
+    qt_offscreen, tmp_path, monkeypatch
+):
+    """Pick properties (no ``x`` column, a "groups" dataset) are saved as
+    they were written instead of failing."""
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    locs, info = io.load_locs(LOCS_PATH)
+    locs = locs.assign(group=np.arange(len(locs)) % 10)
+    props = postprocess.groupprops(locs)
+    assert "x" not in props.columns
+    props_path = tmp_path / "props.hdf5"
+    io.save_datasets(str(props_path), info, groups=props)
+
+    window = gui_filter.Window()
+    window.open(str(props_path))
+    window.apply_expression("n_events > median(n_events)")
+    n_filtered = window.n_filtered
+    assert 0 < n_filtered < len(props)
+    out_path = tmp_path / "props_filter.hdf5"
+    monkeypatch.setattr(
+        lib,
+        "get_save_filename_ext_dialog",
+        lambda *args, **kwargs: (str(out_path), None),
+    )
+    window.save_file_dialog()
+    window.filter_expression.close()
+    window.close()
+
+    saved, saved_info = io.load_filter(str(out_path))
+    assert len(saved) == n_filtered
+    assert list(saved.columns) == list(props.columns)
+    assert saved_info[-1][lib.FILTER_STEPS_KEY] == [
+        "n_events > median(n_events)"
+    ]

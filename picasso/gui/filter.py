@@ -1609,27 +1609,31 @@ class Window(QtWidgets.QMainWindow):
     def save_file_dialog(self) -> None:
         if self.no_locs_warning("Save"):
             return
-        if "x" in self.locs_full.columns:  # Saving only for locs
-            base, ext = os.path.splitext(self.locs_path)
-            out_path = base + "_filter.hdf5"
-            path, exe = lib.get_save_filename_ext_dialog(
-                self,
-                "Save localizations",
-                out_path,
-                filter="*.hdf5",
-                check_ext=".yaml",
-            )
-            if path:
-                filter_info = {
-                    key: value
-                    for key, value in self.filter_log.items()
-                    if key != lib.FILTER_STEPS_KEY or value
-                }
-                filter_info.update(lib.step_info("Filter"))
-                info = self.info + [filter_info]
-                io.save_locs(path, self.materialize_filtered(), info)
+        # tables without x, e.g., Render's pick properties, are saved as
+        # they were written: a "groups" dataset (see io.load_filter)
+        is_locs = "x" in self.locs_full.columns
+        base, ext = os.path.splitext(self.locs_path)
+        out_path = base + "_filter.hdf5"
+        path, exe = lib.get_save_filename_ext_dialog(
+            self,
+            "Save localizations" if is_locs else "Save table",
+            out_path,
+            filter="*.hdf5",
+            check_ext=".yaml",
+        )
+        if not path:
+            return
+        filter_info = {
+            key: value
+            for key, value in self.filter_log.items()
+            if key != lib.FILTER_STEPS_KEY or value
+        }
+        filter_info.update(lib.step_info("Filter"))
+        info = self.info + [filter_info]
+        if is_locs:
+            io.save_locs(path, self.materialize_filtered(), info)
         else:
-            raise NotImplementedError("Saving only implemented for locs.")
+            io.save_datasets(path, info, groups=self.materialize_filtered())
 
     def wheelEvent(self, event: QtGui.QWheelEvent) -> None:
         new_value = (
