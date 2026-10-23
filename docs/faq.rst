@@ -132,8 +132,10 @@ the log is in ``~/.picasso/logs/update.log``.
 
 You can also download and install the new version from the
 `release page <https://github.com/jungmannlab/picasso/releases>`__ yourself;
-on Windows, there is no need to uninstall the old version first. With pip,
-``pip install --upgrade picassosr``.
+on Windows, there is no need to uninstall the old version first, except for
+the *GPU* edition of versions before 1.0: its successor, the *CUDA* edition,
+installs beside it, so uninstall *Picasso-GPU* (Windows *Settings* > *Apps*).
+With pip, ``pip install --upgrade picassosr``.
 
 Updating from a version before 1.0? See :doc:`migration`.
 

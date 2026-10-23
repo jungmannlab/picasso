@@ -218,6 +218,10 @@ Python functions now take nm. Scripts that pass camera pixels need updating;
 :doc:`/migration` lists what changes and the replacement of each setting,
 command and function.
 
+On Windows, the one-click installer's *GPU* edition is now called *CUDA* and
+installs beside the old one: uninstall *Picasso-GPU* (Windows *Settings* >
+*Apps*), or ``picasso`` in a terminal keeps running the old version.
+
 .. _error-log:
 
 Reporting problems

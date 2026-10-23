@@ -629,11 +629,11 @@ def _render_hist(
     locs : pd.DataFrame
         Localizations to be rendered.
     oversampling : float
-        Number of super-resolution pixels per camera pixel.
+        Number of super-resolution pixels per nm.
     y_min, x_min : float
-        Minimum y and x coordinates to be rendered (camera pixels)
+        Minimum y and x coordinates to be rendered (nm)
     y_max, x_max : float
-        Maximum y and x coordinates to be rendered (camera pixels)
+        Maximum y and x coordinates to be rendered (nm)
     ang : tuple or scipy.spatial.transform.Rotation, optional
         Rotation of locs; either a scipy Rotation (e.g. built from a
         quaternion) or a tuple of 3 rotation angles around the x, y
@@ -829,13 +829,13 @@ def _render_gaussian(
     columns : _RenderColumns
         Column arrays of the localizations to be rendered.
     oversampling : float
-        Number of super-resolution pixels per camera pixel.
+        Number of super-resolution pixels per nm.
     y_min, x_min : float
-        Minimum y and x coordinates to be rendered (camera pixels).
+        Minimum y and x coordinates to be rendered (nm).
     y_max, x_max : float
-        Maximum y and x coordinates to be rendered (camera pixels).
+        Maximum y and x coordinates to be rendered (nm).
     min_blur_width : float
-        Minimum localization precision (camera pixels).
+        Minimum localization precision (nm).
     ang : tuple or scipy.spatial.transform.Rotation, optional
         Rotation of localizations; either a scipy Rotation (e.g. built
         from a quaternion) or a tuple of 3 rotation angles around the
@@ -1001,13 +1001,13 @@ def _render_convolve(
     columns : _RenderColumns
         Column arrays of the localizations to be rendered.
     oversampling : float
-        Number of super-resolution pixels per camera pixel.
+        Number of super-resolution pixels per nm.
     y_min, x_min : float
-        Minimum y and x coordinates to be rendered (camera pixels).
+        Minimum y and x coordinates to be rendered (nm).
     y_max, x_max : float
-        Maximum y and x coordinates to be rendered (camera pixels).
+        Maximum y and x coordinates to be rendered (nm).
     min_blur_width : float
-        Minimum localization precision (camera pixels).
+        Minimum localization precision (nm).
     ang : tuple or scipy.spatial.transform.Rotation, optional
         Rotation of localizations; either a scipy Rotation (e.g. built
         from a quaternion) or a tuple of 3 rotation angles around the
@@ -1053,7 +1053,7 @@ def _render_convolve(
 
 
 def global_blur(columns: _RenderColumns) -> tuple[float, float]:
-    """Find the ``convolve`` blur of a channel in camera pixels.
+    """Find the ``convolve`` blur of a channel in nm.
 
     The blur is the caller's ``global_precision`` when given (see
     ``render``), else the median ``lpx`` and ``lpy`` of the rows to
@@ -1069,9 +1069,9 @@ def global_blur(columns: _RenderColumns) -> tuple[float, float]:
     Returns
     -------
     lpx : float
-        Blur in x (camera pixels); 0 if there are no rows to render.
+        Blur in x (nm); 0 if there are no rows to render.
     lpy : float
-        Blur in y (camera pixels); 0 if there are no rows to render.
+        Blur in y (nm); 0 if there are no rows to render.
     """
     if columns.global_lp is not None:
         return columns.global_lp
@@ -1100,11 +1100,11 @@ def _render_smooth(
     columns : _RenderColumns
         Column arrays of the localizations to be rendered.
     oversampling : float
-        Number of super-resolution pixels per camera pixel.
+        Number of super-resolution pixels per nm.
     y_min, x_min : float
-        Minimum y and x coordinates to be rendered (camera pixels).
+        Minimum y and x coordinates to be rendered (nm).
     y_max, x_max : float
-        Maximum y and x coordinates to be rendered (camera pixels).
+        Maximum y and x coordinates to be rendered (nm).
     ang : tuple or scipy.spatial.transform.Rotation, optional
         Rotation of localizations; either a scipy Rotation (e.g. built
         from a quaternion) or a tuple of 3 rotation angles around the
@@ -1215,13 +1215,11 @@ def locs_rotation(
     locs : pd.DataFrame
         Localizations to be rotated.
     oversampling : float
-        Number of super-resolution pixels per camera pixel.
+        Number of super-resolution pixels per nm.
     x_min, x_max : float
-        Minimum and maximum x coordinates to be rendered (camera
-        pixels).
+        Minimum and maximum x coordinates to be rendered (nm).
     y_min, y_max : float
-        Minimum and maximum y coordinates to be rendered (camera
-        pixels).
+        Minimum and maximum y coordinates to be rendered (nm).
     ang : tuple or scipy.spatial.transform.Rotation
         Rotation of localizations; either a scipy Rotation or a tuple
         of 3 rotation angles around the x, y and z axes in radians

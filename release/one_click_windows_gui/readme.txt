@@ -24,7 +24,7 @@ The installer adds the installation folder to the PATH, so Picasso's command lin
 How to update
 -------------
 
-When a new version is out, Picasso tells you about it (at most once a day). Click "Install Now" to download it, check it and install it; Picasso closes, the installer asks for administrator rights, installs the update into the same folder (keeping the selected modules) and Picasso opens again. Please close other Picasso programs and save your work first. Alternatively, download the new installer from the release page and run it; there is no need to uninstall the old version first. Settings, camera configuration and plugins in C:\Users\<your user name>\.picasso are kept either way.
+When a new version is out, Picasso tells you about it (at most once a day). Click "Install Now" to download it, check it and install it; Picasso closes, the installer asks for administrator rights, installs the update into the same folder (keeping the selected modules) and Picasso opens again. Please close other Picasso programs and save your work first. Alternatively, download the new installer from the release page and run it; there is no need to uninstall the old version first. Exception: the "GPU" edition of versions before 1.0 is not replaced by the "CUDA" edition, which installs beside it; uninstall "Picasso-GPU" (Windows Settings > Apps), or "picasso" in a terminal keeps running the old version. Settings, camera configuration and plugins in C:\Users\<your user name>\.picasso are kept either way.
 
 Creating your own installer
 ---------------------------
