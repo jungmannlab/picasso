@@ -1358,10 +1358,6 @@ class TestLinking:
         for col in ["len", "n", "photon_rate"]:
             assert col in out.columns
 
-    def test_link_refit_not_implemented(self, locs, info):
-        with pytest.raises(NotImplementedError):
-            postprocess.link(locs.copy(), info, combine_mode="refit")
-
     def test_link_removes_events_at_movie_edges(self):
         # three events far apart: one starting in the first frame, one in
         # the middle and one ending in the last frame of a 10-frame movie

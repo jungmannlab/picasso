@@ -3623,7 +3623,6 @@ def link(
     *,
     r_max: float = 10.0,
     max_dark_time: int = 3,
-    combine_mode: Literal["average", "refit"] = "average",
     remove_ambiguous_lengths: bool = True,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Link localizations, i.e., group them into binding events based
@@ -3641,11 +3640,6 @@ def link(
         Maximum number of frames without a localization between two
         localizations that are still linked into one binding event.
         Default is 3.
-    combine_mode : {'average', 'refit'}, optional
-        Mode for combining linked localizations. 'average' calculates
-        the average position and properties of the linked localizations,
-        while 'refit' would refit the linked localizations to a model.
-        'refit' is not implemented yet. Default is 'average'.
     remove_ambiguous_lengths : bool, optional
         If True, removes binding events whose length is ambiguous,
         i.e., those that start in the first frame or end in the last
@@ -3670,7 +3664,6 @@ def link(
         info,
         r_max,
         max_dark_time,
-        combine_mode=combine_mode,
         remove_ambiguous_lengths=remove_ambiguous_lengths,
     )
     entry = lib.step_info(
@@ -3689,7 +3682,6 @@ def _link(
     info: list[dict],
     r_max: float,
     max_dark_time: int,
-    combine_mode: Literal["average", "refit"] = "average",
     remove_ambiguous_lengths: bool = True,
 ) -> pd.DataFrame:
     """The linked localizations of ``link``, without the metadata (for
@@ -3711,17 +3703,12 @@ def _link(
         x = locs["x"].to_numpy()
         y = locs["y"].to_numpy()
         link_group = _get_link_groups(frame, x, y, r_max, max_dark_time, group)
-        if combine_mode == "average":
-            linked_locs = _link_loc_groups(
-                locs,
-                info,
-                link_group,
-                remove_ambiguous_lengths=remove_ambiguous_lengths,
-            )
-        elif combine_mode == "refit":
-            raise NotImplementedError(
-                "Refit mode is not implemented yet. Please use 'average' mode."
-            )
+        linked_locs = _link_loc_groups(
+            locs,
+            info,
+            link_group,
+            remove_ambiguous_lengths=remove_ambiguous_lengths,
+        )
     return linked_locs
 
 

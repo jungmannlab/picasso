@@ -1136,6 +1136,9 @@ Removed functions
      - Removed; they always return ``(locs, info)``.
    * - ``postprocess.cluster_combine``, ``cluster_combine_dist``
      - Removed.
+   * - The ``combine_mode`` argument of ``postprocess.link``
+     - Removed; linked localizations are always averaged (``"refit"`` was
+       never implemented).
    * - ``io.load_clusters(path)``
      - ``io.load_locs(path)``
    * - ``lib.append_to_rec(locs, data, name)``
