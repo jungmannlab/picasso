@@ -35,10 +35,10 @@ Last change: 23-OCT-2026 CEST
 - Linked windows that share user-selected attributes, see [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-view.html#render-new-linked-window).
 - New blur methods *Adaptive Histogram (Quad-Tree)* and *Jittered Triangulation* (Baddeley, Cannell & Soeller, *Microsc. Microanal.* 2010). See the [blur documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-blur).
 - The display settings (main and 3D window) show the minimum blur only for the Gaussian blur methods that use it.
-- New action to move xy positions of localizations with a mouse. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-move).
+- New action to move xy positions of localizations with a mouse. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/tools.html#render-move).
 - Apply expression to localizations expands the canvas (metadata's `Height` and `Width`) if x and y positions are out of range.
 - Overlay of image files (`.png` and `.tif`), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-view.html#render-overlay-image).
-- Editable appearance of the tools (e.g., picks), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-tools-settings).
+- Editable appearance of the tools (e.g., picks), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/tools.html#render-tools-settings).
 - Per-channel contrast for multichannel data in `View > Files...`, replacing the relative intensity. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-view.html#render-channel-contrast).
 - Smooth transitions in 3D animations: the motion eases in and out and passes through the positions without sharp turns, see the [documentation](https://picassosr.readthedocs.io/en/latest/render/3d.html#render-animation).
 - Faster circular picking of localizations.
@@ -272,7 +272,7 @@ The [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html)
 
 ### Localize
 - Localize can fit multichannel data one channel at a time, see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/multichannel.html#localize-analyzing-each-channel).
-- A lateral correction (astigmatism / chromatic) can now be kept in its own file and loaded separately from the 3D calibration, see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/3d-calibration.html#localize-appending-or-loading-separately).
+- A lateral correction (astigmatism / chromatic) can now be kept in its own file and loaded separately from the 3D calibration, see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/lateral-correction.html#localize-appending-or-loading-separately).
 - New translation transform model (2 DOF, at least 1 bead pair), offered wherever Picasso fits a geometric transform. It fits a pure shift in x and y.
 - Localize loads z-stack `.nd2` files.
 - Localize's contrast is not set to auto on opening a new movie.
