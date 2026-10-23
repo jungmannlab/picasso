@@ -509,7 +509,7 @@ link localizations into binding events and compute their dark times:
        linked_locs, linked_info
    )
 
-   print(f"Average bright time {linked_locs['n'].mean():.2f} frames")
+   print(f"Average bright time {linked_locs['len'].mean():.2f} frames")
    print(f"Average dark time {linked_locs['dark'].mean():.2f} frames")
 
 More examples are in the :doc:`/notebooks` and the
