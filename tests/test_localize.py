@@ -5295,7 +5295,7 @@ class TestFit2DGpu:
         ):
             assert col in locs.columns
         assert ("angle" in locs.columns) == has_angle
-        assert info["Fit method"] == method
+        assert info[-1]["Fit method"] == method
         # MLE methods attach per-parameter uncertainties + fit diagnostics
         if method.startswith("gaussmle"):
             for col in (
@@ -5332,7 +5332,7 @@ class TestFit2DGpu:
             "lpz",
         ):
             assert col in locs.columns
-        assert info["Spline calibration model"] == "spline-3d"
+        assert info[-1]["Spline calibration model"] == "spline-3d"
 
     def test_gpu_matches_direct_fit_path(
         self, picasso_movie, movie_info, real_identifications
