@@ -14387,6 +14387,32 @@ class FitWorker(QtCore.QThread):
         self.finished.emit(locs, info, dt, self.fit_z, self.calibrate_z)
 
 
+def _no_linked_spots_message(split_fov: bool) -> str:
+    """Explain a multichannel fit that has nothing to fit because no
+    reference detection was found in every other channel (or region).
+
+    Parameters
+    ----------
+    split_fov : bool
+        Whether the channels are regions of one split field of view.
+
+    Returns
+    -------
+    message : str
+        The text for the "Fit failed" dialog.
+    """
+    where = "region" if split_fov else "channel"
+    return (
+        f"None of the spots identified in the reference {where} was also "
+        f"found in every other {where}, so there is nothing to fit "
+        "jointly.\n\n"
+        "Check that the channel registration matches these movies and that "
+        "every channel was identified with a similar min. net gradient, or "
+        f"set 'Identify on' to '{IDENTIFY_MODE_SUM}' in the Parameters "
+        "dialog."
+    )
+
+
 class MultichannelSplineFitWorker(QtCore.QThread):
     """Fit a multichannel cubic-spline PSF across several registered channels
     simultaneously. The reference channel's identifications are mapped into
@@ -14558,12 +14584,7 @@ class MultichannelSplineFitWorker(QtCore.QThread):
                 self.calibration.get("n_channels", len(self.movies))
             )
             if not self._link_across_channels(n_channels):
-                where = "regions" if self.split_fov else "channels"
-                print(
-                    f"Multichannel spline fit: no detection is linked across "
-                    f"all {where} - check the channel registration."
-                )
-                self.aborted.emit()
+                self.failed.emit(_no_linked_spots_message(self.split_fov))
                 return
             if self.split_fov:
                 locs, info = localize.fit_spline_split_fov(
@@ -14892,12 +14913,7 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
                 self.channel_registration.get("n_channels", len(self.movies))
             )
             if not self._link_across_channels(n_channels):
-                where = "regions" if self.split_fov else "channels"
-                print(
-                    "Multichannel Gaussian fit: no detection is linked across "
-                    f"all {where} - check the channel registration."
-                )
-                self.aborted.emit()
+                self.failed.emit(_no_linked_spots_message(self.split_fov))
                 return
             if self.split_fov:
                 result = localize.fit_gauss_split_fov(

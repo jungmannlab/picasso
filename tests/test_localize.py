@@ -12813,6 +12813,43 @@ class TestSumIdentificationsSkipLinking:
         assert worker._link_across_channels(2)
         assert len(worker.identifications) == 2
 
+    def test_nothing_linked_fails_with_the_reason(self):
+        ids_ref = pd.DataFrame({"frame": [0], "x": [10], "y": [10]})
+        # the other channel's only spot is far from the reference one
+        ids_chan = pd.DataFrame({"frame": [0], "x": [28], "y": [28]})
+        movie = np.zeros((1, 32, 32), np.float32)
+        worker = localize_gui.MultichannelSplineFitWorker(
+            [movie, movie],
+            [CAMERA_INFO, CAMERA_INFO],
+            ids_ref,
+            BOX,
+            _fake_spline_calibration(model="spline-3d-multichannel"),
+            identifications_per_channel=[ids_ref, ids_chan],
+        )
+        failed, aborted = [], []
+        worker.failed.connect(failed.append)
+        worker.aborted.connect(lambda: aborted.append(True))
+        worker.run()
+        assert not aborted
+        assert failed == [localize_gui._no_linked_spots_message(False)]
+
+    def test_the_window_shows_why_the_fit_failed(self, monkeypatch):
+        shown = []
+        monkeypatch.setattr(
+            localize_gui.QtWidgets.QMessageBox,
+            "warning",
+            lambda parent, title, text, *a, **k: shown.append((title, text)),
+        )
+        window = localize_gui.Window()
+        try:
+            message = localize_gui._no_linked_spots_message(True)
+            window.on_fit_failed(message)
+            assert shown == [("Fit failed", message)]
+            assert window.status_bar.currentMessage() == "Fit failed."
+            assert "reference region" in message
+        finally:
+            window.close()
+
 
 class TestEstimateTransformsDiagnostics:
     """``spline.estimate_transforms_from_identifications`` reporting how well
@@ -13603,6 +13640,34 @@ class TestMultichannelGaussianWorkerRouting:
         worker.aborted.connect(lambda: aborted.append(True))
         worker.run()
         assert aborted == [True]
+
+    def test_nothing_linked_fails_with_the_reason(self, monkeypatch):
+        def never_called(*args, **kwargs):
+            raise AssertionError("fitted although nothing was linked")
+
+        monkeypatch.setattr(localize, "fit_gauss_multichannel", never_called)
+        ids_ref = pd.DataFrame(
+            {"frame": [0], "x": [6], "y": [6], "net_gradient": [1.0]}
+        )
+        # the other channel's only spot is far from the reference one
+        ids_chan = pd.DataFrame(
+            {"frame": [0], "x": [40], "y": [40], "net_gradient": [1.0]}
+        )
+        worker = localize_gui.MultichannelGaussianFitWorker(
+            [None, None],
+            [{}, {}],
+            ids_ref,
+            BOX,
+            self._registration(),
+            identifications_per_channel=[ids_ref, ids_chan],
+        )
+        failed, aborted = [], []
+        worker.failed.connect(failed.append)
+        worker.aborted.connect(lambda: aborted.append(True))
+        worker.run()
+        assert not aborted
+        assert failed == [localize_gui._no_linked_spots_message(False)]
+        assert "registration" in failed[0]
 
 
 @pytest.mark.gui
