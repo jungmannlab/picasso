@@ -487,7 +487,9 @@ Save spots
 
       import numpy as np
 
-      spots = localize.get_spots(movie, identifications, 7, camera_info)  # (N, 7, 7)
+      spots = localize.get_spots(
+          movie, identifications, box=7, camera_info=camera_info
+      )  # (N, 7, 7)
       np.save("movie_spots.npy", spots)
 
 

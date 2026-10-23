@@ -240,7 +240,7 @@ class TestIdentify:
         tracker = RecordingProgress()
         localize.identify_multichannel_sum(
             movies,
-            [IDENTITY, _shift(3.0)],
+            transforms=[IDENTITY, _shift(3.0)],
             parameters=NET_GRADIENT,
             camera_infos=cameras,
             progress=tracker,
@@ -260,7 +260,9 @@ class TestGetSpots:
         if wrap:
             movie = factory(movie, _info(movie))
         tracker = RecordingProgress()
-        spots = localize.get_spots(movie, ids, BOX, CAMERA, progress=tracker)
+        spots = localize.get_spots(
+            movie, ids, box=BOX, camera_info=CAMERA, progress=tracker
+        )
         assert len(spots) == len(ids)
         assert_phases_complete(tracker, ["Cutting spots"])
         assert tracker.phases[0]["maximum"] == len(ids)
@@ -274,8 +276,10 @@ class TestGetSpots:
         frames, ids = _gauss_frames(n_frames=12)
         movie = ConcurrentMovie(frames, _info(frames))
         tracker = ThreadRecordingProgress()
-        spots = localize.get_spots(movie, ids, BOX, CAMERA, progress=tracker)
-        expected = localize.get_spots(frames, ids, BOX, CAMERA)
+        spots = localize.get_spots(
+            movie, ids, box=BOX, camera_info=CAMERA, progress=tracker
+        )
+        expected = localize.get_spots(frames, ids, box=BOX, camera_info=CAMERA)
         np.testing.assert_array_equal(spots, expected)
         assert_phases_complete(tracker, ["Cutting spots"])
         assert tracker.threads == {threading.get_ident()}
@@ -288,20 +292,24 @@ class TestGetSpots:
         movie = ConcurrentMovie(frames, _info(frames))
         with pytest.raises(lib.OperationCanceled):
             localize.get_spots(
-                movie, ids, BOX, CAMERA, progress=CancelingProgress(after=1)
+                movie,
+                ids,
+                box=BOX,
+                camera_info=CAMERA,
+                progress=CancelingProgress(after=1),
             )
 
     def test_silent_and_console(self, capsys):
         movie, ids = _gauss_frames()
-        _silent(capsys, localize.get_spots, movie, ids, BOX, CAMERA)
+        kwargs = dict(box=BOX, camera_info=CAMERA)
+        _silent(capsys, localize.get_spots, movie, ids, **kwargs)
         _console(
             capsys,
             "Cutting spots",
             localize.get_spots,
             movie,
             ids,
-            BOX,
-            CAMERA,
+            **kwargs,
         )
 
     def test_multichannel_one_phase_over_all_channels(self):
@@ -431,7 +439,7 @@ class TestFit:
 class TestFitSpots:
     def _spots(self):
         movie, ids = _gauss_frames()
-        return localize.get_spots(movie, ids, BOX, CAMERA), ids
+        return localize.get_spots(movie, ids, box=BOX, camera_info=CAMERA), ids
 
     @pytest.mark.parametrize("mle", [False, True])
     def test_gauss(self, capsys, mle):
@@ -478,13 +486,19 @@ class TestFitSpots:
         assert_phases_complete(tracker, ["Fitting spots"])
         tracker = RecordingProgress()
         locs = localize.locs_from_fits_spline(
-            ids, theta, BOX, False, calib, pixelsize=130, progress=tracker
+            ids,
+            theta,
+            box=BOX,
+            em=False,
+            calibration=calib,
+            pixelsize=130,
+            progress=tracker,
         )
         assert len(locs) == len(ids)
         assert_phases_complete(tracker, ["Computing spline CRLB"])
         assert tracker.phases[0]["unit"] == "loc"
-        kwargs = dict(pixelsize=130)
-        args = (ids, theta, BOX, False, calib)
+        kwargs = dict(box=BOX, em=False, calibration=calib, pixelsize=130)
+        args = (ids, theta)
         _silent(capsys, localize.locs_from_fits_spline, *args, **kwargs)
         _console(
             capsys,
@@ -519,8 +533,13 @@ class TestGaussMultichannel:
             return_residuals=True,
             return_jacobians=True,
         )
-        args = (spots, residuals, jacobians)
-        kwargs = dict(use_gpu=False, parallel=parallel)
+        args = (spots,)
+        kwargs = dict(
+            residuals=residuals,
+            jacobians=jacobians,
+            use_gpu=False,
+            parallel=parallel,
+        )
         tracker = RecordingProgress()
         localize.fit_spots_gauss_multichannel(
             *args, progress=tracker, **kwargs
@@ -542,8 +561,15 @@ class TestGaussMultichannel:
         # regression: the cutting and the fit both restarted at 0 on one
         # callback, and the CRLB was unreported
         movies, cameras, ids = _two_channels()
-        args = (movies, cameras, ids, BOX, self.REGISTRATION)
-        kwargs = dict(link_photons=link_photons, use_gpu=False)
+        args = (movies,)
+        kwargs = dict(
+            camera_infos=cameras,
+            identifications=ids,
+            box=BOX,
+            channel_registration=self.REGISTRATION,
+            link_photons=link_photons,
+            use_gpu=False,
+        )
         tracker = RecordingProgress()
         locs, _ = localize.fit_gauss_multichannel(
             *args, progress=tracker, **kwargs
@@ -566,14 +592,21 @@ class TestGaussMultichannel:
 
     def test_fit_gauss_split_fov_phases(self, capsys):
         movie, ids = _split_fov_movie()
-        args = (movie, CAMERA, ids, BOX, _split_fov_geometry())
+        args = (movie,)
+        kwargs = dict(
+            camera_info=CAMERA,
+            identifications=ids,
+            box=BOX,
+            channel_registration=_split_fov_geometry(),
+            use_gpu=False,
+        )
         tracker = RecordingProgress()
         locs, _ = localize.fit_gauss_split_fov(
-            *args, use_gpu=False, progress=tracker
+            *args, progress=tracker, **kwargs
         )
         assert len(locs) == len(ids)
         assert_phases_complete(tracker, MULTI_GAUSS_LABELS)
-        _silent(capsys, localize.fit_gauss_split_fov, *args, use_gpu=False)
+        _silent(capsys, localize.fit_gauss_split_fov, *args, **kwargs)
 
     def test_locs_from_fits_crlb_phase(self):
         movies, cameras, ids = _two_channels()
@@ -587,16 +620,16 @@ class TestGaussMultichannel:
             return_jacobians=True,
         )
         theta = localize.fit_spots_gauss_multichannel(
-            spots, residuals, jacobians, use_gpu=False
+            spots, residuals=residuals, jacobians=jacobians, use_gpu=False
         )
         tracker = RecordingProgress()
         localize.locs_from_fits_gauss_multichannel(
             ids,
             theta,
-            BOX,
-            False,
-            jacobians,
-            residuals,
+            box=BOX,
+            em=False,
+            jacobians=jacobians,
+            residuals=residuals,
             pixelsize=130,
             progress=tracker,
         )
@@ -614,8 +647,15 @@ class TestSplineMultichannel:
     @pytest.mark.parametrize("link_photons", [False, True])
     def test_fit_spline_multichannel_phases(self, capsys, link_photons):
         movies, cameras, ids = _two_channels()
-        args = (movies, cameras, ids, BOX, self._calibration())
-        kwargs = dict(link_photons=link_photons, use_gpu=False)
+        args = (movies,)
+        kwargs = dict(
+            camera_infos=cameras,
+            identifications=ids,
+            box=BOX,
+            calibration=self._calibration(),
+            link_photons=link_photons,
+            use_gpu=False,
+        )
         tracker = RecordingProgress()
         locs, _ = localize.fit_spline_multichannel(
             *args, progress=tracker, **kwargs
@@ -629,10 +669,17 @@ class TestSplineMultichannel:
         # and the CRLB ran silently
         movies, cameras, ids = _two_channels()
         calib = self._calibration(photon_ratios=[[0.5, 0.5], [0.8, 0.2]])
-        args = (movies, cameras, ids, BOX, calib)
+        args = (movies,)
+        kwargs = dict(
+            camera_infos=cameras,
+            identifications=ids,
+            box=BOX,
+            calibration=calib,
+            use_gpu=False,
+        )
         tracker = RecordingProgress()
         locs, _ = localize.fit_spline_multichannel_ratiometric(
-            *args, use_gpu=False, progress=tracker
+            *args, progress=tracker, **kwargs
         )
         assert len(locs) == len(ids)
         assert_phases_complete(tracker)
@@ -653,7 +700,7 @@ class TestSplineMultichannel:
             capsys,
             localize.fit_spline_multichannel_ratiometric,
             *args,
-            use_gpu=False,
+            **kwargs,
         )
 
     def test_fit_spline_split_fov_phases(self):
@@ -663,7 +710,13 @@ class TestSplineMultichannel:
         )
         tracker = RecordingProgress()
         locs, _ = localize.fit_spline_split_fov(
-            movie, CAMERA, ids, BOX, calib, use_gpu=False, progress=tracker
+            movie,
+            camera_info=CAMERA,
+            identifications=ids,
+            box=BOX,
+            calibration=calib,
+            use_gpu=False,
+            progress=tracker,
         )
         assert len(locs) == len(ids)
         assert_phases_complete(tracker, MULTI_SPLINE_LABELS)
@@ -704,11 +757,15 @@ class TestIndependent:
     def test_fit_independent_labels_the_channels(self, capsys, factory):
         frames, _, ids = _two_channels()
         movies = [factory(f, _info(f)) for f in frames]
-        args = (movies, CAMERA, [ids, ids], BOX)
-        tracker = RecordingProgress()
-        results = localize.fit_independent(
-            *args, parallel=False, progress=tracker
+        args = (movies,)
+        kwargs = dict(
+            camera_infos=CAMERA,
+            identifications=[ids, ids],
+            box=BOX,
+            parallel=False,
         )
+        tracker = RecordingProgress()
+        results = localize.fit_independent(*args, progress=tracker, **kwargs)
         assert len(results) == 2
         assert [info[-1]["Channel"] for _, info in results] == [0, 1]
         assert_phases_complete(
@@ -720,13 +777,13 @@ class TestIndependent:
                 "Channel 2/2: fitting spots",
             ],
         )
-        _silent(capsys, localize.fit_independent, *args, parallel=False)
+        _silent(capsys, localize.fit_independent, *args, **kwargs)
         _console(
             capsys,
             "Channel 2/2: fitting spots",
             localize.fit_independent,
             *args,
-            parallel=False,
+            **kwargs,
         )
 
     def test_fit_split_fov_independent_labels_the_regions(self, factory):
@@ -738,10 +795,10 @@ class TestIndependent:
         tracker = RecordingProgress()
         results = localize.fit_split_fov_independent(
             movie,
-            CAMERA,
-            ids_all,
-            BOX,
-            REGIONS,
+            camera_info=CAMERA,
+            identifications=ids_all,
+            box=BOX,
+            regions=REGIONS,
             parallel=False,
             progress=tracker,
         )
@@ -813,7 +870,7 @@ class TestLocalize:
         locs = localize.localize_frames(
             frames,
             _info(frames),
-            NET_GRADIENT,
+            identification_parameters=NET_GRADIENT,
             camera_info=CAMERA,
             progress=tracker,
         )
@@ -824,7 +881,7 @@ class TestLocalize:
             localize.localize_frames,
             frames,
             _info(frames),
-            NET_GRADIENT,
+            identification_parameters=NET_GRADIENT,
             camera_info=CAMERA,
         )
 

@@ -482,10 +482,10 @@ The functions whose results changed:
        ``fit_spline_multichannel``, ``fit_spline_multichannel_ratiometric``,
        ``fit_spline_split_fov``
      - ``locs``
-     - ``locs, info`` (the metadata go in as ``info=``)
+     - ``locs, info`` (the metadata go in second, after the movies)
    * - ``localize.fit_independent``
      - ``[(locs, entry), ...]``
-     - ``[(locs, info), ...]`` (the metadata go in as ``infos=``)
+     - ``[(locs, info), ...]`` (the metadata go in second, as ``infos``)
    * - ``clusterer.find_cluster_centers``
      - ``centers``
      - ``centers, info``
@@ -642,7 +642,7 @@ return ``qe``.
        calibration_3d=..., parallel=...)``
    * - ``localize.identify_multichannel_sum(movies, minimum_ng, box,
        transforms, temporal_median_window=..., ...)``
-     - ``localize.identify_multichannel_sum(movies, transforms,
+     - ``localize.identify_multichannel_sum(movies, info, transforms=...,
        parameters=IdentificationParameters(...))``
    * - ``localize.identify_in_frame``, ``identify_by_frame_number`` and
        ``identify_async`` with ``minimum_ng`` (a number, or a list per region)
@@ -651,9 +651,34 @@ return ``qe``.
      - ``localize.locs_from_fits_gauss``
    * - ``localize.locs_from_fits_gauss(identifications, theta, box, em)``
        (camera pixels)
-     - The same with ``pixelsize=`` (keyword-only, required), returning nm;
-       so do ``locs_from_fits_spline`` and
-       ``locs_from_fits_gauss_multichannel``.
+     - ``locs_from_fits_gauss(identifications, theta, box=..., em=...,
+       pixelsize=...)``, the pixel size required, returning nm; so do
+       ``locs_from_fits_spline`` and ``locs_from_fits_gauss_multichannel``.
+   * - The joint fits of several channels, positionally:
+       ``localize.fit_gauss_multichannel(movies, camera_infos,
+       identifications, box, channel_registration, ...)``, and so
+       ``fit_spline_multichannel``, ``fit_spline_multichannel_ratiometric``,
+       ``fit_gauss_split_fov`` and ``fit_spline_split_fov`` (``movie,
+       camera_info, ...``)
+     - Only the movies and their metadata positionally, as in ``fit``:
+       ``fit_gauss_multichannel(movies, ids_info, camera_infos=...,
+       identifications=..., box=..., channel_registration=...)``.
+   * - ``localize.fit_independent(movies, camera_infos, identifications,
+       box)``, ``fit_split_fov_independent(movie, camera_info,
+       identifications, box, regions, movie_info=...)``
+     - ``fit_independent(movies, infos, camera_infos=..., identifications=...,
+       box=...)``, ``fit_split_fov_independent(movie, info,
+       camera_info=..., identifications=..., box=..., regions=...)``
+   * - ``localize.fit_spots_gauss(spots, rotated, mle, ...)``,
+       ``fit_spots_gauss_multichannel(spots, residuals, jacobians, ...)``,
+       ``fit_spots_spline(spots, calibration, mle, ...)``,
+       ``fit_spots_splinefit`` and ``get_spots(movie, identifications, box,
+       camera_info)``, positionally
+     - Only the data (and the spline calibration) positionally:
+       ``get_spots(movie, identifications, box=..., camera_info=...)``,
+       ``fit_spots_gauss(spots, mle=True)``,
+       ``fit_spots_gauss_multichannel(spots, residuals=...,
+       jacobians=...)``, ``fit_spots_spline(spots, calibration, mle=True)``.
    * - ``localize.picks_to_identifications(picks)``,
        ``locs_to_identifications``, ``add_roi_id``,
        ``locs_to_region_coordinates`` and ``split_locs_by_region`` (camera
@@ -734,12 +759,14 @@ The parameters returned by the fits (``theta``) are ordered
    )
 
    # or, with the spots cut out by hand
-   spots = localize.get_spots(movie, ids, 7, camera_info)
+   spots = localize.get_spots(movie, ids, box=7, camera_info=camera_info)
    theta = localize.fit_spots_gauss(spots)
-   locs = localize.locs_from_fits_gauss(ids, theta, 7, em=False, pixelsize=130)
+   locs = localize.locs_from_fits_gauss(
+       ids, theta, box=7, em=False, pixelsize=130
+   )
    theta, log_l, iters, _ = localize.fit_spots_gauss(spots, mle=True, return_stats=True)
    locs = localize.locs_from_fits_gauss(
-       ids, theta, 7, em=False, mle=True,
+       ids, theta, box=7, em=False, mle=True,
        log_likelihood=log_l, iterations=iters, pixelsize=130,
    )
 
@@ -758,7 +785,13 @@ The calibrations take the identification method as ``identification_method``
 ``picasso.localize.fit_lateral_transform`` and ``calibrate_lateral_transform``.
 The spline calibrations need ``Pixelsize`` in ``camera_info``, and the lateral
 calibrations take a required ``pixelsize``; the lateral corrections they
-store are in nm.
+store are in nm. All of them take only their data positionally: the movies
+(and the metadata) of the spline calibrations, e.g.,
+``calibrate_spline(movie, info, camera_info=..., ...)``, the movies of the
+channel registrations, the movies and the calibration of the
+``refine_*_transforms_from_signal`` functions, and the two movies of the
+lateral calibrations, whose calibration to add to goes in as
+``calibration=``.
 
 .. code-block:: python
    :caption: Picasso 0.11
@@ -775,11 +808,11 @@ store are in nm.
    :caption: Picasso 1.0
 
    calibration = spline.calibrate_spline(
-       movie, info, camera_info, box=13,
+       movie, info, camera_info=camera_info, box=13,
        identification_method=localize.NetGradient(5000), d=20,
    )
    calibration, qc = localize.fit_lateral_transform(
-       movie_ref, movie_target, {}, box=7,
+       movie_ref, movie_target, calibration={}, box=7,
        identification_method=localize.NetGradient(5000), pixelsize=130,
        transform_type="chromatic",
    )

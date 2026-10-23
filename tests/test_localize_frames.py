@@ -85,7 +85,7 @@ def test_matches_batch_localize(movie, movie_info, fitting_method):
     out = localize.localize_frames(
         np.asarray(movie),
         list(movie_info) + [CAMERA_INFO],
-        PARAMS,
+        identification_parameters=PARAMS,
         fitting_method=fitting_method,
     )
     _assert_locs_equal(ref, out)
@@ -95,10 +95,15 @@ def test_camera_info_read_from_info(movie, movie_info):
     """The camera parameters are taken from the info list-of-dicts when no
     ``camera_info`` is passed (the streaming contract carries them there)."""
     explicit = localize.localize_frames(
-        np.asarray(movie), movie_info, PARAMS, camera_info=CAMERA_INFO
+        np.asarray(movie),
+        movie_info,
+        identification_parameters=PARAMS,
+        camera_info=CAMERA_INFO,
     )
     from_info = localize.localize_frames(
-        np.asarray(movie), list(movie_info) + [CAMERA_INFO], PARAMS
+        np.asarray(movie),
+        list(movie_info) + [CAMERA_INFO],
+        identification_parameters=PARAMS,
     )
     _assert_locs_equal(explicit, from_info)
 
@@ -109,7 +114,10 @@ def test_does_not_mutate_camera_info(movie, movie_info):
     camera_info = dict(CAMERA_INFO)
     before = dict(camera_info)
     localize.localize_frames(
-        np.asarray(movie), movie_info, PARAMS, camera_info=camera_info
+        np.asarray(movie),
+        movie_info,
+        identification_parameters=PARAMS,
+        camera_info=camera_info,
     )
     assert camera_info == before
 
@@ -118,10 +126,16 @@ def test_accepts_loaded_movie_unchanged(movie, movie_info):
     """Passing an already-loaded movie (a memmap) is used as-is and matches
     passing the same data as a plain ndarray."""
     as_array = localize.localize_frames(
-        np.asarray(movie), movie_info, PARAMS, camera_info=CAMERA_INFO
+        np.asarray(movie),
+        movie_info,
+        identification_parameters=PARAMS,
+        camera_info=CAMERA_INFO,
     )
     as_movie = localize.localize_frames(
-        movie, movie_info, PARAMS, camera_info=CAMERA_INFO
+        movie,
+        movie_info,
+        identification_parameters=PARAMS,
+        camera_info=CAMERA_INFO,
     )
     _assert_locs_equal(as_array, as_movie)
 
@@ -140,7 +154,11 @@ def _run_in_batches(frames, boundaries, **kwargs):
         if len(chunk):
             parts.append(
                 localize.localize_frames(
-                    chunk, None, PARAMS, start_frame=start, **kwargs
+                    chunk,
+                    None,
+                    identification_parameters=PARAMS,
+                    start_frame=start,
+                    **kwargs,
                 )
             )
         start = end
@@ -152,7 +170,7 @@ def test_batch_boundaries_are_invariant(movie):
     frames = np.asarray(movie)
     n = len(frames)
     full = localize.localize_frames(
-        frames, None, PARAMS, camera_info=CAMERA_INFO
+        frames, None, identification_parameters=PARAMS, camera_info=CAMERA_INFO
     )
     one = _run_in_batches(
         frames, list(range(1, n + 1)), camera_info=CAMERA_INFO
@@ -169,10 +187,14 @@ def test_start_frame_offsets_indices(movie):
     the column dtype (so a batch starting at 0 is unchanged)."""
     frames = np.asarray(movie)
     base = localize.localize_frames(
-        frames, None, PARAMS, camera_info=CAMERA_INFO
+        frames, None, identification_parameters=PARAMS, camera_info=CAMERA_INFO
     )
     shifted = localize.localize_frames(
-        frames, None, PARAMS, camera_info=CAMERA_INFO, start_frame=1000
+        frames,
+        None,
+        identification_parameters=PARAMS,
+        camera_info=CAMERA_INFO,
+        start_frame=1000,
     )
     assert base["frame"].dtype == shifted["frame"].dtype
     np.testing.assert_array_equal(
@@ -180,7 +202,11 @@ def test_start_frame_offsets_indices(movie):
     )
     # start_frame=0 is a no-op on the frame column.
     zero = localize.localize_frames(
-        frames, None, PARAMS, camera_info=CAMERA_INFO, start_frame=0
+        frames,
+        None,
+        identification_parameters=PARAMS,
+        camera_info=CAMERA_INFO,
+        start_frame=0,
     )
     np.testing.assert_array_equal(
         zero["frame"].to_numpy(), base["frame"].to_numpy()
@@ -226,7 +252,7 @@ def test_recovers_known_positions():
     locs = localize.localize_frames(
         frames,
         None,
-        params,
+        identification_parameters=params,
         camera_info=camera_info,
         fitting_method="gaussmle",
     )
@@ -273,7 +299,8 @@ def test_no_qt_on_call_path(tmp_path):
         params = localize.IdentificationParameters(
             method=localize.NetGradient(10), box=7
         )
-        locs = localize.localize_frames(frames, None, params,
+        locs = localize.localize_frames(frames, None,
+                                        identification_parameters=params,
                                         camera_info=camera_info)
         assert "frame" in locs.columns
 

@@ -1261,22 +1261,34 @@ class TestGetSpots:
         """Increasing the baseline subtracts from every spot pixel."""
         cam_a = {"Baseline": 0, "Sensitivity": 1, "Gain": 1}
         cam_b = {"Baseline": 100, "Sensitivity": 1, "Gain": 1}
-        spots_a = localize.get_spots(movie, real_identifications, BOX, cam_a)
-        spots_b = localize.get_spots(movie, real_identifications, BOX, cam_b)
+        spots_a = localize.get_spots(
+            movie, real_identifications, box=BOX, camera_info=cam_a
+        )
+        spots_b = localize.get_spots(
+            movie, real_identifications, box=BOX, camera_info=cam_b
+        )
         np.testing.assert_allclose(spots_a - spots_b, 100.0)
 
     def test_sensitivity_scales_signal(self, movie, real_identifications):
         cam_x1 = {"Baseline": 0, "Sensitivity": 1, "Gain": 1}
         cam_x2 = {"Baseline": 0, "Sensitivity": 2, "Gain": 1}
-        spots_x1 = localize.get_spots(movie, real_identifications, BOX, cam_x1)
-        spots_x2 = localize.get_spots(movie, real_identifications, BOX, cam_x2)
+        spots_x1 = localize.get_spots(
+            movie, real_identifications, box=BOX, camera_info=cam_x1
+        )
+        spots_x2 = localize.get_spots(
+            movie, real_identifications, box=BOX, camera_info=cam_x2
+        )
         np.testing.assert_allclose(spots_x2, spots_x1 * 2)
 
     def test_gain_divides_signal(self, movie, real_identifications):
         cam_x1 = {"Baseline": 0, "Sensitivity": 1, "Gain": 1}
         cam_x2 = {"Baseline": 0, "Sensitivity": 1, "Gain": 2}
-        spots_x1 = localize.get_spots(movie, real_identifications, BOX, cam_x1)
-        spots_x2 = localize.get_spots(movie, real_identifications, BOX, cam_x2)
+        spots_x1 = localize.get_spots(
+            movie, real_identifications, box=BOX, camera_info=cam_x1
+        )
+        spots_x2 = localize.get_spots(
+            movie, real_identifications, box=BOX, camera_info=cam_x2
+        )
         np.testing.assert_allclose(spots_x2, spots_x1 / 2, rtol=1e-5)
 
 
@@ -2734,7 +2746,7 @@ class TestGpufit:
         )
         theta = localize.fit_spots_gauss_gpu(spots, mle=False)
         locs = localize.locs_from_fits_gauss(
-            ids, theta, box, em=False, pixelsize=PIXELSIZE
+            ids, theta, box=box, em=False, pixelsize=PIXELSIZE
         )
         # x_abs = x_id + (x_fit - box_offset); x_fit - box//2 == gt.x, in nm
         np.testing.assert_allclose(
@@ -2892,7 +2904,7 @@ class TestLocsFromFitsGpufit:
         )
         ids = self._ids(2)
         locs = localize.locs_from_fits_gauss(
-            ids, theta, BOX, em=False, pixelsize=PIXELSIZE
+            ids, theta, box=BOX, em=False, pixelsize=PIXELSIZE
         )
         box_offset = int(BOX / 2)
         # ... and everything is expressed in nm
@@ -2930,7 +2942,7 @@ class TestLocsFromFitsGpufit:
         locs = localize.locs_from_fits_gauss(
             self._ids(1),
             theta,
-            BOX,
+            box=BOX,
             em=False,
             pixelsize=PIXELSIZE,
             spherical=True,
@@ -2955,7 +2967,7 @@ class TestLocsFromFitsGpufit:
         full = localize.locs_from_fits_gauss(
             self._ids(1),
             theta,
-            BOX,
+            box=BOX,
             em=False,
             pixelsize=PIXELSIZE,
             mle=True,
@@ -2964,7 +2976,7 @@ class TestLocsFromFitsGpufit:
         sph = localize.locs_from_fits_gauss(
             self._ids(1),
             theta,
-            BOX,
+            box=BOX,
             em=False,
             pixelsize=PIXELSIZE,
             mle=True,
@@ -2979,7 +2991,12 @@ class TestLocsFromFitsGpufit:
     def test_lse_precision_is_mortensen_no_unc_columns(self):
         theta = np.array([[500.0, 3.2, 3.7, 1.3, 1.1, 5.0]], dtype=np.float32)
         locs = localize.locs_from_fits_gauss(
-            self._ids(1), theta, BOX, em=False, pixelsize=PIXELSIZE, mle=False
+            self._ids(1),
+            theta,
+            box=BOX,
+            em=False,
+            pixelsize=PIXELSIZE,
+            mle=False,
         )
         expected_lpx = precision.localization_precision(
             theta[:, 0], theta[:, 3], theta[:, 4], theta[:, 5], em=False
@@ -3000,7 +3017,12 @@ class TestLocsFromFitsGpufit:
     def test_mle_precision_is_crlb_with_unc_columns(self):
         theta = np.array([[500.0, 3.2, 3.7, 1.3, 1.1, 5.0]], dtype=np.float32)
         locs = localize.locs_from_fits_gauss(
-            self._ids(1), theta, BOX, em=False, pixelsize=PIXELSIZE, mle=True
+            self._ids(1),
+            theta,
+            box=BOX,
+            em=False,
+            pixelsize=PIXELSIZE,
+            mle=True,
         )
         # the CRLB is computed in box pixels; the lengths come out in nm
         crlb = precision._gauss_crlb(theta, BOX, em=False)
@@ -3032,7 +3054,12 @@ class TestLocsFromFitsGpufit:
             dtype=np.float32,
         )
         locs = localize.locs_from_fits_gauss(
-            self._ids(1), theta, BOX, em=False, pixelsize=PIXELSIZE, mle=True
+            self._ids(1),
+            theta,
+            box=BOX,
+            em=False,
+            pixelsize=PIXELSIZE,
+            mle=True,
         )
         assert "angle" in locs.columns
         np.testing.assert_allclose(locs["angle"], 80.0, atol=1e-4)
@@ -3046,7 +3073,7 @@ class TestLocsFromFitsGpufit:
         )
         ids = self._ids(3, frames=[2, 0, 1])
         locs = localize.locs_from_fits_gauss(
-            ids, theta, BOX, em=False, pixelsize=PIXELSIZE
+            ids, theta, box=BOX, em=False, pixelsize=PIXELSIZE
         )
         assert list(locs["frame"]) == [0, 1, 2]
 
@@ -3054,7 +3081,7 @@ class TestLocsFromFitsGpufit:
         theta = np.array([[500.0, 3.0, 3.0, 1.2, 1.2, 5.0]], dtype=np.float32)
         # without stats, no log_likelihood / iterations
         locs = localize.locs_from_fits_gauss(
-            self._ids(1), theta, BOX, em=False, pixelsize=PIXELSIZE
+            self._ids(1), theta, box=BOX, em=False, pixelsize=PIXELSIZE
         )
         assert "log_likelihood" not in locs.columns
         assert "iterations" not in locs.columns
@@ -3063,7 +3090,7 @@ class TestLocsFromFitsGpufit:
         locs = localize.locs_from_fits_gauss(
             self._ids(1),
             theta,
-            BOX,
+            box=BOX,
             em=False,
             pixelsize=PIXELSIZE,
             mle=True,
@@ -3083,7 +3110,7 @@ class TestLocsFromFitsGpufit:
         locs = localize.locs_from_fits_gauss(
             self._ids(2),
             theta,
-            BOX,
+            box=BOX,
             em=False,
             pixelsize=PIXELSIZE,
             chi_square=chi_square,
@@ -3101,7 +3128,7 @@ class TestLocsFromFitsGpufit:
         ids = self._ids(n)
         ids["n_id"] = np.arange(n - 1, -1, -1, dtype=np.uint32)
         locs = localize.locs_from_fits_gauss(
-            ids, theta, BOX, em=False, pixelsize=PIXELSIZE
+            ids, theta, box=BOX, em=False, pixelsize=PIXELSIZE
         )
         assert locs["n_id"].dtype == np.uint32
         assert list(locs["n_id"]) == list(range(n))
@@ -3110,10 +3137,20 @@ class TestLocsFromFitsGpufit:
     def test_em_scales_lse_precision_by_sqrt2(self):
         theta = np.array([[500.0, 3.2, 3.7, 1.3, 1.1, 5.0]], dtype=np.float32)
         no_em = localize.locs_from_fits_gauss(
-            self._ids(1), theta, BOX, em=False, pixelsize=PIXELSIZE, mle=False
+            self._ids(1),
+            theta,
+            box=BOX,
+            em=False,
+            pixelsize=PIXELSIZE,
+            mle=False,
         )
         em = localize.locs_from_fits_gauss(
-            self._ids(1), theta, BOX, em=True, pixelsize=PIXELSIZE, mle=False
+            self._ids(1),
+            theta,
+            box=BOX,
+            em=True,
+            pixelsize=PIXELSIZE,
+            mle=False,
         )
         np.testing.assert_allclose(
             em["lpx"] / no_em["lpx"], np.sqrt(2.0), rtol=1e-5
@@ -3394,11 +3431,21 @@ class TestCropSplineCalibration:
         theta[:, 4] = 12.0  # offset
 
         auto = localize.locs_from_fits_spline(
-            ids, theta, box, False, full, pixelsize=PIXELSIZE
+            ids,
+            theta,
+            box=box,
+            em=False,
+            calibration=full,
+            pixelsize=PIXELSIZE,
         )
         pre_cal = localize.crop_spline_calibration(full, box)
         pre = localize.locs_from_fits_spline(
-            ids, theta, box, False, pre_cal, pixelsize=PIXELSIZE
+            ids,
+            theta,
+            box=box,
+            em=False,
+            calibration=pre_cal,
+            pixelsize=PIXELSIZE,
         )
 
         for col in ("x", "y", "z", "photons", "bg", "lpx", "lpy", "lpz"):
@@ -3486,7 +3533,12 @@ class TestSplineHelpers:
         theta[:, 4] = 12.0  # offset (bg)
 
         locs = localize.locs_from_fits_spline(
-            ids, theta, BOX, False, calib, pixelsize=PIXELSIZE
+            ids,
+            theta,
+            box=BOX,
+            em=False,
+            calibration=calib,
+            pixelsize=PIXELSIZE,
         )
 
         box_offset = int(BOX / 2)
@@ -3530,7 +3582,12 @@ class TestSplineHelpers:
         theta[:, 4] = 12.0
 
         plain = localize.locs_from_fits_spline(
-            ids, theta, BOX, False, calib, pixelsize=PIXELSIZE
+            ids,
+            theta,
+            box=BOX,
+            em=False,
+            calibration=calib,
+            pixelsize=PIXELSIZE,
         )
         corrected_calib = dict(calib)
         # the corrections are in nm, like the localizations
@@ -3542,7 +3599,12 @@ class TestSplineHelpers:
                 {"Type": kind, "Transform": affine(matrix).to_dict()},
             )
         moved = localize.locs_from_fits_spline(
-            ids, theta, BOX, False, corrected_calib, pixelsize=PIXELSIZE
+            ids,
+            theta,
+            box=BOX,
+            em=False,
+            calibration=corrected_calib,
+            pixelsize=PIXELSIZE,
         )
         np.testing.assert_allclose(moved["x"], plain["x"] + 8.0, atol=1e-4)
         np.testing.assert_allclose(moved["y"], plain["y"] + 0.5, atol=1e-4)
@@ -3568,7 +3630,12 @@ class TestSplineHelpers:
         theta[:, 4] = 12.0
 
         plain = localize.locs_from_fits_spline(
-            ids, theta, BOX, False, calib, pixelsize=PIXELSIZE
+            ids,
+            theta,
+            box=BOX,
+            em=False,
+            calibration=calib,
+            pixelsize=PIXELSIZE,
         )
         with_affine = dict(calib)
         lib.append_lateral_transform(
@@ -3581,7 +3648,12 @@ class TestSplineHelpers:
             },
         )
         moved = localize.locs_from_fits_spline(
-            ids, theta, BOX, False, with_affine, pixelsize=PIXELSIZE
+            ids,
+            theta,
+            box=BOX,
+            em=False,
+            calibration=with_affine,
+            pixelsize=PIXELSIZE,
         )
         np.testing.assert_allclose(moved["x"], plain["x"])
         np.testing.assert_allclose(moved["y"], plain["y"])
@@ -3601,7 +3673,12 @@ class TestSplineHelpers:
         theta[:, 0] = 3000.0
         theta[:, 3] = 8.0
         locs = localize.locs_from_fits_spline(
-            ids, theta, BOX, False, calib, pixelsize=PIXELSIZE
+            ids,
+            theta,
+            box=BOX,
+            em=False,
+            calibration=calib,
+            pixelsize=PIXELSIZE,
         )
         assert "z" not in locs.columns
         assert "lpz" not in locs.columns
@@ -4062,7 +4139,7 @@ class TestSplineHelpers:
         monkeypatch.setattr(
             localize,
             "locs_from_fits_spline",
-            lambda ids, theta, box, em, cal, **kw: pd.DataFrame(
+            lambda ids, theta, **kw: pd.DataFrame(
                 {"frame": np.asarray(ids["frame"])}
             ),
         )
@@ -4098,10 +4175,13 @@ class TestSplineHelpers:
         )
         localize.fit_spline_multichannel_ratiometric(
             [None, None],
-            [CAMERA_INFO_WITH_PIXELSIZE, CAMERA_INFO_WITH_PIXELSIZE],
-            ids,
-            box,
-            calib,
+            camera_infos=[
+                CAMERA_INFO_WITH_PIXELSIZE,
+                CAMERA_INFO_WITH_PIXELSIZE,
+            ],
+            identifications=ids,
+            box=box,
+            calibration=calib,
             photon_ratios=np.array([[1.0, 1.0], [2.0, 1.0], [1.0, 2.0]]),
         )
         assert calls == [n_starts] * n_hyp
@@ -4220,7 +4300,7 @@ class TestSplineHelpers:
         self, movie, real_identifications
     ):
         single = localize.get_spots(
-            movie, real_identifications, BOX, CAMERA_INFO
+            movie, real_identifications, box=BOX, camera_info=CAMERA_INFO
         )
         identity = affine([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
         stacked = localize.get_spots_multichannel(
@@ -4833,7 +4913,12 @@ class TestSplineFit:
         theta = localize.fit_spots_spline(spots, calib)
         box = calib["n_data"][0]
         locs = localize.locs_from_fits_spline(
-            ids, theta, box, False, calib, pixelsize=PIXELSIZE
+            ids,
+            theta,
+            box=box,
+            em=False,
+            calibration=calib,
+            pixelsize=PIXELSIZE,
         )
         assert len(locs) == n
         for col in ("x", "y", "z", "photons", "bg", "lpx", "lpy", "lpz"):
@@ -5347,13 +5432,16 @@ class TestFit2DGpu:
             fitting_method="gausslq-gpu",
         )
         spots = localize.get_spots(
-            picasso_movie, real_identifications, BOX, self.CAMERA_INFO
+            picasso_movie,
+            real_identifications,
+            box=BOX,
+            camera_info=self.CAMERA_INFO,
         )
         theta = localize.fit_spots_gauss_gpu(spots, mle=False)
         direct = localize.locs_from_fits_gauss(
             real_identifications,
             theta,
-            BOX,
+            box=BOX,
             em=False,
             pixelsize=self.CAMERA_INFO["Pixelsize"],
         )
@@ -5813,10 +5901,22 @@ class TestSplineCRLBEMCCD:
         )
         cols = ["lpx", "lpy", "lpz", "photons_unc", "bg_unc"]
         plain = localize.locs_from_fits_spline(
-            ids, theta, BOX, False, calib, mle=mle, pixelsize=PIXELSIZE
+            ids,
+            theta,
+            box=BOX,
+            em=False,
+            calibration=calib,
+            mle=mle,
+            pixelsize=PIXELSIZE,
         )
         em = localize.locs_from_fits_spline(
-            ids, theta, BOX, True, calib, mle=mle, pixelsize=PIXELSIZE
+            ids,
+            theta,
+            box=BOX,
+            em=True,
+            calibration=calib,
+            mle=mle,
+            pixelsize=PIXELSIZE,
         )
         for col in cols:
             np.testing.assert_allclose(
@@ -6460,7 +6560,7 @@ class TestSplineLinkXyzColumns:
         locs = localize.locs_from_fits_spline(
             self._ids(len(theta)),
             theta,
-            BOX,
+            box=BOX,
             em=False,
             calibration=calib,
             mle=False,
@@ -6591,7 +6691,7 @@ class TestSaveableColumns:
         frames["spline-2d"] = localize.locs_from_fits_spline(
             ids,
             theta_s2,
-            BOX,
+            box=BOX,
             em=False,
             calibration=calib_2d,
             mle=True,
@@ -6601,7 +6701,7 @@ class TestSaveableColumns:
         frames["spline-3d"] = localize.locs_from_fits_spline(
             ids,
             theta_s3,
-            BOX,
+            box=BOX,
             em=False,
             calibration=calib_3d,
             mle=True,
@@ -6623,7 +6723,7 @@ class TestSaveableColumns:
         frames["spline-3d-link-xyz"] = localize.locs_from_fits_spline(
             ids,
             theta_link,
-            BOX,
+            box=BOX,
             em=False,
             calibration=calib_link,
             mle=False,
@@ -6643,7 +6743,7 @@ class TestSaveableColumns:
         locs_ratio = localize.locs_from_fits_spline(
             ids,
             theta_mc,
-            BOX,
+            box=BOX,
             em=False,
             calibration=calib_mc,
             mle=False,
@@ -6780,7 +6880,7 @@ class TestSplinePerChannelPhotonScale:
         locs = localize.locs_from_fits_spline(
             ids,
             theta,
-            box,
+            box=box,
             em=False,
             calibration=calib,
             mle=False,
@@ -6858,10 +6958,10 @@ class TestSplineRatiometric:
         )
         locs, _ = localize.fit_spline_multichannel_ratiometric(
             movies,
-            [cam, cam],
-            ids,
-            box,
-            calib,
+            camera_infos=[cam, cam],
+            identifications=ids,
+            box=box,
+            calibration=calib,
             photon_ratios=self.CANDS,
         )
         assert len(locs) == n
@@ -6900,7 +7000,11 @@ class TestSplineRatiometric:
         )
         # no photon_ratios argument -> taken from the calibration
         locs, _ = localize.fit_spline_multichannel_ratiometric(
-            movies, [cam, cam], ids, box, calib
+            movies,
+            camera_infos=[cam, cam],
+            identifications=ids,
+            box=box,
+            calibration=calib,
         )
         assert (locs["color"] == self.TRUE_IDX).mean() > 0.9
 
@@ -6914,7 +7018,11 @@ class TestSplineRatiometric:
         movie = np.zeros((1, box, box), np.float32)
         with pytest.raises(ValueError):
             localize.fit_spline_multichannel_ratiometric(
-                [movie, movie], [cam, cam], ids, box, calib
+                [movie, movie],
+                camera_infos=[cam, cam],
+                identifications=ids,
+                box=box,
+                calibration=calib,
             )
 
 
@@ -7011,7 +7119,13 @@ class TestFitSplineSplitFovValidation:
             {"frame": [0], "x": [6], "y": [6], "net_gradient": [1.0]}
         )
         with pytest.raises(ValueError, match="split-FOV"):
-            localize.fit_spline_split_fov(movie, CAMERA_INFO, ids, BOX, calib)
+            localize.fit_spline_split_fov(
+                movie,
+                camera_info=CAMERA_INFO,
+                identifications=ids,
+                box=BOX,
+                calibration=calib,
+            )
 
 
 class TestFitSplineSplitFov:
@@ -7043,7 +7157,11 @@ class TestFitSplineSplitFov:
             frame_bounds=(focus - 1, focus + 1),
         )
         locs, _ = localize.fit_spline_split_fov(
-            movie, CAMERA_INFO_WITH_PIXELSIZE, ids, BOX, calib
+            movie,
+            camera_info=CAMERA_INFO_WITH_PIXELSIZE,
+            identifications=ids,
+            box=BOX,
+            calibration=calib,
         )
         assert len(locs) > 0
         # localizations are in the reference region's coordinates (nm)
@@ -7065,10 +7183,10 @@ class TestFitSplineSplitFov:
         assert (ids["x"] >= 48).any()  # some detections are in region 1
         locs, _ = localize.fit_spline_split_fov(
             movie,
-            CAMERA_INFO_WITH_PIXELSIZE,
-            ids,
-            BOX,
-            calib,
+            camera_info=CAMERA_INFO_WITH_PIXELSIZE,
+            identifications=ids,
+            box=BOX,
+            calibration=calib,
             confine_to_reference=True,
         )
         # only the reference-region molecules are fitted (region 1 is the
@@ -7101,10 +7219,10 @@ class TestFitSplineSplitFov:
         )
         locs, _ = localize.fit_spline_split_fov(
             big,
-            CAMERA_INFO_WITH_PIXELSIZE,
-            ids,
-            BOX,
-            calib,
+            camera_info=CAMERA_INFO_WITH_PIXELSIZE,
+            identifications=ids,
+            box=BOX,
+            calibration=calib,
             regions=fit_regions,
         )
         assert len(locs) > 0
@@ -7120,7 +7238,11 @@ class TestFitSplineSplitFov:
             big, parameters=_params(2000.0), frame_bounds=(focus, focus)
         )
         locs_orig, _ = localize.fit_spline_split_fov(
-            big, CAMERA_INFO_WITH_PIXELSIZE, ids_all, BOX, calib
+            big,
+            camera_info=CAMERA_INFO_WITH_PIXELSIZE,
+            identifications=ids_all,
+            box=BOX,
+            calibration=calib,
         )
         assert len(locs_orig) < len(locs)
 
@@ -7237,8 +7359,8 @@ class TestMultichannelWorkerRouting:
         monkeypatch.setattr(
             localize,
             "fit_spline_multichannel",
-            lambda movies, cams, ids, *a, **k: (
-                seen.update(ids=ids),
+            lambda movies, info=None, **k: (
+                seen.update(ids=k["identifications"]),
                 (pd.DataFrame({"frame": [0], "x": [0.0], "y": [0.0]}), []),
             )[1],
         )
@@ -8952,7 +9074,7 @@ class TestFitAffineTransform:
         calibration, _ = localize.fit_lateral_transform(
             movie_ref,
             movie_cyl,
-            {},
+            calibration={},
             box=BOX,
             identification_method=LATERAL_NG,
             model=model,
@@ -8972,7 +9094,7 @@ class TestFitAffineTransform:
         calibration, _ = localize.fit_lateral_transform(
             movie_ref,
             movie_cyl,
-            {},
+            calibration={},
             box=BOX,
             identification_method=LATERAL_NG,
             pixelsize=PIXELSIZE,
@@ -8993,7 +9115,7 @@ class TestFitAffineTransform:
         calibration, _ = localize.fit_lateral_transform(
             movie_ref,
             movie_shifted,
-            {},
+            calibration={},
             box=BOX,
             identification_method=LATERAL_NG,
             model="translation",
@@ -9023,7 +9145,7 @@ class TestFitAffineTransform:
         localize.fit_lateral_transform(
             movie_ref,
             movie_cyl,
-            {},
+            calibration={},
             box=BOX,
             identification_method=LATERAL_NG,
             pixelsize=PIXELSIZE,
@@ -9032,7 +9154,7 @@ class TestFitAffineTransform:
             localize.fit_lateral_transform(
                 movie_ref,
                 movie_cyl,
-                {},
+                calibration={},
                 box=BOX,
                 identification_method=LATERAL_NG,
                 model="polynomial3",
@@ -9064,7 +9186,7 @@ class TestFitAffineTransform:
         calibration, qc = localize.fit_lateral_transform(
             movie_ref,
             movie_cyl,
-            {},
+            calibration={},
             box=BOX,
             identification_method=LATERAL_NG,
             pixelsize=PIXELSIZE,
@@ -9091,7 +9213,7 @@ class TestFitAffineTransform:
         calibration, _ = localize.fit_lateral_transform(
             movie_ref,
             movie_cyl,
-            calibration,
+            calibration=calibration,
             box=BOX,
             identification_method=LATERAL_NG,
             pixelsize=PIXELSIZE,
@@ -9132,7 +9254,7 @@ class TestFitAffineTransform:
         calibration, _ = localize.fit_lateral_transform(
             movie_ref,
             movie_ref,
-            {},
+            calibration={},
             box=BOX,
             identification_method=LATERAL_NG,
             pixelsize=PIXELSIZE,
@@ -9148,7 +9270,9 @@ class TestFitAffineTransform:
         calibration, _ = localize.fit_lateral_transform(
             movie_ref,
             movie_cyl,
-            dict(CALIB_3D),  # io.load_calibration validates the 3D entries
+            calibration=dict(
+                CALIB_3D
+            ),  # io.load_calibration validates the 3D entries
             box=BOX,
             identification_method=LATERAL_NG,
             pixelsize=PIXELSIZE,
@@ -9169,7 +9293,7 @@ class TestFitAffineTransform:
                 localize.fit_lateral_transform(
                     movie_ref,
                     movie_target,
-                    {"model": model, "n_channels": 2},
+                    calibration={"model": model, "n_channels": 2},
                     box=BOX,
                     identification_method=LATERAL_NG,
                     pixelsize=PIXELSIZE,
@@ -9183,7 +9307,7 @@ class TestFitAffineTransform:
             localize.fit_lateral_transform(
                 movie_ref,
                 movie_cyl,
-                {},
+                calibration={},
                 box=BOX,
                 identification_method=1000,
                 pixelsize=PIXELSIZE,
@@ -9195,7 +9319,7 @@ class TestFitAffineTransform:
             localize.fit_lateral_transform(
                 movie,
                 movie,
-                {},
+                calibration={},
                 box=BOX,
                 identification_method=LATERAL_NG,
                 pixelsize=PIXELSIZE,
@@ -9206,7 +9330,7 @@ class TestFitAffineTransform:
         _, qc = localize.fit_lateral_transform(
             movie_ref,
             movie_cyl,
-            {},
+            calibration={},
             box=BOX,
             identification_method=LATERAL_NG,
             pixelsize=PIXELSIZE,
@@ -9261,7 +9385,7 @@ class TestFitAffineTransform:
         localize.fit_lateral_transform(
             movie_ref,
             movie_cyl,
-            {},
+            calibration={},
             box=BOX,
             identification_method=LATERAL_NG,
             pixelsize=PIXELSIZE,
@@ -9281,7 +9405,7 @@ class TestFitAffineTransform:
         calibration = localize.calibrate_lateral_transform(
             movie_ref,
             movie_cyl,
-            {},
+            calibration={},
             box=BOX,
             identification_method=LATERAL_NG,
             pixelsize=PIXELSIZE,
@@ -10899,19 +11023,19 @@ class TestScmosMultichannel:
 
         plain, _ = localize.fit_spline_multichannel(
             movies,
-            camera_infos,
-            identifications,
-            self.BOX,
-            calibration,
+            camera_infos=camera_infos,
+            identifications=identifications,
+            box=self.BOX,
+            calibration=calibration,
             mle=mle,
             use_gpu=use_gpu,
         )
         modeled, _ = localize.fit_spline_multichannel(
             movies,
-            camera_infos,
-            identifications,
-            self.BOX,
-            calibration,
+            camera_infos=camera_infos,
+            identifications=identifications,
+            box=self.BOX,
+            calibration=calibration,
             mle=mle,
             use_gpu=use_gpu,
             camera_calibrations=calibrations,
@@ -10958,10 +11082,10 @@ class TestScmosMultichannel:
         ] * 2
         locs, _ = localize.fit_spline_multichannel_ratiometric(
             movies,
-            camera_infos,
-            identifications,
-            self.BOX,
-            calibration,
+            camera_infos=camera_infos,
+            identifications=identifications,
+            box=self.BOX,
+            calibration=calibration,
             photon_ratios=np.array([[0.5, 0.5], [0.8, 0.2]]),
             mle=False,
             use_gpu=use_gpu,
@@ -11010,10 +11134,10 @@ class TestScmosMultichannel:
         }
         locs, _ = localize.fit_spline_split_fov(
             movie,
-            camera_info,
-            identifications,
-            self.BOX,
-            calibration,
+            camera_info=camera_info,
+            identifications=identifications,
+            box=self.BOX,
+            calibration=calibration,
             mle=False,
             use_gpu=False,
             camera_calibration=calibration_maps,
@@ -11740,7 +11864,7 @@ class TestUnregisteredSumTransforms:
         assert len(alone) == 0
         ids, _ = localize.identify_multichannel_sum(
             [reference, channel],
-            localize.unregistered_sum_transforms(2),
+            transforms=localize.unregistered_sum_transforms(2),
             parameters=parameters,
             camera_infos=[UNIT_CAMERA] * 2,
             parallel=False,
@@ -11769,7 +11893,7 @@ class TestIdentifyMultichannelSum:
         assert len(alone) == 0
         ids, info = localize.identify_multichannel_sum(
             [reference, channel],
-            [IDENTITY_AFFINE, transform],
+            transforms=[IDENTITY_AFFINE, transform],
             parameters=parameters,
             camera_infos=[UNIT_CAMERA] * 2,
             parallel=False,
@@ -11797,7 +11921,7 @@ class TestIdentifyMultichannelSum:
         movie = np.stack(frames)
         ids, info = localize.identify_multichannel_sum(
             [movie, movie],
-            [IDENTITY_AFFINE, transform],
+            transforms=[IDENTITY_AFFINE, transform],
             parameters=_params(800),
             camera_infos=[UNIT_CAMERA] * 2,
             regions=regions,
@@ -11829,7 +11953,7 @@ class TestIdentifyMultichannelSum:
         )
         ids, info = localize.identify_multichannel_sum(
             [movie, movie],
-            localize.unregistered_sum_transforms(2, regions),
+            transforms=localize.unregistered_sum_transforms(2, regions),
             parameters=parameters,
             camera_infos=[UNIT_CAMERA] * 2,
             regions=regions,
@@ -11846,7 +11970,7 @@ class TestIdentifyMultichannelSum:
         with pytest.raises(ValueError, match="cannot be mapped"):
             localize.identify_multichannel_sum(
                 [movie, movie],
-                [IDENTITY_AFFINE, None],
+                transforms=[IDENTITY_AFFINE, None],
                 parameters=_params(100),
             )
 
@@ -13204,10 +13328,10 @@ class TestFitGaussMultichannel:
 
         locs, _ = localize.fit_gauss_multichannel(
             movies,
-            camera_infos,
-            ids,
-            self.BOX,
-            self._registration(),
+            camera_infos=camera_infos,
+            identifications=ids,
+            box=self.BOX,
+            channel_registration=self._registration(),
             mle=mle,
             link_photons=link_photons,
             use_gpu=False,
@@ -13235,10 +13359,10 @@ class TestFitGaussMultichannel:
 
         locs, _ = localize.fit_gauss_multichannel(
             movies,
-            camera_infos,
-            ids,
-            self.BOX,
-            self._registration(),
+            camera_infos=camera_infos,
+            identifications=ids,
+            box=self.BOX,
+            channel_registration=self._registration(),
             mle=True,
             use_gpu=False,
             parallel=False,
@@ -13255,10 +13379,10 @@ class TestFitGaussMultichannel:
 
         locs, _ = localize.fit_gauss_multichannel(
             movies,
-            camera_infos,
-            ids,
-            self.BOX,
-            self._registration(),
+            camera_infos=camera_infos,
+            identifications=ids,
+            box=self.BOX,
+            channel_registration=self._registration(),
             mle=True,
             link_photons=False,
             use_gpu=False,
@@ -13292,10 +13416,10 @@ class TestFitGaussMultichannel:
         for link_photons in (False, True):
             locs, _ = localize.fit_gauss_multichannel(
                 movies,
-                camera_infos,
-                ids,
-                self.BOX,
-                self._registration(),
+                camera_infos=camera_infos,
+                identifications=ids,
+                box=self.BOX,
+                channel_registration=self._registration(),
                 mle=True,
                 link_photons=link_photons,
                 use_gpu=False,
@@ -13311,10 +13435,10 @@ class TestFitGaussMultichannel:
         def bias(registration):
             locs, _ = localize.fit_gauss_multichannel(
                 movies,
-                camera_infos,
-                ids,
-                self.BOX,
-                registration,
+                camera_infos=camera_infos,
+                identifications=ids,
+                box=self.BOX,
+                channel_registration=registration,
                 mle=True,
                 use_gpu=False,
                 parallel=False,
@@ -13332,10 +13456,10 @@ class TestFitGaussMultichannel:
         with pytest.raises(ValueError, match="channel transforms"):
             localize.fit_gauss_multichannel(
                 movies[:1],
-                camera_infos[:1],
-                ids,
-                self.BOX,
-                self._registration(),
+                camera_infos=camera_infos[:1],
+                identifications=ids,
+                box=self.BOX,
+                channel_registration=self._registration(),
                 use_gpu=False,
             )
 
@@ -13343,7 +13467,12 @@ class TestFitGaussMultichannel:
         movies, camera_infos, ids, _, _ = self._dataset()
         with pytest.raises(ValueError, match="channel_transforms"):
             localize.fit_gauss_multichannel(
-                movies, camera_infos, ids, self.BOX, {}, use_gpu=False
+                movies,
+                camera_infos=camera_infos,
+                identifications=ids,
+                box=self.BOX,
+                channel_registration={},
+                use_gpu=False,
             )
 
     def test_per_channel_scmos_calibration_reaches_the_fit(self):
@@ -13355,10 +13484,10 @@ class TestFitGaussMultichannel:
         def fit(camera_calibrations):
             return localize.fit_gauss_multichannel(
                 movies,
-                camera_infos,
-                ids,
-                self.BOX,
-                registration,
+                camera_infos=camera_infos,
+                identifications=ids,
+                box=self.BOX,
+                channel_registration=registration,
                 mle=True,
                 use_gpu=False,
                 parallel=False,
@@ -13922,10 +14051,10 @@ class TestMultichannelGaussianUncertaintyColumns:
         }
         locs, _ = localize.fit_gauss_multichannel(
             movies,
-            camera_infos,
-            ids,
-            self.BOX,
-            registration,
+            camera_infos=camera_infos,
+            identifications=ids,
+            box=self.BOX,
+            channel_registration=registration,
             mle=True,
             link_photons=link_photons,
             use_gpu=False,
@@ -14054,10 +14183,10 @@ class TestFitGaussSplitFov:
 
         locs, _ = localize.fit_gauss_split_fov(
             movie,
-            camera_info,
-            ids,
-            self.BOX,
-            self._registration(),
+            camera_info=camera_info,
+            identifications=ids,
+            box=self.BOX,
+            channel_registration=self._registration(),
             regions=self.REGIONS,
             mle=True,
             link_photons=link_photons,
@@ -14087,10 +14216,10 @@ class TestFitGaussSplitFov:
 
         locs, _ = localize.fit_gauss_split_fov(
             movie,
-            camera_info,
-            ids,
-            self.BOX,
-            registration,
+            camera_info=camera_info,
+            identifications=ids,
+            box=self.BOX,
+            channel_registration=registration,
             regions=self.REGIONS,  # the ROIs actually in use
             mle=True,
             use_gpu=False,
@@ -14111,10 +14240,10 @@ class TestFitGaussSplitFov:
 
         internally, _ = localize.fit_gauss_split_fov(
             movie,
-            camera_info,
-            ids,
-            self.BOX,
-            registration,
+            camera_info=camera_info,
+            identifications=ids,
+            box=self.BOX,
+            channel_registration=registration,
             regions=self.REGIONS,
             mle=True,
             use_gpu=False,
@@ -14122,10 +14251,10 @@ class TestFitGaussSplitFov:
         )
         externally, _ = localize.fit_gauss_split_fov(
             movie,
-            camera_info,
-            confined,
-            self.BOX,
-            registration,
+            camera_info=camera_info,
+            identifications=confined,
+            box=self.BOX,
+            channel_registration=registration,
             regions=self.REGIONS,
             confine_to_reference=False,
             mle=True,
@@ -14147,10 +14276,10 @@ class TestFitGaussSplitFov:
         with pytest.raises(ValueError, match="split-FOV"):
             localize.fit_gauss_split_fov(
                 movie,
-                camera_info,
-                ids,
-                self.BOX,
-                registration,
+                camera_info=camera_info,
+                identifications=ids,
+                box=self.BOX,
+                channel_registration=registration,
                 use_gpu=False,
             )
 
@@ -14561,10 +14690,10 @@ class TestFitIndependent:
         movies, ids = self._channels(picasso_movie_factory)
         results = localize.fit_independent(
             movies,
-            CAMERA_INFO_WITH_PIXELSIZE,
-            ids,
-            BOX,
-            "gausslq",
+            camera_infos=CAMERA_INFO_WITH_PIXELSIZE,
+            identifications=ids,
+            box=BOX,
+            fitting_method="gausslq",
             parallel=False,
         )
         assert len(results) == 2
@@ -14586,10 +14715,10 @@ class TestFitIndependent:
         movies, ids = self._channels(picasso_movie_factory)
         results = localize.fit_independent(
             movies,
-            CAMERA_INFO_WITH_PIXELSIZE,
-            ids,
-            BOX,
-            ["gausslq", "avg"],
+            camera_infos=CAMERA_INFO_WITH_PIXELSIZE,
+            identifications=ids,
+            box=BOX,
+            fitting_method=["gausslq", "avg"],
             parallel=False,
         )
         assert results[0][1][-1]["Fit method"] == "gausslq"
@@ -14599,10 +14728,10 @@ class TestFitIndependent:
         movies, ids = self._channels(picasso_movie_factory)
         results = localize.fit_independent(
             movies,
-            CAMERA_INFO_WITH_PIXELSIZE,
-            ids,
-            BOX,
-            "gausslq",
+            camera_infos=CAMERA_INFO_WITH_PIXELSIZE,
+            identifications=ids,
+            box=BOX,
+            fitting_method="gausslq",
             parallel=False,
         )
         # coordinates in nm; the spots sit at 12.4 and 40.2 camera pixels
@@ -14615,7 +14744,10 @@ class TestFitIndependent:
         movies, ids = self._channels(picasso_movie_factory)
         with pytest.raises(ValueError, match="one per channel"):
             localize.fit_independent(
-                movies, CAMERA_INFO_WITH_PIXELSIZE, ids[:1], BOX
+                movies,
+                camera_infos=CAMERA_INFO_WITH_PIXELSIZE,
+                identifications=ids[:1],
+                box=BOX,
             )
 
     def test_a_joint_calibration_is_rejected(self, picasso_movie_factory):
@@ -14623,10 +14755,10 @@ class TestFitIndependent:
         with pytest.raises(ValueError, match="spline-3d-multichannel"):
             localize.fit_independent(
                 movies,
-                CAMERA_INFO_WITH_PIXELSIZE,
-                ids,
-                BOX,
-                "spline",
+                camera_infos=CAMERA_INFO_WITH_PIXELSIZE,
+                identifications=ids,
+                box=BOX,
+                fitting_method="spline",
                 spline_calibration={"model": "spline-3d-multichannel"},
             )
 
@@ -14640,10 +14772,10 @@ class TestFitIndependent:
         assert (
             localize.fit_independent(
                 movies,
-                CAMERA_INFO_WITH_PIXELSIZE,
-                ids,
-                BOX,
-                "gausslq",
+                camera_infos=CAMERA_INFO_WITH_PIXELSIZE,
+                identifications=ids,
+                box=BOX,
+                fitting_method="gausslq",
                 parallel=False,
             )
             is None
@@ -14665,11 +14797,11 @@ class TestFitSplitFovIndependent:
         movie, ids = self._movie(factory)
         results = localize.fit_split_fov_independent(
             movie,
-            CAMERA_INFO_WITH_PIXELSIZE,
-            ids,
-            BOX,
-            self.REGIONS,
-            "gausslq",
+            camera_info=CAMERA_INFO_WITH_PIXELSIZE,
+            identifications=ids,
+            box=BOX,
+            regions=self.REGIONS,
+            fitting_method="gausslq",
             parallel=False,
             **kwargs,
         )
@@ -14710,7 +14842,7 @@ class TestFitSplitFovIndependent:
         self, picasso_movie_factory
     ):
         info = [{"Frames": 6, "Height": 32, "Width": 64}]
-        _, _, results = self._fit(picasso_movie_factory, movie_info=info)
+        _, _, results = self._fit(picasso_movie_factory, info=info)
         first, second = (r[1] for r in results)
         # the movie entry describes the region, the fit entry the fit
         assert first[0]["Width"] == 32 and first[0]["Height"] == 32
@@ -14733,11 +14865,11 @@ class TestFitSplitFovIndependent:
         movie, ids = self._movie(picasso_movie_factory)
         results = localize.fit_split_fov_independent(
             movie,
-            CAMERA_INFO_WITH_PIXELSIZE,
-            ids,
-            BOX,
-            self.REGIONS,
-            ["gausslq", "avg"],
+            camera_info=CAMERA_INFO_WITH_PIXELSIZE,
+            identifications=ids,
+            box=BOX,
+            regions=self.REGIONS,
+            fitting_method=["gausslq", "avg"],
             parallel=False,
         )
         # "avg" has no fitted width, so its localizations differ from a
@@ -14749,7 +14881,12 @@ class TestFitSplitFovIndependent:
         movie, ids = self._movie(picasso_movie_factory)
         with pytest.raises(ValueError, match="at least one region"):
             localize.fit_split_fov_independent(
-                movie, CAMERA_INFO_WITH_PIXELSIZE, ids, BOX, [], "gausslq"
+                movie,
+                camera_info=CAMERA_INFO_WITH_PIXELSIZE,
+                identifications=ids,
+                box=BOX,
+                regions=[],
+                fitting_method="gausslq",
             )
 
 
@@ -15919,7 +16056,7 @@ class TestWaveletIdentify:
         )
         ids, info = localize.identify_multichannel_sum(
             [reference, channel],
-            [IDENTITY_AFFINE, IDENTITY_AFFINE],
+            transforms=[IDENTITY_AFFINE, IDENTITY_AFFINE],
             parameters=_wavelet_params(WAVELET),
             camera_infos=[UNIT_CAMERA] * 2,
             parallel=False,
@@ -16059,7 +16196,7 @@ class TestWaveletIdentify:
             localize.fit_lateral_transform(
                 movie,
                 movie,
-                {},
+                calibration={},
                 box=BOX,
                 identification_method=WAVELET,
                 pixelsize=PIXELSIZE,
@@ -16120,10 +16257,10 @@ class TestFitsWithoutNetGradient:
         movies, camera_infos, ids, _, _ = case._dataset()
         locs, _ = localize.fit_gauss_multichannel(
             movies,
-            camera_infos,
-            ids.drop(columns="net_gradient"),
-            case.BOX,
-            case._registration(),
+            camera_infos=camera_infos,
+            identifications=ids.drop(columns="net_gradient"),
+            box=case.BOX,
+            channel_registration=case._registration(),
             use_gpu=False,
             parallel=False,
         )

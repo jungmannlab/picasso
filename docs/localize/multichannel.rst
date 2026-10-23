@@ -147,9 +147,14 @@ To fit every channel on its own instead — with any model, and without a regist
           movies[0], infos[0], parameters=parameters
       )
       locs, locs_info = localize.fit_gauss_multichannel(
-          list(movies), camera_infos, identifications, box=7,
-          channel_registration=registration, mle=True, link_photons=False,
-          info=ids_info,
+          list(movies),
+          ids_info,
+          camera_infos=camera_infos,
+          identifications=identifications,
+          box=7,
+          channel_registration=registration,
+          mle=True,
+          link_photons=False,
       )
       io.save_locs("movie_locs.hdf5", locs, locs_info)
 

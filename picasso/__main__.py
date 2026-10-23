@@ -2318,12 +2318,12 @@ def _localize_regions(
     )
     results = fit_split_fov_independent(
         movie,
-        cam_info,
-        identifications,
-        box,
-        roi,
-        region_fit["methods"],
-        movie_info=ids_info,
+        camera_info=cam_info,
+        identifications=identifications,
+        box=box,
+        regions=roi,
+        fitting_method=region_fit["methods"],
+        info=ids_info,
         eps=convergence if convergence > 0 else None,
         max_it=max_iterations if max_iterations > 0 else None,
         spline_calibration=region_fit["spline_calibrations"],
@@ -3112,7 +3112,7 @@ def _lateral_calibrate(args: argparse.Namespace) -> None:
     calibration, qc = localize.fit_lateral_transform(
         movie_ref,
         movie_target,
-        calibration,
+        calibration=calibration,
         box=args.box_side_length,
         identification_method=_identification_method_from_args(
             args, args.gradient

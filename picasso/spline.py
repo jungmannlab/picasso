@@ -426,7 +426,7 @@ def _bead_volumes(
                 "net_gradient": np.ones(len(bidx), dtype=np.float32),
             }
         )
-        got = localize.get_spots(movie, ids, box, camera_info)
+        got = localize.get_spots(movie, ids, box=box, camera_info=camera_info)
         volumes = np.zeros((n_beads, box, box, n_steps), dtype=np.float32)
         volumes[bidx, :, :, pidx] = got
         if return_spots:
@@ -454,7 +454,7 @@ def _bead_volumes(
             "net_gradient": np.ones(n_valid * n_beads, dtype=np.float32),
         }
     )
-    spots = localize.get_spots(movie, ids, box, camera_info)
+    spots = localize.get_spots(movie, ids, box=box, camera_info=camera_info)
     spots = spots.reshape(n_valid, n_beads, box, box)
 
     steps_of_valid = step_of_frame[valid_frames]
@@ -1301,6 +1301,7 @@ def _calibration_pixelsize(calibration: dict) -> float:
 def calibrate_spline(
     movie: localize.LoadedMovie,
     info: list[dict],
+    *,
     camera_info: dict,
     box: int,
     identification_method: localize.IdentificationMethod,
@@ -1318,6 +1319,9 @@ def calibrate_spline(
     z_binning: int = 1,
 ) -> dict | tuple[dict, list]:
     """Generate a cubic-spline PSF calibration from a bead z-stack movie.
+
+    Since v1.0.0: only the movie and its metadata are accepted
+    positionally.
 
     Parameters
     ----------
@@ -2173,6 +2177,7 @@ def _add_photon_ratios(
 def calibrate_spline_multichannel(
     movies: list,
     infos: list,
+    *,
     camera_infos: list[dict],
     box: int,
     identification_method: localize.IdentificationMethod | list,
@@ -2220,6 +2225,9 @@ def calibrate_spline_multichannel(
     stored in the calibration so the fit path can rebuild the single-movie
     channel stack. Prefer the :func:`calibrate_spline_split_fov` wrapper, which
     builds the repeated per-channel lists for you.
+
+    Since v1.0.0: only the movies and their metadata are accepted
+    positionally.
 
     Parameters
     ----------
@@ -2947,6 +2955,7 @@ def _save_registration_diagnostic_plot(
 def calibrate_spline_split_fov(
     movie,
     info,
+    *,
     camera_info: dict,
     box: int,
     identification_method: localize.IdentificationMethod | list,
@@ -2981,6 +2990,9 @@ def calibrate_spline_split_fov(
     region's affine from beads inside that region (pre-aligned by the known
     region-origin offset). All regions must have the same size;
     ``regions[reference]`` is the reference channel.
+
+    Since v1.0.0: only the movie and its metadata are accepted
+    positionally.
 
     Parameters
     ----------
@@ -3647,6 +3659,7 @@ def _update_split_fov_calibration_registration(
 def refine_split_fov_transforms_from_signal(
     movie,
     calibration: dict,
+    *,
     regions: list,
     identification_method: localize.IdentificationMethod | list,
     box: int | None = None,
@@ -3683,6 +3696,8 @@ def refine_split_fov_transforms_from_signal(
     The PSF ``coefficients`` are untouched; only the registration
     (``channel_registration`` / ``channel_transforms`` / ``regions`` /
     ``region_size``) is updated. Requires channels that share signal.
+
+    Since v1.0.0: only ``movie`` and ``calibration`` are accepted positionally.
 
     Parameters
     ----------
@@ -3962,6 +3977,7 @@ def _register_all_channels_by_signal(
 def refine_multichannel_transforms_from_signal(
     movies: list,
     calibration: dict,
+    *,
     identification_method: localize.IdentificationMethod | list,
     box: int | None = None,
     reference: int = 0,
@@ -3998,6 +4014,9 @@ def refine_multichannel_transforms_from_signal(
     Unlike the split-FOV refinement this needs no ``regions`` - the channels
     are whole separate movies - so only ``channel_transforms`` is updated
     (the PSF ``coefficients`` are untouched).
+
+    Since v1.0.0: only ``movies`` and ``calibration`` are accepted
+    positionally.
 
     Parameters
     ----------

@@ -141,7 +141,7 @@ A calibration is built from a **bead z-stack**: image a sample of sparse, bright
          movie, info = io.load_movie("beads_zstack.tif")
          camera_info = {"Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Pixelsize": 130}
          calibration = spline.calibrate_spline(
-             movie, info, camera_info,
+             movie, info, camera_info=camera_info,
              box=13, identification_method=localize.NetGradient(5000),
              d=10,                               # z step in nm
              z_binning=5,

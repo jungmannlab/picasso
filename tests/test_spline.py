@@ -2003,7 +2003,11 @@ class TestRefineSplitFovTransformsFromSignal:
             ],
         }
         updated, reg_info = spline.refine_split_fov_transforms_from_signal(
-            movie, calib, regions, identification_method=SIGNAL_NG, box=BOX
+            movie,
+            calib,
+            regions=regions,
+            identification_method=SIGNAL_NG,
+            box=BOX,
         )
         assert localize.IdentificationParameters.from_info(
             updated["Signal registration identification"]
@@ -2045,7 +2049,11 @@ class TestRefineSplitFovTransformsFromSignal:
             ],
         }
         updated, reg_info = spline.refine_split_fov_transforms_from_signal(
-            movie, calib, regions, identification_method=SIGNAL_NG, box=BOX
+            movie,
+            calib,
+            regions=regions,
+            identification_method=SIGNAL_NG,
+            box=BOX,
         )
         assert reg_info[0]["n_matches"] >= 40
         assert reg_info[0]["rms"] < 1.0
@@ -2086,7 +2094,7 @@ class TestRefineSplitFovTransformsFromSignal:
             spline.refine_split_fov_transforms_from_signal(
                 movie,
                 calib,
-                [[[0, 0], [48, 48]], [[0, 48], [48, 96]]],
+                regions=[[[0, 0], [48, 48]], [[0, 48], [48, 96]]],
                 identification_method=SIGNAL_NG,
                 box=BOX,
             )
@@ -2612,10 +2620,10 @@ class TestWaveletDetection:
         spline.calibrate_spline_split_fov(
             np.zeros((3, 16, 32)),
             [{}],
-            CAMERA_INFO,
-            BOX,
-            self.WAVELET,
-            20.0,
+            camera_info=CAMERA_INFO,
+            box=BOX,
+            identification_method=self.WAVELET,
+            d=20.0,
             regions=[[[0, 0], [16, 16]], [[0, 16], [16, 32]]],
         )
         assert seen["identification_method"] is self.WAVELET
@@ -2662,7 +2670,7 @@ class TestWaveletDetection:
         updated, reg_info = spline.refine_split_fov_transforms_from_signal(
             movie,
             calib,
-            regions,
+            regions=regions,
             identification_method=self.WAVELET,
             box=BOX,
         )

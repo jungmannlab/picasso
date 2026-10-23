@@ -1,6 +1,7 @@
-"""Test the conventions of the public functions on localizations: the
-localizations and their metadata come first, ``f(locs, info, *, ...)``,
-with every later argument keyword-only, and the functions that return
+"""Test the conventions of the public functions on localizations and
+movies: the localizations (or movies) and their metadata come first,
+``f(locs, info, *, ...)`` and ``f(movie, info, *, ...)``, with every
+later argument keyword-only, and the functions that return
 new localizations (processing steps) also return their complete
 metadata, i.e., ``info`` with one entry appended (see
 ``lib.append_metadata``), without modifying ``info``.
@@ -23,8 +24,8 @@ import pytest
 from picasso import clusterer, expression, io, lib, localize, postprocess
 from tests.regen_stability_snapshots import public_api
 
-#: names of the first argument of functions on localizations
-LOCS_NAMES = {"locs", "mols", "picked_locs"}
+#: names of the first argument of functions on localizations or movies
+LOCS_NAMES = {"locs", "mols", "picked_locs", "movie", "movies", "frames"}
 #: names of the metadata argument that follows it
 INFO_NAMES = {"info", "infos"}
 

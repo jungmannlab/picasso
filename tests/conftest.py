@@ -757,7 +757,9 @@ def real_spots(movie, real_identifications):
     """Extracted spots from the bundled .raw — shared across test files."""
     from picasso import localize
 
-    return localize.get_spots(movie, real_identifications, BOX, CAMERA_INFO)
+    return localize.get_spots(
+        movie, real_identifications, box=BOX, camera_info=CAMERA_INFO
+    )
 
 
 # ---------------------------------------------------------------------------

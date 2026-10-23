@@ -2869,9 +2869,9 @@ def _calibration_identification_info(
 
 def identify_multichannel_sum(
     movies: list,
-    transforms: list,
-    *,
     info: list[dict] | None = None,
+    *,
+    transforms: list,
     parameters: IdentificationParameters,
     camera_infos: list | None = None,
     regions: list | None = None,
@@ -2902,17 +2902,20 @@ def identify_multichannel_sum(
     searched for maxima, so it is the summed image that is background
     subtracted and smoothed.
 
+    Since v1.0.0: only the movies and their metadata are accepted
+    positionally.
+
     Parameters
     ----------
     movies : list of MovieLike
         One movie per channel, reference first (or at ``reference``). For
         split-FOV data pass the single movie repeated once per region.
-    transforms : list of lib.FloatArray2D
-        One ``(2, 3)`` reference->channel affine per channel; see
-        :class:`SummedChannelsMovie`.
     info : list of dicts or None, optional
         Metadata of the reference channel's movie. Default is None, i.e.,
         none.
+    transforms : list of lib.FloatArray2D
+        One ``(2, 3)`` reference->channel affine per channel; see
+        :class:`SummedChannelsMovie`.
     parameters : IdentificationParameters
         How the summed movie is identified, as in :func:`identify`. Give a
         single method, as there is one summed image. A minimum net gradient
@@ -3858,6 +3861,7 @@ def _seed_spots(
 def get_spots(
     movie: MovieLike,
     identifications: pd.DataFrame,
+    *,
     box: int,
     camera_info: dict,
     progress: lib.Progress | Literal["console"] | None = None,
@@ -3866,6 +3870,9 @@ def get_spots(
 ) -> lib.FloatArray3D | tuple[lib.FloatArray3D, lib.FloatArray3D | None]:
     """Extract the spots from a movie based on the identified positions
     and convert camera signal to photon counts.
+
+    Since v1.0.0: only ``movie`` and ``identifications`` are accepted
+    positionally.
 
     Parameters
     ----------
@@ -4130,8 +4137,8 @@ def fit(
         spots, variance = get_spots(
             movie,
             identifications,
-            box,
-            camera_info,
+            box=box,
+            camera_info=camera_info,
             progress=progress,
             camera_calibration=camera_calibration,
             return_variance=True,
@@ -4594,6 +4601,7 @@ def _gauss_model(rotated: bool, spherical: bool) -> int:
 
 def fit_spots_gauss(
     spots: lib.FloatArray3D,
+    *,
     rotated: bool = False,
     mle: bool = False,
     spherical: bool = False,
@@ -4622,6 +4630,8 @@ def fit_spots_gauss(
     (:mod:`picasso.fitting.gaussfit` and ``gaussfit_cuda``), so ``use_gpu``
     only affects speed - the arrangement :func:`fit_spots_spline` already uses
     for the spline models.
+
+    Since v1.0.0: only ``spots`` is accepted positionally.
 
     Parameters
     ----------
@@ -4884,6 +4894,7 @@ def _lengths_to_nm(columns: dict, pixelsize: float) -> dict:
 def locs_from_fits_gauss(
     identifications: pd.DataFrame,
     theta: lib.FloatArray2D,
+    *,
     box: int,
     em: bool,
     mle: bool = False,
@@ -4893,7 +4904,6 @@ def locs_from_fits_gauss(
     chi_square: lib.FloatArray1D | None = None,
     variance: lib.FloatArray3D | None = None,
     spots: lib.FloatArray3D | None = None,
-    *,
     pixelsize: float,
 ) -> pd.DataFrame:
     """Convert the fit results from a Gaussian fit into a data frame of
@@ -4902,6 +4912,9 @@ def locs_from_fits_gauss(
     Backend-agnostic: ``picasso.fitting.gaussfit`` (CPU) and
     ``picasso.fitting.gaussfit_cuda`` (GPU) return the same ``theta``
     layout, so both are converted here.
+
+    Since v1.0.0: only ``identifications`` and ``theta`` are accepted
+    positionally.
 
     Parameters
     ----------
@@ -5112,8 +5125,8 @@ def _fit2d_gauss(
     locs = locs_from_fits_gauss(
         identifications,
         theta,
-        box,
-        em,
+        box=box,
+        em=em,
         mle=mle,
         log_likelihood=log_likelihood,
         iterations=iterations,
@@ -5139,6 +5152,7 @@ def _fit2d_gauss(
 
 def fit_spots_gauss_multichannel(
     spots: np.ndarray,
+    *,
     residuals: np.ndarray,
     jacobians: np.ndarray,
     mle: bool = False,
@@ -5159,6 +5173,8 @@ def fit_spots_gauss_multichannel(
     computed once *here*, above the device dispatch, so the CPU and GPU
     backends are guaranteed to see byte-identical inputs and a comparison
     between them tests the algebra rather than two translation layers.
+
+    Since v1.0.0: only ``spots`` is accepted positionally.
 
     Parameters
     ----------
@@ -5303,6 +5319,7 @@ def fit_spots_gauss_multichannel(
 def locs_from_fits_gauss_multichannel(
     identifications: pd.DataFrame,
     theta: np.ndarray,
+    *,
     box: int,
     em: bool,
     jacobians: np.ndarray,
@@ -5314,7 +5331,6 @@ def locs_from_fits_gauss_multichannel(
     chi_square: lib.FloatArray1D | None = None,
     variance: np.ndarray | None = None,
     spots: np.ndarray | None = None,
-    *,
     pixelsize: float,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> pd.DataFrame:
@@ -5323,6 +5339,9 @@ def locs_from_fits_gauss_multichannel(
     The positions are in the **reference channel's** coordinates, as for the
     multichannel spline fit: the fit solves for one shared position and the
     reference channel's box sits on the detection itself.
+
+    Since v1.0.0: only ``identifications`` and ``theta`` are accepted
+    positionally.
 
     Parameters
     ----------
@@ -5546,6 +5565,8 @@ def _record_regions(
 
 def fit_gauss_multichannel(
     movies: list,
+    info: list[dict] | None = None,
+    *,
     camera_infos: list[dict],
     identifications: pd.DataFrame,
     box: int,
@@ -5559,8 +5580,6 @@ def fit_gauss_multichannel(
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     camera_calibrations: list[dict | None] | None = None,
-    *,
-    info: list[dict] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]] | None:
     """Fit a spherical Gaussian jointly across several registered channels.
 
@@ -5569,11 +5588,17 @@ def fit_gauss_multichannel(
     The Gaussian counterpart of :func:`fit_spline_multichannel`, needing only a
     channel registration rather than a measured PSF.
 
+    Since v1.0.0: only the movies and their metadata are accepted
+    positionally.
+
     Parameters
     ----------
     movies : list
         One movie per channel; ``movies[0]`` is the reference channel and the
         order must match the registration's channels.
+    info : list of dicts or None, optional
+        Metadata of the reference channel's identifications (see
+        :func:`identify`) or movie. Default is None, i.e., none.
     camera_infos : list of dict
         One camera-info dict per channel.
     identifications : pd.DataFrame
@@ -5620,9 +5645,6 @@ def fit_gauss_multichannel(
         entries may be None when only some channels sit on a characterized
         camera.
 
-    info : list of dicts or None, optional
-        Metadata of the reference channel's identifications (see
-        :func:`identify`) or movie. Default is None, i.e., none.
     Returns
     -------
     locs : pd.DataFrame
@@ -5678,8 +5700,8 @@ def fit_gauss_multichannel(
         )
         result = fit_spots_gauss_multichannel(
             spots,
-            residuals,
-            jacobians,
+            residuals=residuals,
+            jacobians=jacobians,
             mle=mle,
             link_photons=link_photons,
             use_gpu=use_gpu,
@@ -5698,10 +5720,10 @@ def fit_gauss_multichannel(
         locs = locs_from_fits_gauss_multichannel(
             identifications,
             theta,
-            box,
-            em,
-            jacobians,
-            residuals,
+            box=box,
+            em=em,
+            jacobians=jacobians,
+            residuals=residuals,
             link_photons=link_photons,
             mle=mle,
             pixelsize=_reference_pixelsize(camera_infos),
@@ -5730,6 +5752,8 @@ def fit_gauss_multichannel(
 
 def fit_gauss_split_fov(
     movie,
+    info: list[dict] | None = None,
+    *,
     camera_info: dict,
     identifications: pd.DataFrame,
     box: int,
@@ -5745,8 +5769,6 @@ def fit_gauss_split_fov(
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     camera_calibration: dict | None = None,
-    *,
-    info: list[dict] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]] | None:
     """Fit a spherical Gaussian jointly across the regions of one movie.
 
@@ -5761,10 +5783,16 @@ def fit_gauss_split_fov(
     ``movie`` / ``camera_info`` once per channel and delegates to the standard
     multichannel fitter.
 
+    Since v1.0.0: only the movie and its metadata are accepted
+    positionally.
+
     Parameters
     ----------
     movie : LoadedMovie
         The single loaded movie.
+    info : list of dicts or None, optional
+        Metadata of the reference channel's identifications (see
+        :func:`identify`) or movie. Default is None, i.e., none.
     camera_info : dict
         Camera info of ``movie``.
     identifications : pd.DataFrame
@@ -5810,9 +5838,6 @@ def fit_gauss_split_fov(
         sensor and the maps are indexed by absolute frame coordinates, so the
         same full-frame calibration serves every region.
 
-    info : list of dicts or None, optional
-        Metadata of the reference channel's identifications (see
-        :func:`identify`) or movie. Default is None, i.e., none.
     Returns
     -------
     locs : pd.DataFrame
@@ -5840,10 +5865,10 @@ def fit_gauss_split_fov(
 
     result = fit_gauss_multichannel(
         [movie] * n_channels,
-        [camera_info] * n_channels,
-        ids,
-        box,
-        channel_registration,
+        camera_infos=[camera_info] * n_channels,
+        identifications=ids,
+        box=box,
+        channel_registration=channel_registration,
         mle=mle,
         link_photons=link_photons,
         use_gpu=use_gpu,
@@ -6337,6 +6362,7 @@ def _await_async_fit(
 def fit_spots_splinefit(
     spots: lib.FloatArray3D,
     calibration: dict,
+    *,
     mle: bool = False,
     n_z_starts: int | None = None,
     return_stats: bool = False,
@@ -6360,6 +6386,8 @@ def fit_spots_splinefit(
     between them). Every spline model is supported: ``spline-2d``,
     ``spline-3d``, ``spline-3d-multichannel`` and the photon-decoupled
     ``spline-3d-multichannel-link-xyz``.
+
+    Since v1.0.0: only ``spots`` and ``calibration`` are accepted positionally.
 
     Parameters
     ----------
@@ -6523,6 +6551,7 @@ def _spline_use_gpu(use_gpu: bool | None) -> bool:
 def fit_spots_spline(
     spots: lib.FloatArray3D,
     calibration: dict,
+    *,
     mle: bool = False,
     n_z_starts: int | None = None,
     return_stats: bool = False,
@@ -6538,6 +6567,8 @@ def fit_spots_spline(
 
     A thin wrapper over :func:`fit_spots_splinefit` that resolves the device.
     Both devices run the same algorithm, so the choice only affects speed.
+
+    Since v1.0.0: only ``spots`` and ``calibration`` are accepted positionally.
 
     Parameters
     ----------
@@ -6763,6 +6794,7 @@ def _locs_from_fits_spline_link_xyz(
 def locs_from_fits_spline(
     identifications: pd.DataFrame,
     theta: lib.FloatArray2D,
+    *,
     box: int,
     em: bool,
     calibration: dict,
@@ -6775,7 +6807,6 @@ def locs_from_fits_spline(
     chi_square: lib.FloatArray1D | None = None,
     variance: lib.FloatArray4D | None = None,
     spots: np.ndarray | None = None,
-    *,
     pixelsize: float,
 ) -> pd.DataFrame:
     """Convert spline fit results into a localizations data frame.
@@ -6784,6 +6815,9 @@ def locs_from_fits_spline(
     ``bg`` uncertainties come from :func:`precision._spline_crlb`: the Poisson
     Cramer-Rao bound for maximum-likelihood fits or the least-squares sandwich
     covariance for least-squares ones.
+
+    Since v1.0.0: only ``identifications`` and ``theta`` are accepted
+    positionally.
 
     Parameters
     ----------
@@ -7052,9 +7086,9 @@ def _fit2d_spline_gpu(
     locs = locs_from_fits_spline(
         identifications,
         theta,
-        box,
-        em,
-        calibration,
+        box=box,
+        em=em,
+        calibration=calibration,
         mle=mle,
         log_likelihood=log_likelihood,
         iterations=iterations,
@@ -7110,9 +7144,9 @@ def _fit2d_spline_cpu(
     return locs_from_fits_spline(
         identifications,
         theta,
-        box,
-        em,
-        calibration,
+        box=box,
+        em=em,
+        calibration=calibration,
         mle=mle,
         log_likelihood=log_likelihood,
         iterations=iterations,
@@ -7883,6 +7917,8 @@ def channel_roi_geometry(
 
 def fit_spline_multichannel(
     movies: list,
+    info: list[dict] | None = None,
+    *,
     camera_infos: list[dict],
     identifications: pd.DataFrame,
     box: int,
@@ -7896,8 +7932,6 @@ def fit_spline_multichannel(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     camera_calibrations: list[dict | None] | None = None,
-    *,
-    info: list[dict] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Fit a multichannel cubic-spline PSF across several registered channels.
 
@@ -7909,11 +7943,17 @@ def fit_spline_multichannel(
     ``locs_from_fits_spline``. The resulting localizations are in the
     reference channel's coordinates and contain the fitted ``z`` directly.
 
+    Since v1.0.0: only the movies and their metadata are accepted
+    positionally.
+
     Parameters
     ----------
     movies : list
         One movie per channel; ``movies[0]`` is the reference channel and its
         order must match the calibration's channels.
+    info : list of dicts or None, optional
+        Metadata of the reference channel's identifications (see
+        :func:`identify`) or movie. Default is None, i.e., none.
     camera_infos : list of dict
         One camera-info dict per channel.
     identifications : pd.DataFrame
@@ -7967,9 +8007,6 @@ def fit_spline_multichannel(
         own mapped, rounded box origin, so a calibration follows its channel
         through the affine registration. Default None.
 
-    info : list of dicts or None, optional
-        Metadata of the reference channel's identifications (see
-        :func:`identify`) or movie. Default is None, i.e., none.
     Returns
     -------
     locs : pd.DataFrame
@@ -8034,9 +8071,9 @@ def fit_spline_multichannel(
         locs = locs_from_fits_spline(
             identifications,
             theta,
-            box,
-            em,
-            calibration,
+            box=box,
+            em=em,
+            calibration=calibration,
             mle=mle,
             pixelsize=_reference_pixelsize(camera_infos),
             log_likelihood=log_likelihood,
@@ -8131,6 +8168,8 @@ def _photon_scales(calibration: dict, n_channels: int) -> np.ndarray:
 
 def fit_spline_multichannel_ratiometric(
     movies: list,
+    info: list[dict] | None = None,
+    *,
     camera_infos: list[dict],
     identifications: pd.DataFrame,
     box: int,
@@ -8144,8 +8183,6 @@ def fit_spline_multichannel_ratiometric(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     camera_calibrations: list[dict | None] | None = None,
-    *,
-    info: list[dict] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Ratiometric multichannel spline fit with photon-ratio color assignment.
 
@@ -8164,11 +8201,17 @@ def fit_spline_multichannel_ratiometric(
     abandoned any fit whose model rang negative, which was a large fraction of
     them - see ``splinefit.MU_FLOOR``.)
 
+    Since v1.0.0: only the movies and their metadata are accepted
+    positionally.
+
     Parameters
     ----------
     movies : list
         One movie per channel; ``movies[0]`` is the reference channel. As
         in :func:`fit_spline_multichannel`.
+    info : list of dicts or None, optional
+        Metadata of the reference channel's identifications (see
+        :func:`identify`) or movie. Default is None, i.e., none.
     camera_infos : list of dict
         One camera-info dict per channel.
     identifications : pd.DataFrame
@@ -8213,9 +8256,6 @@ def fit_spline_multichannel_ratiometric(
         own mapped, rounded box origin, so a calibration follows its channel
         through the affine registration. Default None.
 
-    info : list of dicts or None, optional
-        Metadata of the reference channel's identifications (see
-        :func:`identify`) or movie. Default is None, i.e., none.
     Returns
     -------
     locs : pd.DataFrame
@@ -8605,9 +8645,9 @@ def _assemble_ratiometric_locs(
         locs_k = locs_from_fits_spline(
             ids_k,
             theta_k,
-            box,
-            em,
-            calib_k,
+            box=box,
+            em=em,
+            calibration=calib_k,
             mle=mle,
             residuals=(None if roi_residuals is None else roi_residuals[rows]),
             jacobians=jacobians[rows],
@@ -8809,6 +8849,8 @@ def filter_linked_identifications_split_fov(
 
 def fit_spline_split_fov(
     movie,
+    info: list[dict] | None = None,
+    *,
     camera_info: dict,
     identifications: pd.DataFrame,
     box: int,
@@ -8825,8 +8867,6 @@ def fit_spline_split_fov(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     camera_calibration: dict | None = None,
-    *,
-    info: list[dict] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Fit a split-FOV multichannel spline PSF from a *single* movie.
 
@@ -8844,10 +8884,16 @@ def fit_spline_split_fov(
     ``MultichannelSplineFitWorker``: ratiometric if photon ratios are
     present, otherwise the plain linked fit.
 
+    Since v1.0.0: only the movie and its metadata are accepted
+    positionally.
+
     Parameters
     ----------
     movie : LoadedMovie
         The single loaded movie.
+    info : list of dicts or None, optional
+        Metadata of the reference channel's identifications (see
+        :func:`identify`) or movie. Default is None, i.e., none.
     camera_info : dict
         Camera info of ``movie``.
     identifications : pd.DataFrame
@@ -8901,9 +8947,6 @@ def fit_spline_split_fov(
         absolute frame coordinates, so the same full-frame calibration serves
         every region. Default None.
 
-    info : list of dicts or None, optional
-        Metadata of the reference channel's identifications (see
-        :func:`identify`) or movie. Default is None, i.e., none.
     Returns
     -------
     locs : pd.DataFrame
@@ -8945,10 +8988,10 @@ def fit_spline_split_fov(
     ):
         locs, info = fit_spline_multichannel(
             movies,
-            camera_infos,
-            ids,
-            box,
-            calibration,
+            camera_infos=camera_infos,
+            identifications=ids,
+            box=box,
+            calibration=calibration,
             mle=mle,
             link_photons=False,
             progress=progress,
@@ -8966,10 +9009,10 @@ def fit_spline_split_fov(
     ):
         locs, info = fit_spline_multichannel_ratiometric(
             movies,
-            camera_infos,
-            ids,
-            box,
-            calibration,
+            camera_infos=camera_infos,
+            identifications=ids,
+            box=box,
+            calibration=calibration,
             photon_ratios=photon_ratios,
             mle=mle,
             progress=progress,
@@ -8984,10 +9027,10 @@ def fit_spline_split_fov(
     else:
         locs, info = fit_spline_multichannel(
             movies,
-            camera_infos,
-            ids,
-            box,
-            calibration,
+            camera_infos=camera_infos,
+            identifications=ids,
+            box=box,
+            calibration=calibration,
             mle=mle,
             link_photons=link_photons,
             progress=progress,
@@ -9236,12 +9279,12 @@ def split_locs_by_region(
 
 def fit_independent(
     movies: list,
+    infos: list[list[dict] | None] | None = None,
+    *,
     camera_infos: list[dict] | dict,
     identifications: list[pd.DataFrame],
     box: int,
     fitting_method: str | list[str] = "gausslq",
-    *,
-    infos: list[list[dict] | None] | None = None,
     eps: float | list | None = None,
     max_it: int | list | None = None,
     spline_calibration: dict | list | None = None,
@@ -9258,10 +9301,16 @@ def fit_independent(
     and its own calibrations. The channels come out unlinked, in their own
     coordinates, to be connected afterwards.
 
+    Since v1.0.0: only the movies and their metadata are accepted
+    positionally.
+
     Parameters
     ----------
     movies : list
         One movie per channel, as loaded by ``picasso.io.load_movie``.
+    infos : list or None, optional
+        Metadata of each channel's identifications (see :func:`identify`)
+        or movie, or None. Default is None, i.e., none.
     camera_infos : list of dict or dict
         One camera-info dict per channel, or a single one shared by all.
     identifications : list of pd.DataFrame
@@ -9272,9 +9321,6 @@ def fit_independent(
     fitting_method : str or list of str, optional
         Any of ``FIT_METHODS``, either one for all channels or one per
         channel. Default "gausslq".
-    infos : list or None, optional
-        Metadata of each channel's identifications (see :func:`identify`)
-        or movie, or None. Default is None, i.e., none.
     eps, max_it : float, int, list or None, optional
         Convergence criterion and iteration cap, per channel or shared. See
         :func:`fit`.
@@ -9367,13 +9413,13 @@ def fit_independent(
 
 def fit_split_fov_independent(
     movie,
+    info: list[dict] | None = None,
+    *,
     camera_info: dict,
     identifications: pd.DataFrame,
     box: int,
     regions: list,
     fitting_method: str | list[str] = "gausslq",
-    *,
-    movie_info: list[dict] | None = None,
     to_local: bool = True,
     eps: float | list | None = None,
     max_it: int | list | None = None,
@@ -9391,10 +9437,18 @@ def fit_split_fov_independent(
     out as a stand-alone set of localizations in the region's own
     coordinates.
 
+    Since v1.0.0: only the movie and its metadata are accepted
+    positionally.
+
     Parameters
     ----------
     movie : LoadedMovie
         The movie holding all regions.
+    info : list of dict or None, optional
+        The metadata of the movie or of the identifications (see
+        :func:`identify`). When given, it is adapted to each region (see
+        :func:`region_movie_info`) and the region's fit is appended to it,
+        so that what comes back is ready to save.
     camera_info : dict
         Camera information; one camera images every region.
     identifications : pd.DataFrame
@@ -9408,11 +9462,6 @@ def fit_split_fov_independent(
     fitting_method : str or list of str, optional
         Any of ``FIT_METHODS``, either one for all regions or one per
         region. Default "gausslq".
-    movie_info : list of dict or None, optional
-        The metadata of the movie or of the identifications (see
-        :func:`identify`). When given, it is adapted to each region (see
-        :func:`region_movie_info`) and the region's fit is appended to it,
-        so that what comes back is ready to save.
     to_local : bool, optional
         Move each region's localizations into its own coordinate frame
         (default True). False keeps them in sensor coordinates.
@@ -9456,13 +9505,9 @@ def fit_split_fov_independent(
     fits = []
     with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
         for c, region in enumerate(regions):
-            locs, info = fit(
+            locs, region_info = fit(
                 movie,
-                (
-                    None
-                    if movie_info is None
-                    else region_movie_info(movie_info, region)
-                ),
+                (None if info is None else region_movie_info(info, region)),
                 camera_info=camera_info,
                 identifications=confine_to_region(identifications, region),
                 box=box,
@@ -9479,15 +9524,15 @@ def fit_split_fov_independent(
             )
             if locs is None:  # aborted
                 return None
-            fits.append((locs, info))
+            fits.append((locs, region_info))
     results = []
-    for c, (region, (locs, info)) in enumerate(zip(regions, fits)):
+    for c, (region, (locs, region_info)) in enumerate(zip(regions, fits)):
         if to_local:
             locs = locs_to_region_coordinates(
                 locs, region, camera_info["Pixelsize"]
             )
         # the entry of the fit, which is a new dict
-        info[-1].update(
+        region_info[-1].update(
             {
                 "Fit mode": FIT_MODE_INDEPENDENT,
                 "Channel": c,
@@ -9496,7 +9541,7 @@ def fit_split_fov_independent(
                 "Region coordinates": "region" if to_local else "sensor",
             }
         )
-        results.append((locs, info))
+        results.append((locs, region_info))
     return results
 
 
@@ -9956,8 +10001,8 @@ class _InMemoryMovie(io.AbstractPicassoMovie):
 def localize_frames(
     frames,
     info: list[dict] | None,
-    identification_parameters: IdentificationParameters,
     *,
+    identification_parameters: IdentificationParameters,
     start_frame: int = 0,
     camera_info: dict | None = None,
     fitting_method: str = "gausslq",
@@ -10542,10 +10587,10 @@ def _lateral_refine_bead_positions(
     # leaves the pixel values unchanged (the fit only needs relative
     # intensities to localize each bead).
     camera_info = {"Baseline": 0, "Sensitivity": 1.0, "Gain": 1}
-    spots = get_spots(image[np.newaxis], ids, box, camera_info)
+    spots = get_spots(image[np.newaxis], ids, box=box, camera_info=camera_info)
     theta = fit_spots_gauss(spots.astype(np.float32))
     # positions on the image grid (camera pixels), as the coarse ones
-    locs = locs_from_fits_gauss(ids, theta, box, em=False, pixelsize=1.0)
+    locs = locs_from_fits_gauss(ids, theta, box=box, em=False, pixelsize=1.0)
     refined = np.column_stack((locs["y"].to_numpy(), locs["x"].to_numpy()))
     return refined[np.isfinite(refined).all(axis=1)]
 
@@ -10899,6 +10944,7 @@ def _lateral_plot_alignment(
 def fit_lateral_transform(
     movie_ref,
     movie_target,
+    *,
     calibration: dict,
     box: int,
     identification_method: IdentificationMethod,
@@ -10920,6 +10966,9 @@ def fit_lateral_transform(
     carries everything :func:`plot_lateral_calibration` needs to draw the
     diagnostic figure afterwards (on the GUI thread, where matplotlib must
     be driven from).
+
+    Since v1.0.0: only ``movie_ref`` and ``movie_target`` are accepted
+    positionally.
 
     Parameters
     ----------
@@ -11116,6 +11165,7 @@ def plot_lateral_calibration(qc: dict, save_path: str = "") -> None:
 def calibrate_lateral_transform(
     movie_ref,
     movie_target,
+    *,
     calibration: dict,
     box: int,
     identification_method: IdentificationMethod,
@@ -11158,6 +11208,9 @@ def calibrate_lateral_transform(
     expressed in nm (the unit of the coordinates it corrects, see
     ``picasso.transforms.Transform.rescaled``) and decomposed into
     rotation / anisotropic scale / shear.
+
+    Since v1.0.0: only ``movie_ref`` and ``movie_target`` are accepted
+    positionally.
 
     Parameters
     ----------
@@ -11217,7 +11270,7 @@ def calibrate_lateral_transform(
     calibration, qc = fit_lateral_transform(
         movie_ref,
         movie_target,
-        calibration,
+        calibration=calibration,
         box=box,
         identification_method=identification_method,
         pixelsize=pixelsize,

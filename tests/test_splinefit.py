@@ -1386,10 +1386,10 @@ class TestMultichannelIntegration:
         tracker = RecordingProgress()
         locs, _ = localize.fit_spline_multichannel(
             movies,
-            camera_infos,
-            identifications,
-            BOX,
-            calibration,
+            camera_infos=camera_infos,
+            identifications=identifications,
+            box=BOX,
+            calibration=calibration,
             mle=mle,
             link_photons=link_photons,
             use_gpu=False,
@@ -1419,10 +1419,10 @@ class TestMultichannelIntegration:
         )
         locs, _ = localize.fit_spline_multichannel_ratiometric(
             movies,
-            camera_infos,
-            identifications,
-            BOX,
-            calibration,
+            camera_infos=camera_infos,
+            identifications=identifications,
+            box=BOX,
+            calibration=calibration,
             use_gpu=False,
         )
         assert len(locs) == len(truth)
@@ -1436,10 +1436,10 @@ class TestMultichannelIntegration:
         with pytest.raises(ImportError, match="use_gpu=False"):
             localize.fit_spline_multichannel(
                 movies,
-                camera_infos,
-                identifications,
-                BOX,
-                calibration,
+                camera_infos=camera_infos,
+                identifications=identifications,
+                box=BOX,
+                calibration=calibration,
                 use_gpu=True,
             )
 

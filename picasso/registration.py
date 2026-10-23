@@ -1263,6 +1263,7 @@ def _register_bead_channel(
 
 def calibrate_channel_registration_from_beads(
     movies: list,
+    *,
     box: int,
     identification_method: localize.IdentificationMethod | list,
     model: str = "affine",
@@ -1277,6 +1278,8 @@ def calibrate_channel_registration_from_beads(
 
     Beads are detected and refined to sub-pixel accuracy, matched to the
     reference channel's beads, and a transform is fitted per channel.
+
+    Since v1.0.0: only ``movies`` is accepted positionally.
 
     Parameters
     ----------
@@ -1586,6 +1589,7 @@ def _register_signal_channels(
 
 def calibrate_channel_registration_from_signal(
     movies: list,
+    *,
     box: int,
     identification_method: localize.IdentificationMethod | list,
     model: str = "affine",
@@ -1606,6 +1610,8 @@ def calibrate_channel_registration_from_signal(
     every channel in the same frame. Single molecules are detected on an evenly
     spaced sample of frames and paired frame by frame, which registers the
     channels without a separate bead acquisition.
+
+    Since v1.0.0: only ``movies`` is accepted positionally.
 
     Parameters
     ----------

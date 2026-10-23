@@ -13259,7 +13259,7 @@ class Window(QtWidgets.QMainWindow):
         return spline.refine_split_fov_transforms_from_signal(
             self.movie,
             calibration,
-            regions,
+            regions=regions,
             identification_method=identification_method,
             box=self.parameters["Box Size"],
             frame_bounds=frame_bounds,
@@ -13955,7 +13955,10 @@ class Window(QtWidgets.QMainWindow):
         # raw movie on purpose: spots must carry real photon counts, so the
         # identification filters (a detection aid) never apply
         spots = localize.get_spots(
-            self.movie, self.identifications, box, self.camera_info
+            self.movie,
+            self.identifications,
+            box=box,
+            camera_info=self.camera_info,
         )
         # the spots are in photons, converted with the camera information
         info = lib.append_metadata(self.identifications_info, self.camera_info)
@@ -14565,10 +14568,10 @@ class MultichannelSplineFitWorker(QtCore.QThread):
             if self.split_fov:
                 locs, info = localize.fit_spline_split_fov(
                     self.movies[0],
-                    self.camera_infos[0],
-                    self.identifications,
-                    self.box,
-                    self.calibration,
+                    camera_info=self.camera_infos[0],
+                    identifications=self.identifications,
+                    box=self.box,
+                    calibration=self.calibration,
                     regions=self.regions,
                     mle=self.mle,
                     use_gpu=self.use_gpu,
@@ -14587,10 +14590,10 @@ class MultichannelSplineFitWorker(QtCore.QThread):
                 # ratiometric scan.
                 locs, info = localize.fit_spline_multichannel(
                     self.movies,
-                    self.camera_infos,
-                    self.identifications,
-                    self.box,
-                    self.calibration,
+                    camera_infos=self.camera_infos,
+                    identifications=self.identifications,
+                    box=self.box,
+                    calibration=self.calibration,
                     mle=self.mle,
                     use_gpu=self.use_gpu,
                     link_photons=False,
@@ -14606,10 +14609,10 @@ class MultichannelSplineFitWorker(QtCore.QThread):
                 # localization is assigned the max-likelihood ratio as `color`.
                 locs, info = localize.fit_spline_multichannel_ratiometric(
                     self.movies,
-                    self.camera_infos,
-                    self.identifications,
-                    self.box,
-                    self.calibration,
+                    camera_infos=self.camera_infos,
+                    identifications=self.identifications,
+                    box=self.box,
+                    calibration=self.calibration,
                     mle=self.mle,
                     use_gpu=self.use_gpu,
                     tolerance=self.eps,
@@ -14621,10 +14624,10 @@ class MultichannelSplineFitWorker(QtCore.QThread):
             else:
                 locs, info = localize.fit_spline_multichannel(
                     self.movies,
-                    self.camera_infos,
-                    self.identifications,
-                    self.box,
-                    self.calibration,
+                    camera_infos=self.camera_infos,
+                    identifications=self.identifications,
+                    box=self.box,
+                    calibration=self.calibration,
                     mle=self.mle,
                     use_gpu=self.use_gpu,
                     tolerance=self.eps,
@@ -14899,10 +14902,10 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
             if self.split_fov:
                 result = localize.fit_gauss_split_fov(
                     self.movies[0],
-                    self.camera_infos[0],
-                    self.identifications,
-                    self.box,
-                    self.channel_registration,
+                    camera_info=self.camera_infos[0],
+                    identifications=self.identifications,
+                    box=self.box,
+                    channel_registration=self.channel_registration,
                     regions=self.regions,
                     mle=self.mle,
                     link_photons=self.link_photons,
@@ -14917,10 +14920,10 @@ class MultichannelGaussianFitWorker(QtCore.QThread):
             else:
                 result = localize.fit_gauss_multichannel(
                     self.movies,
-                    self.camera_infos,
-                    self.identifications,
-                    self.box,
-                    self.channel_registration,
+                    camera_infos=self.camera_infos,
+                    identifications=self.identifications,
+                    box=self.box,
+                    channel_registration=self.channel_registration,
                     mle=self.mle,
                     link_photons=self.link_photons,
                     use_gpu=self.use_gpu,
@@ -15412,7 +15415,7 @@ class AffineCalibrationWorker(QtCore.QThread):
             calibration, qc = localize.fit_lateral_transform(
                 movie_ref,
                 movie_target,
-                calibration,
+                calibration=calibration,
                 box=self.box,
                 identification_method=self.identification_method,
                 pixelsize=pixelsize,
