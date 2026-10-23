@@ -5792,9 +5792,14 @@ class ParametersDialog(lib.Dialog):
             if os.path.exists(path):
                 # a calibration from before Picasso 1.0 (spot widths in
                 # camera pixels) is converted to nm with this pixel size
-                self.z_calibration = io.load_calibration(
-                    path, pixelsize=self.pixelsize.value()
-                )
+                try:
+                    self.z_calibration = io.load_calibration(
+                        path, pixelsize=self.pixelsize.value()
+                    )
+                except lib.FILE_LOAD_ERRORS as error:
+                    lib.show_load_error(self, path, error)
+                    self.update_z_calib(None)
+                    return
                 self.z_calibration_path = path
             else:
                 self.update_z_calib(None)

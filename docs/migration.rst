@@ -965,9 +965,9 @@ Loading and saving
   ``load_identifications`` and ``load_mask`` no longer take ``qt_parent``:
   they open no dialogs and print nothing; their errors say what is wrong.
   The arguments of ``load_locs`` after the path are keyword-only.
-- ``load_locs`` raises ``picasso.io.LocsFormatError`` (a ``ValueError``)
+- ``load_locs`` raises ``picasso.io.FileFormatError`` (a ``ValueError``)
   instead of a ``KeyError`` when a file lacks a required metadata key or
-  column, and ``picasso.io.MissingPixelsizeError`` (a ``LocsFormatError``)
+  column, and ``picasso.io.MissingPixelsizeError`` (a ``FileFormatError``)
   when only the pixel size is missing; pass it as ``pixelsize=``.
 - ``picasso.io.load_clusters`` is removed: cluster centers are localization
   files, so use ``picasso.io.load_locs``. The cluster tables written before

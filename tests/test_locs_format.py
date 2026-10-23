@@ -90,21 +90,21 @@ class TestFormatVersion:
             make_locs(),
             attrs={"picasso_format": "2.0", "picasso_version": "2.3.1"},
         )
-        with pytest.raises(io.LocsFormatError) as error:
+        with pytest.raises(io.FileFormatError) as error:
             io.load_locs(path)
         message = str(error.value)
         assert "format 2.0" in message
         assert "Picasso 2.3.1" in message
         assert "update Picasso" in message
         # Filter refuses it, too
-        with pytest.raises(io.LocsFormatError):
+        with pytest.raises(io.FileFormatError):
             io.load_filter(path)
 
     def test_malformed_version_is_refused(self, tmp_path):
         path = write_raw(
             tmp_path / "bad.hdf5", make_locs(), attrs={"picasso_format": "x"}
         )
-        with pytest.raises(io.LocsFormatError, match="MAJOR.MINOR"):
+        with pytest.raises(io.FileFormatError, match="MAJOR.MINOR"):
             io.get_format_version(path)
 
     def test_legacy_likelihood_becomes_log_likelihood(self, tmp_path):
@@ -131,21 +131,21 @@ class TestValidation:
     @pytest.mark.parametrize("column", io.MINIMUM_COLUMNS)
     def test_missing_column_raises(self, tmp_path, column):
         path = write_raw(tmp_path / "f.hdf5", make_locs().drop(columns=column))
-        with pytest.raises(io.LocsFormatError, match=f"column '{column}'"):
+        with pytest.raises(io.FileFormatError, match=f"column '{column}'"):
             io.load_locs(path)
 
     @pytest.mark.parametrize("key", io.MINIMUM_METADATA_KEYS)
     def test_missing_metadata_key_raises(self, tmp_path, key):
         info = [{k: v for k, v in INFO[0].items() if k != key}]
         path = write_raw(tmp_path / "f.hdf5", make_locs(), info=info)
-        with pytest.raises(io.LocsFormatError, match=f"key '{key}'"):
+        with pytest.raises(io.FileFormatError, match=f"key '{key}'"):
             io.load_locs(path)
 
     def test_message_lists_everything_missing(self, tmp_path):
         info = [{"Frames": 100}]
         locs = make_locs().drop(columns=["lpx", "lpy"])
         path = write_raw(tmp_path / "f.hdf5", locs, info=info)
-        with pytest.raises(io.LocsFormatError) as error:
+        with pytest.raises(io.FileFormatError) as error:
             io.load_locs(path)
         message = str(error.value)
         assert path in message
@@ -155,8 +155,8 @@ class TestValidation:
 
     def test_error_is_a_value_error_not_a_key_error(self):
         # Render reports a KeyError as "no localizations in the file"
-        assert issubclass(io.LocsFormatError, ValueError)
-        assert not issubclass(io.LocsFormatError, KeyError)
+        assert issubclass(io.FileFormatError, ValueError)
+        assert not issubclass(io.FileFormatError, KeyError)
 
     def test_pixelsize_is_required(self, tmp_path):
         # the field of view is Width x Height camera pixels of Pixelsize
@@ -173,8 +173,8 @@ class TestValidation:
         )
         with pytest.raises(io.MissingPixelsizeError):
             io.load_locs(path)
-        # MissingPixelsizeError is a LocsFormatError, so one handler fits
-        assert issubclass(io.MissingPixelsizeError, io.LocsFormatError)
+        # MissingPixelsizeError is a FileFormatError, so one handler fits
+        assert issubclass(io.MissingPixelsizeError, io.FileFormatError)
         # the pixel size given on the spot converts the legacy file
         locs, loaded_info = io.load_locs(
             str(tmp_path / "f.hdf5"), pixelsize=130
@@ -199,7 +199,7 @@ class TestValidation:
     def test_negative_frames_raise(self, tmp_path):
         locs = make_locs().assign(frame=lambda df: df["frame"].astype(int) - 5)
         path = write_raw(tmp_path / "f.hdf5", locs)
-        with pytest.raises(io.LocsFormatError, match="negative frame"):
+        with pytest.raises(io.FileFormatError, match="negative frame"):
             io.load_locs(path)
 
     def test_fractional_frames_load(self, tmp_path):
@@ -211,7 +211,7 @@ class TestValidation:
 
     def test_validate_locs_accepts_a_dict(self):
         io.validate_locs(make_locs(), INFO[0])
-        with pytest.raises(io.LocsFormatError, match="The localizations"):
+        with pytest.raises(io.FileFormatError, match="The localizations"):
             io.validate_locs(make_locs().drop(columns="x"), INFO[0])
 
 

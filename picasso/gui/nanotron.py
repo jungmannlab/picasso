@@ -1527,6 +1527,11 @@ class Window(QtWidgets.QMainWindow):
                 f"{os.path.basename(info_path)} does not list the classes "
                 "of the model."
             )
+        io.check_format_version(
+            model_info.get(io.FORMAT_VERSION_ATTR),
+            info_path,
+            kind="nanoTRON model",
+        )
         return model, model_info
 
     def load_default_model(self):

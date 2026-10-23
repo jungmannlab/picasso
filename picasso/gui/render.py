@@ -5614,13 +5614,21 @@ def load_fov_file(path: str, pixelsize: float | None = None) -> FloatArray1D:
     file. Files without the ``FOV_FILE_HEADER`` comment line were
     written before Picasso 1.0, in camera pixels, and are converted
     with ``pixelsize`` (nm); ``io.MissingPixelsizeError`` if it is not
-    given for such a file."""
+    given for such a file. ``io.FileFormatError`` for a newer major
+    format version (see ``io.check_format_version``)."""
     with open(path) as f:
         first = f.readline()
     fov = np.loadtxt(path, dtype=float)
     if fov.shape != (4,):
         raise ValueError(f"{path} does not hold a field of view.")
-    if not first.lstrip("# ").startswith("picasso_format"):
+    header = first.lstrip("# ").split()
+    if header and header[0] == io.FORMAT_VERSION_ATTR:
+        io.check_format_version(
+            header[1] if len(header) > 1 else "",
+            path,
+            kind="field of view file",
+        )
+    else:
         if pixelsize is None:
             raise io.MissingPixelsizeError(
                 f"{path} was written before Picasso 1.0, with the field of "
@@ -14772,6 +14780,17 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             if drift is not None:
                 self.load_drift_drop(channel, drift.to_numpy())
 
+    def _load_or_report(self, loader, path: str, **kwargs):
+        """Load ``path`` with ``loader`` (see
+        ``lib_qt.load_or_ask_pixelsize``), telling the user why the file
+        could not be opened, e.g., a newer format version. None if
+        canceled or not loaded."""
+        try:
+            return lib_qt.load_or_ask_pixelsize(self, loader, path, **kwargs)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
+            return None
+
     def _read_drift_file(
         self, path: str, channel: int = 0
     ) -> pd.DataFrame | None:
@@ -14779,12 +14798,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         written before Picasso 1.0 (x, y in camera pixels) is converted
         with the camera pixel size of ``channel`` (its metadata), which
         the user is asked for if no channel is loaded. None if
-        canceled."""
+        canceled or not loaded."""
         pixelsizes = self.pixelsizes
         if channel >= len(pixelsizes):  # all channels: the first one's
             channel = 0
-        return lib_qt.load_or_ask_pixelsize(
-            self,
+        return self._load_or_report(
             io.load_drift,
             path,
             pixelsize=pixelsizes[channel] if pixelsizes else None,
@@ -14796,8 +14814,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         camera pixel size of the first channel (its metadata), which the
         user is asked for if no channel is loaded. None if canceled."""
         pixelsizes = self.pixelsizes
-        return lib_qt.load_or_ask_pixelsize(
-            self,
+        return self._load_or_report(
             load_fov_file,
             path,
             pixelsize=pixelsizes[0] if pixelsizes else None,
@@ -14875,8 +14892,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         the user is asked for if no channel is loaded. None if
         canceled."""
         pixelsizes = self.pixelsizes
-        return lib_qt.load_or_ask_pixelsize(
-            self,
+        return self._load_or_report(
             io.load_picks,
             path,
             pixelsize=pixelsizes[0] if pixelsizes else None,
@@ -14924,7 +14940,17 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         in camera pixels and the zoom as screen pixels per camera pixel;
         both are converted with the camera pixel size of the first
         channel (its metadata), which the user is asked for if no
-        channel is loaded."""
+        channel is loaded. A file of a newer major format version is
+        refused (see ``io.check_format_version``)."""
+        try:
+            io.check_format_version(
+                file.get(io.FORMAT_VERSION_ATTR),
+                path,
+                kind="view settings file",
+            )
+        except io.FileFormatError as error:
+            lib.show_load_error(self, path, error)
+            return
         disp_dlg = self.window.display_settings_dlg
         legacy_file = io.FORMAT_VERSION_ATTR not in file
         pixelsizes = self.pixelsizes

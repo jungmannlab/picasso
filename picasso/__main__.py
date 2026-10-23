@@ -3604,7 +3604,7 @@ def _spinna_compute_roi(
     """
     import os
     import numpy as np
-    from .io import load_yaml
+    from .io import FORMAT_VERSION_ATTR, check_format_version, load_yaml
 
     if apply_mask:
         masks: dict = {}
@@ -3614,6 +3614,11 @@ def _spinna_compute_roi(
             masks[target] = np.load(mask_paths[target])
             mask_path = os.path.splitext(mask_paths[target])[0] + ".yaml"
             mask_info[target] = load_yaml(mask_path)
+            check_format_version(
+                mask_info[target].get(FORMAT_VERSION_ATTR),
+                mask_path,
+                kind="mask",
+            )
         mask_dict = {"mask": masks, "info": mask_info}
     else:
         mask_dict = None

@@ -1818,6 +1818,9 @@ class StructureSimulator:
         elif mask is not None and mask_info is not None:
             # Load the ROI and mask attributes (nm; a mask written before
             # Picasso 1.0 stored its lateral extent in camera pixels)
+            io.check_format_version(
+                mask_info.get(io.FORMAT_VERSION_ATTR), kind="mask"
+            )
             if io.FORMAT_VERSION_ATTR not in mask_info:
                 from . import legacy
 

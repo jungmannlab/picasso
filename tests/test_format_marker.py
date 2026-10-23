@@ -324,3 +324,155 @@ def test_nanotron_model(qt_offscreen, tmp_path, monkeypatch):
         _assert_current(str(tmp_path / "model.yaml"), "nanotron")
     finally:
         window.close()
+
+
+# Files of a newer major format version are refused by every reader (a
+# newer Picasso changed the meaning of their content); a newer minor
+# version only adds what older readers can ignore.
+
+
+def _set_marker(path: str, version: str) -> None:
+    """Replace the format version that the marker of ``path`` records."""
+    if path.endswith(".txt"):
+        text = pathlib.Path(path).read_text()
+        text = text.replace(
+            f"{io.FORMAT_VERSION_ATTR} {io.FORMAT_VERSION}",
+            f"{io.FORMAT_VERSION_ATTR} {version}",
+        )
+        pathlib.Path(path).write_text(text)
+    elif path.endswith(".yaml"):
+        data = io.load_yaml(path)
+        data[io.FORMAT_VERSION_ATTR] = version
+        pathlib.Path(path).write_text(yaml.safe_dump(data))
+    else:
+        with h5py.File(path, "r+") as f:
+            if "metadata" in f.attrs:  # spline calibration
+                metadata = json.loads(f.attrs["metadata"])
+                metadata[io.FORMAT_VERSION_ATTR] = version
+                f.attrs["metadata"] = json.dumps(metadata)
+            else:
+                f.attrs[io.FORMAT_VERSION_ATTR] = version
+
+
+def _write_mask_npy(tmp_path) -> str:
+    locs_path = _write_locs(tmp_path)
+    mask = spinna.MaskGenerator(locs_path, binsize=200, sigma=300, ndim=2)
+    mask.generate_mask()
+    path = str(tmp_path / "mask.npy")
+    mask.save_mask(path)
+    return path
+
+
+# name -> (writer, loader, the file holding the marker, kind in the error)
+READERS = {
+    "locs": (_write_locs, io.load_locs, None, "localization file"),
+    "picks": (_write_picks, io.load_picks, None, "picks file"),
+    "drift": (_write_drift, io.load_drift, None, "drift file"),
+    "z calibration": (
+        _write_z_calibration,
+        io.load_calibration,
+        None,
+        "3D calibration",
+    ),
+    "lateral calibration": (
+        _write_lateral_calibration,
+        io.load_any_calibration,
+        None,
+        "calibration",
+    ),
+    "spline calibration": (
+        _write_spline_calibration,
+        io.load_spline_calibration,
+        None,
+        "spline calibration",
+    ),
+    "SPINNA mask": (_write_mask_npy, io.load_mask, ".yaml", "mask"),
+}
+
+
+class TestNewerFormatVersion:
+    def _write(self, name: str, tmp_path, version: str) -> str:
+        write, _, marker_ext, _ = READERS[name]
+        path = write(tmp_path)
+        marker_path = path
+        if marker_ext is not None:
+            marker_path = str(pathlib.Path(path).with_suffix(marker_ext))
+        _set_marker(marker_path, version)
+        return path
+
+    @pytest.mark.parametrize("name", READERS)
+    def test_newer_major_version_is_refused(self, name, tmp_path):
+        path = self._write(name, tmp_path, "2.0")
+        _, load, _, kind = READERS[name]
+        with pytest.raises(io.FileFormatError) as error:
+            load(path)
+        message = str(error.value)
+        assert f"{kind} format 2.0" in message
+        assert "Please update Picasso" in message
+
+    @pytest.mark.parametrize("name", READERS)
+    def test_newer_minor_version_loads(self, name, tmp_path):
+        path = self._write(name, tmp_path, "1.7")
+        _, load, _, _ = READERS[name]
+        load(path)
+
+    def test_check_format_version(self):
+        assert io.check_format_version(None) is None
+        assert io.check_format_version("1.0") == (1, 0)
+        assert io.check_format_version(b"1.3") == (1, 3)
+        with pytest.raises(io.FileFormatError, match="f.yaml is in the"):
+            io.check_format_version("2.0", "f.yaml", kind="picks file")
+        with pytest.raises(io.FileFormatError, match="MAJOR.MINOR"):
+            io.check_format_version("two", "f.yaml")
+
+    def test_3d_calibration_passed_to_zfit(self):
+        from picasso import zfit
+
+        calibration = {
+            "X Coefficients": [0.0, 1.0],
+            "Y Coefficients": [0.0, 1.0],
+            io.FORMAT_VERSION_ATTR: "2.0",
+            "Path": "calib.yaml",
+        }
+        with pytest.raises(io.FileFormatError, match="calib.yaml"):
+            zfit._calibration_in_nm(calibration, None)
+
+    def test_spinna_batch_masks(self, tmp_path):
+        path = self._write("SPINNA mask", tmp_path, "2.0")
+        with pytest.raises(io.FileFormatError, match="mask format 2.0"):
+            cli._spinna_compute_roi(
+                ["A"], True, {"A": path}, 2, None, None, None
+            )
+
+    def test_spinna_mask_info(self):
+        with pytest.raises(io.FileFormatError, match="mask format 2.0"):
+            spinna.StructureSimulator(
+                structure=spinna.Structure("s"),
+                N_structures=1,
+                le=1.0,
+                label_unc=5.0,
+                mask=np.ones((2, 2)) / 4,
+                mask_info={io.FORMAT_VERSION_ATTR: "2.0"},
+            )
+
+    def test_nanotron_model(self, qt_offscreen, tmp_path):
+        import joblib
+
+        from picasso.gui import nanotron as gui_nanotron
+
+        path = str(tmp_path / "model.sav")
+        joblib.dump({"a": "picklable stand-in for the classifier"}, path)
+        info_path = str(tmp_path / "model.yaml")
+        pathlib.Path(info_path).write_text(
+            yaml.safe_dump(
+                {"Classes": {0: "a", 1: "b"}, io.FORMAT_VERSION_ATTR: "2.0"}
+            )
+        )
+        window = gui_nanotron.Window()
+        try:
+            with pytest.raises(
+                io.FileFormatError, match="nanoTRON model format 2.0"
+            ):
+                window.read_model(path)
+        finally:
+            window.close()

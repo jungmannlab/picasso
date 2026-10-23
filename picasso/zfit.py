@@ -1009,6 +1009,11 @@ def _calibration_in_nm(calibration: dict, pixelsize: float | None) -> dict:
     a ValueError is raised.
     """
     if io.FORMAT_VERSION_ATTR in calibration:
+        io.check_format_version(
+            calibration[io.FORMAT_VERSION_ATTR],
+            calibration.get("Path", ""),
+            kind="3D calibration",
+        )
         return dict(calibration)
     if pixelsize is None:
         raise ValueError(

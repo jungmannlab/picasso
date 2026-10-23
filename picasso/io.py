@@ -61,6 +61,7 @@ __all__ = [
     "save_locs",
     "validate_locs",
     "get_format_version",
+    "check_format_version",
     "FORMAT_VERSION",
     "LOCS_FORMAT_VERSION",
     "MINIMUM_COLUMNS",
@@ -110,7 +111,7 @@ __all__ = [
     "export_3d_visp",
     # errors
     "NoMetadataFileError",
-    "LocsFormatError",
+    "FileFormatError",
     "MissingPixelsizeError",
     "PathTooLongError",
 ]
@@ -181,13 +182,15 @@ class NoMetadataFileError(FileNotFoundError):
     """Raised when a movie or localizations file has no metadata sidecar."""
 
 
-class LocsFormatError(ValueError):
-    """Raised when a localization file does not follow the Picasso
-    format: it lacks required columns or metadata keys, holds invalid
-    values, or was written in a newer, incompatible format version."""
+class FileFormatError(ValueError):
+    """Raised when a file does not follow the Picasso format: a
+    localization file that lacks required columns or metadata keys or
+    holds invalid values, or any file Picasso writes (localizations,
+    picks, drift, calibrations, ...) in a newer, incompatible format
+    version (see ``check_format_version``)."""
 
 
-class MissingPixelsizeError(LocsFormatError):
+class MissingPixelsizeError(FileFormatError):
     """Raised when a file written before Picasso 1.0 (lengths in camera
     pixels) is loaded or converted without the camera pixel size that
     converts it to nm: the file does not record it and none was passed.
@@ -796,11 +799,16 @@ def save_calibration(path: str, calibration: dict) -> None:
         _dump_yaml(calibration, f, default_flow_style=False)
 
 
-def _legacy_calibration_to_nm(calibration: dict, pixelsize, path: str) -> dict:
+def _legacy_calibration_to_nm(
+    calibration: dict, pixelsize, path: str, kind: str = "calibration"
+) -> dict:
     """``calibration`` in nm: converted with ``pixelsize`` if the file
     (``path``) was written before Picasso 1.0, i.e., lacks the format
-    marker, else unchanged. See ``picasso.legacy.calibration_to_nm``."""
+    marker, else unchanged, refusing a newer major format version (see
+    ``check_format_version``; ``kind`` names the file in the error). See
+    ``picasso.legacy.calibration_to_nm``."""
     if FORMAT_VERSION_ATTR in calibration:
+        check_format_version(calibration[FORMAT_VERSION_ATTR], path, kind=kind)
         return calibration
     from . import legacy
 
@@ -849,6 +857,9 @@ def load_calibration(path: str, pixelsize: float | None = None) -> dict:
     MissingPixelsizeError
         If the file was written before Picasso 1.0 and ``pixelsize`` is
         None.
+    FileFormatError
+        If the file is in a newer major format version, see
+        ``check_format_version``.
     """
     _check_path_length(path)
     with open(path, "r") as calibration_file:
@@ -869,7 +880,9 @@ def load_calibration(path: str, pixelsize: float | None = None) -> dict:
             "be a dictionary."
         )
 
-    calibration = _legacy_calibration_to_nm(calibration, pixelsize, path)
+    calibration = _legacy_calibration_to_nm(
+        calibration, pixelsize, path, kind="3D calibration"
+    )
     calibration["Path"] = path
     return calibration
 
@@ -954,13 +967,20 @@ def load_spline_calibration(path: str, pixelsize: float | None = None) -> dict:
         keys alongside it and ``path`` under ``"Path"``, which the
         metadata of the localizations fitted with it record (see
         ``localize.fit``).
+
+    Raises
+    ------
+    FileFormatError
+        If the file is in a newer major format version, see
+        ``check_format_version``.
     """
     _check_path_length(path)
     calibration = _read_spline_calibration(path)
-    if FORMAT_VERSION_ATTR not in calibration:
-        if pixelsize is None:
-            pixelsize = calibration.get("pixelsize")
-        calibration = _legacy_calibration_to_nm(calibration, pixelsize, path)
+    if FORMAT_VERSION_ATTR not in calibration and pixelsize is None:
+        pixelsize = calibration.get("pixelsize")
+    calibration = _legacy_calibration_to_nm(
+        calibration, pixelsize, path, kind="spline calibration"
+    )
     calibration["Path"] = path
     return calibration
 
@@ -1016,6 +1036,9 @@ def load_any_calibration(path: str, pixelsize: float | None = None) -> dict:
     MissingPixelsizeError
         If the file was written before Picasso 1.0 and ``pixelsize`` is
         None.
+    FileFormatError
+        If the file is in a newer major format version, see
+        ``check_format_version``.
     """
     _check_path_length(path)
     if _is_hdf5_calibration(path):
@@ -2071,6 +2094,14 @@ def load_mask(path: str) -> tuple[lib.FloatArray2D, dict]:
         The loaded mask array.
     info : dict
         A dictionary containing metadata about the mask.
+
+    Raises
+    ------
+    TypeError
+        If the file is not a mask saved by SPINNA.
+    FileFormatError
+        If the mask is in a newer major format version, see
+        ``check_format_version``.
     """
     _check_path_length(path)
     mask = np.float64(np.load(path))
@@ -2083,6 +2114,7 @@ def load_mask(path: str) -> tuple[lib.FloatArray2D, dict]:
         raise TypeError("Incorrect file loaded.")
     if "SPINNA" not in value:
         raise TypeError("Please load a mask provided by Picasso SPINNA")
+    check_format_version(info.get(FORMAT_VERSION_ATTR), new_path, kind="mask")
     return mask, info
 
 
@@ -2186,6 +2218,9 @@ def load_picks(
     --------
     >>> from picasso import io
     >>> picks, shape, diameter = io.load_picks("movie_locs_picks.yaml")
+    FileFormatError
+        If the file is in a newer major format version, see
+        ``check_format_version``.
     """
     _check_path_length(path)
     assert path.endswith(".yaml"), "Picks should be stored in a .yaml file."
@@ -2204,6 +2239,9 @@ def load_picks(
     else:
         raise ValueError("Unrecognized picks file")
 
+    check_format_version(
+        regions.get(FORMAT_VERSION_ATTR), path, kind="picks file"
+    )
     if FORMAT_VERSION_ATTR not in regions:
         from . import legacy
 
@@ -2467,6 +2505,9 @@ def load_drift(path: str, pixelsize: float | None = None) -> pd.DataFrame:
     MissingPixelsizeError
         If the file was written before Picasso 1.0 and ``pixelsize`` is
         None.
+    FileFormatError
+        If the file is in a newer major format version, see
+        ``check_format_version``.
     """
     _check_path_length(path)
     if not path.endswith(".txt"):
@@ -2479,7 +2520,10 @@ def load_drift(path: str, pixelsize: float | None = None) -> pd.DataFrame:
     drift_df = pd.DataFrame(drift[:, :2], columns=["x", "y"])
     if drift.shape[1] == 3:
         drift_df["z"] = drift[:, 2]
-    if _drift_file_version(path) is None:
+    version = _drift_file_version(path)
+    if version is not None:
+        _refuse_newer_format(version, path, "drift file")
+    else:
         from . import legacy
 
         if pixelsize is None:
@@ -5820,7 +5864,7 @@ def _parse_format_version(value, path: str = "") -> tuple[int, int]:
         value = value.decode("utf-8", errors="replace")
     match = re.fullmatch(r"\s*(\d+)\.(\d+)\s*", str(value))
     if match is None:
-        raise LocsFormatError(
+        raise FileFormatError(
             f"{path or 'The file'} records the format version {value!r}, "
             "which is not of the form MAJOR.MINOR."
         )
@@ -5849,7 +5893,7 @@ def get_format_version(path: str) -> tuple[int, int] | None:
 
     Raises
     ------
-    LocsFormatError
+    FileFormatError
         If the recorded version is not of the form ``"MAJOR.MINOR"``.
 
     Examples
@@ -5866,13 +5910,89 @@ def get_format_version(path: str) -> tuple[int, int] | None:
     return _parse_format_version(value, path)
 
 
+def check_format_version(
+    version, path: str = "", *, kind: str = "file"
+) -> tuple[int, int] | None:
+    """Check that Picasso can read a file of the given format version.
+
+    Every file Picasso writes records the version of its format (see
+    ``FORMAT_VERSION_ATTR``). A file of a newer major version was
+    written by a newer Picasso that changed the meaning of its content,
+    so reading it as the current format would give wrong results. The
+    loaders of Picasso run this check; call it when reading such a file
+    yourself, e.g., a .yaml file loaded with ``load_yaml``.
+
+    Parameters
+    ----------
+    version : str, bytes or None
+        The version recorded in the file, ``"MAJOR.MINOR"``, e.g., the
+        value of the key ``picasso_format`` of a .yaml file. None for
+        files without the marker (written before Picasso 1.0).
+    path : str, optional
+        The file, named in the error. Default is "", i.e., not named.
+    kind : str, optional
+        What the file is, named in the error, e.g., "picks file".
+        Default is "file".
+
+    Returns
+    -------
+    version : tuple of int or None
+        ``(major, minor)``, e.g. ``(1, 0)``. None if ``version`` is
+        None.
+
+    Raises
+    ------
+    FileFormatError
+        If the version is of a newer major version than
+        ``FORMAT_VERSION``, or not of the form ``"MAJOR.MINOR"``.
+
+    Examples
+    --------
+    >>> from picasso import io
+    >>> picks = io.load_yaml("movie_locs_picks.yaml")
+    >>> io.check_format_version(
+    ...     picks.get(io.FORMAT_VERSION_ATTR),
+    ...     "movie_locs_picks.yaml",
+    ...     kind="picks file",
+    ... )
+    (1, 0)
+    """
+    if version is None:
+        return None
+    version = _parse_format_version(version, path)
+    _refuse_newer_format(version, path, kind)
+    return version
+
+
+def _refuse_newer_format(
+    version: tuple[int, int],
+    path: str,
+    kind: str,
+    writer: str | None = None,
+) -> None:
+    """Raise ``FileFormatError`` if the format ``version`` of the
+    ``kind`` file ``path`` (written by Picasso ``writer``, if known) is
+    of a newer major version than ``FORMAT_VERSION``."""
+    supported = _parse_format_version(FORMAT_VERSION)
+    if version[0] <= supported[0]:
+        return
+    written_by = f", written by Picasso {writer}" if writer else ""
+    raise FileFormatError(
+        f"{path or 'The file'} is in the {kind} format "
+        f"{version[0]}.{version[1]}{written_by}. This version of "
+        f"Picasso ({__version__}) reads the formats up to "
+        f"{supported[0]}.x. Please update Picasso to open the file. "
+        f"See {docs_url('files.html#files-format-versions')}"
+    )
+
+
 def _check_format_version(path: str) -> tuple[int, int] | None:
     """Format version of the localization file ``path`` (None for files
     written before Picasso 1.0), refusing a newer major version.
 
     Raises
     ------
-    LocsFormatError
+    FileFormatError
         If the file is in a format of a newer major version than
         ``LOCS_FORMAT_VERSION``, i.e., written by a newer Picasso that
         changed the meaning of its content.
@@ -5881,19 +6001,10 @@ def _check_format_version(path: str) -> tuple[int, int] | None:
     if FORMAT_VERSION_ATTR not in attrs:
         return None
     version = _parse_format_version(attrs[FORMAT_VERSION_ATTR], path)
-    supported = _parse_format_version(LOCS_FORMAT_VERSION)
-    if version[0] > supported[0]:
-        writer = attrs.get(PICASSO_VERSION_ATTR)
-        if isinstance(writer, bytes):
-            writer = writer.decode("utf-8", errors="replace")
-        written_by = f", written by Picasso {writer}" if writer else ""
-        raise LocsFormatError(
-            f"{path} is in the localization file format "
-            f"{version[0]}.{version[1]}{written_by}. This version of "
-            f"Picasso ({__version__}) reads the formats up to "
-            f"{supported[0]}.x. Please update Picasso to open the file. "
-            f"See {docs_url('files.html#files-format-versions')}"
-        )
+    writer = attrs.get(PICASSO_VERSION_ATTR)
+    if isinstance(writer, bytes):
+        writer = writer.decode("utf-8", errors="replace")
+    _refuse_newer_format(version, path, "localization file", writer)
     return version
 
 
@@ -6023,9 +6134,9 @@ def validate_locs(
 
     Raises
     ------
-    LocsFormatError
+    FileFormatError
         If a column or a metadata key is missing, or if frames are
-        negative. ``MissingPixelsizeError`` (a ``LocsFormatError``) if
+        negative. ``MissingPixelsizeError`` (a ``FileFormatError``) if
         ``Pixelsize`` is the only thing missing, so GUIs can ask for it.
     """
     source = path if path is not None else "The localizations"
@@ -6052,7 +6163,7 @@ def validate_locs(
             f"{docs_url('files.html#files-minimum-requirements')}"
         )
     if problems:
-        raise LocsFormatError(
+        raise FileFormatError(
             f"{source} lacks {' and '.join(problems)}. Localization files "
             "need the columns frame, x, y, lpx and lpy (positions and "
             "precisions in nm) and the metadata keys Width, Height and "
@@ -6063,7 +6174,7 @@ def validate_locs(
     # unsigned frames, as Picasso writes them, need no check
     n_negative = 0 if frame.dtype.kind == "u" else np.count_nonzero(frame < 0)
     if n_negative:
-        raise LocsFormatError(
+        raise FileFormatError(
             f"{source} holds {n_negative:,} localizations with negative "
             "frame numbers; frames count from 0 for the first frame."
         )
@@ -6243,7 +6354,7 @@ def load_locs(
     The file is checked against the Picasso format: a file of a newer,
     incompatible format version (see ``get_format_version``) and a file
     without the required columns or metadata keys (see
-    ``validate_locs``) raise ``LocsFormatError``. Files written before
+    ``validate_locs``) raise ``FileFormatError``. Files written before
     Picasso 1.0 are brought to the current format: their lengths,
     stored in camera pixels, are converted to nm with the ``Pixelsize``
     of the metadata or ``pixelsize`` (see ``picasso.legacy``), and the
@@ -6287,7 +6398,7 @@ def load_locs(
     KeyError
         If the "locs" dataset is not found in the HDF5 file, indicating
         that the file does not contain the expected localization data.
-    LocsFormatError
+    FileFormatError
         If the file is of a newer major format version, lacks required
         columns or metadata keys, or holds negative frame numbers.
     MissingPixelsizeError
@@ -6420,7 +6531,7 @@ def load_filter(
 
     Raises
     ------
-    LocsFormatError
+    FileFormatError
         If the file is of a newer major format version.
     MissingPixelsizeError
         If the file was written before Picasso 1.0 and neither its

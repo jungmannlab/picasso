@@ -1177,7 +1177,7 @@ class TestLocsFileChecks:
                 io.PICASSO_VERSION_ATTR: np.bytes_(b"9.9.0"),
             },
         )
-        with pytest.raises(io.LocsFormatError, match="Picasso 9.9.0"):
+        with pytest.raises(io.FileFormatError, match="Picasso 9.9.0"):
             io.load_locs(path)
 
     def test_dark_times_of_an_unknown_version_are_flagged(self, caplog):

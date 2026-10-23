@@ -84,6 +84,7 @@
   "save_locs",
   "validate_locs",
   "get_format_version",
+  "check_format_version",
   "FORMAT_VERSION",
   "LOCS_FORMAT_VERSION",
   "MINIMUM_COLUMNS",
@@ -128,7 +129,7 @@
   "export_xyz_chimera",
   "export_3d_visp",
   "NoMetadataFileError",
-  "LocsFormatError",
+  "FileFormatError",
   "MissingPixelsizeError",
   "PathTooLongError"
  ],

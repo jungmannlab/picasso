@@ -535,3 +535,61 @@ class TestConvertUnitsDialog:
             f.create_dataset("metadata", data=json.dumps(_info(42.0)))
         assert convert_units.metadata_pixelsize([path]) == 42.0
         assert convert_units.metadata_pixelsize(["nothing.yaml"]) is None
+
+
+class TestNewerFormatVersion:
+    """Files of a newer major format version are refused with a message
+    instead of being read as the current format."""
+
+    @pytest.fixture
+    def reported(self, monkeypatch):
+        messages = []
+        monkeypatch.setattr(
+            QtWidgets.QMessageBox,
+            "critical",
+            lambda parent, title, text, *a, **k: messages.append(text),
+        )
+        return messages
+
+    def test_dropped_fov_txt(self, window, tmp_path, reported):
+        path = str(tmp_path / "fov.txt")
+        gui_render.save_fov_file(path, [130.0, 260.0, 1300.0, 1300.0])
+        text = (
+            open(path)
+            .read()
+            .replace(
+                f"{io.FORMAT_VERSION_ATTR} {io.FORMAT_VERSION}",
+                f"{io.FORMAT_VERSION_ATTR} 2.0",
+            )
+        )
+        open(path, "w").write(text)
+        viewport = window.view.viewport
+        window.view.load_single_txt(path)
+        assert len(reported) == 1
+        assert "field of view file format 2.0" in reported[0]
+        assert window.view.viewport == viewport
+
+    def test_view_settings(self, window, reported):
+        viewport = window.view.viewport
+        window.view.load_screenshot(
+            {
+                io.FORMAT_VERSION_ATTR: "2.0",
+                gui_render.FOV_KEY: [130.0, 260.0, 1300.0, 1300.0],
+                gui_render.ZOOM_KEY: 10.0,
+            },
+            "view.yaml",
+        )
+        assert len(reported) == 1
+        assert "view settings file format 2.0" in reported[0]
+        assert window.view.viewport == viewport
+
+    def test_picks(self, window, tmp_path, reported):
+        path = str(tmp_path / "picks.yaml")
+        io.save_picks(path, [(100.0, 200.0)], "Circle", size=150.0)
+        picks = io.load_yaml(path)
+        picks[io.FORMAT_VERSION_ATTR] = "2.0"
+        open(path, "w").write(yaml.safe_dump(picks))
+        window.view.load_picks(path)
+        assert len(reported) == 1
+        assert "picks file format 2.0" in reported[0]
+        assert window.view._picks == []

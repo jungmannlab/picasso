@@ -3468,7 +3468,7 @@ def _confirm_overwrite(parent: QtWidgets.QWidget | None, path: str) -> bool:
 #: What ``picasso.io``'s loaders raise for a file that cannot be opened:
 #: a missing file or metadata (``io.NoMetadataFileError``), a missing
 #: dataset (KeyError) and a file of the wrong kind or format
-#: (``io.LocsFormatError`` and other ValueErrors), see
+#: (``io.FileFormatError`` and other ValueErrors), see
 #: ``show_load_error``.
 FILE_LOAD_ERRORS = (OSError, KeyError, ValueError)
 
