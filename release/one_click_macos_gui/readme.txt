@@ -21,6 +21,16 @@ How to install
 
 Alternatively, you can create the dmg file yourself by cloning our GitHub repo and running the bash script picasso/release/one_click_macos_gui/create_macos_dmg.sh from the Terminal. Note that you must have conda installed on your computer.
 
+Using Picasso from the Terminal
+-------------------------------
+
+The installer also includes Picasso's command line (e.g., "picasso localize", "picasso link"; see https://picassosr.readthedocs.io/en/latest/cmd.html), but it does not put the "picasso" command on the PATH. To add it, run once in the Terminal (asks for your password):
+
+    sudo mkdir -p /usr/local/bin
+    sudo ln -sf /Applications/Picasso.app/Contents/MacOS/picasso /usr/local/bin/picasso
+
+and open a new Terminal window. The link points into Picasso.app, so it keeps working after updates; "sudo rm /usr/local/bin/picasso" removes it. Without the link, call /Applications/Picasso.app/Contents/MacOS/picasso instead of "picasso".
+
 How to update
 -------------
 

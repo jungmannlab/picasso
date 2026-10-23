@@ -391,7 +391,9 @@ The ``picasso`` command is not found
 - **pip:** activate the environment Picasso is installed in.
 - **Windows one-click installer:** the installer adds Picasso to the
   ``PATH``; open a new terminal after installing.
-- **macOS one-click installer:** ``picasso`` is not on the ``PATH``; run
+- **macOS one-click installer:** ``picasso`` is not on the ``PATH``; add it
+  with a link in ``/usr/local/bin``, see :ref:`installation
+  <installation-command-line>`, or run
   ``/Applications/Picasso.app/Contents/MacOS/picasso``.
 - **Linux:** ``release/create_linux_shortcuts.py`` puts ``picasso`` into
   ``~/.local/bin``, see :doc:`getting-started/installation`.

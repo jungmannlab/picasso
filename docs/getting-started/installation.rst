@@ -32,6 +32,32 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
       and want the accelerated tools. On machines without one, CUDA-only
       options are hidden.
 
+      .. _installation-command-line:
+
+      .. rubric:: Command line
+
+      The installers also include Picasso's :doc:`command line </cmd>`
+      (``picasso localize``, ``picasso link``, ...):
+
+      - **Windows:** the installer adds the installation folder (e.g.,
+        ``C:\Picasso``) to the ``PATH``, so ``picasso`` works in any
+        Command Prompt or PowerShell window opened after installing.
+        Uninstalling removes it again.
+      - **macOS:** ``picasso`` is not on the ``PATH`` after dragging the apps
+        to Applications. To add it, run once in the Terminal (asks for your
+        password):
+
+        .. code-block:: bash
+
+           sudo mkdir -p /usr/local/bin
+           sudo ln -sf /Applications/Picasso.app/Contents/MacOS/picasso /usr/local/bin/picasso
+
+        and open a new Terminal window. The link points into Picasso.app, so
+        it keeps working after updates; ``sudo rm /usr/local/bin/picasso``
+        removes it. Without the link, call
+        ``/Applications/Picasso.app/Contents/MacOS/picasso`` instead of
+        ``picasso``.
+
    .. tab-item:: PyPI
       :sync: pypi
 

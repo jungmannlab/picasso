@@ -19,6 +19,8 @@ How to install
 [!] Camera config and plugins belong in C:\Users\<your user name>\.picasso, not in the installation folder, see "Adding camera configuration and plugins" below.
 [!] Windows Safety features and Windows Defender may ask multiple times for permission during the installation and download.
 
+The installer adds the installation folder to the PATH, so Picasso's command line (e.g., "picasso localize", "picasso link"; see https://picassosr.readthedocs.io/en/latest/cmd.html) works in any Command Prompt or PowerShell window opened after installing. Uninstalling removes it from the PATH again.
+
 How to update
 -------------
 

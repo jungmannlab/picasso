@@ -285,8 +285,10 @@ watcher's logfile shows its exit code.
 
 The custom command can call Picasso's command line (see :doc:`cmd`), which
 the Windows one-click installer puts on the ``PATH``; with the macOS one-click
-installer, call ``/Applications/Picasso.app/Contents/MacOS/picasso`` instead
-of ``picasso``. Some example commands would then be:
+installer, add ``picasso`` to the ``PATH`` as described in
+:ref:`installation-command-line`, or call
+``/Applications/Picasso.app/Contents/MacOS/picasso`` instead of ``picasso``.
+Some example commands would then be:
 
 - ``picasso undrift $LOCS`` for drift correction;
 - ``picasso link $LOCS`` for linking localizations;

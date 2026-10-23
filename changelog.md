@@ -148,6 +148,7 @@ The [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html)
 - The spatial index stored in localization .hdf5 files (`/render_index`). See the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#spatial-index).
 - The user settings file (`~/.picasso/settings.yaml`) is no longer lost when it cannot be read. Also, the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#user-settings-file) has been added.
 - The Windows one-click installer's *GPU* edition is renamed *CUDA*, similarly the installed folders were renamed etc.
+- Fixed: the `picasso` command added to the `PATH` by the Windows one-click installer was found only after signing out and in again, and uninstalling left it on the `PATH`. With the macOS one-click installer, `picasso` can be added to the Terminal, see [documentation](https://picassosr.readthedocs.io/en/latest/getting-started/installation.html#installation-command-line).
 - Fixed: combining localizations whose columns differ (e.g. with and without `net_gradient`, spherical and elliptical, least-squares and MLE fits, or 2D and 3D data) silently deleted all localizations of the files lacking a column when saving. `picasso join`, RESI, and the multi-channel saves of Render (picked localizations, also per pick) and its 3D window now drop the columns not all of them have, with a warning.
 - Fixed Nanotron's PyQt6 information dialogs.
 - Fixed: Design's plate export with colors gave an empty well the color of the well before it, and failed if the first well of a plate was empty.

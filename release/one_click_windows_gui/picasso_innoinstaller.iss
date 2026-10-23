@@ -25,6 +25,11 @@ ArchitecturesInstallIn64BitMode=x64compatible
 ; entry (picasso.exe carries the same icon, see create_installer_windows.bat)
 SetupIconFile=..\logos\picasso.ico
 UninstallDisplayIcon={app}\picasso.exe
+; {app} is added to the system Path (see [Registry]); tell running programs,
+; notably Explorer, to reload it, so that a newly opened terminal finds
+; picasso without signing out first. The uninstaller does the same after
+; removing the entry again (see RemoveFromPath).
+ChangesEnvironment=yes
 
 [Files]
 Source: "{#DISTDIR}\picasso\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
@@ -91,4 +96,54 @@ begin
   Result := Pos(';' + UpperCase(ParamExpanded) + ';', ';' + UpperCase(OrigPath) + ';') = 0;
   if Result = True then
      Result := Pos(';' + UpperCase(ParamExpanded) + '\;', ';' + UpperCase(OrigPath) + ';') = 0;
+end;
+
+// Remove Dir (with or without \ ending, any case) from the system Path, so
+// that uninstalling does not leave a stale entry behind
+procedure RemoveFromPath(Dir: string);
+var
+  OrigPath, NewPath, Rest, Entry: string;
+  P: Integer;
+  Found: Boolean;
+begin
+  if not RegQueryStringValue(HKEY_LOCAL_MACHINE,
+    'SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
+    'Path', OrigPath)
+  then
+    exit;
+  Dir := UpperCase(RemoveBackslash(Dir));
+  NewPath := '';
+  Rest := OrigPath;
+  Found := False;
+  while Rest <> '' do
+  begin
+    P := Pos(';', Rest);
+    if P = 0 then
+    begin
+      Entry := Rest;
+      Rest := '';
+    end else
+    begin
+      Entry := Copy(Rest, 1, P - 1);
+      Rest := Copy(Rest, P + 1, Length(Rest));
+    end;
+    if UpperCase(RemoveBackslash(Entry)) = Dir then
+      Found := True
+    else if Entry <> '' then
+    begin
+      if NewPath <> '' then
+        NewPath := NewPath + ';';
+      NewPath := NewPath + Entry;
+    end;
+  end;
+  if Found then
+    RegWriteExpandStringValue(HKEY_LOCAL_MACHINE,
+      'SYSTEM\CurrentControlSet\Control\Session Manager\Environment',
+      'Path', NewPath);
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    RemoveFromPath(ExpandConstant('{app}'));
 end;
