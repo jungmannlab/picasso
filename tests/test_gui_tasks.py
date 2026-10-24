@@ -43,7 +43,7 @@ def test_result_is_delivered_on_gui_thread(qt_offscreen, parent):
 
     def fn(progress):
         threads.append(threading.current_thread())
-        for i in progress.get_iterator(0, 10):
+        for i in range(10):
             progress.set_value(i + 1)
         return 42
 
@@ -183,18 +183,17 @@ def test_input_is_blocked_while_running(qt_offscreen, parent):
     assert clicks == [1]
 
 
-def test_phases_and_callbacks_drive_one_dialog(qt_offscreen, parent):
+def test_phases_drive_one_dialog(qt_offscreen, parent):
     seen = []
 
     def fn(progress):
-        first = progress.callback("First phase", 4)
-        second = progress.callback("Second phase", 2)
+        lib.start_phase(progress, "First phase", 4)
         for i in range(4):
-            first(i + 1)
+            progress.set_value(i + 1)
+        lib.start_phase(progress, "Second phase", 2)
         for i in range(2):
-            second(i + 1)
-        progress.zero_progress("Third phase")
-        progress.setMaximum(0)
+            progress.set_value(i + 1)
+        lib.start_phase(progress, "Third phase", 0)
 
     task = lib.run_task(fn, "Start", parent, maximum=0)
     task.progress.phase_changed.connect(seen.append)
@@ -208,11 +207,12 @@ def test_task_progress_works_with_progress_consumers(qt_offscreen, parent):
     results = []
 
     def fn(progress):
-        assert lib.normalize_progress(progress) is progress
-        progress.setMaximum(5)
-        for i in progress.get_iterator(0, 5):
-            progress.set_value(i + 1)
-        progress.close()
+        assert isinstance(progress, lib.Progress)
+        with lib.tracked_progress(progress) as tracker:
+            assert tracker is progress
+            lib.start_phase(tracker, "Working", 5)
+            for i in range(5):
+                tracker.set_value(i + 1)
         return progress.value()
 
     task = lib.run_task(fn, "Working", parent, results.append)
@@ -234,3 +234,39 @@ def test_callback_can_start_the_next_task(qt_offscreen, parent):
     _wait_until(qt_offscreen, lambda: len(order) == 2)
     _wait_until(qt_offscreen, lambda: not lib_qt._running_tasks)
     assert order == ["first", "second"]
+
+
+def test_progress_dialog_sounds_once_after_all_phases(
+    qt_offscreen, parent, monkeypatch
+):
+    """A function reporting several phases to a plain ProgressDialog
+    must not trigger the finish sound when its first phase is done, only
+    when the caller closes the dialog."""
+    sounds = []
+    monkeypatch.setattr(lib_qt.notifications, "notify_finished", sounds.append)
+    dialog = lib_qt.ProgressDialog("Working", 0, 0, parent)
+    lib.start_phase(dialog, "First phase", 2)
+    dialog.set_value(2)
+    lib.start_phase(dialog, "Second phase", 3)
+    dialog.set_value(3)
+    assert sounds == []
+    dialog.close()
+    assert len(sounds) == 1
+
+
+def test_progress_dialog_stays_up_between_phases(qt_offscreen, parent):
+    """Qt's auto-reset hid a plain ProgressDialog whenever a phase reached
+    its maximum, so the next phase of the same function ran without a
+    (modal) dialog."""
+    dialog = lib_qt.ProgressDialog("Working", 0, 0, parent)
+    dialog.show()
+    lib.start_phase(dialog, "First phase", 2)
+    dialog.set_value(2)
+    assert dialog.value() == 2  # not reset to -1
+    assert dialog.isVisible()
+    lib.start_phase(dialog, "Second phase", 0)
+    dialog.set_value(5)  # a busy phase reporting a count
+    assert "Estimated time" not in dialog.labelText()
+    assert dialog.isVisible()
+    dialog.close()
+    assert not dialog.isVisible()

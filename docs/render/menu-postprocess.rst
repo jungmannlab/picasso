@@ -119,12 +119,13 @@ distance between them (250 nm by default).
    :icon: code
    :class-container: api-example
 
-   ``spacing`` is in camera pixels.
+   ``spacing`` is in nm (250 nm by default). The returned metadata has the
+   new field of view.
 
    .. code-block:: python
 
       locs, info = lib.unfold_localizations_square(
-          locs, info, n_square=10, spacing=250 / pixelsize
+          locs, info, n_square=10, spacing=250.0
       )
 
 
@@ -155,19 +156,21 @@ channel with the same parameters. Channels that are already linked are skipped.
    :icon: code
    :class-container: api-example
 
-   ``r_max`` is in camera pixels. ``compute_dark_times`` adds the ``dark``
-   column to linked localizations.
+   ``r_max`` is in nm (10 nm by default). ``compute_dark_times`` adds the
+   ``dark`` column to linked localizations.
 
    .. code-block:: python
 
-      from picasso import io, lib, postprocess
+      from picasso import io, postprocess
 
       locs, info = io.load_locs("movie_locs.hdf5")
-      pixelsize = lib.get_from_metadata(info, "Pixelsize")
 
-      linked = postprocess.link(locs, info, r_max=10 / pixelsize, max_dark_time=3)
-      linked = postprocess.compute_dark_times(linked)
+      linked, linked_info = postprocess.link(
+          locs, info, r_max=10.0, max_dark_time=3
+      )
+      linked, linked_info = postprocess.compute_dark_times(linked, linked_info)
       print(linked["len"].mean(), linked["dark"].mean())   # frames
+      io.save_locs("movie_locs_link.hdf5", linked, linked_info)
 
 
 .. _render-select-central-frames:
@@ -196,8 +199,8 @@ always end up in separate events.
 
    .. code-block:: python
 
-      cores = postprocess.select_binding_event_cores(
-          locs, r_max=10 / pixelsize, max_dark_time=3, min_n_locs=3
+      cores, cores_info = postprocess.select_binding_event_cores(
+          locs, info, r_max=10.0, max_dark_time=3, min_n_locs=3
       )
 
 
@@ -211,19 +214,214 @@ selected, the alignment will be via the center of mass of the picks;
 otherwise, redundant cross-correlation (RCC, see :ref:`render-rcc`) will be
 used (always 2D only).
 
+.. _render-align-non-overlapping:
+
+.. rubric:: Localizations outside the overlap
+
+Large shifts can move parts of a channel to where the other channels have no
+localizations By default, all localizations are kept. To remove the localizations
+outside the region where all aligned channels overlap, set ``Keep
+non-overlapping after alignment`` to ``False`` in the ``Render`` section of
+the :ref:`user settings <user-settings-file>`. The overlap is the
+intersection of the rectangles spanned by the x and y coordinates of each
+channel's localizations; z is not considered. If the aligned channels do not
+overlap at all, all localizations are kept and a warning is shown.
+
 .. dropdown:: Python
    :icon: code
    :class-container: api-example
 
-   The circle size of ``align_from_picked`` is the diameter.
+   ``align`` finds the shifts by RCC (``method="rcc"``, the default) or
+   from picked localizations (``method="picked"``), like the menu entry; the
+   circle size is the diameter. Pass ``keep_non_overlapping=False`` to remove
+   the localizations outside the overlap of the aligned channels;
+   ``remove_non_overlapping_locs`` does the same for channels aligned
+   otherwise, and ``overlap_region`` returns the overlap. The metadata of
+   each aligned channel records the shift subtracted from it.
 
    .. code-block:: python
 
-      aligned = postprocess.align([locs_ch1, locs_ch2], [info_ch1, info_ch2])   # RCC
-      aligned = postprocess.align_from_picked(
+      aligned, aligned_infos = postprocess.align(
+          [locs_ch1, locs_ch2], [info_ch1, info_ch2]
+      )  # RCC
+      aligned, aligned_infos = postprocess.align(
           [locs_ch1, locs_ch2], [info_ch1, info_ch2],
-          picks=picks, pick_shape="Circle", pick_size=2 * radius,
+          method="picked", picks=picks, pick_shape="Circle", pick_size=2 * radius,
       )
+      # remove the localizations outside the overlap of the channels and
+      # get the shift of each channel (nm)
+      aligned, aligned_infos, (shift_x, shift_y) = postprocess.align(
+          [locs_ch1, locs_ch2], [info_ch1, info_ch2],
+          keep_non_overlapping=False, return_shifts=True,
+      )
+
+
+.. _render-stitch-tiles:
+
+Stitch tiles
+------------
+
+Stitches tiles recorded at different stage positions into one dataset. A
+large field of view is often imaged as a grid of tiles, all with the same
+camera, so the localizations of every tile are in the same camera frame: loaded
+together, the tiles lie on top of each other, although neighboring tiles only
+share a few microns. Stitching translates each tile to its place and merges
+the tiles.
+
+#. Load the tiles (one file per tile and target) and run ``Postprocess`` >
+   ``Stitch tiles...``.
+#. The table lists the loaded channels with their stage positions (µm), read
+   from the Micro-Manager metadata (``XPositionUm`` and ``YPositionUm``) by
+   default. If you know the positions, e.g., for data acquired with other
+   software, you can enter or correct them in the table. Channels
+   recorded at the same stage position, e.g., the targets of an
+   Exchange-PAINT experiment, get the same **Tile** number and are aligned
+   together. The **Target** number says which channels of different tiles
+   are merged into one channel (by default, the n-th channel of each tile).
+   Untick **Align** to leave a channel out of the alignment, e.g., a sparse
+   target.
+#. Choose the **Initial positions**:
+
+   - *Stage positions*: from the metadata. The **Stage orientation** says
+     how the stage axes run in the image, see
+     :ref:`render-stitch-stage-orientation`; *Automatic* tries all eight
+     possibilities and takes the one whose overlaps match best. Moves made
+     with the Move tool are undone, i.e., the stage positions alone place
+     the tiles.
+   - *Current positions*: where the channels are now, e.g., after placing
+     them roughly with the :ref:`Move tool <render-move>`. **Use this if the
+     files contain no stage positions from Micro-Manager**, see
+     :ref:`render-stitch-without-stage-positions`.
+
+#. Click ``OK``. Each pair of overlapping tiles is matched by
+   cross-correlating the overlap within the **Search radius** (the stage
+   positions are typically off by a few microns) and refined to sub-pixel
+   precision by pairing nearest neighbors. The offsets of all pairs are
+   combined, and pairs that disagree with the others are dropped.
+
+The tiles are replaced by one stitched channel per target, named
+``<first tile>_stitched.hdf5``; save them with ``File`` > ``Save
+localizations``. A summary lists the stage orientation found and, for each
+pair of overlapping tiles, whether it was used and how well it agrees with
+the final positions (residual, nm).
+
+.. _render-stitch-without-stage-positions:
+
+.. rubric:: Without stage positions
+
+If the files contain no stage positions, *Stage positions* cannot be chosen
+in the dialog. This happens when the data were not acquired with
+Micro-Manager, or when the Micro-Manager metadata were not saved with the
+localizations (see the user setting *Save Micro-Manager metadata*).
+
+If you know the stage positions (e.g., from the acquisition software), you
+use them rather than relying on the manual pre-alignment. Enter the stage
+positions in the **Stage x** and **Stage y** columns of the table (µm). Once every
+channel has one, *Stage positions* is chosen and stitching works as with
+Micro-Manager data.
+
+Otherwise, the tiles lie on top of each other. Stitching only searches within
+the **Search radius** around the current positions, so it cannot find the
+tiles' places on its own. Place the tiles by hand first:
+
+#. Select the :ref:`Move tool <render-move>` (:kbd:`Ctrl+G`).
+#. In ``Tools settings`` (:kbd:`Ctrl+T`), select the channels of one tile.
+   With several targets per tile, select all of them so that they move
+   together.
+#. Drag the tile to its approximate place next to its neighbors. An accuracy
+   of a few microns is enough, as long as it is within the search radius.
+   Repeat for every tile except one, which stays where it is.
+#. Run ``Postprocess`` > ``Stitch tiles...`` with *Current positions*. Check
+   the **Tile** numbers in the table: without stage positions, every channel
+   is its own tile, so give the channels of one tile the same number.
+
+.. note::
+
+   Only moves made with the Move tool count as the current positions. Shifts
+   applied otherwise, e.g., by ``Apply expression to localizations`` or
+   ``Align channels``, are not taken into account.
+
+
+.. _render-stitch-stage-orientation:
+
+.. rubric:: Stage orientation
+
+The stage reports its position in its own X and Y axes, while the tiles are
+placed in the image's x and y axes (x to the right, y down). How the two
+relate depends on how the camera is mounted: the image may be mirrored or
+rotated by 90° relative to the stage. The orientation tells in which
+direction of the image a tile lies whose stage X (or Y) position is larger
+than its neighbor's. For example, with *stage X → left, stage Y → up*, of two
+tiles side by side the one at the larger stage X is the left one, and of two
+tiles above each other the one at the larger stage Y is the upper one.
+
+*Automatic* (the default) tries all eight orientations and takes the one
+whose overlaps match best; the summary after stitching shows the one found.
+Choose one only if this fails, e.g., when the tiles overlap little or contain
+few localizations, and keep it for later data from the same microscope.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 20
+
+   * - Orientation in Render
+     - ``picasso stitch --orientation``
+   * - stage X → right, stage Y → down
+     - ``"x, y"``
+   * - stage X → left, stage Y → down
+     - ``"-x, y"``
+   * - stage X → right, stage Y → up
+     - ``"x, -y"``
+   * - stage X → left, stage Y → up
+     - ``"-x, -y"``
+   * - stage X → down, stage Y → right
+     - ``"y, x"``
+   * - stage X → down, stage Y → left
+     - ``"-y, x"``
+   * - stage X → up, stage Y → right
+     - ``"y, -x"``
+   * - stage X → up, stage Y → left
+     - ``"-y, -x"``
+
+
+Options:
+
+- **Correct z offsets** (3D data): each tile is also shifted in z to match
+  its neighbors in the overlaps.
+- **Cut overlaps at the seams**: each overlap keeps the localizations of only
+  the tile whose center is closest, so no molecule is counted twice.
+  Otherwise, overlaps contain the localizations of all tiles at double
+  density.
+- **Offset frames per tile**: the frames of each tile are offset by the
+  frames of the tiles acquired before it (in the order of the Micro-Manager
+  acquisition times), so frames stay unique.
+
+.. note::
+
+   Stitching assumes that the tiles are only translated relative to each
+   other, which holds for one camera at different stage positions. Undrift
+   the tiles before stitching.
+
+Also available as the command :ref:`picasso stitch <cmd-stitch>`.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``stitch.stitch`` returns one localization table and metadata per target,
+   and a report with the tile positions and the pairwise offsets.
+
+   .. code-block:: python
+
+      from picasso import io, stitch
+
+      paths = ["tile1.hdf5", "tile2.hdf5", "tile3.hdf5", "tile4.hdf5"]
+      locs, infos = zip(*[io.load_locs(path) for path in paths])
+      stitched, stitched_infos, report = stitch.stitch(
+          list(locs), list(infos), search_radius_um=10, paths=paths
+      )
+      io.save_locs("stitched.hdf5", stitched[0], stitched_infos[0])
+      print(report["orientation"], report["positions"])
 
 
 .. _render-combine-locs-in-picks:
@@ -242,7 +440,7 @@ distance or dark-time limit.
 
    .. code-block:: python
 
-      combined = postprocess.combine_locs_in_picks(
+      combined, combined_info = postprocess.combine_locs_in_picks(
           locs, info, picks=picks, pick_shape="Circle", pick_size=2 * radius
       )
 
@@ -258,8 +456,8 @@ Shortcut: :kbd:`Ctrl+A`
 
 This tool allows you to apply expressions to localizations, for example:
 
-- ``x +=1`` will shift all localization by one camera pixel to the right
-- ``x +=1; y+=1`` will shift all localization by one camera pixel to the right and one up.
+- ``x += 100`` will shift all localizations by 100 nm to the right
+- ``x += 100; y += 100`` will shift all localizations by 100 nm to the right and 100 nm up.
 - ``flip x z`` will exchange the x-axis with y-axis if z localizations are
   present (side projection), similar for ``flip y z``.
 - ``spiral r n`` will plot each localization over the time of the movie in a
@@ -280,14 +478,14 @@ removed.
    :icon: code
    :class-container: api-example
 
-   Expressions are plain column arithmetic on the DataFrame. ``z`` is in nm
-   while ``x`` and ``y`` are in camera pixels, so a flip converts.
+   Expressions are plain column arithmetic on the DataFrame; ``x``, ``y``
+   and ``z`` are all in nm, so a flip is a plain swap.
 
    .. code-block:: python
 
-      locs["x"] += 1
-      locs["y"] += 1
-      locs["x"], locs["z"] = locs["z"] / pixelsize, locs["x"] * pixelsize   # flip x z
+      locs["x"] += 100                                     # nm
+      locs["y"] += 100
+      locs["x"], locs["z"] = locs["z"].copy(), locs["x"].copy()   # flip x z
 
 
 .. _render-menu-clustering:
@@ -322,11 +520,37 @@ Test clustering
 Checks different clustering parameters on a single pick, see
 :ref:`render-test-clusterer`.
 
+.. _render-menu-spt:
+
+Single-particle tracking
+------------------------
+
+The ``Single-particle tracking`` submenu links localizations into tracks and
+analyzes them, see :doc:`tracking`.
+
+Track particles
+~~~~~~~~~~~~~~~
+
+Links the localizations of consecutive frames into tracks by nearest-neighbor
+tracking, see :ref:`render-spt-track`.
+
+Analyze tracks (MSD, jump distances)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Measures diffusion coefficients from the mean squared displacement and the
+jump distances of a tracked channel, see :ref:`render-spt-analysis`.
+
 Calculate nearest neighbor distances
 ------------------------------------
 
 Calculates distances to the ``k``-th nearest neighbors between two channels,
 see :ref:`render-nearest-neighbor-analysis`.
+
+Coordinate-based colocalization (CBC)
+-------------------------------------
+
+Scores the colocalization of each localization of one channel with another
+channel, for one pair or all pairs of channels, see :ref:`render-cbc`.
 
 RESI
 ----
@@ -337,3 +561,33 @@ Molecular mapping (G5M)
 -----------------------
 
 Molecular mapping with G5M, see :ref:`render-g5m`.
+
+.. _render-menu-spatial-statistics:
+
+Spatial statistics
+------------------
+
+The ``Spatial statistics`` submenu analyzes how the molecules of one channel
+are distributed in space, or how those of two channels are distributed with
+respect to each other (see :ref:`render-cross-functions`).
+
+Ripley's H function
+~~~~~~~~~~~~~~~~~~~
+
+Shows whether the molecules are clustered, randomly distributed or dispersed,
+and on which length scales, in picks, the current view or the whole field of
+view, see :ref:`render-ripley-h`.
+
+Radial distribution function (RDF)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The density of neighbors at each distance from a molecule, relative to the
+mean density, in picks, the current view or the whole field of view, see
+:ref:`render-rdf`.
+
+Nearest neighbor distances (all channels)
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The distributions of the first nearest neighbor distances within and between
+channels, compared with random simulations, see
+:ref:`render-nnd-distributions`.

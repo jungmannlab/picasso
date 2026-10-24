@@ -25,7 +25,6 @@ APPS = {
     "localize": "Window",
     "filter": "Window",
     "average": "Window",
-    "average3": "Window",
     "design": "MainWindow",
     "simulate": "Window",
     "spinna": "Window",

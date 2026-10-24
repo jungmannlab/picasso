@@ -3,9 +3,11 @@ One-click installer for macOS
 
 This is the one-click installer for Picasso on macOS. Please visit our Github repository (https://github.com/jungmannlab/picasso) for details.
 
-The Picasso software is complemented by our Nature Protocols publication (https://www.nature.com/nprot/journal/v12/n6/abs/nprot.2017.024.html).
+The Picasso software is complemented by our Nature Protocols publication (https://doi.org/10.1038/nprot.2017.024).
 
 A comprehensive documentation can be found here: https://picassosr.readthedocs.io/en/latest/
+
+If something does not work, see the answers to common problems: https://picassosr.readthedocs.io/en/latest/faq.html
 
 How to install
 --------------
@@ -19,12 +21,27 @@ How to install
 
 Alternatively, you can create the dmg file yourself by cloning our GitHub repo and running the bash script picasso/release/one_click_macos_gui/create_macos_dmg.sh from the Terminal. Note that you must have conda installed on your computer.
 
+Using Picasso from the Terminal
+-------------------------------
+
+The installer also includes Picasso's command line (e.g., "picasso localize", "picasso link"; see https://picassosr.readthedocs.io/en/latest/cmd.html), but it does not put the "picasso" command on the PATH. To add it, run once in the Terminal (asks for your password):
+
+    sudo mkdir -p /usr/local/bin
+    sudo ln -sf /Applications/Picasso.app/Contents/MacOS/picasso /usr/local/bin/picasso
+
+and open a new Terminal window. The link points into Picasso.app, so it keeps working after updates; "sudo rm /usr/local/bin/picasso" removes it. Without the link, call /Applications/Picasso.app/Contents/MacOS/picasso instead of "picasso".
+
+How to update
+-------------
+
+When a new version is out, Picasso tells you about it (at most once a day). Click "Install Now" to download it, check it and install it; Picasso closes, replaces Picasso.app and the module apps in the same folder (e.g., Picasso Render) and opens again. Please close other Picasso programs and save your work first. If the apps cannot be replaced, e.g., without the rights to change the Applications folder, the disk image opens so that you can drag the apps to Applications as on the first installation. Settings, camera configuration and plugins in ~/.picasso are kept either way.
+
 Adding camera configuration and plugins
 ---------------------------------------
 
 Since version 0.11, both the camera configuration and plugins live in your Picasso user folder, ~/.picasso (that is, /Users/<your user name>/.picasso). This is the same folder that already holds settings.yaml and the log file, and it is the same for every installation type (one-click installer, PyPI, conda, source). Because it sits outside the app bundle, it survives updating or removing Picasso, and you no longer need "Show Package Contents" to get to it.
 
-Camera configuration is essential for correct photon conversion and thus correct localization precision calculation. Put your config file at ~/.picasso/config.yaml. The file is never created for you - you have to create it yourself. The quickest way to get there is to open Picasso: Localize and select File > "Open camera config file location", which opens the folder in Finder (creating it if needed) or reveals wherever a config already in use actually lives. To start from a template, copy config_template.yaml (bundled inside the picasso package, next to __init__.py) into ~/.picasso and rename it to config.yaml. For more details, see documentation: https://picassosr.readthedocs.io/en/latest/localize.html#camera-config
+Camera configuration is essential for correct photon conversion and thus correct localization precision calculation. Put your config file at ~/.picasso/config.yaml. The file is never created for you - you have to create it yourself. The quickest way to get there is to open Picasso: Localize and select File > "Open camera config file location", which opens the folder in Finder (creating it if needed) or reveals wherever a config already in use actually lives. To start from a template, copy config_template.yaml (bundled inside the picasso package, next to __init__.py) into ~/.picasso and rename it to config.yaml. For more details, see documentation: https://picassosr.readthedocs.io/en/latest/localize/camera.html#localize-camera-config
 
 Older versions read config.yaml from inside the app bundle (Contents/Frameworks/picasso). *That still works*: if no ~/.picasso/config.yaml exists, Picasso falls back to the in-bundle file and reads it in place, so an existing setup keeps working. When both are present, ~/.picasso/config.yaml wins.
 
@@ -55,31 +72,36 @@ J. Schnitzbauer*, M.T. Strauss*, T. Schlichthaerle, F. Schueder, R. Jungmann
 Super-Resolution Microscopy with DNA-PAINT
 Nature Protocols (2017). 12: 1198-1228 DOI: 10.1038/nprot.2017.024 (https://doi.org/10.1038/nprot.2017.024)
 
-Many of the functionalities provided by Picasso were published elsewhere, please also cite the respective publications:
+Many of the functionalities provided by Picasso were published independently, please also cite the respective publications:
 
-- All fitting methods are ports of Gpufit. DOI: 10.1038/s41598-017-15313-9 (https://doi.org/10.1038/s41598-017-15313-9). License can be found here (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpufit-LICENSE.txt).
-- Experimental PSF (cubic-spline) fitting. DOIs: 10.1038/nmeth.4661 (https://doi.org/10.1038/nmeth.4661) (Li et al., experimental-PSF localization and bead alignment) and 10.1038/s41598-017-00622-w (https://doi.org/10.1038/s41598-017-00622-w) (Babcock & Zhuang, cubic-spline PSF model). The spline calibration follows the coefficient scheme of Gpuspline; license can be found here (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpuspline-LICENSE.txt).
-- Multichannel (global) experimental-PSF fitting. DOI: 10.1038/s41467-022-30719-4 (https://doi.org/10.1038/s41467-022-30719-4) (Li et al., globLoc).
-- 3D fitting via astigmatism. DOI: 10.1126/science.1153529 (https://www.science.org/doi/10.1126/science.1153529).
-- B-spline wavelet spot identification. DOI: 10.1364/OE.20.002081 (https://doi.org/10.1364/OE.20.002081) (Izeddin et al., Opt. Express 2012)
-- sCMOS pixel-dependent noise modeling. DOI: 10.1038/nmeth.2488 (https://doi.org/10.1038/nmeth.2488).
-- NeNA. DOI: 10.1007/s00418-014-1192-3 (https://doi.org/10.1007/s00418-014-1192-3)
-- FRC. DOI: 10.1038/nmeth.2448 (https://doi.org/10.1038/nmeth.2448)
-- Theoretical lateral localization precision (lpx / lpy, Gaussian least-squares). DOI: 10.1038/nmeth.1447 (https://doi.org/10.1038/nmeth.1447)
-- Theoretical axial localization precision (lpz values, Gaussian). DOI: 10.1038/s41467-026-70198-5 (https://doi.org/10.1038/s41467-026-70198-5)
-- Quad-tree adaptive histogram rendering. DOI: 10.1017/S143192760999122X (https://doi.org/10.1017/S143192760999122X) (Baddeley, Cannell & Soeller, Microsc. Microanal. 2010)
-- RCC undrifting: DOI: 10.1364/OE.22.015982 (https://doi.org/10.1364/OE.22.015982)
-- AIM undrifting. DOI: 10.1126/sciadv.adm776 (https://www.science.org/doi/10.1126/sciadv.adm7765)
-- SMLM clusterer. DOIs: 10.1038/s41467-021-22606-1 (https://doi.org/10.1038/s41467-021-22606-1) and 10.1038/s41586-023-05925-9 (https://doi.org/10.1038/s41586-023-05925-9)
-- DBSCAN: Ester, et al. Inkdd, 1996. (Vol. 96, No. 34, pp. 226-231).
-- Anisotropic DBSCAN inspired by: 10.1021/acs.jpcb.4c02030 (https://doi.org/10.1021/acs.jpcb.4c02030)
-- HDBSCAN. DOI: 10.1007/978-3-642-37456-2_14 (https://doi.org/10.1007/978-3-642-37456-2_14)
-- RESI. DOI: 10.1038/s41586-023-05925-9 (https://doi.org/10.1038/s41586-023-05925-9)
-- Nanotron. DOI: 10.1093/bioinformatics/btaa154 (https://doi.org/10.1093/bioinformatics/btaa154)
-- Picasso: Server. DOI: 10.1038/s42003-022-03909-5 (https://doi.org/10.1038/s42003-022-03909-5)
-- SPINNA. DOI: 10.1038/s41467-025-59500-z (https://doi.org/10.1038/s41467-025-59500-z)
-- SPINNA for LE fitting. DOI: 10.1038/s41592-024-02242-5 (https://doi.org/10.1038/s41592-024-02242-5)
-- G5M. DOI: 10.1038/s41467-026-70198-5 (https://doi.org/10.1038/s41467-026-70198-5)
+- Fitting. All methods are ports of Gpufit, see the Gpufit license (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpufit-LICENSE.txt): Przybylski et al., Sci. Rep., 2017; 10.1038/s41598-017-15313-9 (https://doi.org/10.1038/s41598-017-15313-9)
+- Experimental PSF (cubic-spline) fitting. The calibration follows the coefficient scheme of Gpuspline, see the Gpuspline license (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpuspline-LICENSE.txt): Li et al., Nat. Methods, 2018; Babcock & Zhuang, Sci. Rep., 2017; 10.1038/nmeth.4661 (https://doi.org/10.1038/nmeth.4661), 10.1038/s41598-017-00622-w (https://doi.org/10.1038/s41598-017-00622-w)
+- Multichannel (global) experimental-PSF fitting (globLoc): Li et al., Nat. Commun., 2022; 10.1038/s41467-022-30719-4 (https://doi.org/10.1038/s41467-022-30719-4)
+- 3D fitting via astigmatism: Huang et al., Science, 2008; 10.1126/science.1153529 (https://www.science.org/doi/10.1126/science.1153529)
+- B-spline wavelet spot identification: Izeddin et al., Opt. Express, 2012; 10.1364/OE.20.002081 (https://doi.org/10.1364/OE.20.002081)
+- sCMOS pixel-dependent noise modeling: Huang et al., Nat. Methods, 2013; 10.1038/nmeth.2488 (https://doi.org/10.1038/nmeth.2488)
+- NeNA: Endesfelder et al., Histochem. Cell Biol., 2014; 10.1007/s00418-014-1192-3 (https://doi.org/10.1007/s00418-014-1192-3)
+- FRC: Nieuwenhuizen et al., Nat. Methods, 2013; 10.1038/nmeth.2448 (https://doi.org/10.1038/nmeth.2448)
+- Theoretical lateral localization precision (lpx / lpy, Gaussian least-squares): Mortensen et al., Nat. Methods, 2010; 10.1038/nmeth.1447 (https://doi.org/10.1038/nmeth.1447)
+- Theoretical axial localization precision (lpz, Gaussian): Kowalewski et al., Nat. Commun., 2026; 10.1038/s41467-026-70198-5 (https://doi.org/10.1038/s41467-026-70198-5)
+- Quad-tree adaptive histogram rendering: Baddeley et al., Microsc. Microanal., 2010; 10.1017/S143192760999122X (https://doi.org/10.1017/S143192760999122X)
+- RCC undrifting: Wang et al., Opt. Express, 2014; 10.1364/OE.22.015982 (https://doi.org/10.1364/OE.22.015982)
+- AIM undrifting. Adapted from the authors' code, see the AIM license (https://github.com/jungmannlab/picasso/blob/master/LICENSES/AIM-LICENSE.txt): Ma et al., Sci. Adv., 2024; 10.1126/sciadv.adm7765 (https://www.science.org/doi/10.1126/sciadv.adm7765)
+- SMLM clusterer: Schlichthaerle et al., Nat. Commun., 2021; Reinhardt et al., Nature, 2023; 10.1038/s41467-021-22606-1 (https://doi.org/10.1038/s41467-021-22606-1), 10.1038/s41586-023-05925-9 (https://doi.org/10.1038/s41586-023-05925-9)
+- DBSCAN: Ester et al., KDD, 1996 (Vol. 96, No. 34, pp. 226-231)
+- Anisotropic DBSCAN (inspired by): Lörzing et al., J. Phys. Chem. B, 2024; 10.1021/acs.jpcb.4c02030 (https://doi.org/10.1021/acs.jpcb.4c02030)
+- HDBSCAN: Campello et al., PAKDD, 2013; 10.1007/978-3-642-37456-2_14 (https://doi.org/10.1007/978-3-642-37456-2_14)
+- RESI: Reinhardt et al., Nature, 2023; 10.1038/s41586-023-05925-9 (https://doi.org/10.1038/s41586-023-05925-9)
+- Nanotron: Auer et al., Bioinformatics, 2020; 10.1093/bioinformatics/btaa154 (https://doi.org/10.1093/bioinformatics/btaa154)
+- Picasso Server: Strauss, Commun. Biol., 2022; 10.1038/s42003-022-03909-5 (https://doi.org/10.1038/s42003-022-03909-5)
+- SPINNA: Masullo et al., Nat. Commun., 2025; 10.1038/s41467-025-59500-z (https://doi.org/10.1038/s41467-025-59500-z)
+- SPINNA for labeling efficiency (LE) fitting: Hellmeier et al., Nat. Methods, 2024; 10.1038/s41592-024-02242-5 (https://doi.org/10.1038/s41592-024-02242-5)
+- G5M: Kowalewski et al., Nat. Commun., 2026; 10.1038/s41467-026-70198-5 (https://doi.org/10.1038/s41467-026-70198-5)
+- Coordinate-based colocalization (CBC): Malkusch et al., Histochem. Cell Biol., 2012; 10.1007/s00418-011-0880-5 (https://doi.org/10.1007/s00418-011-0880-5)
+- Ripley's K and H functions: Ripley, J. R. Stat. Soc. B, 1977; 10.1111/j.2517-6161.1977.tb01615.x (https://doi.org/10.1111/j.2517-6161.1977.tb01615.x)
+- Two-channel (cross) Ripley's H and radial distribution functions: Lotwick and Silverman, J. R. Stat. Soc. B, 1982; 10.1111/j.2517-6161.1982.tb01221.x (https://doi.org/10.1111/j.2517-6161.1982.tb01221.x)
+- Stitching tiles (global tile positions, inspired by): Preibisch et al., Bioinformatics, 2009; 10.1093/bioinformatics/btp184 (https://doi.org/10.1093/bioinformatics/btp184)
+- Single-particle tracking (nearest-neighbor tracking, jump distance and MSD analysis): Martens et al., Front. Bioinform., 2021; 10.3389/fbinf.2021.817254 (https://doi.org/10.3389/fbinf.2021.817254)
 
 .. SYNC-END: citing
 
@@ -88,14 +110,20 @@ Many of the functionalities provided by Picasso were published elsewhere, please
 Credits
 -------
 
--  Design icon based on “Hexagon by Creative Stalls" from the Noun Project
--  Simulate icon based on “Microchip by Futishia" from the Noun Project
--  Localize icon based on “Mountains" by MONTANA RUCOBO from the Noun Project
--  Filter icon based on “Funnel" by José Campos from the Noun Project
--  Render icon based on “Paint Palette" by Vectors Market from the Noun Project
--  Average icon based on “Layers" by Creative Stall from the Noun Project
--  Server icon based on “Database" by Nimal Raj from the Noun Project
+-  Design icon based on "Hexagon" by Creative Stall from the Noun Project
+-  Simulate icon based on "Microchip" by Futishia from the Noun Project
+-  Localize icon based on "Mountains" by MONTANA RUCOBO from the Noun Project
+-  Filter icon based on "Funnel" by José Campos from the Noun Project
+-  Render icon based on "Paint Palette" by Vectors Market from the Noun Project
+-  Average icon based on "Layers" by Creative Stall from the Noun Project
+-  Server icon based on "Database" by Nimal Raj from the Noun Project
 -  SPINNA icon based on "Spinner" by Viktor Ostrovsky from the Noun Project
+-  The Noun Project icons above are used under the CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/) license.
 -  Toolbar and menu icons from Lucide (https://lucide.dev) (ISC license). License can be found here (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Lucide-LICENSE.txt).
 
 .. SYNC-END: credits
+
+Third-party licenses
+--------------------
+
+The installer bundles Python, Qt (PyQt6) and many other open-source libraries. Their licenses and copyright notices are collected in THIRD-PARTY-LICENSES.txt, on the disk image and inside Picasso.app (Contents/Resources/THIRD-PARTY-LICENSES.txt).

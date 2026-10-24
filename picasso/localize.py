@@ -26,14 +26,18 @@ License (MIT): ``LICENSES/Gpufit-LICENSE.txt``.
 
 from __future__ import annotations
 
+import logging
+import numbers
 import os
-import multiprocessing
+import sqlite3
 import threading
 import time
 import warnings
 from collections import OrderedDict
-from concurrent.futures import ThreadPoolExecutor, Future
-from functools import partial
+from contextlib import closing
+from dataclasses import dataclass
+from concurrent.futures import ThreadPoolExecutor, Future, as_completed
+from concurrent.futures import wait as wait_futures
 from itertools import chain
 from typing import Literal, Callable, TypeAlias, Union
 from datetime import datetime
@@ -44,8 +48,6 @@ from numba import cuda
 import dask.array as da
 import pandas as pd
 import matplotlib.pyplot as plt
-from tqdm import tqdm
-from sqlalchemy import create_engine
 import matplotlib.gridspec as gridspec
 from scipy.ndimage import gaussian_filter
 from scipy.optimize import curve_fit
@@ -60,7 +62,6 @@ from . import (
     avgroi,
     postprocess,
     zfit,
-    __version__,
 )
 
 # aliased: `transforms` is used as a local name for lists of channel
@@ -78,6 +79,62 @@ from .fitting import (
     splinefit,
     splinefit_cuda,
 )
+
+_log = logging.getLogger(__name__)
+
+__all__ = [
+    "FIT_METHODS",
+    "IDENTIFY_METHODS",
+    "IdentificationParameters",
+    "NetGradient",
+    # one channel
+    "localize",
+    "localize_frames",
+    "identify",
+    "identify_in_frame",
+    "identify_by_frame_number",
+    "clip_rois",
+    "add_roi_id",
+    "get_spots",
+    "fit",
+    "fit_spots_gauss",
+    "gauss_schedule",
+    "locs_from_fits_gauss",
+    "fit_spots_spline",
+    "fit_spots_splinefit",
+    "locs_from_fits_spline",
+    "reduced_chi_square",
+    "picks_to_identifications",
+    "locs_to_identifications",
+    # several channels or regions
+    "SummedChannelsMovie",
+    "unregistered_sum_transforms",
+    "identify_multichannel_sum",
+    "fit_gauss_multichannel",
+    "fit_spots_gauss_multichannel",
+    "locs_from_fits_gauss_multichannel",
+    "fit_gauss_split_fov",
+    "fit_spline_multichannel",
+    "fit_spline_multichannel_ratiometric",
+    "channel_roi_geometry",
+    "channel_roi_residuals",
+    "fit_spline_split_fov",
+    "fit_independent",
+    "fit_split_fov_independent",
+    "split_locs_by_region",
+    "locs_to_region_coordinates",
+    # lateral corrections
+    "calibrate_lateral_transform",
+    "fit_lateral_transform",
+    "plot_lateral_calibration",
+    # quality checks and the summary database (Picasso: Server)
+    "check_nena",
+    "check_kinetics",
+    "check_drift",
+    "get_file_summary",
+    "db_filename",
+    "add_file_to_db",
+]
 
 # Check for CUDA availability of the *fitting* backends. Otherwise, CPU is
 # used. The CRLB kernels have their own probe in picasso.fitting.precision.
@@ -205,6 +262,359 @@ IDENTIFY_METHODS = (IDENTIFY_METHOD_NET_GRADIENT, IDENTIFY_METHOD_WAVELET)
 # `calibrate_lateral_transform`.
 _LATERAL_MATCH_MAX_DIST_PX = 40.0  # max distance between matched pair
 _AFFINE_XCORR_HALF_WIDTH = 18  # half-width of bead crop for xcorr
+
+
+@dataclass(frozen=True)
+class NetGradient:
+    """Settings of the net gradient spot identification: spots are the
+    local maxima whose net gradient exceeds ``minimum``.
+
+    The net gradient adds up the intensity gradients in the box around a
+    local maximum that point towards it. It scales with the brightness of
+    the spots and with the camera gain, so the threshold has to be tuned
+    for every dye and camera - unlike the noise-relative threshold of
+    :class:`picasso.wavelet.WaveletParameters`.
+
+    Parameters
+    ----------
+    minimum : float
+        Minimum net gradient for a local maximum to count as a spot.
+
+    Raises
+    ------
+    ValueError
+        If ``minimum`` is not a single finite number.
+
+    Examples
+    --------
+    >>> from picasso import localize
+    >>> localize.NetGradient(5000)
+    NetGradient(minimum=5000)
+    """
+
+    minimum: float
+
+    def __post_init__(self) -> None:
+        value = self.minimum
+        if isinstance(value, (bool, np.bool_)) or not isinstance(
+            value, (int, float, np.integer, np.floating)
+        ):
+            raise ValueError(
+                "The minimum net gradient must be a single number, got "
+                f"{value!r}. For one threshold per ROI, give one NetGradient "
+                "per ROI."
+            )
+        if not np.isfinite(value):
+            raise ValueError(
+                f"The minimum net gradient must be finite, got {value}."
+            )
+        # frozen: normalize the type through object.__setattr__ (plain
+        # Python numbers keep the metadata free of numpy scalars)
+        value = int(value) if isinstance(value, (int, np.integer)) else value
+        object.__setattr__(self, "minimum", value)
+
+
+#: One spot identification method: :class:`NetGradient` or
+#: :class:`picasso.wavelet.WaveletParameters`.
+IdentificationMethod: TypeAlias = Union[
+    NetGradient, "wavelets.WaveletParameters"
+]
+
+
+def _validate_method(
+    method: IdentificationMethod | list | tuple,
+) -> IdentificationMethod | tuple:
+    """Check an identification method: one method, or a non-empty sequence
+    of methods of one kind (one per ROI), which is returned as a tuple."""
+    kinds = (NetGradient, wavelets.WaveletParameters)
+    if isinstance(method, kinds):
+        return method
+    if isinstance(method, (list, tuple)):
+        methods = tuple(method)
+        if not methods:
+            raise ValueError(
+                "The identification method is an empty sequence; give one "
+                "method, or one per ROI."
+            )
+        kind = next((k for k in kinds if isinstance(methods[0], k)), None)
+        if kind is None or not all(isinstance(m, kind) for m in methods):
+            raise TypeError(
+                "The per-ROI identification methods must all be NetGradient "
+                "or all wavelet.WaveletParameters, got "
+                f"{[type(m).__name__ for m in methods]}."
+            )
+        return methods
+    raise TypeError(
+        "The identification method must be a NetGradient (e.g. "
+        "NetGradient(5000)) or a wavelet.WaveletParameters, or a sequence of "
+        f"them (one per ROI), got {method!r}."
+    )
+
+
+def _is_wavelet(method: IdentificationMethod | list | tuple) -> bool:
+    """Whether ``method`` (one method or one per ROI) is the wavelet
+    identification."""
+    if isinstance(method, (list, tuple)):
+        method = method[0]
+    return isinstance(method, wavelets.WaveletParameters)
+
+
+def _as_method_list(
+    method: IdentificationMethod | list | tuple, n_rois: int
+) -> list:
+    """Normalize ``method`` into one identification method per ROI.
+
+    One method applies to every ROI. A sequence gives each ROI its own
+    settings, which is what split-FOV data needs: the regions are separate
+    channels imaged through different optics, so neither their brightness
+    nor their noise need be alike. A one-element sequence is treated as a
+    single method.
+
+    Raises
+    ------
+    TypeError, ValueError
+        If ``method`` is not a valid method (see
+        :class:`IdentificationParameters`).
+    ValueError
+        If a sequence is given whose length is neither 1 nor ``n_rois``.
+    """
+    method = _validate_method(method)
+    methods = list(method) if isinstance(method, tuple) else [method]
+    if len(methods) == 1:
+        return methods * n_rois
+    if len(methods) != n_rois:
+        raise ValueError(
+            f"Got {len(methods)} identification methods but there are "
+            f"{n_rois} ROI(s); give one per ROI or a single shared one."
+        )
+    return methods
+
+
+@dataclass(frozen=True, kw_only=True)
+class IdentificationParameters:
+    """How spots are identified: the method with its threshold, the box
+    and the filters applied to the movie before identifying.
+
+    Taken by :func:`identify`, :func:`localize` and the functions built on
+    them. The ROI and the frame range, which say *where* to identify rather
+    than *how*, are separate arguments of those functions. All arguments
+    are keyword-only.
+
+    Parameters
+    ----------
+    method : NetGradient, wavelet.WaveletParameters or sequence of them
+        The identification method: local maxima above a minimum net
+        gradient (:class:`NetGradient`), or the wavelet segmentation of
+        Izeddin et al. (2012) (:class:`picasso.wavelet.WaveletParameters`).
+        A sequence gives each ROI its own settings, one per ROI and all of
+        the same method; split-FOV regions are separate channels and need
+        not share a brightness scale or noise.
+    box : int
+        Side length (in camera pixels) of the box around each spot, used
+        for the net gradient and to cut out the spots for the fit. Should
+        be odd.
+    temporal_median_window : int, optional
+        If non-zero, a temporal median background over a window of this
+        many frames is subtracted from every frame before identifying, see
+        ``TemporalMedianMovie``. Default is 0 (no filtering).
+    temporal_median_stride : int or None, optional
+        Spacing between the frames at which the temporal median is
+        evaluated, see ``TemporalMedianMovie``. None (the default) uses
+        ``temporal_median_window``, which is the fastest setting.
+    gaussian_filter_sigma : float, optional
+        If non-zero, every frame is smoothed with a Gaussian of this
+        standard deviation (in camera pixels) before identifying, see
+        ``GaussianFilteredMovie``. This merges the several local maxima of
+        a spot that is not Gaussian-shaped into one. Applied after the
+        temporal median filter, if both are used. Default is 0 (no
+        filtering).
+
+    Raises
+    ------
+    TypeError
+        If ``method`` is not one of the methods above, or a sequence that
+        mixes them.
+    ValueError
+        If ``box`` is not a positive integer, ``temporal_median_window``
+        is negative, ``temporal_median_stride`` is not positive or
+        ``gaussian_filter_sigma`` is negative or not finite.
+
+    Notes
+    -----
+    The filters apply to the identification only: the spots are always cut
+    out of and fitted on the raw movie. Both change the scale of the net
+    gradient, so the minimum net gradient has to be re-tuned when a filter
+    is switched on or off. The wavelet threshold is in units of the noise
+    and needs no re-tuning.
+
+    Examples
+    --------
+    Local maxima above a minimum net gradient of 5000, in 7x7 pixel boxes:
+
+    >>> from picasso import localize, wavelet
+    >>> parameters = localize.IdentificationParameters(
+    ...     method=localize.NetGradient(5000), box=7
+    ... )
+
+    The wavelet identification, on a movie whose background is removed by
+    a temporal median filter over 100 frames:
+
+    >>> parameters = localize.IdentificationParameters(
+    ...     method=wavelet.WaveletParameters(threshold=1.0),
+    ...     box=7,
+    ...     temporal_median_window=100,
+    ... )
+
+    One threshold per ROI, e.g., for the two regions of a split field of
+    view:
+
+    >>> parameters = localize.IdentificationParameters(
+    ...     method=[localize.NetGradient(5000), localize.NetGradient(3000)],
+    ...     box=7,
+    ... )
+
+    The parameters a file was identified with, read back from its
+    metadata:
+
+    >>> from picasso import io
+    >>> locs, info = io.load_locs("movie_locs.hdf5")
+    >>> identify_info = next(_ for _ in info if "Box Size" in _)
+    >>> parameters = localize.IdentificationParameters.from_info(
+    ...     identify_info
+    ... )
+    """
+
+    method: IdentificationMethod | tuple
+    box: int
+    temporal_median_window: int = 0
+    temporal_median_stride: int | None = None
+    gaussian_filter_sigma: float = 0.0
+
+    def __post_init__(self) -> None:
+        # frozen: normalize the values through object.__setattr__
+        object.__setattr__(self, "method", _validate_method(self.method))
+        if int(self.box) != self.box or self.box < 1:
+            raise ValueError(
+                f"The box size must be a positive integer, got {self.box}."
+            )
+        object.__setattr__(self, "box", int(self.box))
+        window = self.temporal_median_window
+        if int(window) != window or window < 0:
+            raise ValueError(
+                "The temporal median window must be a non-negative integer, "
+                f"got {window}."
+            )
+        object.__setattr__(self, "temporal_median_window", int(window))
+        stride = self.temporal_median_stride
+        if stride is not None:
+            if int(stride) != stride or stride < 1:
+                raise ValueError(
+                    "The temporal median stride must be a positive integer "
+                    f"or None, got {stride}."
+                )
+            object.__setattr__(self, "temporal_median_stride", int(stride))
+        sigma = float(self.gaussian_filter_sigma)
+        if not np.isfinite(sigma) or sigma < 0:
+            raise ValueError(
+                "The Gaussian filter sigma must be a non-negative number, "
+                f"got {self.gaussian_filter_sigma}."
+            )
+        object.__setattr__(self, "gaussian_filter_sigma", sigma)
+
+    def to_info(self) -> dict:
+        """The parameters under the keys of the identification metadata.
+
+        The settings of per-ROI methods give one list per key, in ROI
+        order. ``"Temporal Median Stride"`` is only recorded when set.
+
+        Returns
+        -------
+        info : dict
+            ``"Identification Method"`` (see ``IDENTIFY_METHODS``), the
+            settings of the method (``"Min. Net Gradient"`` or those of
+            ``wavelet.WaveletParameters.to_info``), ``"Box Size"``,
+            ``"Temporal Median Window"`` and ``"Gaussian Filter Sigma"``.
+        """
+        if _is_wavelet(self.method):
+            method_info = {
+                "Identification Method": IDENTIFY_METHOD_WAVELET,
+                **wavelet_info(self.method),
+            }
+        else:
+            method_info = {
+                "Identification Method": IDENTIFY_METHOD_NET_GRADIENT,
+                "Min. Net Gradient": (
+                    [_.minimum for _ in self.method]
+                    if isinstance(self.method, tuple)
+                    else self.method.minimum
+                ),
+            }
+        info = {
+            **method_info,
+            "Box Size": self.box,
+            "Temporal Median Window": self.temporal_median_window,
+        }
+        if self.temporal_median_stride is not None:
+            info["Temporal Median Stride"] = self.temporal_median_stride
+        info["Gaussian Filter Sigma"] = self.gaussian_filter_sigma
+        return info
+
+    @classmethod
+    def from_info(cls, info: dict) -> IdentificationParameters:
+        """Read the parameters from a dictionary with the keys of
+        :meth:`to_info`, e.g., the identification metadata of a file.
+
+        A missing ``"Identification Method"`` means the net gradient, as in
+        files written before the wavelet identification existed; missing
+        filter settings mean no filtering and missing wavelet settings take
+        the defaults of Izeddin et al. (2012). A list under a setting holds
+        one value per ROI.
+
+        Parameters
+        ----------
+        info : dict
+            Identification metadata or parameters, with at least
+            ``"Box Size"`` and, for the net gradient identification,
+            ``"Min. Net Gradient"``.
+
+        Returns
+        -------
+        IdentificationParameters
+            The parameters found in ``info``.
+
+        Raises
+        ------
+        ValueError
+            If a required key is missing or the identification method is
+            unknown.
+        """
+        settings = wavelet_from_parameters(info)
+        if settings is not None:
+            method = settings
+        elif info.get("Min. Net Gradient") is None:
+            raise ValueError(
+                "The net gradient identification needs a "
+                "'Min. Net Gradient'."
+            )
+        else:
+            minimum = info["Min. Net Gradient"]
+            # a list holds one threshold per ROI
+            method = (
+                [NetGradient(_) for _ in np.asarray(minimum).tolist()]
+                if isinstance(minimum, (list, tuple, np.ndarray))
+                else NetGradient(minimum)
+            )
+        if info.get("Box Size") is None:
+            raise ValueError(
+                "The identification parameters need a 'Box Size'."
+            )
+        return cls(
+            method=method,
+            box=info["Box Size"],
+            temporal_median_window=info.get("Temporal Median Window") or 0,
+            temporal_median_stride=info.get("Temporal Median Stride"),
+            gaussian_filter_sigma=info.get("Gaussian Filter Sigma") or 0.0,
+        )
 
 
 @numba.jit(nopython=True, nogil=True, cache=False)
@@ -481,120 +891,6 @@ def _as_roi_list(
     return rois if len(rois) else None
 
 
-def _as_ng_list(
-    minimum_ng: float | list | np.ndarray | None,
-    n_rois: int,
-) -> list[float] | list[None]:
-    """Normalize ``minimum_ng`` into one threshold per ROI.
-
-    A scalar (the usual case) applies to every ROI. A sequence gives each
-    ROI its own threshold, which is what split-FOV data needs: the regions
-    are separate channels imaged through different optics, so their spots
-    do not share a brightness scale. A one-element sequence is treated as
-    a scalar.
-
-    Parameters
-    ----------
-    minimum_ng : float, sequence of float or None
-        Minimum net gradient, shared or one per ROI. None (the wavelet
-        identification, which has none) gives None for every ROI.
-    n_rois : int
-        Number of ROIs the thresholds have to cover.
-
-    Returns
-    -------
-    list of float or None
-        ``n_rois`` thresholds.
-
-    Raises
-    ------
-    ValueError
-        If a sequence is given whose length is neither 1 nor ``n_rois``.
-    """
-    if minimum_ng is None:
-        # the wavelet identification has no net gradient threshold
-        return [None] * n_rois
-    if isinstance(minimum_ng, (list, tuple, np.ndarray, pd.Series)):
-        ngs = [float(_) for _ in minimum_ng]
-    else:
-        ngs = [float(minimum_ng)]
-    if len(ngs) == 1:
-        return ngs * n_rois
-    if len(ngs) != n_rois:
-        raise ValueError(
-            f"minimum_ng has {len(ngs)} values but there are {n_rois} "
-            "ROI(s); give one threshold per ROI or a single shared one."
-        )
-    return ngs
-
-
-def _as_wavelet_list(
-    wavelet: wavelets.WaveletParameters | list | None,
-    n_rois: int,
-) -> list:
-    """Normalize ``wavelet`` into one set of wavelet settings per ROI.
-
-    The wavelet counterpart of :func:`_as_ng_list`: one
-    ``WaveletParameters`` applies to every ROI, a sequence gives each ROI
-    its own (split-FOV regions are separate channels, whose noise and
-    spots need not look alike). A one-element sequence is treated as a
-    single setting.
-
-    Parameters
-    ----------
-    wavelet : wavelet.WaveletParameters, sequence of them or None
-        Wavelet settings, shared or one per ROI. None (the net gradient
-        identification) gives None for every ROI.
-    n_rois : int
-        Number of ROIs the settings have to cover.
-
-    Returns
-    -------
-    list of wavelet.WaveletParameters or None
-        ``n_rois`` settings.
-
-    Raises
-    ------
-    ValueError
-        If a sequence is given whose length is neither 1 nor ``n_rois``.
-    """
-    if wavelet is None or isinstance(wavelet, wavelets.WaveletParameters):
-        return [wavelet] * n_rois
-    settings = list(wavelet)
-    if len(settings) == 1:
-        return settings * n_rois
-    if len(settings) != n_rois:
-        raise ValueError(
-            f"wavelet has {len(settings)} settings but there are {n_rois} "
-            "ROI(s); give one per ROI or a single shared one."
-        )
-    return settings
-
-
-def wavelet_for(
-    wavelet: wavelets.WaveletParameters | list | None, index: int
-) -> wavelets.WaveletParameters | None:
-    """The wavelet settings of one ROI (or channel), from shared settings
-    or a per-ROI list; None stays None (net gradient identification).
-
-    Parameters
-    ----------
-    wavelet : wavelet.WaveletParameters, sequence of them or None
-        Wavelet settings, shared or one per ROI.
-    index : int
-        Index of the ROI.
-
-    Returns
-    -------
-    wavelet.WaveletParameters or None
-        The settings of ROI ``index``.
-    """
-    if wavelet is None or isinstance(wavelet, wavelets.WaveletParameters):
-        return wavelet
-    settings = list(wavelet)
-    return settings[0] if len(settings) == 1 else settings[index]
-
-
 def wavelet_info(
     wavelet: wavelets.WaveletParameters | list,
 ) -> dict:
@@ -621,6 +917,8 @@ def wavelet_info(
 def add_roi_id(
     locs: pd.DataFrame,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
+    *,
+    pixelsize: float | None = None,
 ) -> pd.DataFrame:
     """Name the ROI each localization was found in.
 
@@ -642,24 +940,38 @@ def add_roi_id(
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations with ``x`` and ``y`` columns, in the coordinate
-        frame the ROIs are given in.
+        Localizations with ``x`` and ``y`` columns in nm, in the frame
+        of the camera image the ROIs are given in.
     roi : tuple or list of tuples, optional
-        Region(s) of interest the localizations were identified in, see
-        :func:`identify_in_frame`. None or an empty list means the whole
-        frame was used and no column is added. Default is None.
+        Region(s) of interest the localizations were identified in
+        (camera pixels), see :func:`identify_in_frame`. None or an empty
+        list means the whole frame was used and no column is added.
+        Default is None.
+    pixelsize : float, optional
+        Camera pixel size in nm, converting the localizations to the
+        pixel grid of the ROIs. Required when ``roi`` is given.
 
     Returns
     -------
     locs : pd.DataFrame
         A copy with an ``int32`` ``roi_id`` column appended, or ``locs``
         itself when there is no ROI to name.
+
+    Raises
+    ------
+    ValueError
+        If ``roi`` is given without ``pixelsize``.
     """
     rois = _as_roi_list(roi)
     if rois is None:
         return locs
-    x = np.asarray(locs["x"], dtype=np.float64)
-    y = np.asarray(locs["y"], dtype=np.float64)
+    if pixelsize is None:
+        raise ValueError(
+            "add_roi_id needs the camera pixel size (nm) to compare the "
+            "localization coordinates (nm) with the ROIs (camera pixels)."
+        )
+    x = np.asarray(locs["x"], dtype=np.float64) / float(pixelsize)
+    y = np.asarray(locs["y"], dtype=np.float64) / float(pixelsize)
     roi_id = np.full(len(locs), NO_ROI_ID, dtype=np.int32)
     for c, ((y0, x0), (y1, x1)) in enumerate(rois):
         inside = (x >= x0) & (x < x1) & (y >= y0) & (y < y1)
@@ -1097,7 +1409,7 @@ def gaussian_filter_radius(
 
 
 def _identification_crop_pad(
-    box: int, wavelet: wavelets.WaveletParameters | None = None
+    box: int, method: IdentificationMethod | tuple | None = None
 ) -> int:
     """Number of pixels ``identify_in_frame`` reads outside a ROI.
 
@@ -1108,7 +1420,7 @@ def _identification_crop_pad(
     frame.
     """
     pad = int(box / 2) + 1
-    if wavelet is not None:
+    if method is not None and _is_wavelet(method):
         pad += wavelets.WAVELET_RADIUS
     return pad
 
@@ -1116,7 +1428,7 @@ def _identification_crop_pad(
 def identification_roi_pad(
     box: int,
     gaussian_filter_sigma: float | None = None,
-    wavelet: wavelets.WaveletParameters | None = None,
+    method: IdentificationMethod | tuple | None = None,
 ) -> int:
     """Number of pixels a ROI has to be grown by so that every pixel the
     identification actually reads is validly filtered.
@@ -1136,16 +1448,17 @@ def identification_roi_pad(
     gaussian_filter_sigma : float or None, optional
         Sigma of the spatial Gaussian filter, see
         ``GaussianFilteredMovie``. Default is None (no filtering).
-    wavelet : wavelet.WaveletParameters or None, optional
-        Settings of the wavelet identification, or None for the net
-        gradient one. Default is None.
+    method : NetGradient, wavelet.WaveletParameters or None, optional
+        The identification method (or one per ROI), see
+        :class:`IdentificationParameters`. None stands for the net
+        gradient. Default is None.
 
     Returns
     -------
     pad : int
         Padding in pixels.
     """
-    return _identification_crop_pad(box, wavelet) + gaussian_filter_radius(
+    return _identification_crop_pad(box, method) + gaussian_filter_radius(
         gaussian_filter_sigma
     )
 
@@ -1714,7 +2027,7 @@ def _roi_in_window(
     """``roi`` clipped to ``window`` and shifted into its coordinates, for
     identifying in a :class:`CroppedMovie`. None stays None (the whole
     window); a ROI outside the window becomes an empty one rather than
-    being dropped, so that one minimum net gradient per ROI still lines
+    being dropped, so that one identification method per ROI still lines
     up."""
     rois = _as_roi_list(roi)
     if rois is None:
@@ -1731,15 +2044,14 @@ def _roi_in_window(
 
 def _identify_in_crop(
     image: lib.FloatArray2D,
-    minimum_ng: float | None,
     box: int,
-    wavelet: wavelets.WaveletParameters | None,
+    method: IdentificationMethod,
 ) -> tuple[lib.IntArray1D, lib.IntArray1D, lib.FloatArray1D | None]:
-    """Identify spots in a float32 image with the selected method; the
-    net gradient is None for the wavelet identification."""
-    if wavelet is None:
-        return identify_in_image(image, minimum_ng, box)
-    y, x = wavelets.identify_in_image(image, box, wavelet)
+    """Identify spots in a float32 image with one identification method;
+    the net gradient is None for the wavelet identification."""
+    if isinstance(method, NetGradient):
+        return identify_in_image(image, method.minimum, box)
+    y, x = wavelets.identify_in_image(image, box, method)
     return y, x, None
 
 
@@ -1789,30 +2101,29 @@ def unregistered_sum_transforms(
 
 def identify_in_frame(
     frame: lib.IntArray2D,
-    minimum_ng: float | list | np.ndarray | None,
+    method: IdentificationMethod | list | tuple,
     box: int,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
-    *,
-    wavelet: wavelets.WaveletParameters | None = None,
 ) -> tuple[lib.IntArray1D, lib.IntArray1D, lib.FloatArray1D | None]:
     """Identify spots in a single frame within optionally specified
     subregion(s) (ROI).
 
-    By default, spots are local maxima whose net gradient exceeds
-    ``minimum_ng``. With ``wavelet`` given, they are found by wavelet
-    segmentation instead (see :mod:`picasso.wavelet`) and no net gradient
-    is computed.
+    Spots are local maxima whose net gradient exceeds a minimum
+    (:class:`NetGradient`), or they are found by wavelet segmentation
+    (:class:`picasso.wavelet.WaveletParameters`), in which case no net
+    gradient is computed.
 
     Parameters
     ----------
     frame : lib.IntArray2D
         An image frame, 2D array of shape (Y, X).
-    minimum_ng : float, sequence of float or None
-        Minimum net gradient value to consider a maximum as valid. A
-        sequence gives each ROI in ``roi`` its own threshold (split-FOV
-        regions are separate channels and need not share a brightness
-        scale); it must have one value per ROI. Ignored (and may be
-        None) if ``wavelet`` is given.
+    method : NetGradient, wavelet.WaveletParameters or sequence of them
+        The identification method. A sequence gives each ROI in ``roi``
+        its own settings (split-FOV regions are separate channels and need
+        not share a brightness scale); it must have one method per ROI,
+        all of the same kind. With the wavelet identification, each ROI,
+        grown by ``int(box / 2) + 1 + wavelet.WAVELET_RADIUS`` pixels, is
+        segmented on its own, with the noise estimated inside it.
     box : int
         Size of the box used for calculating the gradient. Should be
         an odd integer.
@@ -1824,12 +2135,6 @@ def identify_in_frame(
         several (disjoint) regions. If None, the entire frame is used.
         Note that the origin of the image is in the top-left corner.
         Default is None.
-    wavelet : wavelet.WaveletParameters or sequence of them, optional
-        Settings of the wavelet identification. Each ROI, grown by
-        ``int(box / 2) + 1 + wavelet.WAVELET_RADIUS`` pixels, is segmented
-        on its own, with the noise estimated inside it. A sequence gives
-        each ROI in ``roi`` its own settings, like ``minimum_ng``. Default
-        is None, i.e. the net gradient identification.
 
     Returns
     -------
@@ -1841,30 +2146,21 @@ def identify_in_frame(
         Net gradient values at the identified spots, shape (len(y),).
         None for the wavelet identification.
     """
-    if wavelet is not None:
-        minimum_ng = None  # not used, and possibly per ROI
     rois = _as_roi_list(roi)
     if rois is None:
         image = np.float32(frame)  # otherwise numba goes crazy
-        return _identify_in_crop(
-            image,
-            _as_ng_list(minimum_ng, 1)[0],
-            box,
-            _as_wavelet_list(wavelet, 1)[0],
-        )
-    minimum_ngs = _as_ng_list(minimum_ng, len(rois))
-    wavelet_settings = _as_wavelet_list(wavelet, len(rois))
+        return _identify_in_crop(image, box, _as_method_list(method, 1)[0])
+    methods = _as_method_list(method, len(rois))
+    wavelet = _is_wavelet(methods[0])
     height, width = frame.shape
     # pad each ROI to identify at the border
-    pad = _identification_crop_pad(box, wavelet)
+    pad = _identification_crop_pad(box, methods[0])
     ys, xs, ngs = [], [], []
     for roi_index, ((y0, x0), (y1, x1)) in enumerate(rois):
         py0, px0 = max(y0 - pad, 0), max(x0 - pad, 0)
         py1, px1 = min(y1 + pad, height), min(x1 + pad, width)
         image = np.float32(frame[py0:py1, px0:px1])  # numba needs float32!
-        y, x, net_gradient = _identify_in_crop(
-            image, minimum_ngs[roi_index], box, wavelet_settings[roi_index]
-        )
+        y, x, net_gradient = _identify_in_crop(image, box, methods[roi_index])
         y += py0  # offset back to global frame coordinates
         x += px0
         # keep only spots centered inside the actual ROI
@@ -1874,7 +2170,7 @@ def identify_in_frame(
         if net_gradient is not None:
             ngs.append(net_gradient[inside])
     y, x = np.concatenate(ys), np.concatenate(xs)
-    return y, x, (np.concatenate(ngs) if wavelet is None else None)
+    return y, x, (None if wavelet else np.concatenate(ngs))
 
 
 def _identifications_frame(
@@ -1902,14 +2198,13 @@ def _identifications_frame(
 
 def identify_by_frame_number(
     movie: MovieLike,
-    minimum_ng: float | list | np.ndarray | None,
+    method: IdentificationMethod | list | tuple,
     box: int,
     frame_number: int,
     *,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
     frame_bounds: tuple[int, int] | list | None = None,
     lock: threading.Lock | None = None,
-    wavelet: wavelets.WaveletParameters | None = None,
 ) -> pd.DataFrame:
     """Identify spots in a specific frame of a movie, see
     :func:`identify_in_frame`. Optionally, a lock can be used to ensure
@@ -1920,10 +2215,9 @@ def identify_by_frame_number(
     movie : MovieLike
         A 3D array representing the movie of shape (N, Y, X), where N is
         the number of frames, Y is the height, and X is the width.
-    minimum_ng : float, sequence of float or None
-        Minimum net gradient value to consider a maximum as valid. A
-        sequence gives each ROI its own threshold, one value per ROI (see
-        :func:`identify_in_frame`). Ignored if ``wavelet`` is given.
+    method : NetGradient, wavelet.WaveletParameters or sequence of them
+        The identification method, shared or one per ROI (see
+        :func:`identify_in_frame`).
     box : int
         Size of the box used for calculating the gradient. Should be
         an odd integer.
@@ -1950,10 +2244,6 @@ def identify_by_frame_number(
         If provided, this lock will be used to ensure thread safety when
         accessing the movie data. This is useful in a multithreaded
         environment. Default is None.
-    wavelet : wavelet.WaveletParameters or sequence of them, optional
-        Settings of the wavelet identification, shared or one per ROI
-        (see :func:`identify_in_frame`). Default is None, i.e. the net
-        gradient identification.
 
     Returns
     -------
@@ -1971,7 +2261,7 @@ def identify_by_frame_number(
             empty,
             empty,
             empty,
-            None if wavelet is not None else np.empty(0, dtype=np.float32),
+            None if _is_wavelet(method) else np.empty(0, dtype=np.float32),
         )
     # Movies that read each frame through their own per-thread file
     # handle (TiffMap, STKMovie and the multi-file maps) or a memory map
@@ -1994,9 +2284,7 @@ def identify_by_frame_number(
         frame = np.asarray(frame)[y0:y1, x0:x1]
         roi = _roi_in_window(roi, window)
     # identify
-    y, x, net_gradient = identify_in_frame(
-        frame, minimum_ng, box, roi, wavelet=wavelet
-    )
+    y, x, net_gradient = identify_in_frame(frame, method, box, roi)
     if window is not None:
         y = y + y0  # back to canvas coordinates
         x = x + x0
@@ -2007,48 +2295,52 @@ def identify_by_frame_number(
 def _identify_worker(
     movie: MovieLike,
     current: list[int],
-    minimum_ng: float | list | np.ndarray | None,
+    method: IdentificationMethod | tuple,
     box: int,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None,
     frame_bounds: tuple[int, int] | list | None,
     lock: threading.Lock | None,
-    wavelet: wavelets.WaveletParameters | None = None,
 ) -> list[pd.DataFrame]:
     """Worker function for identifying spots in a movie. This function is
     designed to be run in a separate thread and processes each frame
-    independently."""
+    independently. ``current`` is ``[claimed, finished]``: the next frame to
+    claim and the number of frames finished, both guarded by ``lock``;
+    setting ``current[0]`` to the frame count stops every worker after its
+    current frame."""
     n_frames = len(movie)
     identifications = []
     while True:
         with lock:
             index = current[0]
-            if index == n_frames:
+            if index >= n_frames:
                 return identifications
             current[0] += 1
         identifications.append(
             identify_by_frame_number(
                 movie,
-                minimum_ng,
+                method,
                 box,
                 index,
                 roi=roi,
                 frame_bounds=frame_bounds,
                 lock=lock,
-                wavelet=wavelet,
             )
         )
+        with lock:
+            current[1] += 1
 
 
 def identifications_from_futures(
-    futures: list[multiprocessing.pool.Future],
+    futures: list[Future],
 ) -> pd.DataFrame:
     """Collect the results from a list of futures and combines them
     into a single ``DataFrame``.
 
     Parameters
     ----------
-    futures : list of multiprocessing.pool.Future's
-        A list of futures representing the asynchronous tasks.
+    futures : list of concurrent.futures.Future
+        The futures of the identification threads, see
+        :func:`identify_async`.
 
     Returns
     -------
@@ -2069,26 +2361,24 @@ def identifications_from_futures(
 
 def identify_async(
     movie: MovieLike,
-    minimum_ng: float | list | np.ndarray | None,
+    method: IdentificationMethod | list | tuple,
     box: int,
     *,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
     frame_bounds: tuple[int, int] | list | None = None,
-    wavelet: wavelets.WaveletParameters | None = None,
-) -> tuple[list[int], list[multiprocessing.pool.Future]]:
-    """Asynchronously (i.e., using multithreading) identify spots in a
-    movie using multiple threads. This function divides the work among a
-    specified number of threads.
+) -> tuple[list[int], list[Future]]:
+    """Start identifying spots in a movie on a pool of threads and return
+    without waiting for them. The threads claim the frames one by one;
+    their number is set by the ``cpu_utilization`` of the "Localize"
+    section of the user settings.
 
     Parameters
     ----------
     movie : MovieLike
         The input movie, read frame by frame.
-    minimum_ng : float, sequence of float or None
-        The minimum net gradient for a spot to be considered. A
-        sequence gives each ROI its own threshold, one value per ROI
-        (see :func:`identify_in_frame`). Ignored if ``wavelet`` is
-        given.
+    method : NetGradient, wavelet.WaveletParameters or sequence of them
+        The identification method, shared or one per ROI (see
+        :func:`identify_in_frame`).
     box : int
         The size of the box to extract around each spot.
     roi : tuple or list of tuples, optional
@@ -2107,19 +2397,20 @@ def identify_async(
         specified, the other is to be set to None, for example,
         ``(5, None)`` sets minimum frame to 5 without maximum frame.
         Default is None.
-    wavelet : wavelet.WaveletParameters or sequence of them, optional
-        Settings of the wavelet identification, shared or one per ROI
-        (see :func:`identify_in_frame`). Default is None, i.e. the net
-        gradient identification.
 
     Returns
     -------
     current : list[int]
-        A list of frame indices representing the current processing
-        state.
-    f : list[multiprocessing.pool.Future]
-            A list of futures representing the asynchronous tasks.
+        The processing state, ``[claimed, finished]``: the number of frames
+        the threads have started on and the number they have finished.
+        The identification is complete when ``current[1]`` reaches the
+        number of frames (or all futures are done).
+    f : list of concurrent.futures.Future
+        One future per thread; pass them to
+        :func:`identifications_from_futures` once all are done.
     """
+    # fail here rather than in every worker thread
+    method = _validate_method(method)
     # Use the user settings to define the number of workers that are being used
     settings = io.load_user_settings()
 
@@ -2133,7 +2424,7 @@ def identify_async(
         if cpu_utilization >= 1:
             cpu_utilization = 0.8
     else:
-        print("CPU utilization was not set. Setting to 0.8")
+        _log.info("CPU utilization was not set; it is set to 0.8.")
         cpu_utilization = 0.8
     settings["Localize"]["cpu_utilization"] = cpu_utilization
     io.save_user_settings(settings)
@@ -2141,19 +2432,18 @@ def identify_async(
     n_workers = lib.n_workers(cpu_utilization)
 
     lock = threading.Lock()
-    current = [0]
+    current = [0, 0]
     executor = ThreadPoolExecutor(n_workers)
     f = [
         executor.submit(
             _identify_worker,
             movie,
             current,
-            minimum_ng,
+            method,
             box,
             roi,
             frame_bounds,
             lock,
-            wavelet,
         )
         for _ in range(n_workers)
     ]
@@ -2163,85 +2453,77 @@ def identify_async(
 
 def _identify_threaded(
     movie,
-    minimum_ng,
+    method,
     box,
     roi,
     frame_bounds,
-    progress_callback,
+    progress: lib.Progress,
     abort_callback,
-    wavelet=None,
 ):
-    """Run identify_async and drive its progress loop.
+    """Run identify_async and report the finished frames to ``progress``
+    (an already started phase) from the calling thread.
 
     Returns the identifications, or None if aborted.
     """
     N = len(movie)
-    use_tqdm = progress_callback == "console"
-    iter_range = (
-        tqdm(total=N, desc="Identifying spots", unit="frame")
-        if use_tqdm
-        else None
-    )
     current, futures = identify_async(
         movie,
-        minimum_ng,
+        method,
         box,
         roi=roi,
         frame_bounds=frame_bounds,
-        wavelet=wavelet,
     )
-    last = 0
-    while current[0] < N:
-        if abort_callback is not None and abort_callback():
-            for f in futures:
-                f.cancel()
-            if use_tqdm:
-                iter_range.close()
-            return None
-        if use_tqdm:
-            iter_range.update(current[0] - last)
-            last = current[0]
-        elif callable(progress_callback):
-            progress_callback(current[0])
-        time.sleep(0.2)
-    if use_tqdm:
-        iter_range.update(N - last)
-        iter_range.close()
-    return identifications_from_futures(futures)
+    try:
+        while True:
+            # polled before the completion check, so that an abort is
+            # honored even when the work finishes before the first poll
+            if abort_callback is not None and abort_callback():
+                return None
+            _, pending = wait_futures(futures, timeout=0.2)
+            if not pending:
+                break
+            progress.set_value(current[1])
+        ids = identifications_from_futures(futures)
+        progress.set_value(N)
+        return ids
+    finally:
+        # stops the workers after their current frame (no-op once done),
+        # e.g. on abort or when the tracker canceled the computation
+        current[0] = N
 
 
 def _identify_serial(
     movie,
-    minimum_ng,
+    method,
     box,
     roi,
     frame_bounds,
-    progress_callback,
-    wavelet=None,
+    progress: lib.Progress,
+    abort_callback=None,
 ):
-    """Identify spots frame-by-frame in the current thread."""
+    """Identify spots frame-by-frame in the current thread, reporting the
+    finished frames to ``progress`` (an already started phase).
+
+    Returns None if ``abort_callback``, polled between frames, asked to
+    stop.
+    """
     N = len(movie)
-    use_tqdm = progress_callback == "console"
-    iter_range = (
-        tqdm(range(N), desc="Identifying spots", unit="frame")
-        if use_tqdm
-        else range(N)
-    )
     identifications = []
-    for i in iter_range:
+    for i in range(N):
+        if abort_callback is not None and abort_callback():
+            return None
         identifications.append(
             identify_by_frame_number(
                 movie,
-                minimum_ng,
+                method,
                 box,
                 i,
                 roi=roi,
                 frame_bounds=frame_bounds,
-                wavelet=wavelet,
             )
         )
-        if callable(progress_callback):
-            progress_callback(i)
+        progress.set_value(i + 1)
+    progress.set_value(N)
     ids = pd.concat(identifications, ignore_index=True)
     ids.sort_values(by="frame", kind="stable", inplace=True)
     return ids
@@ -2249,28 +2531,28 @@ def _identify_serial(
 
 def identify(
     movie: MovieLike,
-    minimum_ng: float | list | np.ndarray | None,
-    box: int,
+    info: list[dict] | None = None,
     *,
+    parameters: IdentificationParameters,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
     frame_bounds: tuple[int, int] | list | None = None,
-    threaded: bool = True,
-    temporal_median_window: int | None = None,
-    temporal_median_stride: int | None = None,
-    gaussian_filter_sigma: float | None = None,
-    wavelet: wavelets.WaveletParameters | None = None,
-    progress_callback: (
-        Callable[[list[int]], None] | Literal["console"] | None
-    ) = None,
+    parallel: bool = True,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
-) -> tuple[pd.DataFrame, dict] | None:
-    """Identify spots in a movie. This function can run in a threaded or
-    non-threaded mode.
+) -> tuple[pd.DataFrame, list[dict]] | None:
+    """Identify spots in a movie, on a pool of threads or in the calling
+    thread.
 
-    By default, spots are local maxima whose net gradient exceeds
-    ``minimum_ng``. With ``wavelet`` given, they are found by the wavelet
-    segmentation of Izeddin et al. (2012) instead, see
-    :mod:`picasso.wavelet`.
+    How the spots are identified is set by ``parameters``: local maxima
+    whose net gradient exceeds a minimum (:class:`NetGradient`), or the
+    wavelet segmentation of Izeddin et al. (2012)
+    (:class:`picasso.wavelet.WaveletParameters`), optionally on a movie
+    filtered by a temporal median and/or a Gaussian filter.
+
+    Since v1.0.0: only the movie and its metadata are accepted
+    positionally, the identification settings are passed as one
+    :class:`IdentificationParameters`, and the complete metadata of the
+    identifications is returned.
 
     Parameters
     ----------
@@ -2279,21 +2561,23 @@ def identify(
         ``filled_window`` rectangle (the sum of split-FOV channels, see
         :class:`SummedChannelsMovie`) is filtered and searched in that
         rectangle only, and the ROIs are clipped to it.
-    minimum_ng : float, sequence of float or None
-        The minimum net gradient for a spot to be considered. A
-        sequence gives each ROI its own threshold, one value per ROI
-        (see :func:`identify_in_frame`). Ignored (and may be None) if
-        ``wavelet`` is given.
-    box : int
-        The size of the box to extract around each spot.
+    info : list of dicts or None, optional
+        Metadata of the movie, e.g., from ``io.load_movie``. Default is
+        None, i.e., none.
+    parameters : IdentificationParameters
+        The identification method with its threshold(s), the box size and
+        the filters applied before identifying. The filters apply to the
+        identification only - the returned coordinates refer to the raw
+        movie, which is what the spots must be fitted on.
     roi : tuple or list of tuples, optional
         Region(s) of interest (ROI). A single ROI is a tuple of two
         tuples, where the first contains the start coordinates
         (y_start, x_start) and the second the end coordinates
         (y_end, x_end). A list of such tuples restricts identification to
-        several (disjoint) regions. If None, the entire frame is used.
-        Note that the origin of the image is in the top-left corner.
-        Default is None.
+        several (disjoint) regions, each with its own identification
+        method if ``parameters.method`` is a sequence. If None, the entire
+        frame is used. Note that the origin of the image is in the
+        top-left corner. Default is None.
     frame_bounds : tuple, list of tuples, optional
         Frame numbers to consider for the identification. A single
         ``(min, max)`` tuple restricts identification to one contiguous,
@@ -2303,46 +2587,21 @@ def identify(
         specified, the other is to be set to None, for example,
         ``(5, None)`` sets minimum frame to 5 without maximum frame.
         Default is None.
-    threaded : bool, optional
-        Whether to use threading for the identification process. Default
-        is True.
-    temporal_median_window : int or None, optional
-        If given (and non-zero), a temporal median background is
-        subtracted from every frame before identifying, using a window of
-        this many frames, see ``TemporalMedianMovie``. The filter applies
-        to the identification only - the returned coordinates refer to
-        the raw movie, which is what the spots must be fitted on. Note
-        that ``minimum_ng`` has to be re-tuned when this is switched on
-        or off, since subtracting a background changes the scale of the
-        net gradient. Default is None (no filtering).
-    temporal_median_stride : int or None, optional
-        Spacing between the frames at which the temporal median is
-        evaluated, see ``TemporalMedianMovie``. None (the default) uses
-        ``temporal_median_window``, which is the fastest setting.
-    gaussian_filter_sigma : float or None, optional
-        If given (and non-zero), every frame is smoothed with a Gaussian
-        of this standard deviation (in camera pixels) before identifying,
-        see ``GaussianFilteredMovie``. This merges the several local
-        maxima of a spot that is not Gaussian-shaped into one. Applied
-        after the temporal median filter, if both are used. The filter
-        applies to the identification only - the returned coordinates
-        refer to the raw movie, which is what the spots must be fitted
-        on. Note that ``minimum_ng`` has to be re-tuned when this is
-        changed, since smoothing lowers gradient magnitudes. Default is
-        None (no filtering).
-    wavelet : wavelet.WaveletParameters or sequence of them, optional
-        Settings of the wavelet identification, shared or one per ROI
-        (see :func:`identify_in_frame`). Default is None, i.e. the net
-        gradient identification.
-    progress_callback : callable, "console" or None, optional
-        A callback function to report the progress of the identification
-        process. If "console", progress will be printed to the console.
-        If None, no progress will be reported. Default is None.
+    parallel : bool, optional
+        If True, the frames are identified on a pool of threads (the
+        ``cpu_utilization`` of the "Localize" section of the user
+        settings, 80% of the CPU cores by default); if False, one after
+        another in the calling thread. Default is True.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Identifying spots",
+        over the frames of the movie. Default is None.
     abort_callback : callable, optional
-        A callable for aborting multiprocessing in the GUI. If a
-        callable provided, it must accept no input and return a boolean
-        indicating whether the fitting should be aborted. Default is
-        None.
+        A callable for aborting the identification, e.g., from the GUI.
+        If a callable provided, it must accept no input and return a
+        boolean indicating whether the identification should be aborted.
+        Default is None.
 
     Returns
     -------
@@ -2350,16 +2609,60 @@ def identify(
         Data frame containing the identified spots. Contains fields
         `frame`, `x`, `y`, and `net_gradient` (not for the wavelet
         identification).
-    info : dict
-        Additional information about the identification process, such as
-        the parameters used. ``"Identification Method"`` names the
-        method; the wavelet identification records its settings (see
-        ``wavelet.WaveletParameters.to_info``) instead of
-        ``"Min. Net Gradient"``.
+    info : list of dicts
+        Metadata of the identifications: ``info`` with an entry appended
+        (see ``lib.append_metadata``) recording the parameters (see
+        :meth:`IdentificationParameters.to_info`), the ``"ROI"`` and the
+        ``"Frame Bounds"``, and, for the sum of several channels (a
+        :class:`SummedChannelsMovie`), how they were summed.
 
     None is returned instead if the identification was aborted via
     ``abort_callback``.
+
+    Examples
+    --------
+    Local maxima above a minimum net gradient of 5000, in 7x7 pixel boxes:
+
+    >>> from picasso import io, localize, wavelet
+    >>> movie, movie_info = io.load_movie("movie.ome.tif")
+    >>> parameters = localize.IdentificationParameters(
+    ...     method=localize.NetGradient(5000), box=7
+    ... )
+    >>> ids, ids_info = localize.identify(
+    ...     movie, movie_info, parameters=parameters
+    ... )
+
+    The wavelet identification, after subtracting a temporal median
+    background, in the first 1,000 frames only:
+
+    >>> parameters = localize.IdentificationParameters(
+    ...     method=wavelet.WaveletParameters(threshold=1.0),
+    ...     box=7,
+    ...     temporal_median_window=100,
+    ... )
+    >>> ids, ids_info = localize.identify(
+    ...     movie, movie_info, parameters=parameters, frame_bounds=(0, 999)
+    ... )
+
+    Two regions of interest, each with its own minimum net gradient:
+
+    >>> rois = [((0, 0), (256, 256)), ((0, 256), (256, 512))]
+    >>> parameters = localize.IdentificationParameters(
+    ...     method=[localize.NetGradient(5000), localize.NetGradient(3000)],
+    ...     box=7,
+    ... )
+    >>> ids, ids_info = localize.identify(
+    ...     movie, movie_info, parameters=parameters, roi=rois
+    ... )
     """
+    if not isinstance(parameters, IdentificationParameters):
+        raise TypeError(
+            "parameters must be an IdentificationParameters, got "
+            f"{type(parameters).__name__}."
+        )
+    method = parameters.method
+    box = parameters.box
+    summed = movie if isinstance(movie, SummedChannelsMovie) else None
     # A movie that holds data in one part of its canvas only (a split-FOV
     # channel sum) is searched in that part alone, and the filters are
     # applied to it alone too, so that the empty rest never bleeds in.
@@ -2368,76 +2671,72 @@ def identify(
     if window is not None:
         movie = CroppedMovie(movie, window)
         search_roi = _roi_in_window(roi, window)
-    roi_pad = identification_roi_pad(box, gaussian_filter_sigma, wavelet)
-    if temporal_median_window:
+    roi_pad = identification_roi_pad(
+        box, parameters.gaussian_filter_sigma, method
+    )
+    if parameters.temporal_median_window:
         # note that identify_async() is not wrapped: callers driving the
         # thread pool themselves build the filtered views explicitly
         movie = TemporalMedianMovie(
             movie,
-            temporal_median_window,
-            stride=temporal_median_stride,
+            parameters.temporal_median_window,
+            stride=parameters.temporal_median_stride,
             roi=search_roi,
             roi_pad=roi_pad,
         )
     # temporal median first, then smoothing: the Gaussian is meant to merge
     # the maxima of one spot, not those of the background it sits on
-    if gaussian_filter_sigma:
-        movie = GaussianFilteredMovie(movie, gaussian_filter_sigma)
-    if threaded:
-        ids = _identify_threaded(
-            movie,
-            minimum_ng,
-            box,
-            search_roi,
-            frame_bounds,
-            progress_callback,
-            abort_callback,
-            wavelet,
+    if parameters.gaussian_filter_sigma:
+        movie = GaussianFilteredMovie(movie, parameters.gaussian_filter_sigma)
+    with lib.tracked_progress(
+        progress, "Identifying spots", unit="frame"
+    ) as progress:
+        lib.start_phase(
+            progress, "Identifying spots", len(movie), unit="frame"
         )
-        if ids is None:
-            return
-    else:
-        ids = _identify_serial(
-            movie,
-            minimum_ng,
-            box,
-            search_roi,
-            frame_bounds,
-            progress_callback,
-            wavelet,
-        )
+        if parallel:
+            ids = _identify_threaded(
+                movie,
+                method,
+                box,
+                search_roi,
+                frame_bounds,
+                progress,
+                abort_callback,
+            )
+            if ids is None:
+                return
+        else:
+            ids = _identify_serial(
+                movie,
+                method,
+                box,
+                search_roi,
+                frame_bounds,
+                progress,
+                abort_callback,
+            )
+            if ids is None:
+                return
     if window is not None:
         # back to canvas coordinates
         (y0, x0), _ = window
         ids["y"] += y0
         ids["x"] += x0
-    info = {
-        "Generated by": f"Picasso: v{__version__} Identify",
-        **_identification_method_info(minimum_ng, wavelet),
-        "Box Size": box,
+    entry = {
+        **lib.step_info("Identify"),
+        **parameters.to_info(),
         "ROI": roi,
         "Frame Bounds": frame_bounds,
-        "Temporal Median Window": int(temporal_median_window or 0),
-        "Gaussian Filter Sigma": float(gaussian_filter_sigma or 0.0),
     }
-    return ids, info
-
-
-def _identification_method_info(
-    minimum_ng: float | list | np.ndarray | None,
-    wavelet: wavelets.WaveletParameters | None,
-) -> dict:
-    """Metadata of the identification method: its name and its
-    threshold(s)."""
-    if wavelet is None:
-        return {
-            "Identification Method": IDENTIFY_METHOD_NET_GRADIENT,
-            "Min. Net Gradient": minimum_ng,
-        }
-    return {
-        "Identification Method": IDENTIFY_METHOD_WAVELET,
-        **wavelet_info(wavelet),
-    }
+    if summed is not None:
+        entry["Identification Mode"] = "sum"
+        entry["Sum Channel Transforms"] = [
+            t.to_dict() for t in summed.transforms
+        ]
+        entry["Sum Regions"] = summed.regions
+        entry["Sum Reference Channel"] = summed.reference
+    return ids, lib.append_metadata(info, entry)
 
 
 def wavelet_from_parameters(
@@ -2449,8 +2748,8 @@ def wavelet_from_parameters(
     Parameters
     ----------
     parameters : dict
-        Identification parameters, as passed to :func:`localize` as
-        ``identification_parameters`` or stored in the identification
+        Identification parameters under the keys of
+        :meth:`IdentificationParameters.to_info`, e.g., the identification
         metadata. ``"Identification Method"`` selects the method (the net
         gradient if missing, as in files written before the wavelet
         identification existed) and the keys of
@@ -2535,29 +2834,56 @@ def identification_info(parameters: dict) -> dict:
     return info
 
 
+def _calibration_identification_info(
+    method: IdentificationMethod | list, box: int
+) -> dict:
+    """How the spots of a calibration (beads, or single molecules for a
+    registration from the signal) were identified, for its
+    ``"Identification"`` entry.
+
+    The keys are those of :meth:`IdentificationParameters.to_info`, so
+    ``IdentificationParameters.from_info`` reads the entry back. No
+    filters are applied to calibration movies, so the filter settings are
+    always off. Per-channel methods that are all the same are recorded as
+    one.
+
+    Parameters
+    ----------
+    method : NetGradient, wavelet.WaveletParameters or list
+        The identification method, shared or one per channel in channel
+        order.
+    box : int
+        Box size used to identify the spots.
+
+    Returns
+    -------
+    info : dict
+        The identification metadata.
+    """
+    if isinstance(method, (list, tuple)) and all(
+        m == method[0] for m in method
+    ):
+        method = method[0]
+    return IdentificationParameters(method=method, box=box).to_info()
+
+
 def identify_multichannel_sum(
     movies: list,
-    minimum_ng: float | None,
-    box: int,
-    transforms: list,
+    info: list[dict] | None = None,
     *,
+    transforms: list,
+    parameters: IdentificationParameters,
     camera_infos: list | None = None,
     regions: list | None = None,
     reference: int = 0,
     camera_calibrations: list | None = None,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
     frame_bounds: tuple[int, int] | list | None = None,
-    threaded: bool = True,
-    temporal_median_window: int | None = None,
-    temporal_median_stride: int | None = None,
-    gaussian_filter_sigma: float | None = None,
-    wavelet: wavelets.WaveletParameters | None = None,
+    parallel: bool = True,
     order: int = 1,
-    progress_callback: (
-        Callable[[list[int]], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
-) -> tuple[pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, list[dict]] | None:
     """Identify spots on the *sum* of registered channels.
 
     The spots are identified on the sum rather than in each channel on its
@@ -2576,21 +2902,26 @@ def identify_multichannel_sum(
     searched for maxima, so it is the summed image that is background
     subtracted and smoothed.
 
+    Since v1.0.0: only the movies and their metadata are accepted
+    positionally.
+
     Parameters
     ----------
     movies : list of MovieLike
         One movie per channel, reference first (or at ``reference``). For
         split-FOV data pass the single movie repeated once per region.
-    minimum_ng : float or None
-        Minimum net gradient, a single value: there is one summed image. It has
-        to be re-tuned relative to the per-channel thresholds, since the sum is
-        in photons and over all channels (see :class:`SummedChannelsMovie`).
-        Ignored if ``wavelet`` is given.
-    box : int
-        The size of the box to extract around each spot.
+    info : list of dicts or None, optional
+        Metadata of the reference channel's movie. Default is None, i.e.,
+        none.
     transforms : list of lib.FloatArray2D
         One ``(2, 3)`` reference->channel affine per channel; see
         :class:`SummedChannelsMovie`.
+    parameters : IdentificationParameters
+        How the summed movie is identified, as in :func:`identify`. Give a
+        single method, as there is one summed image. A minimum net gradient
+        has to be re-tuned relative to the per-channel thresholds, since the
+        sum is in photons and over all channels (see
+        :class:`SummedChannelsMovie`).
     camera_infos : list of dict, optional
         One camera info per channel, used to convert counts to photons;
         see :class:`SummedChannelsMovie`. Default is None.
@@ -2609,24 +2940,17 @@ def identify_multichannel_sum(
         the ROIs are clipped to the reference region.
     frame_bounds : tuple, list of tuples, optional
         Frame numbers to consider, as in :func:`identify`. Default is None.
-    threaded : bool, optional
-        Whether to use threading, as in :func:`identify`. Default is True.
-    temporal_median_window : int or None, optional
-        Temporal median window applied to the sum, as in
-        :func:`identify`. Default is None.
-    temporal_median_stride : int or None, optional
-        Temporal median stride, as in :func:`identify`. Default is None.
-    gaussian_filter_sigma : float or None, optional
-        Gaussian filter sigma applied to the sum, as in :func:`identify`.
-        Default is None.
-    wavelet : wavelet.WaveletParameters, optional
-        Settings of the wavelet identification, as in :func:`identify`.
-        Default is None.
+    parallel : bool, optional
+        Whether to identify on a pool of threads, as in :func:`identify`.
+        Default is True.
     order : int, optional
         Spline order of the resampling; see :class:`SummedChannelsMovie`.
         Default is 1.
-    progress_callback : callable, "console" or None, optional
-        Progress reporting, as in :func:`identify`. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Identifying spots",
+        over the frames, as in :func:`identify`. Default is None.
     abort_callback : callable, optional
         Abort check, as in :func:`identify`. Default is None.
 
@@ -2636,10 +2960,15 @@ def identify_multichannel_sum(
         The identified spots in *reference-channel* coordinates, with fields
         `frame`, `x`, `y` and `net_gradient` (the latter measured on the sum,
         and not for the wavelet identification).
-    info : dict
-        Identification metadata, with the summing recorded under
-        ``"Identification Mode"``, ``"Sum Channel Transforms"`` and
-        ``"Sum Regions"``.
+    info : list of dicts
+        Metadata of the identifications: ``info`` with an entry appended
+        (see ``lib.append_metadata``), as in :func:`identify`, recording
+        the summing under ``"Identification Mode"``,
+        ``"Sum Channel Transforms"``, ``"Sum Regions"`` and
+        ``"Sum Reference Channel"``.
+
+    None is returned instead if the identification was aborted via
+    ``abort_callback``.
     """
     summed = SummedChannelsMovie(
         movies,
@@ -2654,34 +2983,23 @@ def identify_multichannel_sum(
         # only the reference region of the canvas holds the sum (and only it
         # is searched, see ``SummedChannelsMovie.filled_window``)
         roi = [summed.regions[summed.reference]]
-    result = identify(
+    # records how the channels were summed
+    return identify(
         summed,
-        minimum_ng,
-        box,
+        info,
+        parameters=parameters,
         roi=roi,
         frame_bounds=frame_bounds,
-        threaded=threaded,
-        temporal_median_window=temporal_median_window,
-        temporal_median_stride=temporal_median_stride,
-        gaussian_filter_sigma=gaussian_filter_sigma,
-        wavelet=wavelet,
-        progress_callback=progress_callback,
+        parallel=parallel,
+        progress=progress,
         abort_callback=abort_callback,
     )
-    if result is None:  # aborted
-        return None
-    ids, info = result
-    info["Generated by"] = f"Picasso: v{__version__} Identify"
-    info["Identification Mode"] = "sum"
-    info["Sum Channel Transforms"] = [t.to_dict() for t in summed.transforms]
-    info["Sum Regions"] = summed.regions
-    info["Sum Reference Channel"] = summed.reference
-    return ids, info
 
 
 def picks_to_identifications(
     picks: list[tuple],
     *,
+    pixelsize: float,
     n_frames: int | None = None,
     drift: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
@@ -2691,24 +3009,27 @@ def picks_to_identifications(
     Parameters
     ----------
     picks : list of tuples
-        List of circular picks positions (centers). See
+        List of circular picks positions (centers) in nm. See
         ``io.load_picks``.
+    pixelsize : float
+        Camera pixel size in nm: identifications are positions on the
+        camera pixel grid of the movie.
     n_frames : int, optional
         Number of frames in the acquisition movie. If None is given,
         it will be extracted from the drift file (if provided).
         Otherwise, an error is raised.
     drift : pd.DataFrame or None, optional
-        A data frame of length n_frames and with columns 'x' and 'y'.
-        Used to adjust the positions of identifications throughout
-        acquisition. Only x and y drift is used; if 'z' is present, it
-        is ignored.
+        A data frame of length n_frames and with columns 'x' and 'y' in
+        nm (see ``io.load_drift``). Used to adjust the positions of
+        identifications throughout acquisition. Only x and y drift is
+        used; if 'z' is present, it is ignored.
 
     Returns
     -------
     identifications : pd.DataFrame
         Data frame containing the identified spots. Contains fields
-        `frame`, `x`, `y`, and `net_gradient`. Note that `net_gradient`
-        is a dummy value.
+        `frame`, `x`, `y` (camera pixels), and `net_gradient`. Note that
+        `net_gradient` is a dummy value.
 
     Raises
     ------
@@ -2738,26 +3059,27 @@ def picks_to_identifications(
                 f"{n_frames} frames were provided but the drift suggests"
                 f" {len(drift)} frames."
             )
-    return _picks_to_identifications(picks, n_frames, drift)
+    return _picks_to_identifications(picks, n_frames, drift, float(pixelsize))
 
 
 def _picks_to_identifications(
     picks: list[tuple],
     n_frames: int,
     drift: pd.DataFrame | None,
+    pixelsize: float,
 ) -> pd.DataFrame:
-    """Convert circular picks to identifications, can be drift-corrected.
-    Assumes correct inputs. See ``picks_to_identifications`` for more
-    details."""
+    """Convert circular picks (nm) to identifications (camera pixels),
+    can be drift-corrected. Assumes correct inputs. See
+    ``picks_to_identifications`` for more details."""
     data = []
     n_id = 0
     for pick_x, pick_y in picks:
-        # drifted:
-        xloc = np.ones((n_frames,), dtype=float) * pick_x
-        yloc = np.ones((n_frames,), dtype=float) * pick_y
+        # drifted, on the camera pixel grid:
+        xloc = np.ones((n_frames,), dtype=float) * pick_x / pixelsize
+        yloc = np.ones((n_frames,), dtype=float) * pick_y / pixelsize
         if drift is not None:
-            xloc += drift["x"].to_numpy()
-            yloc += drift["y"].to_numpy()
+            xloc += drift["x"].to_numpy() / pixelsize
+            yloc += drift["y"].to_numpy() / pixelsize
 
         frames = np.arange(n_frames)
         gradient = np.ones(n_frames) + 100
@@ -2788,6 +3110,8 @@ def locs_to_identifications(
     locs: pd.DataFrame,
     movie_info: list[dict],
     n_frames: int,
+    *,
+    pixelsize: float | None = None,
 ) -> pd.DataFrame:
     """Convert localizations to identifications.
 
@@ -2800,13 +3124,22 @@ def locs_to_identifications(
     n_frames : int
         Number of frames around localizations that are to be used for
         extracting identifications.
+    pixelsize : float, optional
+        Camera pixel size in nm: identifications are positions on the
+        camera pixel grid of the movie. Default is None, i.e., the
+        ``Pixelsize`` of ``movie_info``.
 
     Returns
     -------
     identifications : pd.DataFrame
         Data frame containing the identified spots. Contains fields
-        `frame`, `x`, `y`, and `net_gradient`. Note that `net_gradient`
-        is a dummy value.
+        `frame`, `x`, `y` (camera pixels), and `net_gradient`. Note that
+        `net_gradient` is a dummy value.
+
+    Raises
+    ------
+    KeyError
+        If ``pixelsize`` is None and ``movie_info`` has no ``Pixelsize``.
     """
     assert isinstance(
         locs, pd.DataFrame
@@ -2815,13 +3148,18 @@ def locs_to_identifications(
         isinstance(n_frames, int) and n_frames >= 0
     ), "n_frames must be a non-negative integer"
     max_frames = lib.get_from_metadata(movie_info, "Frames", raise_error=True)
+    if pixelsize is None:
+        pixelsize = lib.get_from_metadata(
+            movie_info, "Pixelsize", raise_error=True
+        )
+    pixelsize = float(pixelsize)
     data = []
     n_id = 0
     for _, element in locs.iterrows():
         currframe = element["frame"]
         if currframe > n_frames and currframe < (max_frames - n_frames):
-            xloc = np.ones((2 * n_frames + 1,), dtype=float) * element["x"]
-            yloc = np.ones((2 * n_frames + 1,), dtype=float) * element["y"]
+            xloc = np.full(2 * n_frames + 1, element["x"] / pixelsize)
+            yloc = np.full(2 * n_frames + 1, element["y"] / pixelsize)
             frames = np.arange(
                 currframe - n_frames,
                 currframe + n_frames + 1,
@@ -3000,7 +3338,8 @@ def _cut_spots_framebyframe(
     ids_y: lib.IntArray1D,
     box: int,
     spots: lib.IntArray3D,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress,
+    offset: int = 0,
 ):
     """Extract the spots out of a movie frame by frame.
 
@@ -3016,9 +3355,12 @@ def _cut_spots_framebyframe(
     spots : lib.IntArray3D
         3D array to store the cut spots, with shape (k, box, box),
         where k is the number of spots identified.
-    progress_callback : callable or None, optional
-        If a callable is provided, it is called after each frame with
-        the cumulative number of spots cut so far. Default is None.
+    progress : lib.Progress
+        Normalized tracker of the running phase, told ``offset`` plus the
+        cumulative number of spots cut after each frame (from the calling
+        thread).
+    offset : int, optional
+        Spots of the running phase cut before this call. Default 0.
 
     Returns
     -------
@@ -3045,8 +3387,6 @@ def _cut_spots_framebyframe(
     ends = np.append(starts[1:], N)
 
     if getattr(movie, "supports_concurrent_reads", False):
-        done = [0]
-        progress_lock = threading.Lock()
 
         def _read_and_cut(frame_number: int) -> None:
             start = int(starts[frame_number])
@@ -3055,14 +3395,24 @@ def _cut_spots_framebyframe(
             _cut_spots_single_frame_into(
                 frame, ids_x, ids_y, r, start, end, spots
             )
-            if callable(progress_callback):
-                with progress_lock:
-                    done[0] += end - start
-                    progress_callback(done[0])
 
-        with ThreadPoolExecutor(_n_io_workers()) as executor:
-            # consume the iterator so exceptions propagate
-            list(executor.map(_read_and_cut, range(n_frames)))
+        executor = ThreadPoolExecutor(_n_io_workers())
+        try:
+            pending = {
+                executor.submit(_read_and_cut, frame_number): frame_number
+                for frame_number in range(n_frames)
+            }
+            # progress is reported here, in the calling thread, never from
+            # the I/O workers
+            done = 0
+            for future in as_completed(pending):
+                future.result()  # propagate a worker's exception
+                frame_number = pending[future]
+                done += int(ends[frame_number] - starts[frame_number])
+                progress.set_value(offset + done)
+        finally:
+            # on an error or a cancellation, drop the frames not yet read
+            executor.shutdown(wait=True, cancel_futures=True)
         return spots
 
     # Serial fallback for movies whose readers are not reentrant
@@ -3074,8 +3424,7 @@ def _cut_spots_framebyframe(
         frame = movie[frame_number]
         _cut_spots_single_frame_into(frame, ids_x, ids_y, r, start, end, spots)
         cum += end - start
-        if callable(progress_callback):
-            progress_callback(cum)
+        progress.set_value(offset + cum)
     return spots
 
 
@@ -3083,20 +3432,24 @@ def _cut_spots(
     movie: MovieLike,
     ids: pd.DataFrame,
     box: int,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | None = None,
+    offset: int = 0,
 ) -> lib.IntArray3D:
     """Cut out spots from a movie based on the identified positions.
 
-    If a callable `progress_callback` is provided, it is called with the
-    cumulative number of spots cut so far, allowing the cutting progress
-    to be tracked.
+    ``progress`` is a normalized tracker (or None for no reporting) whose
+    running phase, started by the caller, is told ``offset`` plus the
+    cumulative number of spots cut so far. The final report is the
+    caller's.
     """
+    progress = lib.normalize_progress(progress)
     N = len(ids)
     ids_frame = ids["frame"].to_numpy()
     ids_x = ids["x"].to_numpy()
     ids_y = ids["y"].to_numpy()
     if isinstance(movie, np.ndarray):
-        if not callable(progress_callback):
+        if type(progress) is lib.MockProgress:
+            # nobody listens: one call, no chunks
             return _cut_spots_numba(movie, ids_frame, ids_x, ids_y, box)
         # cut in chunks so that progress can be reported; spots are
         # written directly into the output array to avoid an extra copy
@@ -3113,7 +3466,7 @@ def _cut_spots(
                 spots,
                 chunk_start,
             )
-            progress_callback(chunk_end)
+            progress.set_value(offset + chunk_end)
         return spots
     elif isinstance(movie, io.ND2Movie) and movie.use_dask:
         """Assumes that identifications are in order of frames!"""
@@ -3131,8 +3484,7 @@ def _cut_spots(
             output_dtypes=[movie.dtype],
             allow_rechunk=True,
         ).compute()
-        if callable(progress_callback):
-            progress_callback(N)
+        # dask runs the whole cut at once: the only report is the final one
         return spots
     else:
         """Assumes that identifications are in order of frames!"""
@@ -3144,7 +3496,8 @@ def _cut_spots(
             ids_y,
             box,
             spots,
-            progress_callback=progress_callback,
+            progress,
+            offset,
         )
         return spots
 
@@ -3199,8 +3552,6 @@ def _to_photons(
     baseline = camera_info["Baseline"] if offset is None else offset
     sensitivity = _sensitivity(camera_info, gain_patch)
     gain = camera_info["Gain"]
-    # since v0.6.0: remove quantum efficiency to better reflect precision
-    # qe = camera_info["Qe"]
     return (spots - baseline) * sensitivity / (gain)
 
 
@@ -3441,10 +3792,9 @@ def camera_calibration_info(camera_calibration: dict | None) -> dict:
 
     Every caller that fits with a calibration must record this, or a
     localization file carries no trace of the noise model that produced it and
-    two runs become indistinguishable after the fact. It lives here, rather
-    than inline in ``fit``, because Picasso Localize rebuilds its own
-    metadata when saving instead of using what ``fit`` returns, and the two
-    must not drift apart.
+    two runs become indistinguishable after the fact. It is shared by
+    ``fit`` and the joint fits of several channels, so that they record
+    the same keys.
 
     Parameters
     ----------
@@ -3511,14 +3861,18 @@ def _seed_spots(
 def get_spots(
     movie: MovieLike,
     identifications: pd.DataFrame,
+    *,
     box: int,
     camera_info: dict,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     camera_calibration: dict | None = None,
     return_variance: bool = False,
 ) -> lib.FloatArray3D | tuple[lib.FloatArray3D, lib.FloatArray3D | None]:
     """Extract the spots from a movie based on the identified positions
     and convert camera signal to photon counts.
+
+    Since v1.0.0: only ``movie`` and ``identifications`` are accepted
+    positionally.
 
     Parameters
     ----------
@@ -3535,10 +3889,11 @@ def get_spots(
     camera_info : dict
         A dictionary containing camera information such as
         `Baseline`, `Sensitivity`, and `Gain`.
-    progress_callback : callable or None, optional
-        If a callable is provided, it is called with the cumulative
-        number of spots cut so far, allowing the cutting progress to be
-        tracked. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Cutting spots", over
+        the identifications. Default is None.
     camera_calibration : dict or None, optional
         Per-pixel sCMOS camera calibration from ``picasso.scmos``. Its
         ``offset`` map replaces the scalar ``Baseline`` and, if present, its
@@ -3556,8 +3911,38 @@ def get_spots(
     variance : lib.FloatArray3D or None
         Only if ``return_variance``.
     """
+    with lib.tracked_progress(progress, "Cutting spots", "spot") as progress:
+        lib.start_phase(
+            progress, "Cutting spots", len(identifications), unit="spot"
+        )
+        result = _get_spots(
+            movie,
+            identifications,
+            box,
+            camera_info,
+            progress,
+            camera_calibration=camera_calibration,
+            return_variance=return_variance,
+        )
+        progress.set_value(len(identifications))
+    return result
+
+
+def _get_spots(
+    movie: MovieLike,
+    identifications: pd.DataFrame,
+    box: int,
+    camera_info: dict,
+    progress: lib.Progress,
+    camera_calibration: dict | None = None,
+    return_variance: bool = False,
+    progress_offset: int = 0,
+) -> lib.FloatArray3D | tuple[lib.FloatArray3D, lib.FloatArray3D | None]:
+    """The work of :func:`get_spots`, reporting ``progress_offset`` plus the
+    spots cut so far to the running phase of ``progress`` (a normalized
+    tracker), which the caller starts and ends."""
     spots = _cut_spots(
-        movie, identifications, box, progress_callback=progress_callback
+        movie, identifications, box, progress, offset=progress_offset
     )
     offset = gain_patch = variance = None
     if camera_calibration is not None:
@@ -3578,78 +3963,9 @@ def get_spots(
     return spots
 
 
-def locs_from_fits(
-    identifications: pd.DataFrame,
-    theta: lib.FloatArray2D,
-    CRLBs: lib.FloatArray2D,
-    likelihoods: lib.FloatArray1D,
-    iterations: lib.FloatArray1D,
-    box: int,
-) -> pd.DataFrame:
-    """Convert the resulting localizations from the list of Futures
-    into a data frame.
-
-    .. deprecated:: 0.11
-        Removed in Picasso 1.0. Left over from the old ``gaussmle`` GPU
-        pipeline and unused since; use :func:`locs_from_fits_gauss`,
-        which takes the fitters' ``theta`` layout directly.
-
-    Parameters
-    ----------
-    identifications : pd.DataFrame
-        Data frame containing the identified spots. Contains fields
-        `frame`, `x`, `y`, and `net_gradient`.
-    theta : lib.FloatArray2D
-        The fitted Gaussian parameters for each spot (x, y positions,
-        photon counts, background, single-emitter image size in x and
-        y).
-    CRLBs : lib.FloatArray2D
-        The Cramer-Rao Lower Bounds for each fitted parameter.
-    likelihoods : lib.FloatArray1D
-        The log-likelihoods of the fitted models.
-    iterations : lib.FloatArray1D
-        The number of iterations taken to converge for each spot.
-    box : int
-        Size of the box used for fitting. Should be an odd integer.
-
-    Returns
-    -------
-    locs : pd.DataFrame
-        Data frame containing the localized spots. The fields include
-        `frame`, `x`, `y`, `photons`, `sx`, `sy`, `bg`, `lpx`, `lpy`,
-        `net_gradient`, `log_likelihood`, and `iterations`.
-    """
-    lib.deprecation_warning(
-        "picasso.localize.locs_from_fits is deprecated and will be removed "
-        "in Picasso 1.0. Use picasso.localize.locs_from_fits_gauss."
-    )
-    # box_offset = int(box / 2)
-    y = theta[:, 0] + identifications["y"]  # - box_offset
-    x = theta[:, 1] + identifications["x"]  # - box_offset
-    lpy = np.sqrt(CRLBs[:, 0])
-    lpx = np.sqrt(CRLBs[:, 1])
-    locs = pd.DataFrame(
-        {
-            "frame": identifications["frame"].astype(np.uint32),
-            "x": x.astype(np.float32),
-            "y": y.astype(np.float32),
-            "photons": theta[:, 2].astype(np.float32),
-            "sx": theta[:, 5].astype(np.float32),
-            "sy": theta[:, 4].astype(np.float32),
-            "bg": theta[:, 3].astype(np.float32),
-            "lpx": lpx.astype(np.float32),
-            "lpy": lpy.astype(np.float32),
-            **lib.net_gradient_column(identifications),
-            "log_likelihood": likelihoods.astype(np.float32),
-            "iterations": iterations.astype(np.int32),
-        }
-    )
-    locs.sort_values(by="frame", kind="quicksort", inplace=True)
-    return locs
-
-
 def fit(
     movie: LoadedMovie,
+    info: list[dict] | None = None,
     *,
     camera_info: dict,
     identifications: pd.DataFrame,
@@ -3676,23 +3992,25 @@ def fit(
     max_it: int | None = None,
     spline_calibration: dict | None = None,
     camera_calibration: dict | None = None,
-    multiprocess: bool = True,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    lateral_transforms: dict | list | str | None = None,
+    parallel: bool = True,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
-    cut_progress_callback: Callable[[int], None] | None = None,
-) -> tuple[pd.DataFrame | None, dict]:
+) -> tuple[pd.DataFrame | None, list[dict]]:
     """Fit 2D localizations to a movie, given positions of the detected
     spots (identifications).
 
-    Since v0.11.0: renamed from ``fit2D`` (removed in v0.12.0). Only the
-    movie is accepted positionally.
+    Since v0.11.0: renamed from ``fit2D`` (removed in v1.0.0). Since
+    v1.0.0, only the movie and the metadata are accepted positionally, and
+    the complete metadata of the localizations is returned.
 
     Parameters
     ----------
     movie : LoadedMovie
         The input movie, as loaded by ``picasso.io.load_movie``.
+    info : list of dicts or None, optional
+        Metadata of the identifications (see :func:`identify`) or of the
+        movie. Default is None, i.e., none.
     camera_info : dict
         A dictionary containing camera information: "Baseline",
         "Sensitivity", "Gain" and "Pixelsize".
@@ -3761,31 +4079,47 @@ def fit(
         the variance term itself (the shift cancels), but their
         uncertainties do grow on noisy pixels; prefer an MLE method for
         sCMOS data. Default is None.
-    multiprocess : bool, optional
-        Whether or not to use multiprocessing. Ignored for GPU fitting.
-        Default is True.
-    progress_callback : callable, "console" or None, optional
-        If a callable provided, it must accept one integer input (number
-        of localized spots). If "console", tqdm is used to display
-        progress. If None, progress is not tracked.
+    lateral_transforms : dict, list, str or None, optional
+        Lateral (x, y) corrections applied to the localizations after the
+        fit, e.g., a chromatic correction: a calibration with an
+        ``"Affine transforms"`` list, the list itself, or the path of a
+        calibration file (see ``lib.resolve_lateral_transforms``). Those
+        that ``spline_calibration`` carries, and the fit therefore applies
+        itself, are skipped with a ``lib.DuplicateLateralTransformWarning``.
+        They are recorded in an entry of their own. Default is None.
+    parallel : bool, optional
+        If True, the CPU fits run on a pool of threads ("gausslq",
+        "gaussmle", "spline" and their variants) or, for "avg", of worker
+        processes; if False, they run in the calling thread. Ignored by
+        the GPU methods. Default is True.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        "Cutting spots" over the identifications, "Fitting spots" over the
+        spots finished (per chunk on the GPU) and, for the "spline*"
+        methods, "Computing spline CRLB" over the localizations. Default
+        is None.
     abort_callback : callable or None, optional
-        A callable for aborting multiprocessing in the GUI. If a
+        A callable for aborting the fit, e.g., from the GUI. If a
         callable provided, it must accept no input and return a boolean
-        indicating whether the fitting should be aborted. Default is
+        indicating whether the fitting should be aborted. Polled after the
+        spots are cut and throughout the fit, by every method. Default is
         None.
-    cut_progress_callback : callable or None, optional
-        If a callable is provided, it is called with the cumulative
-        number of spots cut so far while extracting the spots from the
-        movie (before fitting). It must accept one integer input.
-        Default is None.
 
     Returns
     -------
     locs : pd.DataFrame
-        Data frame containing the localized spots. Returns None if
-        fitting was aborted.
-    new_info : dict
-        New metadata.
+        Data frame containing the localized spots, with every length
+        (``x``, ``y``, ``sx``, ``sy``, ``lpx``, ``lpy``, ``z``, ``lpz``,
+        ...) in nm; ``camera_info["Pixelsize"]`` converts the fit, which
+        works on the camera pixel grid. Returns None if fitting was
+        aborted.
+    info : list of dicts
+        Metadata of the localizations: ``info`` with an entry recording
+        the fit and ``camera_info`` appended (see
+        ``lib.append_metadata``), and one recording ``lateral_transforms``
+        if any were applied.
     """
     _validate_fit_args(
         movie,
@@ -3796,35 +4130,40 @@ def fit(
         spline_calibration,
         eps,
         max_it,
-        multiprocess,
+        parallel,
         camera_calibration,
     )
-    spots, variance = get_spots(
-        movie,
-        identifications,
-        box,
-        camera_info,
-        progress_callback=cut_progress_callback,
-        camera_calibration=camera_calibration,
-        return_variance=True,
-    )
-    em = camera_info["Gain"] > 1
-    gauss_flags = parse_gauss_code(fitting_method)
-    locs = _dispatch_fit(
-        fitting_method=fitting_method,
-        gauss_flags=gauss_flags,
-        spots=spots,
-        identifications=identifications,
-        box=box,
-        em=em,
-        variance=variance,
-        eps=eps,
-        max_it=max_it,
-        spline_calibration=spline_calibration,
-        multiprocess=multiprocess,
-        progress_callback=progress_callback,
-        abort_callback=abort_callback,
-    )
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        spots, variance = get_spots(
+            movie,
+            identifications,
+            box=box,
+            camera_info=camera_info,
+            progress=progress,
+            camera_calibration=camera_calibration,
+            return_variance=True,
+        )
+        em = camera_info["Gain"] > 1
+        gauss_flags = parse_gauss_code(fitting_method)
+        if callable(abort_callback) and abort_callback():
+            locs = None  # aborted while the spots were cut
+        else:
+            locs = _dispatch_fit(
+                fitting_method=fitting_method,
+                gauss_flags=gauss_flags,
+                spots=spots,
+                identifications=identifications,
+                box=box,
+                em=em,
+                variance=variance,
+                eps=eps,
+                max_it=max_it,
+                spline_calibration=spline_calibration,
+                parallel=parallel,
+                progress=progress,
+                abort_callback=abort_callback,
+                pixelsize=float(camera_info["Pixelsize"]),
+            )
     localize_info = _fit_localize_info(
         fitting_method,
         gauss_flags,
@@ -3833,8 +4172,44 @@ def fit(
         spline_calibration,
         camera_calibration,
     )
-    new_info = localize_info | camera_info
-    return locs, new_info
+    info = lib.append_metadata(info, localize_info | camera_info)
+    if locs is None:  # aborted
+        return None, info
+    # the spline calibration's own corrections were applied by the fit
+    return _apply_extra_affine(
+        locs,
+        info,
+        lateral_transforms,
+        spline_calibration if fitting_method.startswith("spline") else None,
+    )
+
+
+def _is_positive_number(value) -> bool:
+    """Whether ``value`` is a positive real number, also a NumPy scalar
+    (e.g., a pixel size read from movie metadata); booleans are not."""
+    return (
+        isinstance(value, numbers.Real)
+        and not isinstance(value, bool)
+        and value > 0
+    )
+
+
+def _reference_pixelsize(camera_infos: list[dict]) -> float:
+    """Camera pixel size (nm) of the reference channel of a multichannel
+    fit, whose coordinates the localizations are expressed in.
+
+    Raises
+    ------
+    ValueError
+        If the reference channel's ``camera_info`` lacks ``Pixelsize``.
+    """
+    pixelsize = camera_infos[0].get("Pixelsize")
+    if not _is_positive_number(pixelsize):
+        raise ValueError(
+            "The reference channel's camera_info needs 'Pixelsize', the "
+            "camera pixel size in nm, to express the coordinates in nm."
+        )
+    return float(pixelsize)
 
 
 def _validate_fit_args(
@@ -3846,20 +4221,22 @@ def _validate_fit_args(
     spline_calibration: dict | None,
     eps: float | None,
     max_it: int | None,
-    multiprocess: bool,
+    parallel: bool,
     camera_calibration: dict | None,
 ) -> None:
-    """Validate ``fit``'s arguments and fill in ``camera_info`` defaults.
+    """Validate ``fit``'s arguments.
 
-    Mutates ``camera_info`` in place (fills in "Pixelsize" if missing), as
-    ``fit`` relies on that side effect.
+    Raises
+    ------
+    ValueError
+        If ``camera_info`` lacks a positive ``Pixelsize`` (nm).
     """
-    accepted_movie_types = (io.AbstractPicassoMovie, np.memmap)
-    if bitplane.IMSWRITER:
-        accepted_movie_types += (
-            bitplane.MovieMapper,
-            bitplane.MovieMapperStack,
-        )
+    accepted_movie_types = (
+        io.AbstractPicassoMovie,
+        np.memmap,
+        bitplane.MovieMapper,
+        bitplane.MovieMapperStack,
+    )
     assert isinstance(
         movie, accepted_movie_types
     ), "movie must be a movie loaded by picasso.io.load_movie"
@@ -3883,14 +4260,14 @@ def _validate_fit_args(
     assert max_it is None or (
         isinstance(max_it, int) and max_it > 0
     ), "max_it must be a positive integer or None"
-    assert isinstance(multiprocess, bool), "multiprocess must be a boolean"
-    if "Pixelsize" not in camera_info:
-        warnings.warn(
-            "Camera info in picasso.localize.fit does not contain "
-            "'Pixelsize', i.e., effective camera pixel size in nm. "
-            "Assuming 130."
+    assert isinstance(parallel, bool), "parallel must be a boolean"
+    pixelsize = camera_info.get("Pixelsize")
+    if not _is_positive_number(pixelsize):
+        raise ValueError(
+            "camera_info needs 'Pixelsize', the effective camera pixel size "
+            "in nm (after magnification): coordinates are stored in nm, "
+            f"so the fit cannot run without it. Got {pixelsize!r}."
         )
-        camera_info["Pixelsize"] = 130
 
     # ``camera_info`` is merged verbatim into the saved YAML at the end, so an
     # array in it would be dumped element by element into every sidecar. The
@@ -3919,9 +4296,10 @@ def _dispatch_fit(
     eps: float | None,
     max_it: int | None,
     spline_calibration: dict | None,
-    multiprocess: bool,
-    progress_callback: Callable[[int], None] | Literal["console"] | None,
+    parallel: bool,
+    progress: lib.Progress,
     abort_callback: Callable[[], bool] | None,
+    pixelsize: float,
 ) -> pd.DataFrame | None:
     """Run the fitting backend selected by ``fitting_method``.
 
@@ -3949,12 +4327,14 @@ def _dispatch_fit(
         The maximum number of iterations per spot, as in :func:`fit`.
     spline_calibration : dict or None
         Cubic-spline PSF calibration for the "spline*" methods.
-    multiprocess : bool
-        Whether to use multiprocessing. Ignored for GPU fitting.
-    progress_callback : callable, "console" or None
-        Progress reporting, as in :func:`fit`.
+    parallel : bool
+        Whether to fit on a pool of workers, as in :func:`fit`.
+    progress : lib.Progress
+        Normalized tracker, given the fit's phases, as in :func:`fit`.
     abort_callback : callable or None
         Abort check, as in :func:`fit`.
+    pixelsize : float
+        Camera pixel size in nm, converting the fitted positions to nm.
 
     Returns
     -------
@@ -3963,8 +4343,6 @@ def _dispatch_fit(
         aborted.
     """
     if gauss_flags is not None:
-        if gauss_flags["use_gpu"] and callable(progress_callback):
-            progress_callback(1)
         locs = _fit2d_gauss(
             spots=spots,
             identifications=identifications,
@@ -3972,19 +4350,17 @@ def _dispatch_fit(
             em=em,
             tolerance=eps,
             max_iterations=max_it,
-            progress_callback=(
-                None if gauss_flags["use_gpu"] else progress_callback
-            ),
+            progress=progress,
             variance=variance,
+            parallel=parallel,
+            abort_callback=abort_callback,
+            pixelsize=pixelsize,
             **gauss_flags,
         )
     elif fitting_method in ("spline-gpu", "spline-mle-gpu"):
-        if callable(progress_callback):
-            progress_callback(1)
         # "spline-mle-gpu" uses the Poisson maximum-likelihood estimator,
-        # "spline-gpu" least squares.
-        # The GPU fit itself is a single call; progress_callback then tracks
-        # the per-spot CRLB / precision computation in locs_from_fits_spline.
+        # "spline-gpu" least squares. The fit is reported per launched
+        # chunk, then the CRLB per chunk of localizations.
         locs = _fit2d_spline_gpu(
             spots=spots,
             identifications=identifications,
@@ -3992,16 +4368,17 @@ def _dispatch_fit(
             em=em,
             calibration=spline_calibration,
             mle=fitting_method == "spline-mle-gpu",
-            progress_callback=progress_callback,
+            progress=progress,
             tolerance=eps,
             max_iterations=max_it,
             variance=variance,
+            abort_callback=abort_callback,
+            pixelsize=pixelsize,
         )
     elif fitting_method in ("spline", "spline-mle"):
-        # The CPU cubic-spline fit (picasso.fitting.splinefit). Unlike the
-        # GPU path it is a per-spot loop, so progress_callback tracks the fit
-        # itself and the fit can be aborted. eps / max_it override the
-        # convergence schedule; None picks the one matching the multi-start.
+        # The CPU cubic-spline fit (picasso.fitting.splinefit), reported per
+        # spot, then the CRLB. eps / max_it override the convergence
+        # schedule; None picks the one matching the multi-start.
         locs = _fit2d_spline_cpu(
             spots=spots,
             identifications=identifications,
@@ -4011,10 +4388,11 @@ def _dispatch_fit(
             mle=fitting_method == "spline-mle",
             tolerance=eps,
             max_iterations=max_it,
-            multiprocess=multiprocess,
-            progress_callback=progress_callback,
+            parallel=parallel,
+            progress=progress,
             abort_callback=abort_callback,
             variance=variance,
+            pixelsize=pixelsize,
         )
     elif fitting_method == "avg":
         locs = _fit2d_avg(
@@ -4022,10 +4400,11 @@ def _dispatch_fit(
             identifications,
             box,
             em,
-            multiprocess,
-            progress_callback,
+            parallel,
+            progress,
             abort_callback,
             variance=variance,
+            pixelsize=pixelsize,
         )
     return locs
 
@@ -4040,7 +4419,7 @@ def _fit_localize_info(
 ) -> dict:
     """Build the "Generated by"/schedule metadata dict written by ``fit``."""
     localize_info = {
-        "Generated by": f"Picasso: v{__version__} Fit 2D",
+        **lib.step_info("Fit 2D"),
         "Fit method": fitting_method,
     }
     # Record the schedule the fit actually ran with, per method - each
@@ -4058,6 +4437,11 @@ def _fit_localize_info(
         localize_info["Spline calibration path"] = spline_calibration.get(
             "Path", "N/A"
         )
+        # the lateral corrections the calibration carries, which the fit
+        # applies (see ``_locs_from_fits_spline``)
+        own = lib.describe_lateral_transforms(spline_calibration)
+        if own:
+            localize_info["Lateral corrections applied"] = own
         on_gpu = fitting_method.endswith("-gpu")
         localize_info["Spline fit device"] = "GPU" if on_gpu else "CPU"
         localize_info["Spline CRLB device"] = (
@@ -4217,6 +4601,7 @@ def _gauss_model(rotated: bool, spherical: bool) -> int:
 
 def fit_spots_gauss(
     spots: lib.FloatArray3D,
+    *,
     rotated: bool = False,
     mle: bool = False,
     spherical: bool = False,
@@ -4224,10 +4609,10 @@ def fit_spots_gauss(
     return_stats: bool = False,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     variance: lib.FloatArray3D | None = None,
+    parallel: bool = True,
+    abort_callback: Callable[[], bool] | None = None,
 ) -> (
     lib.FloatArray2D
     | tuple[
@@ -4236,6 +4621,7 @@ def fit_spots_gauss(
         lib.FloatArray1D,
         lib.FloatArray1D | None,
     ]
+    | None
 ):
     """Fit spots with a 2D Gaussian on the CPU or the GPU.
 
@@ -4244,6 +4630,8 @@ def fit_spots_gauss(
     (:mod:`picasso.fitting.gaussfit` and ``gaussfit_cuda``), so ``use_gpu``
     only affects speed - the arrangement :func:`fit_spots_spline` already uses
     for the spline models.
+
+    Since v1.0.0: only ``spots`` is accepted positionally.
 
     Parameters
     ----------
@@ -4268,14 +4656,25 @@ def fit_spots_gauss(
     max_iterations : int or None, optional
         Maximum number of iterations per spot. ``None`` uses the method's
         own schedule, see :func:`gauss_schedule`.
-    progress_callback : callable, "console" or None, optional
-        Reported per spot on the CPU; the GPU fit is one launch per chunk.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots", over
+        the spots finished: per chunk of 64 spots on the CPU, per launched
+        chunk on the GPU. Default is None.
     variance : lib.FloatArray3D, optional
         Per-pixel sCMOS readout variance in photoelectrons squared, laid out
         exactly like ``spots`` (from ``get_spots(..., return_variance=True)``).
         Applies Huang et al.'s noise model to the maximum-likelihood
         estimator; least squares is unaffected by construction. Default is
         None.
+    parallel : bool, optional
+        If True, the CPU fit runs on a pool of threads (the kernels are
+        ``nogil``); if False, in the calling thread. Ignored on the GPU,
+        where one launch fits a chunk of spots. Default is True.
+    abort_callback : callable or None, optional
+        Polled during the fit; returning True stops it and the function
+        returns None. Default is None.
 
     Returns
     -------
@@ -4290,6 +4689,8 @@ def fit_spots_gauss(
     chi_square : lib.FloatArray1D or None
         Only if ``return_stats``. The residual sum of squares at the optimum;
         None for maximum likelihood.
+    None
+        If ``abort_callback`` asked to stop.
     """
     if rotated and spherical:
         raise ValueError("'rotated' and 'spherical' are mutually exclusive.")
@@ -4311,17 +4712,48 @@ def fit_spots_gauss(
         spherical=spherical,
     ).astype(np.float64)
 
-    backend = gaussfit_cuda if use_gpu else gaussfit
-    parameters, chi_squares, _states, number_iterations = backend.fit_spots(
-        model,
-        spots,
-        initial_parameters,
+    kwargs = dict(
         mle=mle,
         tolerance=tolerance,
         max_iterations=max_iterations,
-        progress_callback=progress_callback,
         variance=variance,
     )
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        if use_gpu:
+            # starts and ends its own "Fitting spots" phase; stops between
+            # chunks when aborted, leaving the remaining spots unfitted
+            result = gaussfit_cuda.fit_spots(
+                model,
+                spots,
+                initial_parameters,
+                progress=progress,
+                abort_callback=abort_callback,
+                **kwargs,
+            )
+            if callable(abort_callback) and abort_callback():
+                return None
+        elif not parallel or len(spots) == 0:
+            # starts and ends its own "Fitting spots" phase
+            result = gaussfit.fit_spots(
+                model,
+                spots,
+                initial_parameters,
+                progress=progress,
+                abort_callback=abort_callback,
+                **kwargs,
+            )
+            if result is None:
+                return None
+        else:
+            n_spots = len(spots)
+            lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
+            job = gaussfit.fit_spots_async(
+                model, spots, initial_parameters, **kwargs
+            )
+            if not _await_async_fit(job, n_spots, progress, abort_callback):
+                return None
+            result = job.results()
+    parameters, chi_squares, _states, number_iterations = result
     parameters = parameters.astype(np.float32)
     chi_squares = chi_squares.astype(np.float32)
 
@@ -4426,9 +4858,43 @@ def fit_spots_gauss_gpu(
     )
 
 
+#: Columns of fitted localizations that the fit produces in camera
+#: pixels (box coordinates) and that the ``locs_from_fits_*`` builders
+#: convert to nm with the camera pixel size.
+_PIXEL_LENGTH_COLUMNS = (
+    "x",
+    "y",
+    "sx",
+    "sy",
+    "lpx",
+    "lpy",
+    "sx_unc",
+    "sy_unc",
+)
+
+
+def _lengths_to_nm(columns: dict, pixelsize: float) -> dict:
+    """Convert the lateral lengths of fitted localization ``columns``
+    (``_PIXEL_LENGTH_COLUMNS``, camera pixels) to nm in place and
+    return the dict. ``z`` and ``lpz`` are in nm already."""
+    pixelsize = float(pixelsize)
+    if not np.isfinite(pixelsize) or pixelsize <= 0:
+        raise ValueError(
+            f"The camera pixel size must be positive, got {pixelsize} nm."
+        )
+    for name in _PIXEL_LENGTH_COLUMNS:
+        if name in columns:
+            values = np.asarray(columns[name])
+            columns[name] = (values.astype(np.float64) * pixelsize).astype(
+                np.float32
+            )
+    return columns
+
+
 def locs_from_fits_gauss(
     identifications: pd.DataFrame,
     theta: lib.FloatArray2D,
+    *,
     box: int,
     em: bool,
     mle: bool = False,
@@ -4438,6 +4904,7 @@ def locs_from_fits_gauss(
     chi_square: lib.FloatArray1D | None = None,
     variance: lib.FloatArray3D | None = None,
     spots: lib.FloatArray3D | None = None,
+    pixelsize: float,
 ) -> pd.DataFrame:
     """Convert the fit results from a Gaussian fit into a data frame of
     localizations.
@@ -4445,6 +4912,9 @@ def locs_from_fits_gauss(
     Backend-agnostic: ``picasso.fitting.gaussfit`` (CPU) and
     ``picasso.fitting.gaussfit_cuda`` (GPU) return the same ``theta``
     layout, so both are converted here.
+
+    Since v1.0.0: only ``identifications`` and ``theta`` are accepted
+    positionally.
 
     Parameters
     ----------
@@ -4505,11 +4975,15 @@ def locs_from_fits_gauss(
         ``chi_square`` they add the ``reduced_chi_square`` column, the
         goodness of fit normalized for the box size and the photon counts
         (see :func:`reduced_chi_square`). Default is None.
+    pixelsize : float
+        Camera pixel size in nm. The fit works in camera pixels; the
+        positions, widths and precisions are converted to nm with it.
 
     Returns
     -------
     locs : pd.DataFrame
-        Data frame containing the localized spots.
+        Data frame containing the localized spots, with every length in
+        nm.
     """
     box_offset = int(box / 2)
     rotated = theta.shape[1] == 7
@@ -4591,7 +5065,7 @@ def locs_from_fits_gauss(
             variance,
         )
     )
-    locs = pd.DataFrame(columns)
+    locs = pd.DataFrame(_lengths_to_nm(columns, pixelsize))
     if "n_id" in identifications.columns:
         # The cross-channel link index. Carried through and sorted on, as
         # the spline path does - a multichannel fit needs every channel's
@@ -4601,33 +5075,6 @@ def locs_from_fits_gauss(
     else:
         locs.sort_values(by="frame", kind="quicksort", inplace=True)
     return locs
-
-
-def locs_from_fits_gauss_gpu(*args, **kwargs) -> pd.DataFrame:
-    """Convert the fit results from a Gaussian fit into a data frame of
-    localizations.
-
-    .. deprecated:: 0.11
-        Renamed to :func:`locs_from_fits_gauss` and removed under this
-        name in Picasso 1.0. The function never was GPU-specific: it
-        converts CPU and GPU Gaussian fits alike.
-
-    Parameters
-    ----------
-    *args, **kwargs
-        Forwarded verbatim to :func:`locs_from_fits_gauss`.
-
-    Returns
-    -------
-    locs : pd.DataFrame
-        Data frame containing the localized spots.
-    """
-    lib.deprecation_warning(
-        "picasso.localize.locs_from_fits_gauss_gpu is deprecated and will "
-        "be removed in Picasso 1.0. It handles CPU and GPU fits alike and "
-        "was renamed to picasso.localize.locs_from_fits_gauss."
-    )
-    return locs_from_fits_gauss(*args, **kwargs)
 
 
 def _fit2d_gauss(
@@ -4641,18 +5088,24 @@ def _fit2d_gauss(
     use_gpu: bool = False,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
     variance: lib.FloatArray3D | None = None,
-) -> pd.DataFrame:
+    parallel: bool = True,
+    abort_callback: Callable[[], bool] | None = None,
+    *,
+    pixelsize: float,
+) -> pd.DataFrame | None:
     """Fit 2D Gaussians with least squares or, if ``mle``, maximum
     likelihood, on the CPU or the GPU. If ``rotated``, a rotated elliptical
     Gaussian is fitted and the resulting localizations contain the fitted
     rotation angle (in degrees) in the column ``angle``. If ``spherical``, an
     isotropic Gaussian with a single width is fitted and the resulting ``sx``
-    and ``sy`` columns are identical. See ``fit`` for more details."""
-    theta, log_likelihood, iterations, chi_square = fit_spots_gauss(
+    and ``sy`` columns are identical. ``pixelsize`` (nm) converts the result
+    to nm. ``progress`` (a normalized tracker, or None) gets the "Fitting
+    spots" phase. See ``fit`` for more details.
+
+    Returns None if ``abort_callback`` asked to stop."""
+    result = fit_spots_gauss(
         spots,
         rotated=rotated,
         mle=mle,
@@ -4661,14 +5114,19 @@ def _fit2d_gauss(
         return_stats=True,
         tolerance=tolerance,
         max_iterations=max_iterations,
-        progress_callback=progress_callback,
+        progress=progress,
         variance=variance,
+        parallel=parallel,
+        abort_callback=abort_callback,
     )
+    if result is None:
+        return None
+    theta, log_likelihood, iterations, chi_square = result
     locs = locs_from_fits_gauss(
         identifications,
         theta,
-        box,
-        em,
+        box=box,
+        em=em,
         mle=mle,
         log_likelihood=log_likelihood,
         iterations=iterations,
@@ -4676,6 +5134,7 @@ def _fit2d_gauss(
         chi_square=chi_square,
         variance=variance,
         spots=spots,
+        pixelsize=pixelsize,
     )
     return locs
 
@@ -4693,6 +5152,7 @@ def _fit2d_gauss(
 
 def fit_spots_gauss_multichannel(
     spots: np.ndarray,
+    *,
     residuals: np.ndarray,
     jacobians: np.ndarray,
     mle: bool = False,
@@ -4700,10 +5160,8 @@ def fit_spots_gauss_multichannel(
     use_gpu: bool | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    multiprocess: bool = True,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    parallel: bool = True,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     variance: np.ndarray | None = None,
     return_stats: bool = False,
@@ -4715,6 +5173,8 @@ def fit_spots_gauss_multichannel(
     computed once *here*, above the device dispatch, so the CPU and GPU
     backends are guaranteed to see byte-identical inputs and a comparison
     between them tests the algebra rather than two translation layers.
+
+    Since v1.0.0: only ``spots`` is accepted positionally.
 
     Parameters
     ----------
@@ -4738,12 +5198,15 @@ def fit_spots_gauss_multichannel(
     max_iterations : int or None, optional
         Maximum number of iterations per spot. None uses the method's own,
         see :func:`gauss_schedule`.
-    multiprocess : bool, optional
+    parallel : bool, optional
         Run the CPU kernels on a thread pool (they are ``nogil``). Ignored on
         the GPU, where one launch fits every spot.
-    progress_callback : callable, "console" or None, optional
-        Called with the cumulative number of spots fitted; ``"console"`` shows
-        a progress bar instead.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots", over
+        the spots finished: per spot on the CPU, per chunk on the GPU.
+        Default is None.
     abort_callback : callable, optional
         Polled during the fit; returning True stops it.
     variance : np.ndarray, optional
@@ -4786,60 +5249,58 @@ def fit_spots_gauss_multichannel(
         link_photons=link_photons,
     ).astype(np.float64)
 
-    if use_gpu:
-        result = gaussfit_cuda.fit_spots_multichannel(
-            kind,
-            spots,
-            jacobians,
-            residuals,
-            initial_parameters,
-            mle=mle,
-            tolerance=tolerance,
-            max_iterations=max_iterations,
-            progress_callback=progress_callback,
-            abort_callback=abort_callback,
-            variance=variance,
-        )
-        if result is None:
-            return None
-    elif not multiprocess or len(spots) == 0:
-        result = gaussfit.fit_spots_multichannel(
-            kind,
-            spots,
-            jacobians,
-            residuals,
-            initial_parameters,
-            mle=mle,
-            tolerance=tolerance,
-            max_iterations=max_iterations,
-            progress_callback=progress_callback,
-            variance=variance,
-        )
-    else:
-        job = gaussfit.fit_spots_multichannel_async(
-            kind,
-            spots,
-            jacobians,
-            residuals,
-            initial_parameters,
-            mle=mle,
-            tolerance=tolerance,
-            max_iterations=max_iterations,
-            variance=variance,
-        )
-        n_spots = len(spots)
-        while not job.finished():
-            job.raise_errors()
-            if abort_callback is not None and abort_callback():
-                job.stop()
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        if use_gpu:
+            # starts and ends its own "Fitting spots" phase
+            result = gaussfit_cuda.fit_spots_multichannel(
+                kind,
+                spots,
+                jacobians,
+                residuals,
+                initial_parameters,
+                mle=mle,
+                tolerance=tolerance,
+                max_iterations=max_iterations,
+                progress=progress,
+                abort_callback=abort_callback,
+                variance=variance,
+            )
+            if result is None:
                 return None
-            if callable(progress_callback):
-                progress_callback(min(job.current[0], n_spots))
-            time.sleep(0.1)
-        job.raise_errors()
-        if callable(progress_callback):
-            progress_callback(n_spots)
-        result = job.results()
+        elif not parallel or len(spots) == 0:
+            # starts and ends its own "Fitting spots" phase
+            result = gaussfit.fit_spots_multichannel(
+                kind,
+                spots,
+                jacobians,
+                residuals,
+                initial_parameters,
+                mle=mle,
+                tolerance=tolerance,
+                max_iterations=max_iterations,
+                progress=progress,
+                variance=variance,
+                abort_callback=abort_callback,
+            )
+            if result is None:
+                return None
+        else:
+            n_spots = len(spots)
+            lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
+            job = gaussfit.fit_spots_multichannel_async(
+                kind,
+                spots,
+                jacobians,
+                residuals,
+                initial_parameters,
+                mle=mle,
+                tolerance=tolerance,
+                max_iterations=max_iterations,
+                variance=variance,
+            )
+            if not _await_async_fit(job, n_spots, progress, abort_callback):
+                return None
+            result = job.results()
 
     theta, chi_squares, _states, iterations = result
     theta = theta.astype(np.float32)
@@ -4858,6 +5319,7 @@ def fit_spots_gauss_multichannel(
 def locs_from_fits_gauss_multichannel(
     identifications: pd.DataFrame,
     theta: np.ndarray,
+    *,
     box: int,
     em: bool,
     jacobians: np.ndarray,
@@ -4869,12 +5331,17 @@ def locs_from_fits_gauss_multichannel(
     chi_square: lib.FloatArray1D | None = None,
     variance: np.ndarray | None = None,
     spots: np.ndarray | None = None,
+    pixelsize: float,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Localizations from a multichannel spherical Gaussian fit.
 
     The positions are in the **reference channel's** coordinates, as for the
     multichannel spline fit: the fit solves for one shared position and the
     reference channel's box sits on the detection itself.
+
+    Since v1.0.0: only ``identifications`` and ``theta`` are accepted
+    positionally.
 
     Parameters
     ----------
@@ -4913,6 +5380,15 @@ def locs_from_fits_gauss_multichannel(
         ``reduced_chi_square`` column, the goodness of fit normalized for the
         box size and the photon counts (see :func:`reduced_chi_square`).
         Default is None.
+    pixelsize : float
+        Camera pixel size of the reference channel in nm; the positions,
+        widths and precisions are converted to nm with it.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase,
+        "Computing Gaussian CRLB", over the localizations. Default is
+        None.
 
     Returns
     -------
@@ -4952,16 +5428,21 @@ def locs_from_fits_gauss_multichannel(
             [x_shift, y_shift, sigma, photons_ch, bg_ch]
         )
 
-    crlb = precision._gauss_crlb_multichannel(
-        crlb_theta,
-        box,
-        jacobians,
-        residuals,
-        mle=mle,
-        em=em,
-        link_photons=link_photons,
-        variance=variance,
-    )
+    with lib.tracked_progress(
+        progress, "Computing Gaussian CRLB", "loc"
+    ) as progress:
+        # starts and ends its own "Computing Gaussian CRLB" phase
+        crlb = precision._gauss_crlb_multichannel(
+            crlb_theta,
+            box,
+            jacobians,
+            residuals,
+            mle=mle,
+            em=em,
+            link_photons=link_photons,
+            variance=variance,
+            progress=progress,
+        )
     # Both models put the shared parameters first and the CRLB comes back in
     # the order it was given, so x, y and sigma are always columns 0, 1, 2.
     with np.errstate(invalid="ignore"):
@@ -5024,7 +5505,7 @@ def locs_from_fits_gauss_multichannel(
             variance,
         )
     )
-    locs = pd.DataFrame(columns)
+    locs = pd.DataFrame(_lengths_to_nm(columns, pixelsize))
     if "n_id" in identifications.columns:
         locs["n_id"] = np.asarray(identifications["n_id"]).astype(np.uint32)
         locs.sort_values(by="n_id", kind="quicksort", inplace=True)
@@ -5033,8 +5514,59 @@ def locs_from_fits_gauss_multichannel(
     return locs
 
 
+def _joint_fit_entry(
+    step: str,
+    fit_method: str,
+    camera_infos: list[dict],
+    calibration: dict,
+    *,
+    link_photons: bool | str,
+    use_gpu: bool | None,
+    tolerance: float | None,
+    max_iterations: int | None,
+    camera_calibrations: list[dict | None] | None,
+) -> dict:
+    """Metadata entry recording a joint fit of several channels (or
+    split-FOV regions): the method, the calibration or channel
+    registration (its ``"Path"`` and ``"model"``), the schedule asked for
+    (None: the fitter's default, not recorded), the sCMOS calibration and
+    the reference channel's camera information."""
+    entry = {
+        **lib.step_info(step),
+        "Fit method": fit_method + ("-gpu" if use_gpu else ""),
+        "Channels": len(calibration.get("channel_transforms") or camera_infos),
+        "Link photons": link_photons,
+        "Calibration path": calibration.get("Path", "N/A"),
+    }
+    if calibration.get("model"):
+        entry["Calibration model"] = calibration["model"]
+    if tolerance is not None:
+        entry["Convergence criterion"] = tolerance
+    if max_iterations is not None:
+        entry["Max iterations"] = max_iterations
+    entry.update(camera_calibration_info((camera_calibrations or [None])[0]))
+    return entry | camera_infos[0]
+
+
+def _record_regions(
+    info: list[dict], regions: list, reference: int
+) -> list[dict]:
+    """``info`` of a joint fit with the split-FOV regions it fitted
+    recorded in its last entry (a new dict, see ``lib.append_metadata``)."""
+    info[-1].update(
+        {
+            "Split FOV": True,
+            "Regions": [_normalize_rect(region) for region in regions],
+            "Reference region": int(reference),
+        }
+    )
+    return info
+
+
 def fit_gauss_multichannel(
     movies: list,
+    info: list[dict] | None = None,
+    *,
     camera_infos: list[dict],
     identifications: pd.DataFrame,
     box: int,
@@ -5044,11 +5576,11 @@ def fit_gauss_multichannel(
     use_gpu: bool | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    multiprocess: bool = True,
-    progress_callback: Callable[[int], None] | None = None,
+    parallel: bool = True,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     camera_calibrations: list[dict | None] | None = None,
-) -> pd.DataFrame | None:
+) -> tuple[pd.DataFrame, list[dict]] | None:
     """Fit a spherical Gaussian jointly across several registered channels.
 
     Global fit in the sense of globLoc (Li et al., Nat. Commun. 13, 3133,
@@ -5056,11 +5588,17 @@ def fit_gauss_multichannel(
     The Gaussian counterpart of :func:`fit_spline_multichannel`, needing only a
     channel registration rather than a measured PSF.
 
+    Since v1.0.0: only the movies and their metadata are accepted
+    positionally.
+
     Parameters
     ----------
     movies : list
         One movie per channel; ``movies[0]`` is the reference channel and the
         order must match the registration's channels.
+    info : list of dicts or None, optional
+        Metadata of the reference channel's identifications (see
+        :func:`identify`) or movie. Default is None, i.e., none.
     camera_infos : list of dict
         One camera-info dict per channel.
     identifications : pd.DataFrame
@@ -5090,12 +5628,16 @@ def fit_gauss_multichannel(
     max_iterations : int or None, optional
         Maximum number of iterations per spot. None uses the method's own,
         see :func:`gauss_schedule`.
-    multiprocess : bool, optional
+    parallel : bool, optional
         Run the CPU kernels on a thread pool (they are ``nogil``). Ignored on
         the GPU. Default True.
-    progress_callback : callable, optional
-        Called with the cumulative number of spots processed, during both the
-        spot extraction and the fit.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        "Cutting spots" over the spots of all channels, "Fitting spots"
+        over the molecules and "Computing Gaussian CRLB" over the
+        localizations. Default is None.
     abort_callback : callable, optional
         Polled during the fit; returning True stops it and returns None.
     camera_calibrations : list of dict or None, optional
@@ -5105,10 +5647,14 @@ def fit_gauss_multichannel(
 
     Returns
     -------
-    locs : pd.DataFrame or None
+    locs : pd.DataFrame
         Localizations in the reference channel's coordinates - see
-        :func:`locs_from_fits_gauss_multichannel` for the columns - or None if
-        ``abort_callback`` asked to stop.
+        :func:`locs_from_fits_gauss_multichannel` for the columns.
+    info : list of dicts
+        Metadata of the localizations: ``info`` with an entry recording
+        the fit appended (see ``lib.append_metadata``).
+
+    None is returned instead if ``abort_callback`` asked to stop.
 
     Raises
     ------
@@ -5139,58 +5685,75 @@ def fit_gauss_multichannel(
     identifications = multichannel_inbounds_ids(
         identifications, box, movies, transforms
     )
-    spots, residuals, variance, jacobians = get_spots_multichannel(
-        movies,
-        identifications,
-        box,
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        spots, residuals, variance, jacobians = get_spots_multichannel(
+            movies,
+            identifications,
+            box,
+            camera_infos,
+            transforms,
+            progress=progress,
+            return_residuals=True,
+            camera_calibrations=camera_calibrations,
+            return_variance=True,
+            return_jacobians=True,
+        )
+        result = fit_spots_gauss_multichannel(
+            spots,
+            residuals=residuals,
+            jacobians=jacobians,
+            mle=mle,
+            link_photons=link_photons,
+            use_gpu=use_gpu,
+            tolerance=tolerance,
+            max_iterations=max_iterations,
+            parallel=parallel,
+            progress=progress,
+            abort_callback=abort_callback,
+            variance=variance,
+            return_stats=True,
+        )
+        if result is None:
+            return None
+        theta, log_likelihood, iterations, chi_square = result
+        em = camera_infos[0].get("Gain", 1) > 1
+        locs = locs_from_fits_gauss_multichannel(
+            identifications,
+            theta,
+            box=box,
+            em=em,
+            jacobians=jacobians,
+            residuals=residuals,
+            link_photons=link_photons,
+            mle=mle,
+            pixelsize=_reference_pixelsize(camera_infos),
+            log_likelihood=log_likelihood,
+            iterations=iterations,
+            chi_square=chi_square,
+            variance=precision._crlb_variance_channel_major(
+                variance, len(transforms)
+            ),
+            spots=spots,
+            progress=progress,
+        )
+    entry = _joint_fit_entry(
+        "Fit multichannel Gaussian",
+        "gaussmle-spherical" if mle else "gausslq-spherical",
         camera_infos,
-        transforms,
-        progress_callback=progress_callback,
-        return_residuals=True,
-        camera_calibrations=camera_calibrations,
-        return_variance=True,
-        return_jacobians=True,
-    )
-    result = fit_spots_gauss_multichannel(
-        spots,
-        residuals,
-        jacobians,
-        mle=mle,
+        channel_registration,
         link_photons=link_photons,
         use_gpu=use_gpu,
         tolerance=tolerance,
         max_iterations=max_iterations,
-        multiprocess=multiprocess,
-        progress_callback=progress_callback,
-        abort_callback=abort_callback,
-        variance=variance,
-        return_stats=True,
+        camera_calibrations=camera_calibrations,
     )
-    if result is None:
-        return None
-    theta, log_likelihood, iterations, chi_square = result
-    em = camera_infos[0].get("Gain", 1) > 1
-    return locs_from_fits_gauss_multichannel(
-        identifications,
-        theta,
-        box,
-        em,
-        jacobians,
-        residuals,
-        link_photons=link_photons,
-        mle=mle,
-        log_likelihood=log_likelihood,
-        iterations=iterations,
-        chi_square=chi_square,
-        variance=precision._crlb_variance_channel_major(
-            variance, len(transforms)
-        ),
-        spots=spots,
-    )
+    return locs, lib.append_metadata(info, entry)
 
 
 def fit_gauss_split_fov(
     movie,
+    info: list[dict] | None = None,
+    *,
     camera_info: dict,
     identifications: pd.DataFrame,
     box: int,
@@ -5202,11 +5765,11 @@ def fit_gauss_split_fov(
     use_gpu: bool | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    multiprocess: bool = True,
-    progress_callback: Callable[[int], None] | None = None,
+    parallel: bool = True,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     camera_calibration: dict | None = None,
-) -> pd.DataFrame | None:
+) -> tuple[pd.DataFrame, list[dict]] | None:
     """Fit a spherical Gaussian jointly across the regions of one movie.
 
     The split-FOV counterpart of :func:`fit_gauss_multichannel`, for channels
@@ -5220,10 +5783,16 @@ def fit_gauss_split_fov(
     ``movie`` / ``camera_info`` once per channel and delegates to the standard
     multichannel fitter.
 
+    Since v1.0.0: only the movie and its metadata are accepted
+    positionally.
+
     Parameters
     ----------
     movie : LoadedMovie
         The single loaded movie.
+    info : list of dicts or None, optional
+        Metadata of the reference channel's identifications (see
+        :func:`identify`) or movie. Default is None, i.e., none.
     camera_info : dict
         Camera info of ``movie``.
     identifications : pd.DataFrame
@@ -5255,10 +5824,13 @@ def fit_gauss_split_fov(
     max_iterations : int or None, optional
         Maximum number of iterations per spot, as in
         :func:`fit_gauss_multichannel`.
-    multiprocess : bool, optional
+    parallel : bool, optional
         Run the CPU kernels on a thread pool. Default True.
-    progress_callback : callable, optional
-        Called with the cumulative number of spots processed.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        of :func:`fit_gauss_multichannel`. Default is None.
     abort_callback : callable, optional
         Polled during the fit; returning True stops it and returns None.
     camera_calibration : dict, optional
@@ -5268,9 +5840,14 @@ def fit_gauss_split_fov(
 
     Returns
     -------
-    locs : pd.DataFrame or None
-        Localizations in the reference region's coordinates, or None if
-        ``abort_callback`` asked to stop.
+    locs : pd.DataFrame
+        Localizations in the reference region's coordinates.
+    info : list of dicts
+        Metadata of the localizations: ``info`` with an entry recording
+        the fit, including the regions, appended (see
+        ``lib.append_metadata``).
+
+    None is returned instead if ``abort_callback`` asked to stop.
     """
     fit_regions, reference, transforms = split_fov_fit_geometry(
         channel_registration, regions
@@ -5286,19 +5863,19 @@ def fit_gauss_split_fov(
     channel_registration = dict(channel_registration)
     channel_registration["channel_transforms"] = list(transforms)
 
-    return fit_gauss_multichannel(
+    result = fit_gauss_multichannel(
         [movie] * n_channels,
-        [camera_info] * n_channels,
-        ids,
-        box,
-        channel_registration,
+        camera_infos=[camera_info] * n_channels,
+        identifications=ids,
+        box=box,
+        channel_registration=channel_registration,
         mle=mle,
         link_photons=link_photons,
         use_gpu=use_gpu,
         tolerance=tolerance,
         max_iterations=max_iterations,
-        multiprocess=multiprocess,
-        progress_callback=progress_callback,
+        parallel=parallel,
+        progress=progress,
         abort_callback=abort_callback,
         # one physical camera, so every region reads the same maps; _cut_map
         # indexes them with absolute frame coordinates, which is what makes one
@@ -5308,7 +5885,12 @@ def fit_gauss_split_fov(
             if camera_calibration is None
             else [camera_calibration] * n_channels
         ),
+        info=info,
     )
+    if result is None:  # aborted
+        return None
+    locs, info = result
+    return locs, _record_regions(info, fit_regions, reference)
 
 
 # ----------------------------------------------------------------------
@@ -5495,10 +6077,8 @@ def _run_splinefit(
     jacobians: np.ndarray | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    multiprocess: bool = True,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    parallel: bool = True,
+    progress: lib.Progress | None = None,
     abort_callback: Callable[[], bool] | None = None,
     use_gpu: bool = False,
     variance: lib.FloatArray3D | None = None,
@@ -5508,8 +6088,10 @@ def _run_splinefit(
     Returns ``(theta, chi_squares, states, iterations)``, or None if
     ``abort_callback`` asked to stop. The axial multi-start runs inside the
     per-spot kernel on both devices, so every seed is tried while that spot's
-    data is still in cache and progress is reported once per spot rather than
-    once per pass.
+    data is still in cache and progress is reported once per spot (once per
+    chunk on the GPU) rather than once per pass. ``progress`` is a
+    normalized tracker (None reports nothing); the fit is reported as one
+    phase, "Fitting spots".
 
     ``use_gpu`` selects :mod:`picasso.fitting.splinefit_cuda` over
     :mod:`picasso.fitting.splinefit`. The two backends are driven from *this*
@@ -5522,12 +6104,12 @@ def _run_splinefit(
     byte-identical inputs. That is what makes a CPU/GPU comparison meaningful
     rather than a test of two translation layers agreeing.
 
-    ``multiprocess`` keeps ``fit``'s argument name, but as for ``gaussmle``
-    it selects a **thread** pool: the CPU kernels are ``nogil``, so the workers
-    run concurrently while sharing the spots and the coefficient table rather
-    than pickling a copy of each into a subprocess. False runs the fit serially
-    in the calling thread, which is what the tests use for reproducibility. It
-    is ignored on the GPU, where one launch fits every spot.
+    ``parallel`` selects a pool of **threads**: the CPU kernels are
+    ``nogil``, so the workers run concurrently while sharing the spots and
+    the coefficient table rather than pickling a copy of each into a
+    subprocess. False runs the fit serially in the calling thread, which is
+    what the tests use for reproducibility. It is ignored on the GPU, where
+    one launch fits every spot.
     """
     box = spots.shape[1]
     # Fit a smaller-than-calibration box against a centered crop, exactly as
@@ -5545,19 +6127,19 @@ def _run_splinefit(
         max_iterations,
         variance,
     )
+    progress = lib.normalize_progress(progress)
     aborted = callable(abort_callback) and abort_callback()
     if aborted:
         return None
     if use_gpu:
-        return _run_splinefit_gpu(
-            args, kwargs, progress_callback, abort_callback
-        )
-    if not multiprocess or n_spots == 0:
+        return _run_splinefit_gpu(args, kwargs, progress, abort_callback)
+    if not parallel or n_spots == 0:
+        # starts and ends its own "Fitting spots" phase
         return splinefit.fit_spots(
-            *args, progress_callback=progress_callback, **kwargs
+            *args, progress=progress, abort_callback=abort_callback, **kwargs
         )
     return _run_splinefit_threaded(
-        args, kwargs, n_spots, progress_callback, abort_callback
+        args, kwargs, n_spots, progress, abort_callback
     )
 
 
@@ -5671,10 +6253,11 @@ def _prepare_splinefit_args(
 def _run_splinefit_gpu(
     args: tuple,
     kwargs: dict,
-    progress_callback: Callable[[int], None] | Literal["console"] | None,
+    progress: lib.Progress,
     abort_callback: Callable[[], bool] | None,
 ) -> tuple | None:
-    """Run the CUDA spline kernel, translating its abort signal to None."""
+    """Run the CUDA spline kernel, translating its abort signal to None.
+    The kernel reports its own "Fitting spots" phase to ``progress``."""
     stopped_early = False
 
     def _abort() -> bool:
@@ -5686,7 +6269,7 @@ def _run_splinefit_gpu(
 
     result = splinefit_cuda.fit_spots(
         *args,
-        progress_callback=progress_callback,
+        progress=progress,
         abort_callback=_abort if callable(abort_callback) else None,
         **kwargs,
     )
@@ -5697,99 +6280,89 @@ def _run_splinefit_threaded(
     args: tuple,
     kwargs: dict,
     n_spots: int,
-    progress_callback: Callable[[int], None] | Literal["console"] | None,
+    progress: lib.Progress,
     abort_callback: Callable[[], bool] | None,
 ) -> tuple | None:
-    """Run the CPU spline kernel's thread pool and poll it to completion."""
+    """Run the CPU spline kernel's thread pool and poll it to completion,
+    reporting the "Fitting spots" phase to ``progress``."""
+    lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
     fit = splinefit.fit_spots_async(*args, **kwargs)
-    use_tqdm = progress_callback == "console"
-    iter_range = (
-        tqdm(total=n_spots, desc="Fitting", unit="spot") if use_tqdm else None
-    )
-    aborted, last = _await_splinefit(
-        fit, n_spots, progress_callback, abort_callback, use_tqdm, iter_range
-    )
-    while not fit.finished():
-        # A spot is claimed before it is fitted, so the last few may still be
-        # in flight once the counter reaches n_spots. Aborted runs wait too, so
-        # no thread is left writing into the arrays after this returns.
-        fit.raise_errors()
-        time.sleep(0.05)
-    fit.raise_errors()
-    if use_tqdm:
-        if not aborted:
-            iter_range.update(n_spots - last)
-        iter_range.close()
-    if aborted:
+    if not _await_async_fit(fit, n_spots, progress, abort_callback):
         return None
-    if callable(progress_callback):
-        # Report completion explicitly: a fit short enough to finish before the
-        # first poll would otherwise never call back at all.
-        progress_callback(n_spots)
     return fit.results()
 
 
-def _await_splinefit(
-    fit,
+def _await_async_fit(
+    job: splinefit.AsyncFit,
     n_spots: int,
-    progress_callback: Callable[[int], None] | Literal["console"] | None,
+    progress: lib.Progress,
     abort_callback: Callable[[], bool] | None,
-    use_tqdm: bool,
-    iter_range,
-) -> tuple[bool, int]:
-    """Poll the thread pool until every spot is claimed, or an abort fires.
+) -> bool:
+    """Poll a fit running on a CPU thread pool until every worker exited.
+
+    Reports the number of spots *finished* (fitted, results written) to the
+    running phase of ``progress``, from the calling thread, and ends the
+    phase at ``n_spots``. However this returns or raises - completion, an
+    abort, a worker error or a tracker raising ``lib.OperationCanceled`` -
+    no worker writes into the result arrays afterwards.
 
     Parameters
     ----------
-    fit : object
-        The running fit, as returned by ``splinefit.fit_spots_async``.
+    job : picasso.fitting.splinefit.AsyncFit
+        The running fit, e.g. from ``splinefit.fit_spots_async`` or
+        ``gaussfit.fit_spots_multichannel_async``.
     n_spots : int
         Total number of spots.
-    progress_callback : callable, "console" or None
-        Called with the cumulative number of claimed spots, unless
-        ``use_tqdm``.
+    progress : lib.Progress
+        Normalized tracker whose phase the caller started.
     abort_callback : callable or None
         Polled on every iteration; returning True stops the fit.
-    use_tqdm : bool
-        Whether progress goes to ``iter_range`` instead of
-        ``progress_callback``.
-    iter_range : tqdm.tqdm or None
-        The progress bar, if ``use_tqdm``.
 
     Returns
     -------
-    aborted : bool
-        True if ``abort_callback`` stopped the fit.
-    last : int
-        Spot count last reported to ``iter_range``, for the caller's final
-        tqdm update.
+    completed : bool
+        False if ``abort_callback`` stopped the fit.
+
+    Raises
+    ------
+    RuntimeError
+        If the workers exited without fitting every spot.
     """
-    last = 0
-    while fit.current[0] < n_spots:
-        if callable(abort_callback) and abort_callback():
-            fit.stop()
-            return True, last
-        if use_tqdm:
-            iter_range.update(fit.current[0] - last)
-            last = fit.current[0]
-        elif callable(progress_callback):
-            progress_callback(fit.current[0])
-        # The workers write into preallocated arrays and nothing ever collects
-        # their futures, so a worker that died would leave the counter frozen
-        # and this loop spinning forever. Surface the error instead.
-        fit.raise_errors()
-        if fit.finished() and fit.current[0] < n_spots:
+    completed = False
+    try:
+        while True:
+            # polled before the completion check, as in _identify_threaded
+            if callable(abort_callback) and abort_callback():
+                return False
+            if job.finished():
+                break
+            # The workers write into preallocated arrays and nothing ever
+            # collects their futures, so a worker that died would leave the
+            # counter frozen. Surface the error instead.
+            job.raise_errors()
+            progress.set_value(min(job.n_done, n_spots))
+            time.sleep(0.1)
+        job.raise_errors()
+        if job.n_done < n_spots:
             raise RuntimeError(
-                "The spline fitting workers stopped after "
-                f"{fit.current[0]} of {n_spots} spots."
+                "The fitting workers stopped after "
+                f"{job.n_done} of {n_spots} spots."
             )
-        time.sleep(0.2)
-    return False, last
+        completed = True
+    finally:
+        if not completed:
+            job.stop()
+            # spots in flight run to completion; wait for them
+            while not job.finished():
+                time.sleep(0.05)
+    progress.set_value(n_spots)
+    return True
 
 
 def fit_spots_splinefit(
     spots: lib.FloatArray3D,
     calibration: dict,
+    *,
     mle: bool = False,
     n_z_starts: int | None = None,
     return_stats: bool = False,
@@ -5797,10 +6370,8 @@ def fit_spots_splinefit(
     jacobians: np.ndarray | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    multiprocess: bool = True,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    parallel: bool = True,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
     use_gpu: bool = False,
     variance: lib.FloatArray3D | None = None,
@@ -5815,6 +6386,8 @@ def fit_spots_splinefit(
     between them). Every spline model is supported: ``spline-2d``,
     ``spline-3d``, ``spline-3d-multichannel`` and the photon-decoupled
     ``spline-3d-multichannel-link-xyz``.
+
+    Since v1.0.0: only ``spots`` and ``calibration`` are accepted positionally.
 
     Parameters
     ----------
@@ -5850,14 +6423,16 @@ def fit_spots_splinefit(
         Maximum number of iterations per spot. None (the default) uses the
         one that fit would use by default, see
         ``picasso.fitting.splinefit.convergence_schedule``.
-    multiprocess : bool, optional
-        Keeps ``fit``'s argument name, but selects a **thread** pool: the CPU
-        kernels are ``nogil``. False fits serially in the calling thread.
-        Ignored on the GPU. Default True.
-    progress_callback : callable, "console" or None, optional
-        ``"console"`` shows a tqdm bar; a callable is invoked with the
-        cumulative number of spots fitted - per spot on the CPU, per chunk on
-        the GPU.
+    parallel : bool, optional
+        If True, the CPU kernels (which are ``nogil``) run on a pool of
+        threads; if False, serially in the calling thread. Ignored on the
+        GPU. Default True.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots", over
+        the spots finished: per spot on the CPU, per chunk on the GPU.
+        Default is None.
     abort_callback : callable or None, optional
         Polled while the fit runs; returning True stops it.
     use_gpu : bool, optional
@@ -5881,21 +6456,22 @@ def fit_spots_splinefit(
         Only if ``return_stats``. The residual sum of squares at the optimum;
         None for maximum likelihood.
     """
-    result = _run_splinefit(
-        spots,
-        calibration,
-        mle=mle,
-        n_z_starts=n_z_starts,
-        residuals=residuals,
-        jacobians=jacobians,
-        tolerance=tolerance,
-        max_iterations=max_iterations,
-        multiprocess=multiprocess,
-        progress_callback=progress_callback,
-        abort_callback=abort_callback,
-        use_gpu=use_gpu,
-        variance=variance,
-    )
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        result = _run_splinefit(
+            spots,
+            calibration,
+            mle=mle,
+            n_z_starts=n_z_starts,
+            residuals=residuals,
+            jacobians=jacobians,
+            tolerance=tolerance,
+            max_iterations=max_iterations,
+            parallel=parallel,
+            progress=progress,
+            abort_callback=abort_callback,
+            use_gpu=use_gpu,
+            variance=variance,
+        )
     if result is None:
         return None
     theta, chi_squares, _states, iterations = result
@@ -5923,6 +6499,7 @@ def _fit_splinefit_multistart(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     variance: lib.FloatArray3D | None = None,
+    progress: lib.Progress | None = None,
 ) -> tuple:
     """Axial multi-start with the numba kernels, on either device.
 
@@ -5933,7 +6510,8 @@ def _fit_splinefit_multistart(
 
     There is no separate seed loop here: both kernels run the multi-start
     per spot internally and return the winning seed, so this only has to
-    translate the fit state into the ``converged`` mask."""
+    translate the fit state into the ``converged`` mask. ``progress`` (a
+    normalized tracker, or None) gets the "Fitting spots" phase."""
     theta, chi_squares, states, iterations = _run_splinefit(
         spots,
         calibration,
@@ -5943,6 +6521,7 @@ def _fit_splinefit_multistart(
         jacobians=jacobians,
         tolerance=tolerance,
         max_iterations=max_iterations,
+        progress=progress,
         use_gpu=use_gpu,
         variance=variance,
     )
@@ -5972,6 +6551,7 @@ def _spline_use_gpu(use_gpu: bool | None) -> bool:
 def fit_spots_spline(
     spots: lib.FloatArray3D,
     calibration: dict,
+    *,
     mle: bool = False,
     n_z_starts: int | None = None,
     return_stats: bool = False,
@@ -5980,15 +6560,15 @@ def fit_spots_spline(
     use_gpu: bool | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     variance: lib.FloatArray3D | None = None,
 ) -> np.ndarray | tuple | None:
     """Fit spots with a cubic-spline PSF model on the available device.
 
     A thin wrapper over :func:`fit_spots_splinefit` that resolves the device.
     Both devices run the same algorithm, so the choice only affects speed.
+
+    Since v1.0.0: only ``spots`` and ``calibration`` are accepted positionally.
 
     Parameters
     ----------
@@ -6020,8 +6600,11 @@ def fit_spots_spline(
     max_iterations : int or None, optional
         Maximum number of iterations per spot, as in
         :func:`fit_spots_splinefit`.
-    progress_callback : callable, "console" or None, optional
-        Progress reporting, as in :func:`fit_spots_splinefit`.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots", over
+        the spots, as in :func:`fit_spots_splinefit`. Default is None.
     variance : lib.FloatArray3D, optional
         Per-pixel sCMOS readout variance in photoelectrons squared, laid
         out like ``spots``. Default None.
@@ -6047,7 +6630,7 @@ def fit_spots_spline(
         jacobians=jacobians,
         tolerance=tolerance,
         max_iterations=max_iterations,
-        progress_callback=progress_callback,
+        progress=progress,
         use_gpu=_spline_use_gpu(use_gpu),
         variance=variance,
     )
@@ -6064,6 +6647,7 @@ def _fit_spline_multistart(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     variance: lib.FloatArray3D | None = None,
+    progress: lib.Progress | None = None,
 ) -> tuple:
     """Axial multi-start on whichever device is available.
 
@@ -6080,6 +6664,7 @@ def _fit_spline_multistart(
         max_iterations=max_iterations,
         use_gpu=_spline_use_gpu(use_gpu),
         variance=variance,
+        progress=progress,
     )
 
 
@@ -6092,17 +6677,17 @@ def _locs_from_fits_spline_link_xyz(
     em: bool = False,
     log_likelihood: lib.FloatArray1D | None = None,
     iterations: lib.FloatArray1D | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
     residuals: np.ndarray | None = None,
     jacobians: np.ndarray | None = None,
     chi_square: lib.FloatArray1D | None = None,
     variance: lib.FloatArray4D | None = None,
     spots: np.ndarray | None = None,
+    *,
+    pixelsize: float,
 ) -> pd.DataFrame:
     """Localizations from a photon-decoupled (link-XYZ) multichannel spline
-    fit.
+    fit, with every length in nm (``pixelsize`` is the camera pixel size).
 
     ``theta`` columns are ``[x_shift, y_shift, z_shift, N_0..N_{c-1},
     bg_0..bg_{c-1}]``. Emits the shared ``x, y, z`` plus per-channel photon and
@@ -6110,7 +6695,8 @@ def _locs_from_fits_spline_link_xyz(
     ``photons`` / ``bg``, and ``rel_photons_ch{c}`` = that channel's share of
     the total photons (the continuous ratiometric readout that the free photon
     ratio provides; the shares sum to 1). ``calibration`` is assumed already
-    cropped to ``box``."""
+    cropped to ``box``. ``progress`` (a normalized tracker, or None) gets the
+    CRLB phase(s), see ``precision._spline_crlb``."""
     n_channels = precision._spline_n_channels(calibration)
     variance = precision._crlb_variance_channel_major(variance, n_channels)
     oversampling = float(calibration.get("oversampling", 1.0))
@@ -6142,7 +6728,7 @@ def _locs_from_fits_spline_link_xyz(
         box,
         mle=mle,
         em=em,
-        progress_callback=progress_callback,
+        progress=progress,
         residuals=residuals,
         jacobians=jacobians,
         variance=variance,
@@ -6200,7 +6786,7 @@ def _locs_from_fits_spline_link_xyz(
             variance,
         )
     )
-    locs = pd.DataFrame(columns)
+    locs = pd.DataFrame(_lengths_to_nm(columns, pixelsize))
     locs.sort_values(by="frame", kind="quicksort", inplace=True)
     return locs
 
@@ -6208,20 +6794,20 @@ def _locs_from_fits_spline_link_xyz(
 def locs_from_fits_spline(
     identifications: pd.DataFrame,
     theta: lib.FloatArray2D,
+    *,
     box: int,
     em: bool,
     calibration: dict,
     mle: bool = True,
     log_likelihood: lib.FloatArray1D | None = None,
     iterations: lib.FloatArray1D | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     residuals: np.ndarray | None = None,
     jacobians: np.ndarray | None = None,
     chi_square: lib.FloatArray1D | None = None,
     variance: lib.FloatArray4D | None = None,
     spots: np.ndarray | None = None,
+    pixelsize: float,
 ) -> pd.DataFrame:
     """Convert spline fit results into a localizations data frame.
 
@@ -6229,6 +6815,9 @@ def locs_from_fits_spline(
     ``bg`` uncertainties come from :func:`precision._spline_crlb`: the Poisson
     Cramer-Rao bound for maximum-likelihood fits or the least-squares sandwich
     covariance for least-squares ones.
+
+    Since v1.0.0: only ``identifications`` and ``theta`` are accepted
+    positionally.
 
     Parameters
     ----------
@@ -6258,9 +6847,13 @@ def locs_from_fits_spline(
         given. Default None.
     iterations : lib.FloatArray1D, optional
         Iterations each spot took; becomes a column when given. Default None.
-    progress_callback : callable, "console" or None, optional
-        Forwarded to :func:`precision._spline_crlb`, which reports the
-        per-spot CRLB computation.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Computing spline
+        CRLB", over the localizations; if the GPU attempt fails, the CPU
+        starts over in a new phase, "Computing spline CRLB on the CPU".
+        Default is None.
     residuals : np.ndarray, optional
         ``(n_spots, n_channels, 2)`` sub-pixel ROI offsets of a multichannel
         fit (see :func:`channel_roi_geometry`). Default None.
@@ -6279,6 +6872,10 @@ def locs_from_fits_spline(
         ``chi_square`` they add the ``reduced_chi_square`` column, the
         goodness of fit normalized for the box size and the photon counts
         (see :func:`reduced_chi_square`). Default None.
+    pixelsize : float
+        Camera pixel size in nm. The fit works in camera pixels; the
+        positions and lateral precisions are converted to nm with it
+        (``z`` and ``lpz`` come in nm from the calibration's z step).
 
     Returns
     -------
@@ -6291,6 +6888,47 @@ def locs_from_fits_spline(
         additionally have the calibration's lateral transforms applied
         (``lib.apply_lateral_transforms``).
     """
+    with lib.tracked_progress(
+        progress, precision._SPLINE_CRLB_LABEL, "loc"
+    ) as progress:
+        return _locs_from_fits_spline(
+            identifications,
+            theta,
+            box,
+            em,
+            calibration,
+            mle=mle,
+            log_likelihood=log_likelihood,
+            iterations=iterations,
+            progress=progress,
+            residuals=residuals,
+            jacobians=jacobians,
+            chi_square=chi_square,
+            variance=variance,
+            spots=spots,
+            pixelsize=pixelsize,
+        )
+
+
+def _locs_from_fits_spline(
+    identifications: pd.DataFrame,
+    theta: lib.FloatArray2D,
+    box: int,
+    em: bool,
+    calibration: dict,
+    mle: bool,
+    log_likelihood: lib.FloatArray1D | None,
+    iterations: lib.FloatArray1D | None,
+    progress: lib.Progress,
+    residuals: np.ndarray | None,
+    jacobians: np.ndarray | None,
+    chi_square: lib.FloatArray1D | None,
+    variance: lib.FloatArray4D | None,
+    spots: np.ndarray | None,
+    *,
+    pixelsize: float,
+) -> pd.DataFrame:
+    """:func:`locs_from_fits_spline` with a normalized tracker."""
     calibration = crop_spline_calibration(calibration, box)
     model = calibration["model"]
     if model == precision._LINK_XYZ_MODEL:
@@ -6306,12 +6944,13 @@ def locs_from_fits_spline(
             em=em,
             log_likelihood=log_likelihood,
             iterations=iterations,
-            progress_callback=progress_callback,
+            progress=progress,
             residuals=residuals,
             jacobians=jacobians,
             chi_square=chi_square,
             variance=variance,
             spots=spots,
+            pixelsize=pixelsize,
         )
     is_3d = model != "spline-2d"
     box_offset = int(box / 2)
@@ -6343,7 +6982,7 @@ def locs_from_fits_spline(
         box,
         mle=mle,
         em=em,
-        progress_callback=progress_callback,
+        progress=progress,
         residuals=residuals,
         jacobians=jacobians,
         variance=variance,
@@ -6394,7 +7033,7 @@ def locs_from_fits_spline(
             variance,
         )
     )
-    locs = pd.DataFrame(columns)
+    locs = pd.DataFrame(_lengths_to_nm(columns, pixelsize))
     locs.sort_values(by="frame", kind="quicksort", inplace=True)
     if precision._spline_n_channels(calibration) > 1:
         return locs
@@ -6408,23 +7047,27 @@ def _fit2d_spline_gpu(
     em: bool,
     calibration: dict,
     mle: bool = False,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
     n_z_starts: int | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
     variance: lib.FloatArray3D | None = None,
-) -> pd.DataFrame:
+    abort_callback: Callable[[], bool] | None = None,
+    *,
+    pixelsize: float,
+) -> pd.DataFrame | None:
     """Fit an experimentally measured cubic-spline PSF on the GPU. For a 3D
     calibration the localizations contain the fitted ``z`` directly. See
-    ``fit`` for more details. ``progress_callback`` tracks the per-spot CRLB
-    computation in ``locs_from_fits_spline``.
+    ``fit`` for more details. ``progress`` (a normalized tracker) gets two
+    phases: "Fitting spots" (per chunk) and the CRLB of
+    ``locs_from_fits_spline``.
 
     ``n_z_starts`` is the axial multi-start (see
     :func:`fit_spots_splinefit`); ``None`` picks it from the calibration.
-    Pass 1 for the single in-focus start."""
-    theta, log_likelihood, iterations, chi_square = fit_spots_splinefit(
+    Pass 1 for the single in-focus start.
+
+    Returns None if ``abort_callback`` asked to stop."""
+    result = fit_spots_splinefit(
         spots,
         calibration,
         mle=mle,
@@ -6432,22 +7075,28 @@ def _fit2d_spline_gpu(
         n_z_starts=n_z_starts,
         tolerance=tolerance,
         max_iterations=max_iterations,
+        progress=progress,
         use_gpu=True,
         variance=variance,
+        abort_callback=abort_callback,
     )
+    if result is None:
+        return None
+    theta, log_likelihood, iterations, chi_square = result
     locs = locs_from_fits_spline(
         identifications,
         theta,
-        box,
-        em,
-        calibration,
+        box=box,
+        em=em,
+        calibration=calibration,
         mle=mle,
         log_likelihood=log_likelihood,
         iterations=iterations,
-        progress_callback=progress_callback,
+        progress=progress,
         chi_square=chi_square,
         variance=variance,
         spots=spots,
+        pixelsize=pixelsize,
     )
     return locs
 
@@ -6462,23 +7111,18 @@ def _fit2d_spline_cpu(
     n_z_starts: int | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    multiprocess: bool = True,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    parallel: bool = True,
+    progress: lib.Progress | None = None,
     abort_callback: Callable[[], bool] | None = None,
     variance: lib.FloatArray3D | None = None,
+    *,
+    pixelsize: float,
 ) -> pd.DataFrame | None:
     """Fit an experimentally measured cubic-spline PSF on the CPU. For a 3D
     calibration the localizations contain the fitted ``z`` directly. See
-    ``fit`` for more details.
-
-    Unlike the GPU path, whose fit is one launch per chunk,
-    ``progress_callback`` here tracks the fit itself, one step per spot. The
-    per-spot CRLB pass in ``locs_from_fits_spline`` is a second sweep over the
-    same localizations, so it only gets the callback in ``"console"`` mode -
-    where it draws its own labeled progress bar - rather than rewinding a
-    GUI's counter back to zero.
+    ``fit`` for more details. ``progress`` (a normalized tracker) gets two
+    phases: "Fitting spots" (per spot) and the CRLB of
+    ``locs_from_fits_spline``.
 
     Returns None if ``abort_callback`` asked to stop."""
     result = fit_spots_splinefit(
@@ -6489,8 +7133,8 @@ def _fit2d_spline_cpu(
         return_stats=True,
         tolerance=tolerance,
         max_iterations=max_iterations,
-        multiprocess=multiprocess,
-        progress_callback=progress_callback,
+        parallel=parallel,
+        progress=progress,
         abort_callback=abort_callback,
         variance=variance,
     )
@@ -6500,18 +7144,17 @@ def _fit2d_spline_cpu(
     return locs_from_fits_spline(
         identifications,
         theta,
-        box,
-        em,
-        calibration,
+        box=box,
+        em=em,
+        calibration=calibration,
         mle=mle,
         log_likelihood=log_likelihood,
         iterations=iterations,
-        progress_callback=(
-            "console" if progress_callback == "console" else None
-        ),
+        progress=progress,
         chi_square=chi_square,
         variance=variance,
         spots=spots,
+        pixelsize=pixelsize,
     )
 
 
@@ -6773,7 +7416,7 @@ def link_identifications_multichannel(
     identifications_per_channel: list,
     transforms: list,
     tol: float,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> np.ndarray:
     """Boolean mask over the reference channel's detections marking those that
     are also detected in *every* other channel.
@@ -6798,8 +7441,12 @@ def link_identifications_multichannel(
         that channel (as stored in the calibration's ``channel_transforms``).
     tol : float
         Pairing radius in camera pixels (the GUI preview uses ``1.5 * box``).
-    progress_callback : callable, optional
-        Called with the cumulative number of reference detections processed.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase,
+        "Linking channels", over the reference detections. Default is
+        None.
 
     Returns
     -------
@@ -6807,6 +7454,27 @@ def link_identifications_multichannel(
         Boolean mask over ``identifications_per_channel[0]`` rows. All
         ``False`` if no other channel carries identifications.
     """
+    with lib.tracked_progress(
+        progress, "Linking channels", "spot"
+    ) as progress:
+        reference = identifications_per_channel[0]
+        n_ref = 0 if reference is None else len(reference)
+        lib.start_phase(progress, "Linking channels", n_ref, unit="spot")
+        linked = _link_identifications(
+            identifications_per_channel, transforms, tol, progress
+        )
+        progress.set_value(n_ref)
+    return linked
+
+
+def _link_identifications(
+    identifications_per_channel: list,
+    transforms: list,
+    tol: float,
+    progress: lib.Progress,
+) -> np.ndarray:
+    """The work of :func:`link_identifications_multichannel`, reporting
+    to the running phase of ``progress`` (a normalized tracker)."""
     reference = identifications_per_channel[0]
     n_ref = 0 if reference is None else len(reference)
     if n_ref == 0:
@@ -6863,10 +7531,8 @@ def link_identifications_multichannel(
                 match_count[ref_order[start:stop][matched]] += 1
             done += stop - start
             # one monotone 0 -> n_ref progression across all checked channels
-            if callable(progress_callback) and (f % 2000 == 0):
-                progress_callback((i_c * n_ref + done) // n_checked)
-    if callable(progress_callback):
-        progress_callback(n_ref)
+            if f % 2000 == 0:
+                progress.set_value((i_c * n_ref + done) // n_checked)
     return match_count == n_checked
 
 
@@ -6875,7 +7541,7 @@ def filter_linked_identifications(
     transforms: list,
     box: int,
     tol: float | None = None,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, int, int]:
     """Keep only the reference detections linked across *all* channels.
 
@@ -6899,8 +7565,12 @@ def filter_linked_identifications(
         Largest distance (camera pixels) at which a mapped reference detection
         and a channel detection count as the same molecule. None (the default)
         uses ``1.5 * box``.
-    progress_callback : callable, optional
-        Invoked with a monotone 0 -> ``n_total`` progression.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase,
+        "Linking channels", over the reference detections (none if no
+        other channel has identifications). Default is None.
 
     Returns
     -------
@@ -6934,7 +7604,7 @@ def filter_linked_identifications(
         identifications_per_channel,
         transforms,
         tol,
-        progress_callback=progress_callback,
+        progress=progress,
     )
     n_kept = int(linked.sum())
     # Keeping almost nothing means the inter-channel registration (or the
@@ -6961,7 +7631,7 @@ def get_spots_multichannel(
     box: int,
     camera_infos: list[dict],
     transforms: list,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     return_residuals: bool = False,
     camera_calibrations: list[dict | None] | None = None,
     return_variance: bool = False,
@@ -6990,8 +7660,12 @@ def get_spots_multichannel(
         One reference -> channel transform per channel, each a
         ``picasso.transforms.Transform`` or a dict accepted by
         ``transforms.from_dict``; ``transforms[0]`` is the identity.
-    progress_callback : callable, optional
-        Forwarded to ``get_spots`` for the reference channel.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase,
+        "Cutting spots", over the spots of all channels (identifications
+        times channels). Default is None.
     return_residuals : bool, optional
         Also return the sub-pixel ROI-placement residuals, i.e. the fractional
         part discarded when each channel's box is snapped to an integer pixel.
@@ -7047,6 +7721,48 @@ def get_spots_multichannel(
             np.asarray(identifications["y"], dtype=np.float64),
         ]
     )
+    with lib.tracked_progress(progress, "Cutting spots", "spot") as progress:
+        n_ids = len(identifications)
+        lib.start_phase(
+            progress, "Cutting spots", n_ids * n_channels, unit="spot"
+        )
+        result = _get_spots_multichannel(
+            movies,
+            identifications,
+            box,
+            camera_infos,
+            transforms,
+            progress,
+            camera_calibrations,
+            ref_xy,
+        )
+        progress.set_value(n_ids * n_channels)
+    spots, residuals, variance = result
+    result = (spots,)
+    if return_residuals:
+        result += (residuals,)
+    if return_variance:
+        result += (variance,)
+    if return_jacobians:
+        result += (tform.channel_jacobians(transforms, ref_xy),)
+    return result[0] if len(result) == 1 else result
+
+
+def _get_spots_multichannel(
+    movies: list,
+    identifications: pd.DataFrame,
+    box: int,
+    camera_infos: list[dict],
+    transforms: list,
+    progress: lib.Progress,
+    camera_calibrations: list,
+    ref_xy: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Cut every channel's spots for :func:`get_spots_multichannel`,
+    reporting the spots of all channels cut so far to the running phase of
+    ``progress``. Returns ``(spots, residuals, variance)``."""
+    n_channels = len(movies)
+    n_ids = len(identifications)
     channel_spots = []
     channel_variance = []
     residuals = np.zeros((len(ref_xy), n_channels, 2), dtype=np.float32)
@@ -7069,14 +7785,15 @@ def get_spots_multichannel(
         # the calibration maps from it here - rather than from the reference
         # identifications - is what keeps a channel's variance patch aligned
         # with the spot it accompanies.
-        spots_c, variance_c = get_spots(
+        spots_c, variance_c = _get_spots(
             movies[c],
             ids_c,
             box,
             camera_infos[c],
-            progress_callback=progress_callback if c == 0 else None,
+            progress,
             camera_calibration=camera_calibrations[c],
             return_variance=True,
+            progress_offset=c * n_ids,
         )
         channel_spots.append(spots_c)
         if variance_c is None:
@@ -7090,14 +7807,7 @@ def get_spots_multichannel(
         if any(c is not None for c in camera_calibrations)
         else None
     )
-    result = (spots,)
-    if return_residuals:
-        result += (residuals,)
-    if return_variance:
-        result += (variance,)
-    if return_jacobians:
-        result += (tform.channel_jacobians(transforms, ref_xy),)
-    return result[0] if len(result) == 1 else result
+    return spots, residuals, variance
 
 
 def channel_roi_residuals(
@@ -7207,20 +7917,22 @@ def channel_roi_geometry(
 
 def fit_spline_multichannel(
     movies: list,
+    info: list[dict] | None = None,
+    *,
     camera_infos: list[dict],
     identifications: pd.DataFrame,
     box: int,
     calibration: dict,
     mle: bool = False,
     link_photons: bool = True,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     apply_roi_residuals: bool = True,
     n_z_starts: int | None = None,
     use_gpu: bool | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
     camera_calibrations: list[dict | None] | None = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Fit a multichannel cubic-spline PSF across several registered channels.
 
     Global fit in the sense of globLoc (Li et al., Nat. Commun. 13, 3133,
@@ -7231,11 +7943,17 @@ def fit_spline_multichannel(
     ``locs_from_fits_spline``. The resulting localizations are in the
     reference channel's coordinates and contain the fitted ``z`` directly.
 
+    Since v1.0.0: only the movies and their metadata are accepted
+    positionally.
+
     Parameters
     ----------
     movies : list
         One movie per channel; ``movies[0]`` is the reference channel and its
         order must match the calibration's channels.
+    info : list of dicts or None, optional
+        Metadata of the reference channel's identifications (see
+        :func:`identify`) or movie. Default is None, i.e., none.
     camera_infos : list of dict
         One camera-info dict per channel.
     identifications : pd.DataFrame
@@ -7253,9 +7971,13 @@ def fit_spline_multichannel(
         gets its own photon count and background, reported as
         ``photons_ch{c}`` / ``bg_ch{c}`` / ``rel_photons_ch{c}``.
         Available for 2 to 6 channels. See :func:`_as_link_xyz_calibration`.
-    progress_callback : callable, optional
-        Invoked with the cumulative spot count as the extraction, the fit and
-        the CRLB computation proceed.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        "Cutting spots" over the spots of all channels, "Fitting spots"
+        over the molecules and "Computing spline CRLB" over the
+        localizations. Default is None.
     apply_roi_residuals : bool, optional
         Hand the sub-pixel ROI-placement residuals to the fit model (default
         True), so each channel's spline is evaluated where its data actually
@@ -7292,6 +8014,9 @@ def fit_spline_multichannel(
         the fitted ``z`` directly (see :func:`locs_from_fits_spline`). With
         ``link_photons=False`` they additionally carry ``photons_ch{c}``,
         ``bg_ch{c}`` and ``rel_photons_ch{c}``.
+    info : list of dicts
+        Metadata of the localizations: ``info`` with an entry recording
+        the fit appended (see ``lib.append_metadata``).
 
     Raises
     ------
@@ -7315,49 +8040,63 @@ def fit_spline_multichannel(
     identifications = multichannel_inbounds_ids(
         identifications, box, movies, transforms
     )
-    spots, residuals, variance, jacobians = get_spots_multichannel(
-        movies,
-        identifications,
-        box,
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        spots, residuals, variance, jacobians = get_spots_multichannel(
+            movies,
+            identifications,
+            box,
+            camera_infos,
+            transforms,
+            progress=progress,
+            return_residuals=True,
+            camera_calibrations=camera_calibrations,
+            return_variance=True,
+            return_jacobians=True,
+        )
+        theta, log_likelihood, iterations, chi_square = fit_spots_spline(
+            spots,
+            calibration,
+            mle=mle,
+            return_stats=True,
+            residuals=residuals if apply_roi_residuals else None,
+            jacobians=jacobians,
+            n_z_starts=n_z_starts,
+            use_gpu=use_gpu,
+            tolerance=tolerance,
+            max_iterations=max_iterations,
+            progress=progress,
+            variance=variance,
+        )
+        em = camera_infos[0].get("Gain", 1) > 1
+        locs = locs_from_fits_spline(
+            identifications,
+            theta,
+            box=box,
+            em=em,
+            calibration=calibration,
+            mle=mle,
+            pixelsize=_reference_pixelsize(camera_infos),
+            log_likelihood=log_likelihood,
+            iterations=iterations,
+            progress=progress,
+            residuals=residuals if apply_roi_residuals else None,
+            jacobians=jacobians,
+            chi_square=chi_square,
+            variance=variance,
+            spots=spots,
+        )
+    entry = _joint_fit_entry(
+        "Fit multichannel spline",
+        "spline-mle" if mle else "spline",
         camera_infos,
-        transforms,
-        progress_callback=progress_callback,
-        return_residuals=True,
-        camera_calibrations=camera_calibrations,
-        return_variance=True,
-        return_jacobians=True,
-    )
-    theta, log_likelihood, iterations, chi_square = fit_spots_spline(
-        spots,
         calibration,
-        mle=mle,
-        return_stats=True,
-        residuals=residuals if apply_roi_residuals else None,
-        jacobians=jacobians,
-        n_z_starts=n_z_starts,
+        link_photons=link_photons,
         use_gpu=use_gpu,
         tolerance=tolerance,
         max_iterations=max_iterations,
-        progress_callback=progress_callback,
-        variance=variance,
+        camera_calibrations=camera_calibrations,
     )
-    em = camera_infos[0].get("Gain", 1) > 1
-    return locs_from_fits_spline(
-        identifications,
-        theta,
-        box,
-        em,
-        calibration,
-        mle=mle,
-        log_likelihood=log_likelihood,
-        iterations=iterations,
-        progress_callback=progress_callback,
-        residuals=residuals if apply_roi_residuals else None,
-        jacobians=jacobians,
-        chi_square=chi_square,
-        variance=variance,
-        spots=spots,
-    )
+    return locs, lib.append_metadata(info, entry)
 
 
 def scale_channel_blocks(
@@ -7429,20 +8168,22 @@ def _photon_scales(calibration: dict, n_channels: int) -> np.ndarray:
 
 def fit_spline_multichannel_ratiometric(
     movies: list,
+    info: list[dict] | None = None,
+    *,
     camera_infos: list[dict],
     identifications: pd.DataFrame,
     box: int,
     calibration: dict,
     photon_ratios: lib.FloatArray2D | None = None,
     mle: bool = False,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     apply_roi_residuals: bool = True,
     n_z_starts: int | None = None,
     use_gpu: bool | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
     camera_calibrations: list[dict | None] | None = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Ratiometric multichannel spline fit with photon-ratio color assignment.
 
     Implements globLoc's ratiometric scheme (Li et al., Nat. Commun. 13, 3133,
@@ -7460,11 +8201,17 @@ def fit_spline_multichannel_ratiometric(
     abandoned any fit whose model rang negative, which was a large fraction of
     them - see ``splinefit.MU_FLOOR``.)
 
+    Since v1.0.0: only the movies and their metadata are accepted
+    positionally.
+
     Parameters
     ----------
     movies : list
         One movie per channel; ``movies[0]`` is the reference channel. As
         in :func:`fit_spline_multichannel`.
+    info : list of dicts or None, optional
+        Metadata of the reference channel's identifications (see
+        :func:`identify`) or movie. Default is None, i.e., none.
     camera_infos : list of dict
         One camera-info dict per channel.
     identifications : pd.DataFrame
@@ -7480,8 +8227,15 @@ def fit_spline_multichannel_ratiometric(
         values matter (the shared amplitude absorbs the overall scale).
     mle : bool, optional
         Use the Poisson maximum-likelihood estimator. Default False.
-    progress_callback : callable, optional
-        Invoked with the cumulative spot count as the fit proceeds.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        "Cutting spots" over the spots of all channels, then, for every
+        hypothesis k of K, "Hypothesis k/K: fitting spots" over the
+        molecules, and finally "Hypothesis k/K: computing spline CRLB"
+        over the localizations assigned to each winning hypothesis.
+        Default is None.
     apply_roi_residuals : bool, optional
         As in :func:`fit_spline_multichannel`. Default True.
     n_z_starts : int, optional
@@ -7509,6 +8263,9 @@ def fit_spline_multichannel_ratiometric(
         added integer ``color`` column (the winning ratio index) and
         per-channel photon columns ``photons_ch{c}`` (``photons`` is their
         sum).
+    info : list of dicts
+        Metadata of the localizations: ``info`` with an entry recording
+        the fit appended (see ``lib.append_metadata``).
 
     Raises
     ------
@@ -7524,13 +8281,67 @@ def fit_spline_multichannel_ratiometric(
     identifications = multichannel_inbounds_ids(
         identifications, box, movies, transforms
     )
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        locs = _fit_spline_multichannel_ratiometric(
+            movies,
+            camera_infos,
+            identifications,
+            box,
+            calibration,
+            photon_ratios,
+            transforms,
+            n_channels,
+            mle,
+            progress,
+            apply_roi_residuals,
+            n_z_starts,
+            use_gpu,
+            tolerance,
+            max_iterations,
+            camera_calibrations,
+        )
+    entry = _joint_fit_entry(
+        "Fit multichannel spline",
+        "spline-mle" if mle else "spline",
+        camera_infos,
+        calibration,
+        link_photons="ratiometric",
+        use_gpu=use_gpu,
+        tolerance=tolerance,
+        max_iterations=max_iterations,
+        camera_calibrations=camera_calibrations,
+    )
+    entry["Photon ratios"] = np.asarray(photon_ratios).tolist()
+    return locs, lib.append_metadata(info, entry)
+
+
+def _fit_spline_multichannel_ratiometric(
+    movies: list,
+    camera_infos: list[dict],
+    identifications: pd.DataFrame,
+    box: int,
+    calibration: dict,
+    photon_ratios: lib.FloatArray2D,
+    transforms: list,
+    n_channels: int,
+    mle: bool,
+    progress: lib.Progress,
+    apply_roi_residuals: bool,
+    n_z_starts: int | None,
+    use_gpu: bool | None,
+    tolerance: float | None,
+    max_iterations: int | None,
+    camera_calibrations: list[dict | None] | None,
+) -> pd.DataFrame:
+    """The work of :func:`fit_spline_multichannel_ratiometric`, with the
+    validated inputs and a normalized tracker."""
     spots, roi_residuals, variance, jacobians = get_spots_multichannel(
         movies,
         identifications,
         box,
         camera_infos,
         transforms,
-        progress_callback=progress_callback,
+        progress=progress,
         return_residuals=True,
         camera_calibrations=camera_calibrations,
         return_variance=True,
@@ -7560,6 +8371,7 @@ def fit_spline_multichannel_ratiometric(
         max_iterations,
         use_gpu,
         variance,
+        progress,
     )
 
     # Per spot: the best VALID hypothesis (lowest residual / chi2), falling
@@ -7586,6 +8398,8 @@ def fit_spline_multichannel_ratiometric(
         variance,
         n_channels,
         spots,
+        _reference_pixelsize(camera_infos),
+        progress,
     )
 
     locs = pd.concat(parts) if parts else pd.DataFrame()
@@ -7667,6 +8481,7 @@ def _fit_ratiometric_hypotheses(
     max_iterations: int | None,
     use_gpu: bool | None,
     variance: lib.FloatArray3D | None,
+    progress: lib.Progress,
 ) -> tuple[list, list, np.ndarray, np.ndarray]:
     """Fit every photon-ratio hypothesis, keeping per-spot params and score.
 
@@ -7695,6 +8510,9 @@ def _fit_ratiometric_hypotheses(
         Fit on the GPU, the CPU, or (None) whichever is available.
     variance : lib.FloatArray3D or None
         Per-pixel sCMOS readout variance, laid out like ``spots``.
+    progress : lib.Progress
+        Normalized tracker; every hypothesis k of K is one phase,
+        "Hypothesis k/K: fitting spots".
 
     Returns
     -------
@@ -7730,6 +8548,9 @@ def _fit_ratiometric_hypotheses(
             max_iterations=max_iterations,
             use_gpu=use_gpu,
             variance=variance,
+            progress=_LabeledProgress(
+                progress, f"Hypothesis {k + 1}/{n_hyp}: "
+            ),
         )
         thetas.append(params)
         chis.append(np.asarray(chi_squares))
@@ -7757,6 +8578,8 @@ def _assemble_ratiometric_locs(
     variance: lib.FloatArray3D | None,
     n_channels: int,
     spots: np.ndarray,
+    pixelsize: float,
+    progress: lib.Progress,
 ) -> list:
     """Build localizations per winning-hypothesis group.
 
@@ -7797,6 +8620,11 @@ def _assemble_ratiometric_locs(
         Number of channels.
     spots : np.ndarray
         Channel-stacked spots in photons.
+    pixelsize : float
+        Camera pixel size of the reference channel in nm.
+    progress : lib.Progress
+        Normalized tracker; every non-empty group of hypothesis k of K
+        gets the phase "Hypothesis k/K: computing spline CRLB".
 
     Returns
     -------
@@ -7817,9 +8645,9 @@ def _assemble_ratiometric_locs(
         locs_k = locs_from_fits_spline(
             ids_k,
             theta_k,
-            box,
-            em,
-            calib_k,
+            box=box,
+            em=em,
+            calibration=calib_k,
             mle=mle,
             residuals=(None if roi_residuals is None else roi_residuals[rows]),
             jacobians=jacobians[rows],
@@ -7829,6 +8657,10 @@ def _assemble_ratiometric_locs(
             chi_square=(None if mle else chis[k][rows]),
             variance=(None if variance is None else variance[rows]),
             spots=spots[rows],
+            pixelsize=pixelsize,
+            progress=_LabeledProgress(
+                progress, f"Hypothesis {k + 1}/{n_hyp}: "
+            ),
         )
         amp = pd.Series(np.asarray(theta_k[:, 0]), index=ids_k.index)
         ps = _photon_scales(calib_k, n_channels)
@@ -7956,7 +8788,7 @@ def filter_linked_identifications_split_fov(
     box: int,
     regions: list | None = None,
     tol: float | None = None,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, int, int]:
     """Split-FOV counterpart of :func:`filter_linked_identifications`.
 
@@ -7981,8 +8813,12 @@ def filter_linked_identifications_split_fov(
     tol : float, optional
         Largest distance (camera pixels) at which detections in two regions
         count as the same molecule. None (the default) uses ``1.5 * box``.
-    progress_callback : callable, optional
-        Invoked with a monotone 0 -> ``n_total`` progression.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase,
+        "Linking channels", over the reference-region detections, as in
+        :func:`filter_linked_identifications`. Default is None.
 
     Returns
     -------
@@ -8007,12 +8843,14 @@ def filter_linked_identifications_split_fov(
         [transforms[c] for c in order],
         box,
         tol=tol,
-        progress_callback=progress_callback,
+        progress=progress,
     )
 
 
 def fit_spline_split_fov(
     movie,
+    info: list[dict] | None = None,
+    *,
     camera_info: dict,
     identifications: pd.DataFrame,
     box: int,
@@ -8022,14 +8860,14 @@ def fit_spline_split_fov(
     mle: bool = False,
     link_photons: bool = True,
     confine_to_reference: bool = True,
-    progress_callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     apply_roi_residuals: bool = True,
     n_z_starts: int | None = None,
     use_gpu: bool | None = None,
     tolerance: float | None = None,
     max_iterations: int | None = None,
     camera_calibration: dict | None = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Fit a split-FOV multichannel spline PSF from a *single* movie.
 
     The rectangular sub-regions of the movie are the channels. Global fit as
@@ -8046,10 +8884,16 @@ def fit_spline_split_fov(
     ``MultichannelSplineFitWorker``: ratiometric if photon ratios are
     present, otherwise the plain linked fit.
 
+    Since v1.0.0: only the movie and its metadata are accepted
+    positionally.
+
     Parameters
     ----------
     movie : LoadedMovie
         The single loaded movie.
+    info : list of dicts or None, optional
+        Metadata of the reference channel's identifications (see
+        :func:`identify`) or movie. Default is None, i.e., none.
     camera_info : dict
         Camera info of ``movie``.
     identifications : pd.DataFrame
@@ -8078,8 +8922,13 @@ def fit_spline_split_fov(
     confine_to_reference : bool, optional
         Filter ``identifications`` to the reference region first. Default
         True.
-    progress_callback : callable, optional
-        Invoked with the cumulative spot count as the fit proceeds.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        of whichever multichannel fitter is chosen,
+        :func:`fit_spline_multichannel` or
+        :func:`fit_spline_multichannel_ratiometric`. Default is None.
     apply_roi_residuals : bool, optional
         As in :func:`fit_spline_multichannel`. Default True.
     n_z_starts : int, optional
@@ -8103,6 +8952,10 @@ def fit_spline_split_fov(
     locs : pd.DataFrame
         The localizations, in the reference region's coordinates, as returned
         by whichever multichannel fitter was chosen.
+    info : list of dicts
+        Metadata of the localizations: ``info`` with an entry recording
+        the fit, including the regions, appended (see
+        ``lib.append_metadata``).
     """
     fit_regions, reference, transforms = split_fov_fit_geometry(
         calibration, regions
@@ -8133,58 +8986,63 @@ def fit_spline_split_fov(
         not link_photons
         and 2 <= n_channels <= precision._LINK_XYZ_MAX_CHANNELS
     ):
-        return fit_spline_multichannel(
+        locs, info = fit_spline_multichannel(
             movies,
-            camera_infos,
-            ids,
-            box,
-            calibration,
+            camera_infos=camera_infos,
+            identifications=ids,
+            box=box,
+            calibration=calibration,
             mle=mle,
             link_photons=False,
-            progress_callback=progress_callback,
+            progress=progress,
             apply_roi_residuals=apply_roi_residuals,
             n_z_starts=n_z_starts,
             use_gpu=use_gpu,
             tolerance=tolerance,
             max_iterations=max_iterations,
             camera_calibrations=camera_calibrations,
+            info=info,
         )
-    if (
+    elif (
         photon_ratios is not None
         or calibration.get("photon_ratios") is not None
     ):
-        return fit_spline_multichannel_ratiometric(
+        locs, info = fit_spline_multichannel_ratiometric(
             movies,
-            camera_infos,
-            ids,
-            box,
-            calibration,
+            camera_infos=camera_infos,
+            identifications=ids,
+            box=box,
+            calibration=calibration,
             photon_ratios=photon_ratios,
             mle=mle,
-            progress_callback=progress_callback,
+            progress=progress,
             apply_roi_residuals=apply_roi_residuals,
             n_z_starts=n_z_starts,
             use_gpu=use_gpu,
             tolerance=tolerance,
             max_iterations=max_iterations,
             camera_calibrations=camera_calibrations,
+            info=info,
         )
-    return fit_spline_multichannel(
-        movies,
-        camera_infos,
-        ids,
-        box,
-        calibration,
-        mle=mle,
-        link_photons=link_photons,
-        progress_callback=progress_callback,
-        apply_roi_residuals=apply_roi_residuals,
-        n_z_starts=n_z_starts,
-        use_gpu=use_gpu,
-        tolerance=tolerance,
-        max_iterations=max_iterations,
-        camera_calibrations=camera_calibrations,
-    )
+    else:
+        locs, info = fit_spline_multichannel(
+            movies,
+            camera_infos=camera_infos,
+            identifications=ids,
+            box=box,
+            calibration=calibration,
+            mle=mle,
+            link_photons=link_photons,
+            progress=progress,
+            apply_roi_residuals=apply_roi_residuals,
+            n_z_starts=n_z_starts,
+            use_gpu=use_gpu,
+            tolerance=tolerance,
+            max_iterations=max_iterations,
+            camera_calibrations=camera_calibrations,
+            info=info,
+        )
+    return locs, _record_regions(info, fit_regions, reference)
 
 
 # ----------------------------------------------------------------------
@@ -8224,16 +9082,38 @@ def _per_channel_arg(value: object, n_channels: int, name: str) -> list:
     return [value] * n_channels
 
 
-def _channel_progress(
-    progress_callback: Callable[[int, int], None] | Literal["console"] | None,
-    channel: int,
-) -> Callable[[int], None] | Literal["console"] | None:
-    """One channel's progress callback: the caller's, told which channel is
-    reporting. ``"console"`` is passed straight through, so each channel
-    gets its own progress bar."""
-    if progress_callback is None or progress_callback == "console":
-        return progress_callback
-    return partial(progress_callback, channel)
+class _LabeledProgress:
+    """A view of a normalized progress tracker that prefixes the label of
+    every phase started through it, e.g. ``"Channel 2/3: "`` turns
+    "Fitting spots" into "Channel 2/3: fitting spots".
+
+    Implements the ``lib.Progress`` interface by delegation. :meth:`close`
+    does nothing: the wrapped tracker belongs to the caller, and so a
+    function handed this view never ends the caller's reporting.
+    """
+
+    def __init__(self, progress: lib.Progress, prefix: str) -> None:
+        self._progress = progress
+        self._prefix = prefix
+
+    def set_value(self, value: int) -> None:
+        self._progress.set_value(value)
+
+    def setMaximum(self, maximum: int) -> None:
+        self._progress.setMaximum(maximum)
+
+    def maximum(self) -> int:
+        return self._progress.maximum()
+
+    def zero_progress(self, description: str | None = None, **kwargs) -> None:
+        if description:
+            description = (
+                self._prefix + description[:1].lower() + description[1:]
+            )
+        self._progress.zero_progress(description, **kwargs)
+
+    def close(self) -> None:
+        pass
 
 
 def _check_single_channel_calibration(
@@ -8310,7 +9190,7 @@ def region_movie_info(info: list[dict], region: list) -> list[dict]:
 
 
 def locs_to_region_coordinates(
-    locs: pd.DataFrame, region: list
+    locs: pd.DataFrame, region: list, pixelsize: float
 ) -> pd.DataFrame:
     """Move localizations into one region's own coordinate frame.
 
@@ -8322,17 +9202,20 @@ def locs_to_region_coordinates(
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations with ``x`` and ``y`` columns, in sensor coordinates.
+        Localizations with ``x`` and ``y`` columns (nm), in sensor
+        coordinates.
     region : list
-        A ``[[y_min, x_min], [y_max, x_max]]`` rectangle, in any corner
-        order.
+        A ``[[y_min, x_min], [y_max, x_max]]`` rectangle (camera pixels),
+        in any corner order.
+    pixelsize : float
+        Camera pixel size in nm.
 
     Returns
     -------
     locs : pd.DataFrame
         A copy with ``x`` and ``y`` shifted by the region's origin.
     """
-    x0, y0 = _region_origin_xy(region)
+    x0, y0 = _region_origin_xy(region) * float(pixelsize)
     shifted = locs.copy()
     shifted["x"] = (np.asarray(locs["x"], dtype=np.float64) - x0).astype(
         np.float32
@@ -8344,7 +9227,11 @@ def locs_to_region_coordinates(
 
 
 def split_locs_by_region(
-    locs: pd.DataFrame, regions: list, to_local: bool = True
+    locs: pd.DataFrame,
+    regions: list,
+    to_local: bool = True,
+    *,
+    pixelsize: float,
 ) -> list[pd.DataFrame]:
     """Split localizations by the region of the sensor they fall in.
 
@@ -8356,45 +9243,56 @@ def split_locs_by_region(
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations with ``x`` and ``y`` columns, in sensor coordinates.
+        Localizations with ``x`` and ``y`` columns (nm), in sensor
+        coordinates.
     regions : list
-        One ``[[y_min, x_min], [y_max, x_max]]`` rectangle per region.
+        One ``[[y_min, x_min], [y_max, x_max]]`` rectangle per region
+        (camera pixels).
     to_local : bool, optional
         Move each region's localizations into its own coordinate frame
         (default True, see :func:`locs_to_region_coordinates`). False keeps
         them in sensor coordinates.
+    pixelsize : float
+        Camera pixel size in nm.
 
     Returns
     -------
     locs_per_region : list of pd.DataFrame
         One table per region, in the order the regions were given.
     """
+    pixelsize = float(pixelsize)
     per_region = []
     for region in regions:
-        region_locs = confine_to_region(locs, region)
+        (y0, x0), (y1, x1) = _normalize_rect(region)
+        region_nm = [
+            [y0 * pixelsize, x0 * pixelsize],
+            [y1 * pixelsize, x1 * pixelsize],
+        ]
+        region_locs = confine_to_region(locs, region_nm)
         if to_local:
-            region_locs = locs_to_region_coordinates(region_locs, region)
+            region_locs = locs_to_region_coordinates(
+                region_locs, region, pixelsize
+            )
         per_region.append(region_locs)
     return per_region
 
 
 def fit_independent(
     movies: list,
+    infos: list[list[dict] | None] | None = None,
+    *,
     camera_infos: list[dict] | dict,
     identifications: list[pd.DataFrame],
     box: int,
     fitting_method: str | list[str] = "gausslq",
-    *,
     eps: float | list | None = None,
     max_it: int | list | None = None,
     spline_calibration: dict | list | None = None,
     camera_calibration: dict | list | None = None,
-    multiprocess: bool = True,
-    progress_callback: (
-        Callable[[int, int], None] | Literal["console"] | None
-    ) = None,
+    parallel: bool = True,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
-) -> list[tuple[pd.DataFrame, dict]] | None:
+) -> list[tuple[pd.DataFrame, list[dict]]] | None:
     """Fit several channels independently, one single-channel fit each.
 
     The alternative to the joint fits (:func:`fit_spline_multichannel`,
@@ -8403,10 +9301,16 @@ def fit_independent(
     and its own calibrations. The channels come out unlinked, in their own
     coordinates, to be connected afterwards.
 
+    Since v1.0.0: only the movies and their metadata are accepted
+    positionally.
+
     Parameters
     ----------
     movies : list
         One movie per channel, as loaded by ``picasso.io.load_movie``.
+    infos : list or None, optional
+        Metadata of each channel's identifications (see :func:`identify`)
+        or movie, or None. Default is None, i.e., none.
     camera_infos : list of dict or dict
         One camera-info dict per channel, or a single one shared by all.
     identifications : list of pd.DataFrame
@@ -8427,20 +9331,26 @@ def fit_independent(
     camera_calibration : dict, list or None, optional
         Per-pixel sCMOS calibration per channel, or one shared by all. Each
         must match the shape of its own movie.
-    multiprocess : bool, optional
-        Whether to use multiprocessing. Default True.
-    progress_callback : callable, "console" or None, optional
-        Called with ``(channel, n_spots_done)`` as each channel is fitted;
-        ``"console"`` shows one tqdm progress bar per channel.
+    parallel : bool, optional
+        Whether to fit on a pool of workers, as in :func:`fit`. Default
+        True.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases of
+        :func:`fit` for every channel c of C, labeled "Channel c/C: ...",
+        e.g. "Channel 2/3: fitting spots". Default is None.
     abort_callback : callable or None, optional
         Called with no arguments; returning True aborts. The whole batch then
         returns None.
 
     Returns
     -------
-    results : list of (pd.DataFrame, dict) or None
-        One ``(locs, info)`` pair per channel, in the order given. None if
-        the fit was aborted.
+    results : list of (pd.DataFrame, list of dicts) or None
+        One ``(locs, info)`` pair per channel, in the order given, where
+        ``info`` is the channel's metadata with the fit recorded as in
+        :func:`fit`, including the ``"Fit mode"`` and the ``"Channel"``.
+        None if the fit was aborted.
     """
     n_channels = len(movies)
     if len(identifications) != n_channels:
@@ -8448,7 +9358,14 @@ def fit_independent(
             f"{len(identifications)} identification tables for "
             f"{n_channels} movies; pass one per channel."
         )
-    infos = _per_channel_arg(camera_infos, n_channels, "camera_infos")
+    if infos is None:
+        infos = [None] * n_channels
+    if len(infos) != n_channels:
+        raise ValueError(
+            f"{len(infos)} metadata lists for {n_channels} movies; pass one "
+            "per channel."
+        )
+    camera_infos = _per_channel_arg(camera_infos, n_channels, "camera_infos")
     methods = _per_channel_arg(fitting_method, n_channels, "fitting_method")
     epss = _per_channel_arg(eps, n_channels, "eps")
     max_its = _per_channel_arg(max_it, n_channels, "max_it")
@@ -8458,52 +9375,58 @@ def fit_independent(
     cameras = _per_channel_arg(
         camera_calibration, n_channels, "camera_calibration"
     )
-    results = []
     for c in range(n_channels):
         _check_single_channel_calibration(splines[c], c)
-        locs, info = fit(
-            movies[c],
-            camera_info=infos[c],
-            identifications=identifications[c],
-            box=box,
-            fitting_method=methods[c],
-            eps=epss[c],
-            max_it=max_its[c],
-            spline_calibration=splines[c],
-            camera_calibration=cameras[c],
-            multiprocess=multiprocess,
-            progress_callback=_channel_progress(progress_callback, c),
-            abort_callback=abort_callback,
-        )
-        if locs is None:  # aborted
-            return None
-        info = info | {
-            "Fit mode": FIT_MODE_INDEPENDENT,
-            "Channel": c,
-            "Channels": n_channels,
-        }
-        results.append((locs, info))
+    results = []
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        for c in range(n_channels):
+            locs, info = fit(
+                movies[c],
+                infos[c],
+                camera_info=camera_infos[c],
+                identifications=identifications[c],
+                box=box,
+                fitting_method=methods[c],
+                eps=epss[c],
+                max_it=max_its[c],
+                spline_calibration=splines[c],
+                camera_calibration=cameras[c],
+                parallel=parallel,
+                progress=_LabeledProgress(
+                    progress, f"Channel {c + 1}/{n_channels}: "
+                ),
+                abort_callback=abort_callback,
+            )
+            if locs is None:  # aborted
+                return None
+            # the entry of the fit, which is a new dict
+            info[-1].update(
+                {
+                    "Fit mode": FIT_MODE_INDEPENDENT,
+                    "Channel": c,
+                    "Channels": n_channels,
+                }
+            )
+            results.append((locs, info))
     return results
 
 
 def fit_split_fov_independent(
     movie,
+    info: list[dict] | None = None,
+    *,
     camera_info: dict,
     identifications: pd.DataFrame,
     box: int,
     regions: list,
     fitting_method: str | list[str] = "gausslq",
-    *,
-    movie_info: list[dict] | None = None,
     to_local: bool = True,
     eps: float | list | None = None,
     max_it: int | list | None = None,
     spline_calibration: dict | list | None = None,
     camera_calibration: dict | None = None,
-    multiprocess: bool = True,
-    progress_callback: (
-        Callable[[int, int], None] | Literal["console"] | None
-    ) = None,
+    parallel: bool = True,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
 ) -> list[tuple[pd.DataFrame, list[dict]]] | None:
     """Fit each region of a split field of view independently.
@@ -8514,10 +9437,18 @@ def fit_split_fov_independent(
     out as a stand-alone set of localizations in the region's own
     coordinates.
 
+    Since v1.0.0: only the movie and its metadata are accepted
+    positionally.
+
     Parameters
     ----------
     movie : LoadedMovie
         The movie holding all regions.
+    info : list of dict or None, optional
+        The metadata of the movie or of the identifications (see
+        :func:`identify`). When given, it is adapted to each region (see
+        :func:`region_movie_info`) and the region's fit is appended to it,
+        so that what comes back is ready to save.
     camera_info : dict
         Camera information; one camera images every region.
     identifications : pd.DataFrame
@@ -8531,11 +9462,6 @@ def fit_split_fov_independent(
     fitting_method : str or list of str, optional
         Any of ``FIT_METHODS``, either one for all regions or one per
         region. Default "gausslq".
-    movie_info : list of dict or None, optional
-        The movie's metadata, as loaded by ``picasso.io.load_movie``. When
-        given, it is adapted to each region (see :func:`region_movie_info`)
-        and prepended to that region's fit metadata, so that what comes back
-        is ready to save.
     to_local : bool, optional
         Move each region's localizations into its own coordinate frame
         (default True). False keeps them in sensor coordinates.
@@ -8544,11 +9470,15 @@ def fit_split_fov_independent(
     camera_calibration : dict or None, optional
         Per-pixel sCMOS calibration for the (single) camera, covering the
         full frame. Default None.
-    multiprocess : bool, optional
-        Whether to use multiprocessing. Default True.
-    progress_callback : callable, "console" or None, optional
-        Called with ``(region, n_spots_done)`` as each region is fitted;
-        ``"console"`` shows one tqdm progress bar per region.
+    parallel : bool, optional
+        Whether to fit on a pool of workers, as in :func:`fit`. Default
+        True.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases of
+        :func:`fit` for every region r of R, labeled "Region r/R: ...",
+        e.g. "Region 2/3: fitting spots". Default is None.
     abort_callback : callable or None, optional
         Called with no arguments; returning True aborts. The whole batch then
         returns None.
@@ -8558,7 +9488,7 @@ def fit_split_fov_independent(
     results : list of (pd.DataFrame, list of dict) or None
         One ``(locs, info)`` pair per region, in the order the regions were
         given. ``info`` ends with that region's fit metadata and, when
-        ``movie_info`` was passed, starts with the region's movie metadata.
+        ``movie_info`` was passed, starts with it, adapted to the region.
         None if the fit was aborted.
     """
     n_regions = len(regions)
@@ -8570,38 +9500,48 @@ def fit_split_fov_independent(
     splines = _per_channel_arg(
         spline_calibration, n_regions, "spline_calibration"
     )
-    results = []
-    for c, region in enumerate(regions):
+    for c in range(n_regions):
         _check_single_channel_calibration(splines[c], c)
-        locs, fit_info = fit(
-            movie,
-            camera_info=camera_info,
-            identifications=confine_to_region(identifications, region),
-            box=box,
-            fitting_method=methods[c],
-            eps=epss[c],
-            max_it=max_its[c],
-            spline_calibration=splines[c],
-            camera_calibration=camera_calibration,
-            multiprocess=multiprocess,
-            progress_callback=_channel_progress(progress_callback, c),
-            abort_callback=abort_callback,
-        )
-        if locs is None:  # aborted
-            return None
+    fits = []
+    with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
+        for c, region in enumerate(regions):
+            locs, region_info = fit(
+                movie,
+                (None if info is None else region_movie_info(info, region)),
+                camera_info=camera_info,
+                identifications=confine_to_region(identifications, region),
+                box=box,
+                fitting_method=methods[c],
+                eps=epss[c],
+                max_it=max_its[c],
+                spline_calibration=splines[c],
+                camera_calibration=camera_calibration,
+                parallel=parallel,
+                progress=_LabeledProgress(
+                    progress, f"Region {c + 1}/{n_regions}: "
+                ),
+                abort_callback=abort_callback,
+            )
+            if locs is None:  # aborted
+                return None
+            fits.append((locs, region_info))
+    results = []
+    for c, (region, (locs, region_info)) in enumerate(zip(regions, fits)):
         if to_local:
-            locs = locs_to_region_coordinates(locs, region)
-        fit_info = fit_info | {
-            "Fit mode": FIT_MODE_INDEPENDENT,
-            "Channel": c,
-            "Channels": n_regions,
-            "Region": _normalize_rect(region),
-            "Region coordinates": "region" if to_local else "sensor",
-        }
-        info = [fit_info]
-        if movie_info is not None:
-            info = region_movie_info(movie_info, region) + info
-        results.append((locs, info))
+            locs = locs_to_region_coordinates(
+                locs, region, camera_info["Pixelsize"]
+            )
+        # the entry of the fit, which is a new dict
+        region_info[-1].update(
+            {
+                "Fit mode": FIT_MODE_INDEPENDENT,
+                "Channel": c,
+                "Channels": n_regions,
+                "Region": _normalize_rect(region),
+                "Region coordinates": "region" if to_local else "sensor",
+            }
+        )
+        results.append((locs, region_info))
     return results
 
 
@@ -8610,31 +9550,37 @@ def _fit2d_avg(
     identifications: pd.DataFrame,
     box: int,
     em: bool,
-    multiprocess: bool = True,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    parallel: bool = True,
+    progress: lib.Progress | None = None,
     abort_callback: Callable[[], bool] | None = None,
     variance: lib.FloatArray3D | None = None,
+    *,
+    pixelsize: float,
 ) -> pd.DataFrame | None:
     """Take localizations at the average value of the spots, see
-    ``fit_2D`` for more details."""
+    ``fit`` for more details. ``pixelsize`` (nm) converts the result
+    to nm; ``progress`` (a normalized tracker, or None) gets the "Fitting
+    spots" phase."""
+    progress = lib.normalize_progress(progress)
     N = len(identifications)
-    if multiprocess:
-        fs = avgroi.fit_spots_parallel(spots, asynch=True)
-        theta = _process_fitting_futures(
-            fs, N, progress_callback, abort_callback
-        )
+    if parallel:
+        lib.start_phase(progress, "Fitting spots", N, unit="spot")
+        fs = avgroi.fit_spots_async(spots)
+        theta = _process_fitting_futures(fs, N, progress, abort_callback)
         if theta is None:
             return
     else:
-        theta = avgroi.fit_spots(spots, progress_callback)
+        # starts and ends its own "Fitting spots" phase
+        theta = avgroi.fit_spots(spots, progress, abort_callback)
+        if theta is None:
+            return None
     locs = avgroi.locs_from_fits(
         identifications,
         theta,
         box,
         em,
         readout_variance=_mean_readout_variance(variance),
+        pixelsize=pixelsize,
     )
     return locs
 
@@ -8642,38 +9588,31 @@ def _fit2d_avg(
 def _process_fitting_futures(
     fs: list[Future],
     N: int,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress,
     abort_callback: Callable[[], bool] | None = None,
 ) -> lib.FloatArray2D | None:
-    """Convenience function for processing progress of fitting using
-    multiprocessing. See ``_fit2d_gauss``, ``_fit2d_avg``."""
-    n_tasks = len(fs)
-    use_tqdm = progress_callback == "console"
-    if use_tqdm:
-        iter_range = tqdm(total=N, desc="Fitting", unit="spot")
-
-    while lib.n_futures_done(fs) < n_tasks:
-        # check for abort
-        if callable(abort_callback) and abort_callback():
+    """Wait for the tasks of ``avgroi.fit_spots_async``,
+    reporting the spots of the finished tasks to the running phase of
+    ``progress`` (a normalized tracker) and ending it at ``N``. Returns
+    None if ``abort_callback`` asked to stop; the pending tasks are
+    canceled then, and on any exception (e.g. ``lib.OperationCanceled``)."""
+    completed = False
+    try:
+        while True:
+            # polled before the completion check, as in _identify_threaded
+            if callable(abort_callback) and abort_callback():
+                return None
+            done, pending = wait_futures(fs, timeout=0.2)
+            if not pending:
+                break
+            progress.set_value(sum(len(f.result()) for f in done))
+        theta = avgroi.fits_from_futures(fs)
+        completed = True
+    finally:
+        if not completed:
             for f in fs:
                 f.cancel()
-            if use_tqdm:
-                iter_range.close()
-            return
-
-        # update progress
-        n_finished = round(N * lib.n_futures_done(fs) / n_tasks)
-        if use_tqdm:
-            iter_range.update(n_finished - iter_range.n)
-        elif callable(progress_callback):
-            progress_callback(n_finished)
-        time.sleep(0.2)
-    if use_tqdm:
-        iter_range.update(N - iter_range.n)
-        iter_range.close()
-    theta = avgroi.fits_from_futures(fs)
+    progress.set_value(N)
     return theta
 
 
@@ -8681,7 +9620,7 @@ def localize(
     movie: LoadedMovie,
     *,
     camera_info: dict,
-    identification_parameters: dict,
+    identification_parameters: IdentificationParameters,
     roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
     frame_bounds: tuple[int, int] | None = None,
     movie_info: list[dict] | None = None,
@@ -8709,16 +9648,8 @@ def localize(
     calibration_3d: dict | str | None = None,
     affine_calibration: dict | list | None = None,
     camera_calibration: dict | None = None,
-    threaded: bool = True,
-    identification_progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
-    fit_progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
-    fit_z_progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    parallel: bool = True,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Localize (i.e., identify and fit) spots in a movie using the
     specified parameters.
@@ -8730,9 +9661,11 @@ def localize(
     all fitting methods.
 
     Since v0.11.0: astigmatic 3D fitting via ``calibration_3d``, which
-    replaces ``localize_3D`` (removed in v0.12.0).
+    replaces ``localize_3D`` (removed in v1.0.0).
 
-    Since v0.12.0: only the movie is accepted positionally.
+    Since v1.0.0: only the movie is accepted positionally, and the
+    identification settings are passed as one
+    :class:`IdentificationParameters`.
 
     Parameters
     ----------
@@ -8741,32 +9674,12 @@ def localize(
     camera_info : dict
         A dictionary containing camera information such as
         `Baseline`, `Sensitivity`, and `Gain`.
-    identification_parameters : dict
-        A dictionary containing spot identification parameters,
-        including:
-
-        - `Identification Method`: optional, ``"net gradient"``
-          (default) or ``"wavelet"``, see :func:`identify`.
-        - `Min. Net Gradient`: Minimum net gradient for spot
-          identification. Not needed for the wavelet identification.
-        - `Wavelet Threshold`, `Wavelet Noise Estimate`, `Wavelet Min.
-          Area`: optional settings of the wavelet identification, see
-          ``wavelet.WaveletParameters``; missing ones take the defaults
-          of Izeddin et al. (2012).
-        - `Box Size`: Size of the box to cut out around each spot.
-        - `Temporal Median Window`: optional, window length (in frames)
-          of the temporal median filter applied before identification;
-          0 or missing disables it. Fitting always uses the raw movie.
-        - `Gaussian Filter Sigma`: optional, standard deviation (in
-          camera pixels) of a spatial Gaussian filter applied to every
-          frame before identification, see ``GaussianFilteredMovie``. It
-          merges the several local maxima of a spot that is not
-          Gaussian-shaped into one. Applied after the temporal median
-          filter, if both are used. The filter applies to the
-          identification only - the spots are always cut out of and
-          fitted on the raw movie. Note that the minimum net gradient
-          has to be re-tuned when this is changed, since smoothing
-          lowers gradient magnitudes. 0 or missing disables it.
+    identification_parameters : IdentificationParameters
+        How the spots are identified (see :func:`identify`): the method
+        with its threshold(s), the size of the box that is cut out around
+        each spot and fitted, and the filters applied before identifying.
+        The filters apply to the identification only - the spots are
+        always cut out of and fitted on the raw movie.
     roi : tuple or list of tuples, optional
         Region of interest (ROI) defined as a tuple of two tuples,
         where the first tuple contains the start coordinates
@@ -8829,7 +9742,9 @@ def localize(
         calibration kept in its own file, whether or not the fit is 3D.
         A calibration dictionary carrying a ``"Lateral transforms"``
         list, the list itself, or the path of a calibration file to read
-        them from; several are applied in list order. With
+        them from; several are applied in list order. The corrections
+        are in nm; a file written before Picasso 1.0 (camera pixels) is
+        converted with ``camera_info["Pixelsize"]`` when loaded. With
         ``calibration_3d`` these run after the corrections that
         calibration carries, so keeping one separate gives the same
         coordinates as appending it to the 3D calibration. A correction
@@ -8842,123 +9757,163 @@ def localize(
         forwarded to ``fit``. When given, its maps replace the scalar
         "Baseline" (and, if a gain map is present, "Sensitivity") of
         ``camera_info``. Default is None.
-    threaded : bool, optional
-        Whether to use multithreading/multiprocessing. Default is True.
-    identification_progress_callback : callable or "console" or None
-        A callback for progress updates during identification. If
-        "console", progress will be printed to the console. If None,
-        progress is not reported. Default is None.
-    fit_progress_callback : callable or "console" or None
-        A callback for progress updates during fitting. If "console",
-        progress will be printed to the console. If None, progress is
-        not reported. Default is None.
-    fit_z_progress_callback : callable or "console" or None
-        As ``fit_progress_callback``, for the astigmatic z fitting.
-        Ignored unless ``calibration_3d`` is given. Default is None.
+    parallel : bool, optional
+        If True, the spots are identified on a pool of threads (see
+        :func:`identify`), and fitted and, with ``calibration_3d``,
+        z-fitted on pools of workers (see :func:`fit` and
+        ``picasso.zfit.zfit``); if False, all of it runs in the calling
+        thread. Default is True.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        "Identifying spots" over the frames (see :func:`identify`), then
+        those of :func:`fit` ("Cutting spots", "Fitting spots" and, for
+        the "spline*" methods, "Computing spline CRLB") and, with
+        ``calibration_3d``, those of ``picasso.zfit.zfit``. Default is
+        None.
 
     Returns
     -------
     locs : pd.DataFrame
-        Data frame containing the localized spots. With ``roi`` given, a
-        ``roi_id`` column naming the ROI each of them came from is
-        appended, see :func:`add_roi_id`.
+        Data frame containing the localized spots, with every length
+        in nm (see :func:`fit`; the camera pixel size is
+        ``camera_info["Pixelsize"]``). With ``roi`` given, a ``roi_id``
+        column naming the ROI each of them came from is appended, see
+        :func:`add_roi_id`.
     info : list[dict]
         A list of dictionaries containing metadata about the movie and
         the fitting process.
+
+    Examples
+    --------
+    2D localization with the default least-squares Gaussian fit, of the
+    spots whose net gradient exceeds 5000:
+
+    >>> from picasso import io, localize, wavelet
+    >>> movie, movie_info = io.load_movie("movie.ome.tif")
+    >>> camera_info = {
+    ...     "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Pixelsize": 130
+    ... }
+    >>> parameters = localize.IdentificationParameters(
+    ...     method=localize.NetGradient(5000), box=7
+    ... )
+    >>> locs, info = localize.localize(
+    ...     movie,
+    ...     camera_info=camera_info,
+    ...     identification_parameters=parameters,
+    ...     movie_info=movie_info,
+    ... )
+
+    Spots identified by wavelet segmentation on a background-subtracted
+    movie, fitted by maximum likelihood on the GPU:
+
+    >>> parameters = localize.IdentificationParameters(
+    ...     method=wavelet.WaveletParameters(threshold=1.0),
+    ...     box=7,
+    ...     temporal_median_window=100,
+    ... )
+    >>> locs, info = localize.localize(
+    ...     movie,
+    ...     camera_info=camera_info,
+    ...     identification_parameters=parameters,
+    ...     movie_info=movie_info,
+    ...     fitting_method="gaussmle-gpu",
+    ... )
+
+    Saved with ``io.save_locs("movie_locs.hdf5", locs, info)``, the
+    parameters are recorded in the metadata, and
+    :meth:`IdentificationParameters.from_info` reads them back.
     """
     assert isinstance(camera_info, dict), "camera_info must be a dict"
-    assert isinstance(
-        identification_parameters, dict
-    ), "identification_parameters must be a dict"
+    if not isinstance(identification_parameters, IdentificationParameters):
+        raise TypeError(
+            "identification_parameters must be an IdentificationParameters, "
+            f"got {type(identification_parameters).__name__}."
+        )
     fit_z = _validate_calibration_3d(calibration_3d, fitting_method)
     if fit_z and isinstance(calibration_3d, str):
-        calibration_3d = io.load_calibration(calibration_3d)
+        calibration_3d = io.load_calibration(
+            calibration_3d, pixelsize=camera_info.get("Pixelsize")
+        )
 
     # Use empty list as default for movie_info
     if movie_info is None:
         movie_info = []
 
-    # Identify spots
-    identifications, identify_info = identify(
-        movie,
-        identification_parameters.get("Min. Net Gradient"),
-        identification_parameters["Box Size"],
-        roi=roi,
-        frame_bounds=frame_bounds,
-        threaded=threaded,
-        temporal_median_window=identification_parameters.get(
-            "Temporal Median Window", 0
-        ),
-        gaussian_filter_sigma=identification_parameters.get(
-            "Gaussian Filter Sigma", None
-        ),
-        wavelet=wavelet_from_parameters(identification_parameters),
-        progress_callback=identification_progress_callback,
-    )
-
-    # Fit spots
-    locs, fit_info = fit(
-        movie=movie,
-        camera_info=camera_info,
-        identifications=identifications,
-        box=identification_parameters["Box Size"],
-        fitting_method=fitting_method,
-        eps=eps,
-        max_it=max_it,
-        spline_calibration=spline_calibration,
-        camera_calibration=camera_calibration,
-        multiprocess=threaded,
-        progress_callback=fit_progress_callback,
-    )
-    # Before the z fit and the lateral corrections below: both move x/y,
-    # which would blur the ROI a localization was detected in.
-    locs = add_roi_id(locs, roi)
-    info = io.strip_mm_metadata(movie_info) + [identify_info] + [fit_info]
-
-    if fit_z:
-        # Astigmatic z fitting on top of the 2D fit, see Huang, et al.
-        # Science, 2008. zfit only knows gausslq/gaussmle; map the GPU /
-        # rotated codes to the corresponding CPU noise model.
-        locs, info = zfit.zfit(
-            locs=locs,
-            info=info,
-            calibration=calibration_3d,
-            fitting_method=(
-                "gaussmle"
-                if fitting_method.startswith("gaussmle")
-                else "gausslq"
-            ),
-            filter=0,
-            lateral_transforms=affine_calibration,
-            multiprocess=threaded,
-            progress_callback=fit_z_progress_callback,
+    with lib.tracked_progress(
+        progress, "Identifying spots", "frame"
+    ) as progress:
+        # Identify spots
+        identifications, info = identify(
+            movie,
+            io.strip_mm_metadata(movie_info),
+            parameters=identification_parameters,
+            roi=roi,
+            frame_bounds=frame_bounds,
+            parallel=parallel,
+            progress=progress,
         )
-        # zfit applies both the calibration's own lateral corrections and
-        # the separately loaded ones, in that order, and records them - so
-        # a correction kept in its own file gives the same coordinates as
-        # one appended to the 3D calibration.
-        return locs, info
+
+        # Fit spots
+        locs, info = fit(
+            movie,
+            info,
+            camera_info=camera_info,
+            identifications=identifications,
+            box=identification_parameters.box,
+            fitting_method=fitting_method,
+            eps=eps,
+            max_it=max_it,
+            spline_calibration=spline_calibration,
+            camera_calibration=camera_calibration,
+            parallel=parallel,
+            progress=progress,
+        )
+        # Before the z fit and the lateral corrections below: both move x/y,
+        # which would blur the ROI a localization was detected in.
+        locs = add_roi_id(locs, roi, pixelsize=camera_info["Pixelsize"])
+
+        if fit_z:
+            # Astigmatic z fitting on top of the 2D fit, see Huang, et al.
+            # Science, 2008. zfit only knows gausslq/gaussmle; map the GPU /
+            # rotated codes to the corresponding CPU noise model.
+            locs, info = zfit.zfit(
+                locs=locs,
+                info=info,
+                calibration=calibration_3d,
+                fitting_method=(
+                    "gaussmle"
+                    if fitting_method.startswith("gaussmle")
+                    else "gausslq"
+                ),
+                filter=0,
+                lateral_transforms=affine_calibration,
+                parallel=parallel,
+                progress=progress,
+            )
+            # zfit applies both the calibration's own lateral corrections
+            # and the separately loaded ones, in that order, and records
+            # them - so a correction kept in its own file gives the same
+            # coordinates as one appended to the 3D calibration.
+            return locs, info
 
     # Standalone affine corrections (e.g. a chromatic one used without a 3D
     # calibration); those carried by the spline calibration were already
     # applied by the fit, so they are dropped here rather than applied twice.
-    extra, duplicates = lib.drop_duplicate_lateral_transforms(
-        lib.resolve_lateral_transforms(affine_calibration), spline_calibration
+    return _apply_extra_affine(
+        locs,
+        info,
+        affine_calibration,
+        spline_calibration if fitting_method.startswith("spline") else None,
     )
-    _warn_duplicate_affine(duplicates)
-    if extra:
-        locs = lib.apply_lateral_transforms(locs, extra)
-        fit_info["Lateral corrections applied"] = (
-            lib.describe_lateral_transforms(extra)
-        )
-    return locs, info
 
 
 #: Camera keys ``fit`` reads off ``camera_info`` (see ``_to_photons`` /
 #: ``_sensitivity``); the rest of a picasso info list is movie metadata.
 #: Pulled out of the info list-of-dicts by ``localize_frames`` when no
 #: ``camera_info`` is passed explicitly.
-_CAMERA_INFO_KEYS = ("Baseline", "Sensitivity", "Gain", "Qe", "Pixelsize")
+_CAMERA_INFO_KEYS = ("Baseline", "Sensitivity", "Gain", "Pixelsize")
 
 
 def _camera_info_from_info(info: list[dict] | None) -> dict:
@@ -8967,7 +9922,7 @@ def _camera_info_from_info(info: list[dict] | None) -> dict:
     The streaming contract (S0B-2, contract 3) carries the camera info inside
     ``info`` rather than as a separate argument, so ``localize_frames`` pulls
     the keys ``fit`` needs (``Baseline``, ``Sensitivity``, ``Gain`` and,
-    optionally, ``Qe``/``Pixelsize``) out of it. Later dicts win, so a
+    optionally, ``Pixelsize``) out of it. Later dicts win, so a
     fit/identify block appended to a raw-movie block can override it.
     """
     camera_info: dict = {}
@@ -9033,7 +9988,10 @@ class _InMemoryMovie(io.AbstractPicassoMovie):
         return self._frames[index]
 
     def tofile(self, file_handle, byte_order=None):
-        self._frames.tofile(file_handle)
+        frames = self._frames
+        if byte_order is not None:
+            frames = frames.astype(frames.dtype.newbyteorder(byte_order))
+        frames.tofile(file_handle)
 
     @property
     def dtype(self):
@@ -9043,8 +10001,8 @@ class _InMemoryMovie(io.AbstractPicassoMovie):
 def localize_frames(
     frames,
     info: list[dict] | None,
-    params: dict,
     *,
+    identification_parameters: IdentificationParameters,
     start_frame: int = 0,
     camera_info: dict | None = None,
     fitting_method: str = "gausslq",
@@ -9052,13 +10010,8 @@ def localize_frames(
     max_it: int | None = None,
     spline_calibration: dict | None = None,
     camera_calibration: dict | None = None,
-    threaded: bool = True,
-    identification_progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
-    fit_progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    parallel: bool = True,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Localize an in-memory frame stack, GUI-free (streaming/live input).
 
@@ -9081,13 +10034,10 @@ def localize_frames(
     info : list of dict or None
         Picasso info list-of-dicts: movie metadata and, unless
         ``camera_info`` is passed, the camera parameters (``Baseline``,
-        ``Sensitivity``, ``Gain`` and, optionally, ``Qe``/``Pixelsize``),
+        ``Sensitivity``, ``Gain`` and, optionally, ``Pixelsize``),
         which are read out of it (see :func:`_camera_info_from_info`).
-    params : dict
-        Identification parameters, at least ``"Min. Net Gradient"`` and
-        ``"Box Size"``; ``"Temporal Median Window"`` and
-        ``"Gaussian Filter Sigma"`` are honored if present, as in
-        :func:`localize`.
+    identification_parameters : IdentificationParameters
+        How the spots are identified, as in :func:`localize`.
     start_frame : int, optional
         Absolute index of the first frame in ``frames``. The returned
         ``frame`` column is offset by this, so a caller that increments it by
@@ -9099,10 +10049,13 @@ def localize_frames(
     fitting_method : str, optional
         Which fitting algorithm to use, see :func:`fit`. Default ``"gausslq"``
         (GPU variants such as ``"gausslq-gpu"`` run on the GPU if available).
-    eps, max_it, spline_calibration, camera_calibration, threaded
+    eps, max_it, spline_calibration, camera_calibration, parallel
         Forwarded to :func:`localize` unchanged.
-    identification_progress_callback, fit_progress_callback
-        Progress callbacks forwarded to :func:`localize`.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        of :func:`localize`. Default is None.
 
     Returns
     -------
@@ -9112,7 +10065,6 @@ def localize_frames(
         :func:`localize` returns them, with ``frame`` shifted by
         ``start_frame``.
     """
-    assert isinstance(params, dict), "params must be a dict"
     assert (
         isinstance(start_frame, (int, np.integer)) and start_frame >= 0
     ), "start_frame must be a non-negative integer"
@@ -9132,16 +10084,15 @@ def localize_frames(
     locs, _ = localize(
         movie,
         camera_info=camera_info,
-        identification_parameters=params,
+        identification_parameters=identification_parameters,
         movie_info=info if info is not None else [],
         fitting_method=fitting_method,
         eps=eps,
         max_it=max_it,
         spline_calibration=spline_calibration,
         camera_calibration=camera_calibration,
-        threaded=threaded,
-        identification_progress_callback=identification_progress_callback,
-        fit_progress_callback=fit_progress_callback,
+        parallel=parallel,
+        progress=progress,
     )
 
     if start_frame:
@@ -9213,7 +10164,10 @@ def _apply_extra_affine(
     metadata. Corrections ``applied`` already covers are dropped instead of
     applied a second time. A no-op when there are none."""
     extra, duplicates = lib.drop_duplicate_lateral_transforms(
-        lib.resolve_lateral_transforms(affine_calibration), applied
+        lib.resolve_lateral_transforms(
+            affine_calibration, lib.get_from_metadata(info, "Pixelsize")
+        ),
+        applied,
     )
     _warn_duplicate_affine(duplicates)
     if not extra:
@@ -9221,7 +10175,7 @@ def _apply_extra_affine(
     locs = lib.apply_lateral_transforms(locs, extra)
     info = info + [
         {
-            "Generated by": f"Picasso: v{__version__} Affine correction",
+            **lib.step_info("Affine correction"),
             "Lateral corrections applied": lib.describe_lateral_transforms(
                 extra
             ),
@@ -9232,8 +10186,9 @@ def _apply_extra_affine(
 
 def check_nena(
     locs: pd.DataFrame,
-    info: None,
-    callback: Callable[[int], None] = None,
+    info: list[dict] | None = None,
+    *,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> float:
     """Calculate the NeNA (experimental localization precision) from
     localizations.
@@ -9242,28 +10197,31 @@ def check_nena(
     ----------
     locs : pd.DataFrame
         Data frame containing the localized spots.
-    info : None
-        Not used.
-    callback : Callable[[int], None], optional
-        A callback function that can be used to report progress. It
-        should accept an integer argument representing the current
-        step or frame number. Default is None.
+    info : list of dicts or None, optional
+        Metadata of ``locs``. Not used; accepted so that the call
+        matches the other functions on localizations. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phase(s)
+        of ``picasso.postprocess.nena``. Default is None.
 
     Returns
     -------
-    nena_px : float
-        The NeNA value in pixels, representing the experimental
-        localization precision.
+    nena : float
+        The NeNA value in nm, representing the experimental
+        localization precision; NaN if it could not be calculated.
     """
-    print("Calculating NeNA.. ", end="")
     locs = locs[0:MAX_LOCS]
     try:
-        result, nena_px = postprocess.nena(locs, info, callback=callback)
-    except Exception as e:
-        print(e)
-        nena_px = float("nan")
-    print(f"{nena_px:.2f} px.")
-    return nena_px
+        result, nena = postprocess.nena(locs, info, progress=progress)
+    except lib.OperationCanceled:
+        raise
+    except Exception as error:
+        _log.warning("NeNA could not be calculated: %s", error)
+        nena = float("nan")
+    _log.info("NeNA: %.2f nm.", nena)
+    return nena
 
 
 def check_kinetics(locs: pd.DataFrame, info: list[dict]) -> float:
@@ -9281,18 +10239,18 @@ def check_kinetics(locs: pd.DataFrame, info: list[dict]) -> float:
     len_mean : float
         The mean length of binding events in frames.
     """
-    print("Linking.. ", end="")
     locs = locs.iloc[0:MAX_LOCS]
-    locs = postprocess.link(locs, info=info)
+    locs, _ = postprocess.link(locs, info)
     len_mean = locs.len.mean()
-    print(f"Mean length {len_mean:.2f} frames.")
+    _log.info("Mean length of the binding events: %.2f frames.", len_mean)
     return len_mean
 
 
 def check_drift(
     locs: pd.DataFrame,
     info: list[dict],
-    callback: Callable[[int], None] = None,
+    *,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[float, float]:
     """Estimate the drift of localizations in x and y directions.
 
@@ -9302,17 +10260,19 @@ def check_drift(
         Data frame containing the localized spots.
     info : list[dict]
         A list of dictionaries containing metadata about the movie.
-    callback : Callable[[int], None], optional
-        A callback function that can be used to report progress. It
-        should accept an integer argument representing the current
-        step or frame number. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        of ``picasso.postprocess.undrift`` (segmentation, then the
+        correlation of the segment pairs). Default is None.
 
     Returns
     -------
     drift_x : float
-        The estimated drift in the x direction.
+        The estimated mean drift in the x direction (nm).
     drift_y : float
-        The estimated drift in the y direction.
+        The estimated mean drift in the y direction (nm).
     """
     steps = int(len(locs) // (MAX_LOCS))
     steps = max(1, steps)
@@ -9321,18 +10281,18 @@ def check_drift(
     n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
     segmentation = max(1, int(n_frames // 10))
 
-    print(f"Estimating drift with segmentation {segmentation}")
-    drift, locs = postprocess.undrift(
+    _log.info("Estimating drift with segmentation %d.", segmentation)
+    _, _, drift = postprocess.undrift(
         locs,
         info,
-        segmentation,
+        segmentation=segmentation,
         display=False,
-        rcc_callback=callback,
+        progress=progress,
     )
     drift_x = float(drift["x"].mean())
     drift_y = float(drift["y"].mean())
 
-    print(f"Drift is X: {drift_x:.2f}, Y: {drift_y:.2f}.")
+    _log.info("Drift: X %.2f, Y %.2f.", drift_x, drift_y)
 
     return (drift_x, drift_y)
 
@@ -9343,6 +10303,7 @@ def get_file_summary(
     drift: tuple[float, float] | None = None,
     len_mean: float | None = None,
     nena: float | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> dict:
     """Generate a summary of the localization file, including metadata
     and statistics about the localizations.
@@ -9360,8 +10321,14 @@ def get_file_summary(
         The mean length of binding events in frames. If None, it will
         be calculated from the localizations.
     nena : float | None, optional
-        The NeNA value in pixels. If None, it will be calculated from
-        the localizations.
+        The NeNA value in nm. If None, it will be calculated from the
+        localizations.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        of :func:`check_nena` and :func:`check_drift` for the values that
+        are calculated. Default is None.
 
     Returns
     -------
@@ -9396,27 +10363,30 @@ def get_file_summary(
         if col_ not in summary:
             summary[col_] = float("nan")
 
-    nena_px = check_nena(locs, info) if nena is None else nena
-    len_mean = check_kinetics(locs, info) if len_mean is None else len_mean
-    drift_x, drift_y = check_drift(locs, info) if drift is None else drift
+    with lib.tracked_progress(progress, "Calculating NeNA") as progress:
+        nena_nm = (
+            check_nena(locs, info, progress=progress) if nena is None else nena
+        )
+        len_mean = check_kinetics(locs, info) if len_mean is None else len_mean
+        drift_x, drift_y = (
+            check_drift(locs, info, progress=progress)
+            if drift is None
+            else drift
+        )
 
     summary["len_mean"] = len_mean
     summary["n_locs"] = len(locs)
     summary["locs_frame"] = len(locs) / summary["frames"]
+    # the drift is in nm; the columns keep their names for the database
     summary["drift_x"] = drift_x
     summary["drift_y"] = drift_y
-    summary["nena_px"] = nena_px
-    summary["nena_nm"] = nena_px * summary["pixelsize"]
+    summary["nena_nm"] = nena_nm
+    summary["nena_px"] = nena_nm / summary["pixelsize"]
     summary["filename"] = os.path.normpath(file)
     summary["filename_hdf"] = file_hdf
     summary["file_created"] = datetime.fromtimestamp(os.path.getmtime(file))
     summary["entry_created"] = datetime.now()
     return summary
-
-
-def _db_filename() -> str:  # TODO: remove in 1.0
-    """Old alias for `db_filename."""
-    return db_filename()
 
 
 def db_filename() -> str:
@@ -9438,9 +10408,55 @@ def db_filename() -> str:
 
 def _save_file_summary(summary: dict) -> None:
     """Save the summary of a localization file to a SQLite database."""
-    engine = create_engine("sqlite:///" + db_filename(), echo=False)
-    s = pd.Series(summary, index=summary.keys()).to_frame().T
-    s.to_sql("files", con=engine, if_exists="append", index=False)
+    save_file_summaries(pd.Series(summary, index=summary.keys()).to_frame().T)
+
+
+def save_file_summaries(summaries: pd.DataFrame) -> None:
+    """Append localization file summaries to the ``files`` table of the
+    database (see ``db_filename``).
+
+    A table created by an older Picasso version lacks the columns added
+    since, for example new localization columns, which would make the
+    insert fail. These columns are added to the table first and are
+    empty (NULL) for the rows already in it.
+
+    Parameters
+    ----------
+    summaries : pd.DataFrame
+        One row per file, with the keys of :func:`get_file_summary` as
+        columns.
+    """
+    with closing(sqlite3.connect(db_filename())) as connection, connection:
+        # the names of the columns, if the table exists
+        existing = {
+            row[1] for row in connection.execute("PRAGMA table_info(files)")
+        }
+        if existing:
+            for column, values in summaries.items():
+                if column in existing:
+                    continue
+                # a summary row built from a dict has object dtype, so the
+                # type is inferred from the values; an all-empty column is
+                # taken as numeric, as are all statistics columns
+                kind = pd.api.types.infer_dtype(values, skipna=True)
+                if kind.startswith("datetime"):
+                    sql_type = "TIMESTAMP"
+                elif kind in (
+                    "empty",
+                    "floating",
+                    "integer",
+                    "mixed-integer-float",
+                ):
+                    sql_type = "FLOAT"
+                else:
+                    sql_type = "TEXT"
+                name = column.replace('"', '""')
+                connection.execute(
+                    f'ALTER TABLE files ADD COLUMN "{name}" {sql_type}'
+                )
+        summaries.to_sql(
+            "files", con=connection, if_exists="append", index=False
+        )
 
 
 def add_file_to_db(
@@ -9449,6 +10465,7 @@ def add_file_to_db(
     drift: tuple[float, float] | None = None,
     len_mean: float | None = None,
     nena: float | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> None:
     """Add a localization file summary to the SQLite database.
 
@@ -9465,15 +10482,22 @@ def add_file_to_db(
         Mean length of binding events in frames. If None, it is
         calculated from the localizations.
     nena : float | None, optional
-        NeNA value in pixels. If None, it is calculated from the
+        NeNA value in nm. If None, it is calculated from the
         localizations.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases
+        of :func:`get_file_summary`. Default is None.
 
     Notes
     -----
     The summary is built by :func:`get_file_summary` and appended to the
     ``files`` table of the database (see ``db_filename``).
     """
-    summary = get_file_summary(file, file_hdf, drift, len_mean, nena)
+    summary = get_file_summary(
+        file, file_hdf, drift, len_mean, nena, progress=progress
+    )
     _save_file_summary(summary)
 
 
@@ -9499,8 +10523,7 @@ def _movie_to_image(movie) -> np.ndarray:
 def _lateral_detect_beads(
     image: np.ndarray,
     box: int,
-    minimum_ng: float | None,
-    wavelet: wavelets.WaveletParameters | None = None,
+    identification_method: IdentificationMethod,
 ) -> np.ndarray:
     """Detect bead candidates using the standard spot identification
     (local maxima above a minimum net gradient, or the wavelet
@@ -9514,19 +10537,17 @@ def _lateral_detect_beads(
         Box size used by ``identify_in_image`` (also sets the minimum
         distance between two beads detected by their net gradient).
         Should be an odd integer.
-    minimum_ng : float or None
-        Minimum net gradient for a local maximum to be kept. Ignored if
-        ``wavelet`` is given.
-    wavelet : wavelet.WaveletParameters, optional
-        Settings of the wavelet identification. Default is None, i.e.
-        the net gradient identification.
+    identification_method : NetGradient or wavelet.WaveletParameters
+        How the beads are detected, see :class:`IdentificationParameters`.
 
     Returns
     -------
     np.ndarray
         (N, 2) array of [row, col] integer coordinates.
     """
-    y, x, _ = _identify_in_crop(np.float32(image), minimum_ng, box, wavelet)
+    y, x, _ = _identify_in_crop(
+        np.float32(image), box, _validate_method(identification_method)
+    )
     return np.column_stack((y, x))
 
 
@@ -9566,9 +10587,10 @@ def _lateral_refine_bead_positions(
     # leaves the pixel values unchanged (the fit only needs relative
     # intensities to localize each bead).
     camera_info = {"Baseline": 0, "Sensitivity": 1.0, "Gain": 1}
-    spots = get_spots(image[np.newaxis], ids, box, camera_info)
+    spots = get_spots(image[np.newaxis], ids, box=box, camera_info=camera_info)
     theta = fit_spots_gauss(spots.astype(np.float32))
-    locs = locs_from_fits_gauss(ids, theta, box, em=False)
+    # positions on the image grid (camera pixels), as the coarse ones
+    locs = locs_from_fits_gauss(ids, theta, box=box, em=False, pixelsize=1.0)
     refined = np.column_stack((locs["y"].to_numpy(), locs["x"].to_numpy()))
     return refined[np.isfinite(refined).all(axis=1)]
 
@@ -9736,7 +10758,8 @@ def _xcorr_gaussian2d(xy, x0, y0, sx, sy, amp, bg):
 
 
 def _xcorr_peak_nm(cc: np.ndarray, nm: float) -> tuple[float, float]:
-    """Sub-pixel cross-correlation peak, in ``nm`` (or px if ``nm`` is 1)."""
+    """Sub-pixel cross-correlation peak of the image-grid correlogram
+    ``cc``, in nm (``nm`` is the camera pixel size)."""
     py, px = np.unravel_index(np.argmax(cc), cc.shape)
     cy_cc, cx_cc = cc.shape[0] // 2, cc.shape[1] // 2
     r = 5
@@ -9773,16 +10796,13 @@ def _xcorr_peak_nm(cc: np.ndarray, nm: float) -> tuple[float, float]:
 def _alignment_title(
     decomp: dict,
     n_pairs: int,
-    pixelsize: float | None,
     transform_type: str,
     ref_path: str,
     target_path: str,
 ) -> str:
-    """Build the suptitle for the lateral-alignment QC figure."""
-    if pixelsize is not None:
-        trans_str = f"Tx={decomp['tx_nm']:.1f} nm  Ty={decomp['ty_nm']:.1f} nm"
-    else:
-        trans_str = f"Tx={decomp['tx_px']:.3f} px  Ty={decomp['ty_px']:.3f} px"
+    """Build the suptitle for the lateral-alignment QC figure.
+    ``decomp`` is the decomposition of the transform in nm."""
+    trans_str = f"Tx={decomp['tx_nm']:.1f} nm  Ty={decomp['ty_nm']:.1f} nm"
     title = (
         f"Alignment check  |  {n_pairs} bead pairs  |  "
         f"Scale X={decomp['scale_x']:.5f}  Y={decomp['scale_y']:.5f}  "
@@ -9804,7 +10824,7 @@ def _lateral_plot_alignment(
     pairs_ref: np.ndarray,
     decomp: dict,
     n_pairs: int,
-    pixelsize: float | None = None,
+    pixelsize: float,
     save_path: str = "",
     ref_path: str = "",
     target_path: str = "",
@@ -9813,11 +10833,12 @@ def _lateral_plot_alignment(
     """Four-panel QC figure: overlay before/after correction and mean
     per-bead cross-correlation before/after correction.
 
-    If ``pixelsize`` is None, axes are labeled in pixels; otherwise
-    they are scaled to nm and labeled accordingly.
+    The images and bead positions are on the camera pixel grid; the
+    axes are scaled with ``pixelsize`` (nm) and labeled in nm, and
+    ``decomp`` is the decomposition of the transform in nm.
     """
-    nm = pixelsize if pixelsize is not None else 1.0
-    unit = "nm" if pixelsize is not None else "px"
+    nm = float(pixelsize)
+    unit = "nm"
 
     ref_n = _normalize_img(img_ref)
     mov_n = _normalize_img(img_mov)
@@ -9831,12 +10852,13 @@ def _lateral_plot_alignment(
     off_raw = np.hypot(dy_raw, dx_raw)
     off_cor = np.hypot(dy_cor, dx_cor)
 
-    fig = plt.figure(figsize=(11, 11))
+    # constrained: tight_layout cannot place the colorbars' nested grids
+    fig = plt.figure(figsize=(11, 11), layout="constrained")
     title = _alignment_title(
-        decomp, n_pairs, pixelsize, transform_type, ref_path, target_path
+        decomp, n_pairs, transform_type, ref_path, target_path
     )
     fig.suptitle(title, fontsize=10, fontweight="bold")
-    gs = gridspec.GridSpec(2, 2, figure=fig, wspace=0.30, hspace=0.25)
+    gs = gridspec.GridSpec(2, 2, figure=fig)
 
     ext = [0, img_ref.shape[1] * nm, img_ref.shape[0] * nm, 0]
 
@@ -9914,7 +10936,6 @@ def _lateral_plot_alignment(
     ax.set_xlabel(f"Δx ({unit})")
     ax.set_ylabel(f"Δy ({unit})")
 
-    fig.tight_layout()
     if save_path:
         fig.savefig(save_path, dpi=150, bbox_inches="tight")
     plt.show()
@@ -9923,25 +10944,31 @@ def _lateral_plot_alignment(
 def fit_lateral_transform(
     movie_ref,
     movie_target,
+    *,
     calibration: dict,
     box: int,
-    minimum_ng: float,
-    pixelsize: float | None = None,
+    identification_method: IdentificationMethod,
+    pixelsize: float,
     transform_type: str = "astigmatism",
     ref_path: str = "",
     target_path: str = "",
     model: str = "affine",
-    wavelet: wavelets.WaveletParameters | None = None,
 ) -> tuple[dict, dict]:
     """Fit the target -> reference transform and append it to a calibration.
 
-    The transform is appended to ``calibration``'s ordered list of affine
-    corrections. This is the computational half of
+    The transform is fitted on the bead positions of the two images
+    (camera pixels) and stored in nm, the unit of the coordinates it
+    corrects (``picasso.transforms.Transform.rescaled``). It is appended
+    to ``calibration``'s ordered list of affine corrections. This is the
+    computational half of
     :func:`calibrate_lateral_transform`. It touches no matplotlib state, so
     it is safe to call from a worker thread; the returned ``qc`` dict
     carries everything :func:`plot_lateral_calibration` needs to draw the
     diagnostic figure afterwards (on the GUI thread, where matplotlib must
     be driven from).
+
+    Since v1.0.0: only ``movie_ref`` and ``movie_target`` are accepted
+    positionally.
 
     Parameters
     ----------
@@ -9952,12 +10979,13 @@ def fit_lateral_transform(
     box : int
         Box size used to identify bead candidates. Should be an odd
         integer.
-    minimum_ng : float
-        Minimum net gradient for a bead candidate to be kept. Ignored if
-        ``wavelet`` is given.
-    pixelsize : float, optional
-        Camera pixel size in nm. If None (default), values are reported in
-        pixels.
+    identification_method : NetGradient or wavelet.WaveletParameters
+        How the bead candidates are detected in both images: local maxima
+        above a minimum net gradient (:class:`NetGradient`) or wavelet
+        segmentation (see :class:`IdentificationParameters`).
+    pixelsize : float
+        Camera pixel size in nm, which expresses the transform fitted on
+        the bead images (camera pixels) in nm.
     transform_type : {"astigmatism", "chromatic"}, optional
         What the transform corrects. Default is "astigmatism".
     ref_path : str, optional
@@ -9969,9 +10997,6 @@ def fit_lateral_transform(
     model : str, optional
         The transform model, one of ``picasso.transforms.MODELS``. Default
         is "affine".
-    wavelet : wavelet.WaveletParameters, optional
-        Detect the bead candidates by wavelet segmentation with these
-        settings instead of by their net gradient. Default is None.
 
     Notes
     -----
@@ -9983,13 +11008,20 @@ def fit_lateral_transform(
     -------
     calibration : dict
         The input calibration, with the transform appended to its
-        ``"Affine transforms"`` list (an existing entry of the same type is
-        replaced). Save it with ``io.save_any_calibration``.
+        ``"Lateral transforms"`` list (an existing entry of the same type
+        is replaced). The entry holds the transform in nm (``Transform``),
+        its decomposition in nm (``Decomposition``, see
+        ``picasso.transforms.Transform.decompose``), how the beads were
+        identified (``Identification``, see
+        ``IdentificationParameters.from_info``), the camera pixel size
+        (``Pixelsize (nm)``) and the format marker
+        (``io.FORMAT_VERSION_ATTR``). Save it with
+        ``io.save_any_calibration``.
     qc : dict
         Inputs for :func:`plot_lateral_calibration`: the reference, target
-        and corrected images, the matched reference bead positions, the
-        decomposition, the number of pairs, the pixel size, the transform
-        type and the source paths.
+        and corrected images and the matched reference bead positions
+        (camera pixel grid), the decomposition (nm), the number of pairs,
+        the pixel size, the transform type and the source paths.
 
     Raises
     ------
@@ -10018,11 +11050,9 @@ def fit_lateral_transform(
     img_ref = _movie_to_image(movie_ref)
     img_target = _movie_to_image(movie_target)
 
-    coarse_ref = _lateral_detect_beads(
-        img_ref, box, minimum_ng, wavelet=wavelet
-    )
+    coarse_ref = _lateral_detect_beads(img_ref, box, identification_method)
     coarse_target = _lateral_detect_beads(
-        img_target, box, minimum_ng, wavelet=wavelet
+        img_target, box, identification_method
     )
     refined_ref = _lateral_refine_bead_positions(img_ref, coarse_ref, box)
     refined_target = _lateral_refine_bead_positions(
@@ -10041,10 +11071,18 @@ def fit_lateral_transform(
             "or choose a simpler model."
         )
 
-    transform, keep = _estimate_lateral_transform(
+    pixelsize = float(pixelsize)
+    if not pixelsize > 0:
+        raise ValueError(
+            f"The camera pixel size must be positive, got {pixelsize} nm."
+        )
+    # fitted on the image grid (camera pixels), stored in nm: the unit of
+    # the localizations it will correct
+    transform_px, keep = _estimate_lateral_transform(
         pairs_target, pairs_ref, model
     )
-    decomp = transform.decompose(pixelsize)
+    transform = transform_px.rescaled(pixelsize)
+    decomp = transform.decompose()
 
     # What the two images are called depends on what is being corrected;
     # the fit and the way the transform is applied are identical.
@@ -10059,18 +11097,22 @@ def fit_lateral_transform(
         "Target image": target_path or "N/A",
         "Bead pairs": int(keep.sum()),
         "Bead pairs rejected": int(len(keep) - keep.sum()),
+        "Identification": _calibration_identification_info(
+            identification_method, box
+        ),
         "Decomposition": decomp,
+        "Pixelsize (nm)": pixelsize,
+        io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION,
     }
-    if pixelsize is not None:
-        lateral_entry["Pixelsize (nm)"] = float(pixelsize)
     lib.append_lateral_transform(calibration, lateral_entry)
 
     qc = {
         "img_ref": img_ref,
         "img_target": img_target,
         # the warp is part of the fit's output, not of the drawing, so it
-        # is computed here and only displayed by the plotting function
-        "img_cor": tform.warp_image(img_target, transform.inverse()),
+        # is computed here and only displayed by the plotting function;
+        # the image lives on the camera pixel grid
+        "img_cor": tform.warp_image(img_target, transform_px.inverse()),
         "pairs_ref": pairs_ref,
         # Every detection in each image plus the indices of the matched
         # ones (pair k is (idx_ref[k], idx_target[k])), so the Localize
@@ -10123,16 +11165,16 @@ def plot_lateral_calibration(qc: dict, save_path: str = "") -> None:
 def calibrate_lateral_transform(
     movie_ref,
     movie_target,
+    *,
     calibration: dict,
     box: int,
-    minimum_ng: float,
-    pixelsize: float | None = None,
+    identification_method: IdentificationMethod,
+    pixelsize: float,
     transform_type: str = "astigmatism",
     ref_path: str = "",
     target_path: str = "",
     model: str = "affine",
     plot_path: str = "",
-    wavelet: wavelets.WaveletParameters | None = None,
 ) -> dict:
     """Fit a transform that maps a bead image into a reference frame and
     append it to any calibration dict.
@@ -10146,7 +11188,7 @@ def calibrate_lateral_transform(
     - ``"chromatic"``: one color channel is mapped into the reference
       color channel, correcting chromatic aberration.
 
-    Both are stored as entries of an ordered ``"Affine transforms"`` list
+    Both are stored as entries of an ordered ``"Lateral transforms"`` list
     and applied to ``x``/``y`` in that order after fitting, so a 3D
     two-color experiment can chain the astigmatism correction and the
     chromatic one. The list is read from whatever calibration the fit uses
@@ -10158,12 +11200,17 @@ def calibrate_lateral_transform(
     reference frame. A multichannel spline calibration registers its
     channels itself, so appending a transform to one raises ``ValueError``.
 
-    The fit is performed in pixel coordinates on a per-pixel mean of
-    each movie. Bead candidates are found by Gaussian-blur + local-max,
+    The fit is performed in camera pixel coordinates on a per-pixel mean
+    of each movie. Bead candidates are found by Gaussian-blur + local-max,
     refined to sub-pixel accuracy by a 2D Gaussian fit, then matched
     between the two images by mutual nearest neighbor. The transform is
-    fitted by least squares (see :func:`picasso.transforms.estimate`) and
-    decomposed into rotation / anisotropic scale / shear.
+    fitted by least squares (see :func:`picasso.transforms.estimate`),
+    expressed in nm (the unit of the coordinates it corrects, see
+    ``picasso.transforms.Transform.rescaled``) and decomposed into
+    rotation / anisotropic scale / shear.
+
+    Since v1.0.0: only ``movie_ref`` and ``movie_target`` are accepted
+    positionally.
 
     Parameters
     ----------
@@ -10182,13 +11229,14 @@ def calibrate_lateral_transform(
     box : int
         Box size used to identify bead candidates (also sets the minimum
         distance between two detected beads). Should be an odd integer.
-    minimum_ng : float or None
-        Minimum net gradient for a bead candidate to be kept. Ignored if
-        ``wavelet`` is given.
-    pixelsize : float, optional
-        Camera pixel size in nm. If given, decomposition translations
-        and the diagnostic plot are converted from pixels to nm. If
-        None (default), values are reported in pixels. Default is None.
+    identification_method : NetGradient or wavelet.WaveletParameters
+        How the bead candidates are detected in both images: local maxima
+        above a minimum net gradient (:class:`NetGradient`) or wavelet
+        segmentation (see :class:`IdentificationParameters`).
+    pixelsize : float
+        Camera pixel size in nm. The transform is fitted on the bead
+        images (camera pixels) and stored in nm; the decomposition and
+        the diagnostic plot are in nm.
     transform_type : {"astigmatism", "chromatic"}, optional
         What the transform corrects; recorded in the entry and used to
         decide which existing entry it replaces. Default is
@@ -10204,16 +11252,14 @@ def calibrate_lateral_transform(
     plot_path : str, optional
         If given, the diagnostic figure is saved to this path. The
         figure is always shown interactively. Default is "".
-    wavelet : wavelet.WaveletParameters, optional
-        Detect the bead candidates by wavelet segmentation with these
-        settings instead of by their net gradient. Default is None.
 
     Returns
     -------
     calibration : dict
-        The input calibration with the transform appended to its
-        ``"Affine transforms"`` list. Use ``io.save_any_calibration`` to
-        save the result to YAML or HDF5, whichever the calibration is.
+        The input calibration with the transform (nm) appended to its
+        ``"Lateral transforms"`` list, see :func:`fit_lateral_transform`.
+        Use ``io.save_any_calibration`` to save the result to YAML or
+        HDF5, whichever the calibration is.
 
     Notes
     -----
@@ -10224,15 +11270,14 @@ def calibrate_lateral_transform(
     calibration, qc = fit_lateral_transform(
         movie_ref,
         movie_target,
-        calibration,
+        calibration=calibration,
         box=box,
-        minimum_ng=minimum_ng,
+        identification_method=identification_method,
         pixelsize=pixelsize,
         transform_type=transform_type,
         ref_path=ref_path,
         target_path=target_path,
         model=model,
-        wavelet=wavelet,
     )
     plot_lateral_calibration(qc, save_path=plot_path)
     return calibration

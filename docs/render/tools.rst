@@ -16,8 +16,9 @@ Zoom
 
 Shortcut: :kbd:`Ctrl+Z`
 
-Selects the zoom tool. Dragging a rectangle with the left mouse button zooms
-into it; dragging with the right mouse button pans. Panning is also available
+Selects the zoom tool. Dragging a rectangle with the left mouse button (in any
+direction) zooms into it; a right click (or :kbd:`Esc`) while dragging cancels
+it. Dragging with the right mouse button pans. Panning is also available
 in every tool by dragging with the left mouse button while holding
 :kbd:`Ctrl` (:kbd:`Cmd` on macOS). See :ref:`render-navigation` for all
 controls.
@@ -101,12 +102,13 @@ move:
 
 * Dragging beyond the right or bottom edge increases ``Width`` or ``Height``.
 * Dragging beyond the left or top edge translates all channels, picks and
-  measured points by the same whole number of camera pixels, so that no
-  coordinate is negative and the channels stay registered. ``Width`` and
-  ``Height`` grow by the same amount, so the camera field of view stays inside
+  measured points by the same distance, a whole number of camera pixels of
+  the canvas (a multiple of ``Pixelsize`` nm), so that no coordinate is
+  negative and the channels stay registered. ``Width`` and ``Height`` grow by
+  the same number of camera pixels, so the camera field of view stays inside
   the canvas. The translation is saved in the metadata as
-  ``Canvas offset x (cam. px)`` and ``Canvas offset y (cam. px)``; subtract it
-  to return to the camera coordinates, e.g., for picks saved before the
+  ``Canvas offset x (nm)`` and ``Canvas offset y (nm)``; subtract it to
+  return to the camera coordinates, e.g., for picks saved before the
   translation.
 * The canvas shrinks again when the localizations are moved back, but it is
   never smaller than the camera image, whose size is saved as
@@ -118,7 +120,7 @@ A channel loaded later, or saved with a different canvas offset, is brought
 into the same frame as the loaded channels.
 
 The shift of each channel done with the move tool is saved in its metadata as
-``Manual shift x (cam. px)`` and ``Manual shift y (cam. px)``.
+``Manual shift x (nm)`` and ``Manual shift y (nm)``.
 
 .. _render-tools-settings:
 

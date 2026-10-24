@@ -79,7 +79,7 @@ Then build a registration with ``Calibration`` > ``Register channels (2D)``, whi
 
 ``Transform model`` chooses how the channels are related — ``translation`` (a pure xy shift), ``affine`` (the default), ``projective``, ``polynomial2`` or ``polynomial3`` — with the same trade-offs as described under :ref:`localize-lateral-transform-models`.
 
-The registration is saved as a small ``.yaml`` (by default ``<movie>_channel_reg.yaml``) and loaded straight away. Picasso reports, per channel, how many correspondences were paired and the residual RMS in camera pixels — check those before fitting: a registration built from too few pairs, or with an RMS approaching a pixel, will hold the channels together at the wrong place.
+The registration is saved as a small ``.yaml`` (by default ``<movie>_channel_reg.yaml``) and loaded straight away. Picasso reports, per channel, how many correspondences were paired and the residual RMS in camera pixels (the registration maps the raw image of one channel onto the other, so it is detector geometry and stays in camera pixels even though the localization coordinates are in nm) — check those before fitting: a registration built from too few pairs, or with an RMS approaching a pixel, will hold the channels together at the wrong place.
 
 .. dropdown:: Python
    :icon: code
@@ -92,11 +92,12 @@ The registration is saved as a small ``.yaml`` (by default ``<movie>_channel_reg
 
    .. code-block:: python
 
-      from picasso import io, registration
+      from picasso import io, localize, registration
 
       movies = [io.load_movie(p)[0] for p in ("beads_ch0.tif", "beads_ch1.tif")]
       calibration = registration.calibrate_channel_registration_from_beads(
-          movies, box=7, minimum_ng=5000, model="affine", multi_fov=True,
+          movies, box=7, identification_method=localize.NetGradient(5000),
+          model="affine", multi_fov=True,
           path="beads_channel_reg.yaml",
       )
 
@@ -139,12 +140,23 @@ To fit every channel on its own instead — with any model, and without a regist
       camera_infos = [camera_info_ch0, camera_info_ch1]
       registration = io.load_any_calibration("beads_channel_reg.yaml")
 
-      identifications, id_info = localize.identify(movies[0], 5000, 7)
-      locs = localize.fit_gauss_multichannel(
-          list(movies), camera_infos, identifications, box=7,
-          channel_registration=registration, mle=True, link_photons=False,
+      parameters = localize.IdentificationParameters(
+          method=localize.NetGradient(5000), box=7
       )
-      io.save_locs("movie_locs.hdf5", locs, list(infos[0]) + [id_info])
+      identifications, ids_info = localize.identify(
+          movies[0], infos[0], parameters=parameters
+      )
+      locs, locs_info = localize.fit_gauss_multichannel(
+          list(movies),
+          ids_info,
+          camera_infos=camera_infos,
+          identifications=identifications,
+          box=7,
+          channel_registration=registration,
+          mle=True,
+          link_photons=False,
+      )
+      io.save_locs("movie_locs.hdf5", locs, locs_info)
 
 
 .. _localize-linking-photon-counts:

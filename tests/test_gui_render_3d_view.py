@@ -21,18 +21,23 @@ from picasso.gui import render as gui_render
 from picasso.gui import rotation
 
 
-WIDTH = HEIGHT = 64.0
+WIDTH = HEIGHT = 64.0  # camera pixels
 PIXELSIZE = 130.0
+WIDTH_NM = WIDTH * PIXELSIZE
+HEIGHT_NM = HEIGHT * PIXELSIZE
+# a zoomed field of view and a pick center, nm (10-40 and 32 px)
+ZOOMED = [(1300.0, 2600.0), (3900.0, 5200.0)]
+PICK = (4160.0, 4160.0)
 
 
 def _locs(n: int = 3000, seed: int = 0, with_z: bool = True) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     locs = pd.DataFrame(
         {
-            "x": rng.uniform(0.0, WIDTH, size=n),
-            "y": rng.uniform(0.0, HEIGHT, size=n),
-            "lpx": rng.uniform(0.05, 0.3, size=n),
-            "lpy": rng.uniform(0.05, 0.3, size=n),
+            "x": rng.uniform(0.0, WIDTH_NM, size=n),
+            "y": rng.uniform(0.0, HEIGHT_NM, size=n),
+            "lpx": rng.uniform(0.05, 0.3, size=n) * PIXELSIZE,
+            "lpy": rng.uniform(0.05, 0.3, size=n) * PIXELSIZE,
             "photons": rng.uniform(500.0, 5000.0, size=n),
             "frame": rng.integers(0, 1000, size=n).astype(np.int32),
         }
@@ -68,7 +73,7 @@ def window(qt_offscreen, tmp_path, monkeypatch):
             _info(),
             render_=False,
         )
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [(0.0, 0.0), (HEIGHT_NM, WIDTH_NM)]
     window.view.resize(128, 128)
     yield window
     window.window_rot.view_rot.stop_render_worker()
@@ -91,23 +96,27 @@ def test_one_pick_opens_that_pick(window):
     view = window.view
     view._pick_shape = "Circle"
     window.tools_settings_dialog.pick_diameter.setValue(10.0 * PIXELSIZE)
-    view._picks = [(32.0, 32.0)]
+    view._picks = [PICK]
     window.open_3d_view()
     view_rot = window.window_rot.view_rot
     assert window.window_rot.isVisible()
     assert view_rot._source == "pick"
     assert view_rot.pick_shape == "Circle"
-    assert view_rot.pick == (32.0, 32.0)
+    assert view_rot.pick == PICK
     for i in range(2):
         expected = len(view.picked_locs(i, add_group=False)[0])
         assert len(view_rot.locs[i]) == expected
-    # the z column arrives in camera pixels
-    assert view_rot.locs[0]["z"].abs().max() < 1.0
+    # the z column stays in nm, only centered on the loaded mean
+    picked = view.picked_locs(0, add_group=False)[0]
+    np.testing.assert_allclose(
+        np.sort(view_rot.locs[0]["z"].to_numpy()) + view_rot._z_shift,
+        np.sort(picked["z"].to_numpy()),
+    )
 
 
 def test_no_pick_opens_the_field_of_view(window):
     view = window.view
-    zoomed = [(10.0, 20.0), (30.0, 40.0)]
+    zoomed = ZOOMED
     view.viewport = zoomed
     window.open_3d_view()
     view_rot = window.window_rot.view_rot
@@ -117,7 +126,8 @@ def test_no_pick_opens_the_field_of_view(window):
     # the field of view is the main window's, at most widened to the
     # window's aspect ratio
     (y0, x0), (y1, x1) = view_rot.viewport
-    assert y0 <= 10.0 and x0 <= 20.0 and y1 >= 30.0 and x1 >= 40.0
+    assert y0 <= 1300.0 and x0 <= 2600.0
+    assert y1 >= 3900.0 and x1 >= 5200.0
     for i in range(2):
         n = len(view_rot.locs[i])
         assert _in_view(view.locs[i], zoomed) <= n <= len(view.locs[i])
@@ -129,14 +139,14 @@ def test_no_pick_opens_the_field_of_view(window):
 def test_several_picks_count_as_none(window):
     view = window.view
     view._pick_shape = "Circle"
-    view._picks = [(20.0, 20.0), (40.0, 40.0)]
+    view._picks = [(2600.0, 2600.0), (5200.0, 5200.0)]
     window.open_3d_view()
     assert window.window_rot.view_rot._source == "fov"
 
 
 def test_opening_again_on_the_same_content_only_raises(window):
     view = window.view
-    view.viewport = [(10.0, 20.0), (30.0, 40.0)]
+    view.viewport = ZOOMED
     window.open_3d_view()
     view_rot = window.window_rot.view_rot
     loaded = view_rot.locs
@@ -146,14 +156,14 @@ def test_opening_again_on_the_same_content_only_raises(window):
     assert view_rot.locs is loaded  # not reloaded
     np.testing.assert_allclose(view_rot.rotation.as_quat(), rotation_before)
     # a changed field of view reloads (and resets the rotation)
-    view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    view.viewport = [(0.0, 0.0), (HEIGHT_NM, WIDTH_NM)]
     window.open_3d_view()
     assert view_rot.locs is not loaded
     assert len(view_rot.locs[0]) == len(view.locs[0])
     # so does switching to a pick
     view._pick_shape = "Circle"
     window.tools_settings_dialog.pick_diameter.setValue(10.0 * PIXELSIZE)
-    view._picks = [(32.0, 32.0)]
+    view._picks = [PICK]
     window.open_3d_view()
     assert view_rot._source == "pick"
     assert view_rot.pick_shape == "Circle"
@@ -161,7 +171,7 @@ def test_opening_again_on_the_same_content_only_raises(window):
 
 def test_arrow_pan_in_the_field_of_view_keeps_following(window):
     view = window.view
-    view.viewport = [(10.0, 20.0), (30.0, 40.0)]
+    view.viewport = ZOOMED
     window.open_3d_view()
     view_rot = window.window_rot.view_rot
     before = [(y0, x0) for (y0, x0), _ in [view_rot.viewport]]
@@ -169,13 +179,13 @@ def test_arrow_pan_in_the_field_of_view_keeps_following(window):
     (y0, x0), _ = view_rot.viewport
     assert x0 == pytest.approx(before[0][1] + 5.0)
     assert y0 == pytest.approx(before[0][0])
-    assert view.viewport == [(10.0, 20.0), (30.0, 40.0)]  # main untouched
+    assert view.viewport == ZOOMED  # main untouched
     assert view._picks == []  # no pick was invented
 
 
 def test_fit_in_view_works_without_a_pick(window):
     view = window.view
-    loaded = [(10.0, 20.0), (30.0, 40.0)]
+    loaded = ZOOMED
     view.viewport = loaded
     window.open_3d_view()
     view_rot = window.window_rot.view_rot
@@ -186,17 +196,18 @@ def test_fit_in_view_works_without_a_pick(window):
     view_rot.fit_in_view_rotated()
     # back to the loaded field of view (widened to the window's aspect)
     (y0, x0), (y1, x1) = view_rot.viewport
-    assert y0 <= 10.0 and x0 <= 20.0 and y1 >= 30.0 and x1 >= 40.0
+    assert y0 <= 1300.0 and x0 <= 2600.0
+    assert y1 >= 3900.0 and x1 >= 5200.0
     assert y1 - y0 == pytest.approx(fitted[1][0] - fitted[0][0], rel=1e-6)
     # the pick-based fit is unchanged
     view._pick_shape = "Circle"
     window.tools_settings_dialog.pick_diameter.setValue(10.0 * PIXELSIZE)
-    view._picks = [(32.0, 32.0)]
+    view._picks = [PICK]
     window.open_3d_view()
     view_rot.zoom_in()
     view_rot.fit_in_view_rotated()
     (y0, x0), (y1, x1) = view_rot.viewport
-    assert y0 <= 27.0 and y1 >= 37.0  # the circle's 10 px diameter
+    assert y0 <= 3510.0 and y1 >= 4810.0  # the 1300 nm diameter
 
 
 def test_two_dimensional_data_is_refused(qt_offscreen, tmp_path, monkeypatch):
@@ -213,7 +224,7 @@ def test_two_dimensional_data_is_refused(qt_offscreen, tmp_path, monkeypatch):
         _info(),
         render_=False,
     )
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [(0.0, 0.0), (HEIGHT_NM, WIDTH_NM)]
     window.open_3d_view()
     assert len(shown) == 1 and "z" in shown[0][2]
     assert not window.window_rot.isVisible()

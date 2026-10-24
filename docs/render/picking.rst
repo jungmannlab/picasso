@@ -47,11 +47,11 @@ all picks share one size or each pick carries its own extent:
 
 Removing picks:
 
-- Clicking the right mouse button inside a pick removes that pick.
-- Two shapes are drawn incrementally and undo their last step instead:
-  ``Polygon`` removes the last vertex, and ``Brush`` removes the last stroke,
-  wherever you click. Undoing a brush stroke that was joining two painted
-  regions leaves them as two separate picks again.
+- Clicking the right mouse button inside a pick removes that pick. For
+  ``Brush``, this removes the whole painted region under the cursor, i.e.,
+  all of the strokes merged into it.
+- ``Polygon`` is drawn incrementally and undoes its last step instead: a right
+  click removes the last vertex, wherever you click.
 - ``Tools > Clear picks`` (:kbd:`Ctrl+C`) removes all of them.
 
 .. warning::
@@ -123,35 +123,38 @@ See :doc:`menu-tools` for the other pick utilities.
    :icon: code
    :class-container: api-example
 
-   Picks are lists of centers in camera pixels (for rectangles, pairs of
-   end points), and ``picked_locs`` returns one DataFrame per pick. Note
-   the size conventions: ``picked_locs`` and ``pick_similar`` take the
-   *radius* of a circular pick, ``lib.pick_areas`` and the pick-region
-   files its *diameter* (the width for rectangles).
+   Picks are lists of centers in nm (for rectangles, pairs of end
+   points), and ``picked_locs`` returns one DataFrame per pick. The pick
+   size is the *diameter* of a circular pick (the width for rectangles,
+   the side length for squares) in nm, in every function and in the
+   pick-region files.
 
    .. code-block:: python
 
       import pandas as pd
-      import yaml
-      from picasso import io, lib, postprocess
+      from picasso import io, postprocess
 
       locs, info = io.load_locs("movie_locs.hdf5")
-      pixelsize = lib.get_from_metadata(info, "Pixelsize")
 
-      picks = [(120.3, 88.1), (131.0, 92.7)]             # centers, camera pixels
-      radius = 100 / pixelsize / 2                       # 100 nm diameter
-      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=radius)
+      picks = [(15639.0, 11453.0), (17030.0, 12051.0)]   # centers, nm
+      diameter = 100.0                                   # nm
+      picked = postprocess.picked_locs(
+          locs, info, picks=picks, pick_shape="Circle", pick_size=diameter
+      )
 
       # Pick similar
       picks += postprocess.pick_similar(
-          locs, info, picks, "Circle", pick_size=radius, std_range=2.0
+          locs,
+          info,
+          picks=picks,
+          pick_shape="Circle",
+          pick_size=diameter,
+          std_range=2.0,
       )
 
       # Save picked localizations (one "group" per pick) and the pick regions
       io.save_locs("movie_locs_picked.hdf5", pd.concat(picked, ignore_index=True), info)
-      regions = {"Diameter (nm)": 100.0, "Centers": [list(map(float, p)) for p in picks]}
-      with open("movie_locs_picks.yaml", "w") as f:
-          yaml.dump(regions, f)
+      io.save_picks("movie_locs_picks.yaml", picks, "Circle", size=diameter)
 
-      # Load pick regions saved by Render (size in camera pixels)
-      picks, shape, diameter = io.load_picks("movie_locs_picks.yaml", pixelsize=pixelsize)
+      # Load pick regions saved by Render (positions and diameter in nm)
+      picks, shape, diameter = io.load_picks("movie_locs_picks.yaml")

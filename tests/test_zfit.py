@@ -25,9 +25,14 @@ import yaml
 # Headless plotting for calibrate_z which calls plt.show()
 matplotlib.use("Agg")
 
-from picasso import io, lib, zfit  # noqa: E402
+from picasso import io, lib, localize, zfit  # noqa: E402
 
-from tests.conftest import CALIB_3D, affine  # noqa: E402
+from tests._progress_tracking import (  # noqa: E402
+    CancelingProgress,
+    RecordingProgress,
+    assert_phases_complete,
+)
+from tests.conftest import CALIB_3D, PIXELSIZE, affine  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Numerical helpers
@@ -182,21 +187,74 @@ class TestZfit:
         )
         assert len(out) == len(locs)
 
-    def test_pixelsize_argument_is_used(self, locs, info):
-        """If ``pixelsize`` is provided as an argument, it is appended to
-        info — verify that the function does not raise even when info
-        lacks Pixelsize."""
+    def test_pixelsize_argument_overrides_metadata(self, locs, info):
+        """``pixelsize`` only enters the spot width uncertainties (whose
+        formulas work in camera pixels), so a different pixel size changes
+        lpz but not z; the caller's info is left untouched."""
+        n_info = len(info)
+        out_meta, _ = zfit.zfit(
+            locs, info, calibration=dict(CALIB_3D), filter=0
+        )
+        out_arg, _ = zfit.zfit(
+            locs,
+            info,
+            calibration=dict(CALIB_3D),
+            pixelsize=2 * PIXELSIZE,
+            filter=0,
+        )
+        assert len(info) == n_info
+        np.testing.assert_allclose(
+            out_arg["z"].to_numpy(), out_meta["z"].to_numpy(), atol=1e-6
+        )
+        assert not np.allclose(
+            out_arg["lpz"].to_numpy(), out_meta["lpz"].to_numpy()
+        )
+
+    def test_missing_pixelsize_raises(self, locs, info):
         info_no_px = [
             {k: v for k, v in d.items() if "Pixelsize" not in k} for d in info
         ]
-        out, _ = zfit.zfit(
-            locs,
-            info_no_px,
-            calibration=dict(CALIB_3D),
-            pixelsize=130.0,
-            fitting_method="gausslq",
+        with pytest.raises(ValueError, match="Pixelsize"):
+            zfit.zfit(locs, info_no_px, calibration=dict(CALIB_3D))
+
+    def test_legacy_calibration_is_converted_with_a_warning(self, locs, info):
+        """A calibration without the format marker was recorded in camera
+        pixels: its coefficients are scaled by the pixel size (with a
+        warning) and the z fit matches the nm calibration."""
+        legacy_calib = {
+            k: v for k, v in CALIB_3D.items() if k != io.FORMAT_VERSION_ATTR
+        }
+        for key in ("X Coefficients", "Y Coefficients"):
+            legacy_calib[key] = [c / PIXELSIZE for c in legacy_calib[key]]
+        nm, _ = zfit.zfit(locs, info, calibration=dict(CALIB_3D), filter=0)
+        with pytest.warns(UserWarning, match="convert-units"):
+            out, new_info = zfit.zfit(
+                locs, info, calibration=legacy_calib, filter=0
+            )
+        np.testing.assert_allclose(
+            out["z"].to_numpy(), nm["z"].to_numpy(), rtol=1e-4, atol=1e-3
         )
-        assert "z" in out.columns
+        np.testing.assert_allclose(
+            out["lpz"].to_numpy(), nm["lpz"].to_numpy(), rtol=1e-4
+        )
+        # the caller's dict is not touched, the metadata records nm
+        assert legacy_calib["X Coefficients"][-1] == pytest.approx(
+            CALIB_3D["X Coefficients"][-1] / PIXELSIZE
+        )
+        assert new_info[-1]["X Coefficients"] == pytest.approx(
+            CALIB_3D["X Coefficients"]
+        )
+        assert io.FORMAT_VERSION_ATTR not in new_info[-1]
+
+    def test_legacy_calibration_without_pixelsize_raises(self, locs, info):
+        legacy_calib = {
+            k: v for k, v in CALIB_3D.items() if k != io.FORMAT_VERSION_ATTR
+        }
+        info_no_px = [
+            {k: v for k, v in d.items() if "Pixelsize" not in k} for d in info
+        ]
+        with pytest.raises(ValueError, match="Pixelsize"):
+            zfit.zfit(locs, info_no_px, calibration=legacy_calib)
 
     def test_invalid_fitting_method_raises(self, locs, info):
         with pytest.raises(AssertionError):
@@ -252,14 +310,14 @@ class TestZfit:
             locs,
             info,
             calibration=dict(CALIB_3D),
-            multiprocess=False,
+            parallel=False,
             filter=0,  # disable filtering so the lengths match exactly
         )
         out_par, _ = zfit.zfit(
             locs,
             info,
             calibration=dict(CALIB_3D),
-            multiprocess=True,
+            parallel=True,
             filter=0,
         )
         # both have the same length (filter=0)
@@ -283,10 +341,87 @@ class TestZfit:
             locs,
             info,
             calibration=dict(CALIB_3D),
-            multiprocess=True,
+            parallel=True,
             abort_callback=lambda: True,
         )
         assert out is None and info_out is None
+
+    def test_serial_fit_can_be_aborted(self, locs, info):
+        """Regression: only the process pool polled ``abort_callback``."""
+        out, info_out = zfit.zfit(
+            locs,
+            info,
+            calibration=dict(CALIB_3D),
+            parallel=False,
+            abort_callback=lambda: True,
+        )
+        assert out is None and info_out is None
+
+
+class TestZfitProgress:
+    """The ``progress`` argument of ``zfit``: one "Fitting z" phase over the
+    localizations, ending at their count on every path."""
+
+    N = 30
+
+    @pytest.fixture
+    def few_locs(self, locs):
+        return locs.head(self.N).reset_index(drop=True)
+
+    def test_serial_counts_fitted_locs(self, few_locs, info):
+        """Regression: the serial path reported the 0-based index of the
+        localization being fitted, so it never reached the count."""
+        tracker = RecordingProgress()
+        zfit.zfit(few_locs, info, calibration=dict(CALIB_3D), progress=tracker)
+        assert_phases_complete(tracker, ["Fitting z"])
+        phase = tracker.phases[0]
+        assert phase["maximum"] == self.N
+        assert phase["unit"] == "loc"
+        assert phase["values"][: self.N + 1] == list(range(self.N + 1))
+
+    def test_none_is_silent_and_console_works(self, few_locs, info, capsys):
+        zfit.zfit(few_locs, info, calibration=dict(CALIB_3D))
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        zfit.zfit(
+            few_locs, info, calibration=dict(CALIB_3D), progress="console"
+        )
+        assert "Fitting z" in capsys.readouterr().err
+
+    @pytest.mark.slow
+    def test_multiprocess_ends_at_the_count(self, few_locs, info, capsys):
+        """Regression: the multiprocess path reported an estimate polled
+        every 0.2 s and no final value, so a tracker could stop short of
+        the count. ``progress=None`` must also not print a bar."""
+        tracker = RecordingProgress()
+        out, _ = zfit.zfit(
+            few_locs,
+            info,
+            calibration=dict(CALIB_3D),
+            parallel=True,
+            filter=0,
+            progress=tracker,
+        )
+        assert len(out) == self.N
+        assert_phases_complete(tracker, ["Fitting z"])
+        assert tracker.phases[0]["maximum"] == self.N
+        capsys.readouterr()
+        zfit.zfit(few_locs, info, calibration=dict(CALIB_3D), parallel=True)
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+
+    @pytest.mark.slow
+    def test_multiprocess_cancel_propagates(self, few_locs, info):
+        """A GUI tracker canceling the task stops the fit and the
+        exception propagates (the pool is shut down on the way)."""
+        with pytest.raises(lib.OperationCanceled):
+            zfit.zfit(
+                few_locs,
+                info,
+                calibration=dict(CALIB_3D),
+                parallel=True,
+                progress=CancelingProgress(after=2),
+            )
 
 
 class TestZfitAffineCorrections:
@@ -351,14 +486,14 @@ class TestZfitAffineCorrections:
             locs,
             info,
             calibration=self._calibration(("astigmatism", self.SHIFT)),
-            multiprocess=False,
+            parallel=False,
             filter=0,
         )
         parallel, _ = zfit.zfit(
             locs,
             info,
             calibration=self._calibration(("astigmatism", self.SHIFT)),
-            multiprocess=True,
+            parallel=True,
             filter=0,
         )
         keys = ["frame", "z"]
@@ -551,7 +686,7 @@ class TestZfitSeparatelyLoadedLateralCorrections:
             info,
             calibration=self._calibration(("astigmatism", self.ASTIG)),
             lateral_transforms=extra,
-            multiprocess=False,
+            parallel=False,
             filter=0,
         )
         parallel, _ = zfit.zfit(
@@ -559,7 +694,7 @@ class TestZfitSeparatelyLoadedLateralCorrections:
             info,
             calibration=self._calibration(("astigmatism", self.ASTIG)),
             lateral_transforms=extra,
-            multiprocess=True,
+            parallel=True,
             filter=0,
         )
         keys = ["frame", "z"]
@@ -588,18 +723,25 @@ class TestZfitGPU:
     @pytest.mark.skipif(
         not zfit.CUDA_AVAILABLE, reason="requires a CUDA-capable GPU"
     )
-    def test_gpu_matches_serial(self, locs, info):
+    @pytest.mark.parametrize("fitting_method", ["gausslq", "gaussmle"])
+    def test_gpu_matches_serial(self, locs, info, fitting_method):
         """On real GPU hardware, the GPU path reproduces the serial CPU
-        path for z and lpz."""
+        path for z, d_zcalib and lpz."""
         out_serial, _ = zfit.zfit(
             locs,
             info,
             calibration=dict(CALIB_3D),
-            multiprocess=False,
+            parallel=False,
             filter=0,
+            fitting_method=fitting_method,
         )
         out_gpu, _ = zfit.zfit(
-            locs, info, calibration=dict(CALIB_3D), gpu=True, filter=0
+            locs,
+            info,
+            calibration=dict(CALIB_3D),
+            gpu=True,
+            filter=0,
+            fitting_method=fitting_method,
         )
         assert len(out_serial) == len(out_gpu)
         keys = ["frame", "x", "y"]
@@ -611,6 +753,34 @@ class TestZfitGPU:
         np.testing.assert_allclose(
             s["lpz"].to_numpy(), g["lpz"].to_numpy(), atol=1e-3
         )
+        np.testing.assert_allclose(
+            s["d_zcalib"].to_numpy(), g["d_zcalib"].to_numpy(), atol=1e-3
+        )
+
+    @pytest.mark.skipif(
+        not zfit.CUDA_AVAILABLE, reason="requires a CUDA-capable GPU"
+    )
+    def test_gpu_empty_locs(self, locs, info):
+        """No localizations launches no kernel but still yields the z
+        columns."""
+        out, _ = zfit.zfit(
+            locs.iloc[:0], info, calibration=dict(CALIB_3D), gpu=True
+        )
+        assert len(out) == 0
+        for column in ("z", "d_zcalib", "lpz"):
+            assert column in out.columns
+
+    @pytest.mark.skipif(
+        not zfit.CUDA_AVAILABLE, reason="requires a CUDA-capable GPU"
+    )
+    def test_gpu_progress(self, locs, info):
+        """The real-device twin of the simulator test's progress check."""
+        tracker = RecordingProgress()
+        zfit.zfit(
+            locs, info, calibration=dict(CALIB_3D), gpu=True, progress=tracker
+        )
+        assert_phases_complete(tracker, ["Fitting z"])
+        assert tracker.phases[0]["maximum"] == len(locs)
 
     @pytest.mark.slow
     def test_gpu_simulator_matches_serial(self):
@@ -633,9 +803,18 @@ class TestZfitGPU:
             "locs, info = io.load_locs('./tests/data/testdata_locs.hdf5')\n"
             "locs = locs.head(25).reset_index(drop=True)\n"
             "s, _ = zfit.zfit(locs, info, calibration=dict(calib), "
-            "filter=0, multiprocess=False)\n"
+            "filter=0, parallel=False)\n"
+            "from picasso import lib\n"
+            "class Rec(lib.MockProgress):\n"
+            "    values = []\n"
+            "    def set_value(self, value, *a, **k):\n"
+            "        self.values.append(value)\n"
+            "rec = Rec()\n"
             "g, _ = zfit.zfit(locs, info, calibration=dict(calib), "
-            "filter=0, gpu=True)\n"
+            "filter=0, gpu=True, progress=rec)\n"
+            "assert rec.maximum() == len(locs), rec.maximum()\n"
+            "assert rec.values[-1] == len(locs), rec.values\n"
+            "assert rec.values == sorted(rec.values), rec.values\n"
             "keys = ['frame', 'x', 'y']\n"
             "s = s.sort_values(keys).reset_index(drop=True)\n"
             "g = g.sort_values(keys).reset_index(drop=True)\n"
@@ -669,7 +848,10 @@ class TestAxialLocalizationPrecision:
 
     def test_returns_one_per_loc(self, fitted_locs, info):
         lpz = zfit.axial_localization_precision(
-            fitted_locs, info, dict(CALIB_3D), fitting_method="gausslq"
+            fitted_locs,
+            info,
+            calibration=dict(CALIB_3D),
+            fitting_method="gausslq",
         )
         assert lpz.shape == (len(fitted_locs),)
         assert (lpz > 0).all()
@@ -680,7 +862,7 @@ class TestAxialLocalizationPrecision:
             zfit.axial_localization_precision(
                 fitted_locs,
                 info,
-                dict(CALIB_3D),
+                calibration=dict(CALIB_3D),
                 modality="not_astigmatic",
             )
 
@@ -688,26 +870,36 @@ class TestAxialLocalizationPrecision:
         self, fitted_locs, info
     ):
         """When sx_unc / sy_unc columns exist, the gaussmle path should
-        use them instead of recomputing from gaussmle.sigma_uncertainty."""
+        use them instead of recomputing from
+        precision.sigma_uncertainty_mle."""
         locs2 = fitted_locs.copy()
         # Make the per-loc precomputed uncertainties artificially huge —
         # the resulting lpz must reflect that change.
         locs2["sx_unc"] = 10.0
         locs2["sy_unc"] = 10.0
         lpz_with = zfit.axial_localization_precision(
-            locs2, info, dict(CALIB_3D), fitting_method="gaussmle"
+            locs2, info, calibration=dict(CALIB_3D), fitting_method="gaussmle"
         )
         lpz_without = zfit.axial_localization_precision(
-            fitted_locs, info, dict(CALIB_3D), fitting_method="gaussmle"
+            fitted_locs,
+            info,
+            calibration=dict(CALIB_3D),
+            fitting_method="gaussmle",
         )
         assert lpz_with.mean() > lpz_without.mean()
 
     def test_gausslq_and_gaussmle_paths_both_finite(self, fitted_locs, info):
         lpz_lq = zfit.axial_localization_precision(
-            fitted_locs, info, dict(CALIB_3D), fitting_method="gausslq"
+            fitted_locs,
+            info,
+            calibration=dict(CALIB_3D),
+            fitting_method="gausslq",
         )
         lpz_mle = zfit.axial_localization_precision(
-            fitted_locs, info, dict(CALIB_3D), fitting_method="gaussmle"
+            fitted_locs,
+            info,
+            calibration=dict(CALIB_3D),
+            fitting_method="gaussmle",
         )
         assert np.all(np.isfinite(lpz_lq))
         assert np.all(np.isfinite(lpz_mle))
@@ -715,7 +907,10 @@ class TestAxialLocalizationPrecision:
     def test_invalid_fitting_method_raises(self, fitted_locs, info):
         with pytest.raises(AssertionError):
             zfit.axial_localization_precision_astig(
-                fitted_locs, info, dict(CALIB_3D), fitting_method="bogus"
+                fitted_locs,
+                info,
+                calibration=dict(CALIB_3D),
+                fitting_method="bogus",
             )
 
 
@@ -730,8 +925,8 @@ class TestAxialLocalizationPrecisionAstig:
             {
                 "x": np.zeros(n, dtype=np.float32),
                 "y": np.zeros(n, dtype=np.float32),
-                "sx": np.full(n, 1.1, dtype=np.float32),
-                "sy": np.full(n, 1.0, dtype=np.float32),
+                "sx": np.full(n, 1.1 * PIXELSIZE, dtype=np.float32),
+                "sy": np.full(n, 1.0 * PIXELSIZE, dtype=np.float32),
                 "photons": np.asarray(photons_array, dtype=np.float32),
                 "bg": np.full(n, 5.0, dtype=np.float32),
                 "z": np.full(n, 100.0, dtype=np.float32),
@@ -742,7 +937,7 @@ class TestAxialLocalizationPrecisionAstig:
         photons = np.array([500.0, 2000.0, 10000.0])
         locs = self._make_locs(photons)
         lpz = zfit.axial_localization_precision_astig(
-            locs, info, dict(CALIB_3D), fitting_method="gausslq"
+            locs, info, calibration=dict(CALIB_3D), fitting_method="gausslq"
         )
         # Strict monotonic decrease in lpz as photons grow
         assert lpz[0] > lpz[1] > lpz[2]
@@ -783,12 +978,12 @@ class TestCalibrateZ:
                         "frame": fi,
                         "x": 16.0,
                         "y": 16.0,
-                        "sx": sx_mean + rng.normal(0, 0.02),
-                        "sy": sy_mean + rng.normal(0, 0.02),
+                        "sx": (sx_mean + rng.normal(0, 0.02)) * PIXELSIZE,
+                        "sy": (sy_mean + rng.normal(0, 0.02)) * PIXELSIZE,
                         "photons": 5000.0,
                         "bg": 10.0,
-                        "lpx": 0.01,
-                        "lpy": 0.01,
+                        "lpx": 0.01 * PIXELSIZE,
+                        "lpy": 0.01 * PIXELSIZE,
                     }
                 )
         locs = pd.DataFrame(rows)
@@ -805,7 +1000,7 @@ class TestCalibrateZ:
     def test_returns_required_keys(self, bead_stack, monkeypatch):
         monkeypatch.setattr("matplotlib.pyplot.show", lambda *a, **k: None)
         locs, info, d = bead_stack
-        calib = zfit.calibrate_z(locs, info, d, magnification_factor=0.79)
+        calib = zfit.calibrate_z(locs, info, d=d, magnification_factor=0.79)
         for key in [
             "X Coefficients",
             "Y Coefficients",
@@ -821,21 +1016,110 @@ class TestCalibrateZ:
         assert calib["Step size in nm"] == d
         assert calib["Magnification factor"] == 0.79
         assert calib["Path"] == "N/A"
+        # in nm, also when not saved to a file
+        assert calib[io.FORMAT_VERSION_ATTR] == io.FORMAT_VERSION
+        # the metadata holds no identification step
+        assert "Identification" not in calib
+
+    def test_records_the_identification(self, bead_stack, monkeypatch):
+        monkeypatch.setattr("matplotlib.pyplot.show", lambda *a, **k: None)
+        locs, info, d = bead_stack
+        parameters = localize.IdentificationParameters(
+            method=localize.NetGradient(5000),
+            box=7,
+            temporal_median_window=50,
+        )
+        info = info + [
+            {
+                **parameters.to_info(),
+                "ROI": None,
+                **lib.step_info("Localize"),
+            }
+        ]
+
+        calib = zfit.calibrate_z(locs, info, d=d, magnification_factor=0.79)
+
+        assert calib["Identification"] == parameters.to_info()
 
     def test_recovered_polynomial_resembles_truth(
         self, bead_stack, monkeypatch
     ):
         """Recovered spot-size at z=0 should match the polynomial offset
-        we built into the synthetic data (~1.5 px) within ~0.1 px."""
+        we built into the synthetic data (1.5 camera pixels, in nm)
+        within 0.1 camera pixels."""
         monkeypatch.setattr("matplotlib.pyplot.show", lambda *a, **k: None)
         locs, info, d = bead_stack
-        calib = zfit.calibrate_z(locs, info, d, magnification_factor=0.79)
+        calib = zfit.calibrate_z(locs, info, d=d, magnification_factor=0.79)
         cx = np.array(calib["X Coefficients"])
         cy = np.array(calib["Y Coefficients"])
         # at z=0 (after recentering), sx and sy should both be near the
         # crossing point of the synthetic polynomials (~1.5)
-        assert zfit._get_calib_size(cx, 0.0) == pytest.approx(1.5, abs=0.1)
-        assert zfit._get_calib_size(cy, 0.0) == pytest.approx(1.5, abs=0.1)
+        assert zfit._get_calib_size(cx, 0.0) == pytest.approx(
+            1.5 * PIXELSIZE, abs=0.1 * PIXELSIZE
+        )
+        assert zfit._get_calib_size(cy, 0.0) == pytest.approx(
+            1.5 * PIXELSIZE, abs=0.1 * PIXELSIZE
+        )
+
+    @pytest.mark.parametrize("z_binning", [1, 2])
+    def test_curves_cross_at_zero_for_an_off_center_crossing(
+        self, monkeypatch, z_binning
+    ):
+        """Real bead scans rarely cross in the middle of the scan:
+        recentering must shift the stage positions once, so that the
+        calibration curves cross at z = 0 and follow the truth around
+        it. (With the z axis shifted twice, the curves crossed at minus
+        the offset.)"""
+        monkeypatch.setattr("matplotlib.pyplot.show", lambda *a, **k: None)
+        n_frames, d, offset = 80, 10.0, 150.0  # crossing at stage z = 150
+        z_total = (n_frames - 1) * d
+
+        def truth_x(z):
+            return 1.5 + 1e-3 * (z - offset) + 1e-5 * (z - offset) ** 2
+
+        def truth_y(z):
+            return 1.5 - 1e-3 * (z - offset) + 1e-5 * (z - offset) ** 2
+
+        rng = np.random.default_rng(0)
+        rows = []
+        for fi in range(n_frames):
+            z = -(fi * d - z_total / 2)
+            for _ in range(40):
+                rows.append(
+                    {
+                        "frame": fi,
+                        "x": 16.0 * PIXELSIZE,
+                        "y": 16.0 * PIXELSIZE,
+                        "sx": (truth_x(z) + rng.normal(0, 0.01)) * PIXELSIZE,
+                        "sy": (truth_y(z) + rng.normal(0, 0.01)) * PIXELSIZE,
+                        "photons": 5000.0,
+                        "bg": 10.0,
+                        "lpx": 0.01 * PIXELSIZE,
+                        "lpy": 0.01 * PIXELSIZE,
+                    }
+                )
+        info = [
+            {"Frames": n_frames, "Pixelsize": 130, "Width": 32, "Height": 32}
+        ]
+        calib = zfit.calibrate_z(
+            pd.DataFrame(rows),
+            info,
+            d=d,
+            magnification_factor=0.79,
+            z_binning=z_binning,
+        )
+        cx = np.array(calib["X Coefficients"])
+        cy = np.array(calib["Y Coefficients"])
+        assert zfit._get_calib_size(cx, 0.0) == pytest.approx(
+            zfit._get_calib_size(cy, 0.0), abs=0.01 * PIXELSIZE
+        )
+        for z in (-200.0, 0.0, 150.0):
+            assert zfit._get_calib_size(cx, z) == pytest.approx(
+                truth_x(z + offset) * PIXELSIZE, abs=0.01 * PIXELSIZE
+            )
+            assert zfit._get_calib_size(cy, z) == pytest.approx(
+                truth_y(z + offset) * PIXELSIZE, abs=0.01 * PIXELSIZE
+            )
 
     def test_writes_yaml_and_png_when_path_given(
         self, bead_stack, monkeypatch, tmp_path
@@ -844,7 +1128,7 @@ class TestCalibrateZ:
         locs, info, d = bead_stack
         out_path = tmp_path / "calib.yaml"
         calib = zfit.calibrate_z(
-            locs, info, d, magnification_factor=0.79, path=str(out_path)
+            locs, info, d=d, magnification_factor=0.79, path=str(out_path)
         )
         assert out_path.exists()
         png_path = tmp_path / "calib.png"
@@ -870,7 +1154,7 @@ class TestCalibrateZ:
         locs, info, d = bead_stack
         out_path = tmp_path / "calib.yaml"
         calib = zfit.calibrate_z(
-            locs, info, d, magnification_factor=0.79, path=str(out_path)
+            locs, info, d=d, magnification_factor=0.79, path=str(out_path)
         )
         assert out_path.exists()
         assert out_path.stat().st_size > 0
@@ -910,12 +1194,12 @@ class TestCalibrateZBinning:
                         "frame": fi,
                         "x": 16.0,
                         "y": 16.0,
-                        "sx": sx_mean + rng.normal(0, 0.02),
-                        "sy": sy_mean + rng.normal(0, 0.02),
+                        "sx": (sx_mean + rng.normal(0, 0.02)) * PIXELSIZE,
+                        "sy": (sy_mean + rng.normal(0, 0.02)) * PIXELSIZE,
                         "photons": 5000.0,
                         "bg": 10.0,
-                        "lpx": 0.01,
-                        "lpy": 0.01,
+                        "lpx": 0.01 * PIXELSIZE,
+                        "lpy": 0.01 * PIXELSIZE,
                     }
                 )
         info = [
@@ -930,14 +1214,20 @@ class TestCalibrateZBinning:
 
     def test_binning_of_one_is_the_default(self, bead_stack):
         locs, info = bead_stack
-        default = zfit.calibrate_z(locs, info, self.D, 0.79)
-        explicit = zfit.calibrate_z(locs, info, self.D, 0.79, z_binning=1)
+        default = zfit.calibrate_z(
+            locs, info, d=self.D, magnification_factor=0.79
+        )
+        explicit = zfit.calibrate_z(
+            locs, info, d=self.D, magnification_factor=0.79, z_binning=1
+        )
         assert explicit == default
         assert default["Z binning"] == 1
 
     def test_binned_calibration_is_recorded_and_accurate(self, bead_stack):
         locs, info = bead_stack
-        calib = zfit.calibrate_z(locs, info, self.D, 0.79, z_binning=5)
+        calib = zfit.calibrate_z(
+            locs, info, d=self.D, magnification_factor=0.79, z_binning=5
+        )
         assert calib["Z binning"] == 5
         # the stage step stays the raw one; only the fit points are binned
         assert calib["Step size in nm"] == self.D
@@ -945,8 +1235,12 @@ class TestCalibrateZBinning:
         cy = np.array(calib["Y Coefficients"])
         # same crossing as the unbinned calibration: the curves are smooth
         # on the scale of five 10 nm steps
-        assert zfit._get_calib_size(cx, 0.0) == pytest.approx(1.5, abs=0.1)
-        assert zfit._get_calib_size(cy, 0.0) == pytest.approx(1.5, abs=0.1)
+        assert zfit._get_calib_size(cx, 0.0) == pytest.approx(
+            1.5 * PIXELSIZE, abs=0.1 * PIXELSIZE
+        )
+        assert zfit._get_calib_size(cy, 0.0) == pytest.approx(
+            1.5 * PIXELSIZE, abs=0.1 * PIXELSIZE
+        )
         # and they still separate with z in opposite directions
         assert zfit._get_calib_size(cx, 150.0) > zfit._get_calib_size(
             cy, 150.0
@@ -956,7 +1250,9 @@ class TestCalibrateZBinning:
         locs, info = bead_stack
         # 50 steps in bins of 8 leaves 6 bins, too few for a 6th-order fit
         with pytest.raises(ValueError, match="at least 7"):
-            zfit.calibrate_z(locs, info, self.D, 0.79, z_binning=8)
+            zfit.calibrate_z(
+                locs, info, d=self.D, magnification_factor=0.79, z_binning=8
+            )
 
 
 class TestCalibrateZFrameBounds:
@@ -987,12 +1283,12 @@ class TestCalibrateZFrameBounds:
                         "frame": fi,
                         "x": 16.0,
                         "y": 16.0,
-                        "sx": sx_mean + rng.normal(0, 0.02),
-                        "sy": sy_mean + rng.normal(0, 0.02),
+                        "sx": (sx_mean + rng.normal(0, 0.02)) * PIXELSIZE,
+                        "sy": (sy_mean + rng.normal(0, 0.02)) * PIXELSIZE,
                         "photons": 5000.0,
                         "bg": 10.0,
-                        "lpx": 0.01,
-                        "lpy": 0.01,
+                        "lpx": 0.01 * PIXELSIZE,
+                        "lpy": 0.01 * PIXELSIZE,
                     }
                 )
         locs = pd.DataFrame(rows)
@@ -1024,12 +1320,12 @@ class TestCalibrateZFrameBounds:
         ``frame_bounds=None`` (all frames used)."""
         locs, info = bead_stack
         calib_none = zfit.calibrate_z(
-            locs, info, self.D, magnification_factor=0.79, frame_bounds=None
+            locs, info, d=self.D, magnification_factor=0.79, frame_bounds=None
         )
         calib_nn = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(None, None),
         )
@@ -1045,12 +1341,12 @@ class TestCalibrateZFrameBounds:
         unbounded calibration."""
         locs, info = bead_stack
         calib_none = zfit.calibrate_z(
-            locs, info, self.D, magnification_factor=0.79
+            locs, info, d=self.D, magnification_factor=0.79
         )
         calib_full = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(0, self.N_FRAMES - 1),
         )
@@ -1069,7 +1365,7 @@ class TestCalibrateZFrameBounds:
         zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(10, 39),
         )
@@ -1084,7 +1380,7 @@ class TestCalibrateZFrameBounds:
         zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=[(10, 19), (30, 39)],
         )
@@ -1097,14 +1393,14 @@ class TestCalibrateZFrameBounds:
         calib_flat = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(10, 39),
         )
         calib_list = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=[(10, 39)],
         )
@@ -1123,7 +1419,7 @@ class TestCalibrateZFrameBounds:
         zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(None, 29),  # frames 0..29
         )
@@ -1132,7 +1428,7 @@ class TestCalibrateZFrameBounds:
         zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(20, None),  # frames 20..49
         )
@@ -1147,7 +1443,7 @@ class TestCalibrateZFrameBounds:
         calib = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(10, self.N_FRAMES - 1),
         )
@@ -1165,14 +1461,14 @@ class TestCalibrateZFrameBounds:
         calib_full = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=bounds,
         )
         calib_pre = zfit.calibrate_z(
             pre_filtered,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=bounds,
         )
@@ -1187,12 +1483,12 @@ class TestCalibrateZFrameBounds:
         """Restricting the frames must actually change the fit."""
         locs, info = bead_stack
         calib_none = zfit.calibrate_z(
-            locs, info, self.D, magnification_factor=0.79
+            locs, info, d=self.D, magnification_factor=0.79
         )
         calib_bounded = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(10, 39),
         )
@@ -1205,12 +1501,14 @@ class TestCalibrateZFrameBounds:
         calib = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frame_bounds=(10, 39),
         )
         assert calib["Frame bounds"] == (10, 39)
-        calib = zfit.calibrate_z(locs, info, self.D, magnification_factor=0.79)
+        calib = zfit.calibrate_z(
+            locs, info, d=self.D, magnification_factor=0.79
+        )
         assert calib["Frame bounds"] is None
 
 
@@ -1261,12 +1559,12 @@ class TestCalibrateZFramesPerStep:
                         "frame": frame,
                         "x": 16.0,
                         "y": 16.0,
-                        "sx": sx_mean + rng.normal(0, 0.02),
-                        "sy": sy_mean + rng.normal(0, 0.02),
+                        "sx": (sx_mean + rng.normal(0, 0.02)) * PIXELSIZE,
+                        "sy": (sy_mean + rng.normal(0, 0.02)) * PIXELSIZE,
                         "photons": 5000.0,
                         "bg": 10.0,
-                        "lpx": 0.01,
-                        "lpy": 0.01,
+                        "lpx": 0.01 * PIXELSIZE,
+                        "lpy": 0.01 * PIXELSIZE,
                     }
                 )
         locs = pd.DataFrame(rows)
@@ -1298,7 +1596,7 @@ class TestCalibrateZFramesPerStep:
         calib = zfit.calibrate_z(
             locs,
             info,
-            d,
+            d=d,
             magnification_factor=0.79,
             frames_per_step=4,
             frame_order="fov",
@@ -1310,7 +1608,7 @@ class TestCalibrateZFramesPerStep:
         """Omitting the new arguments must default to one frame per z
         position and the 'fov' order, preserving the classic behavior."""
         locs, info, d = self._make_stack(1, "fov")
-        calib = zfit.calibrate_z(locs, info, d, magnification_factor=0.79)
+        calib = zfit.calibrate_z(locs, info, d=d, magnification_factor=0.79)
         assert calib["Frames per step"] == 1
         assert calib["Frame order"] == "fov"
 
@@ -1319,7 +1617,9 @@ class TestCalibrateZFramesPerStep:
         calibration whether stored as one frame per position or spread
         over several frames, in either acquisition order."""
         base_locs, base_info, d = self._make_stack(1, "fov")
-        base = zfit.calibrate_z(base_locs, base_info, d, 0.79)
+        base = zfit.calibrate_z(
+            base_locs, base_info, d=d, magnification_factor=0.79
+        )
 
         for frames_per_step in (4, 5):
             for order in ("fov", "z"):
@@ -1327,7 +1627,7 @@ class TestCalibrateZFramesPerStep:
                 calib = zfit.calibrate_z(
                     locs,
                     info,
-                    d,
+                    d=d,
                     magnification_factor=0.79,
                     frames_per_step=frames_per_step,
                     frame_order=order,
@@ -1372,12 +1672,12 @@ class TestCalibrateZFramesPerStep:
                             "frame": frame,
                             "x": bx,
                             "y": by,
-                            "sx": sx_mean + rng.normal(0, 0.02),
-                            "sy": sy_mean + rng.normal(0, 0.02),
+                            "sx": (sx_mean + rng.normal(0, 0.02)) * PIXELSIZE,
+                            "sy": (sy_mean + rng.normal(0, 0.02)) * PIXELSIZE,
                             "photons": 5000.0,
                             "bg": 10.0,
-                            "lpx": 0.01,
-                            "lpy": 0.01,
+                            "lpx": 0.01 * PIXELSIZE,
+                            "lpy": 0.01 * PIXELSIZE,
                         }
                     )
         locs = pd.DataFrame(rows)
@@ -1387,15 +1687,19 @@ class TestCalibrateZFramesPerStep:
         calib = zfit.calibrate_z(
             locs,
             info,
-            self.D,
+            d=self.D,
             magnification_factor=0.79,
             frames_per_step=n_fov,
             frame_order="z",
         )
         cx = np.array(calib["X Coefficients"])
         cy = np.array(calib["Y Coefficients"])
-        assert zfit._get_calib_size(cx, 0.0) == pytest.approx(1.5, abs=0.1)
-        assert zfit._get_calib_size(cy, 0.0) == pytest.approx(1.5, abs=0.1)
+        assert zfit._get_calib_size(cx, 0.0) == pytest.approx(
+            1.5 * PIXELSIZE, abs=0.1 * PIXELSIZE
+        )
+        assert zfit._get_calib_size(cy, 0.0) == pytest.approx(
+            1.5 * PIXELSIZE, abs=0.1 * PIXELSIZE
+        )
 
     def test_number_of_z_positions_drives_the_fit(self, monkeypatch):
         """With ``frames_per_step`` frames per position, the polynomial
@@ -1407,7 +1711,7 @@ class TestCalibrateZFramesPerStep:
         zfit.calibrate_z(
             locs,
             info,
-            d,
+            d=d,
             magnification_factor=0.79,
             frames_per_step=4,
             frame_order="z",
@@ -1416,21 +1720,26 @@ class TestCalibrateZFramesPerStep:
 
     def test_recovers_polynomial_with_multiple_frames(self):
         """The recovered spot-size at z=0 should still match the
-        synthetic polynomials (~1.5 px) when several frames per position
+        synthetic polynomials (1.5 camera pixels, in nm) when several
+        frames per position
         are used."""
         locs, info, d = self._make_stack(5, "z")
         calib = zfit.calibrate_z(
             locs,
             info,
-            d,
+            d=d,
             magnification_factor=0.79,
             frames_per_step=5,
             frame_order="z",
         )
         cx = np.array(calib["X Coefficients"])
         cy = np.array(calib["Y Coefficients"])
-        assert zfit._get_calib_size(cx, 0.0) == pytest.approx(1.5, abs=0.1)
-        assert zfit._get_calib_size(cy, 0.0) == pytest.approx(1.5, abs=0.1)
+        assert zfit._get_calib_size(cx, 0.0) == pytest.approx(
+            1.5 * PIXELSIZE, abs=0.1 * PIXELSIZE
+        )
+        assert zfit._get_calib_size(cy, 0.0) == pytest.approx(
+            1.5 * PIXELSIZE, abs=0.1 * PIXELSIZE
+        )
 
     def test_trailing_incomplete_step_is_ignored(self, monkeypatch):
         """Frames that do not complete a final z position are dropped:
@@ -1450,7 +1759,7 @@ class TestCalibrateZFramesPerStep:
         calib = zfit.calibrate_z(
             locs,
             info,
-            d,
+            d=d,
             magnification_factor=0.79,
             frames_per_step=3,
             frame_order="fov",
@@ -1459,7 +1768,7 @@ class TestCalibrateZFramesPerStep:
         # the stray sx=99 localizations must not have shifted the fit
         assert zfit._get_calib_size(
             np.array(calib["X Coefficients"]), 0.0
-        ) == pytest.approx(1.5, abs=0.1)
+        ) == pytest.approx(1.5 * PIXELSIZE, abs=0.1 * PIXELSIZE)
 
     def test_frames_per_step_exceeding_frames_raises(self):
         locs, info, d = self._make_stack(1, "fov")
@@ -1468,7 +1777,7 @@ class TestCalibrateZFramesPerStep:
             zfit.calibrate_z(
                 locs,
                 info,
-                d,
+                d=d,
                 magnification_factor=0.79,
                 frames_per_step=10,
             )
@@ -1479,7 +1788,7 @@ class TestCalibrateZFramesPerStep:
         calib = zfit.calibrate_z(
             locs,
             info,
-            d,
+            d=d,
             magnification_factor=0.79,
             path=str(out_path),
             frames_per_step=4,
@@ -1500,7 +1809,7 @@ class TestCalibrateZFramesPerStep:
         zfit.calibrate_z(
             locs,
             info,
-            d,
+            d=d,
             magnification_factor=0.79,
             frames_per_step=4,
             frame_order="fov",

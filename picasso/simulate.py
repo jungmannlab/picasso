@@ -12,6 +12,17 @@ import numpy as np
 from . import io, lib
 from numba import njit
 
+__all__ = [
+    "define_structure",
+    "generate_positions",
+    "prepare_structures",
+    "distribute_photons",
+    "convert_movie",
+    "noisy_p",
+    "check_type",
+    "save_movie",
+]
+
 magfac = 0.79
 
 
@@ -26,14 +37,19 @@ def calculate_zpsf(
     Parameters
     ----------
     z : lib.FloatArray1D or number
-        The z position(s) at which to calculate the PSF.
+        The z position(s) in nm at which to calculate the PSF.
     cx, cy : lib.FloatArray1D
-        Coefficients for the x/y dimension of the PSF.
+        Coefficients for the x/y dimension of the PSF: the "X/Y
+        Coefficients" of an astigmatism calibration (see
+        ``zfit.calibrate_z``), i.e., polynomials of the spot width in nm
+        against z in nm.
 
     Returns
     -------
     wx, wy : lib.FloatArray1D
-        The calculated PSF sizes in the x and y dimensions.
+        The calculated PSF sizes in the x and y dimensions, in the unit
+        of the coefficients (nm for a Picasso 1.0 calibration; the
+        simulation divides them by the camera pixel size).
     """
     z = z / magfac
     z2 = z * z
@@ -62,28 +78,7 @@ def calculate_zpsf(
     return (wx, wy)
 
 
-def test_calculate_zpsf() -> lib.FloatArray1D:
-    """Test function for calculate_zpsf."""
-    cx = np.array([1, 2, 3, 4, 5, 6, 7])
-    cy = np.array([1, 2, 3, 4, 5, 6, 7])
-    z = np.array([1, 2, 3, 4, 5, 6, 7])
-    wx, wy = calculate_zpsf(z, cx, cy)
-
-    result = [
-        4.90350522e01,
-        7.13644987e02,
-        5.52316597e03,
-        2.61621620e04,
-        9.06621337e04,
-        2.54548124e05,
-        6.14947219e05,
-    ]
-
-    delta = wx - result
-    assert sum(delta**2) < 0.001
-
-
-def saveInfo(filename: str, info: dict) -> None:
+def save_info(filename: str, info: dict) -> None:
     """Save metadata to a YAML file.
 
     Parameters
@@ -254,8 +249,6 @@ def paintgen(
     eventsum = np.cumsum(events)
     # Find the first event that exceeds the total integration time
     maxloc = np.argmax(eventsum > (frames * time))
-    simulatedmeandark = np.mean(events[:maxloc:2])
-    simulatedmeanbright = np.mean(events[1:maxloc:2])
 
     if np.mod(maxloc, 2):  # uneven -> ends with an OFF-event
         onevents = int(np.floor(maxloc / 2))
@@ -295,15 +288,15 @@ def paintgen(
         spotkinetics = [
             onevents,
             sum(photonsinframe > 0),
-            simulatedmeandark,
-            simulatedmeanbright,
+            np.mean(events[:maxloc:2]),
+            np.mean(events[1:maxloc:2]),
         ]
     else:
         spotkinetics = [0, sum(photonsinframe > 0), 0, 0]
     return photonsinframe, timetrace, spotkinetics
 
 
-def distphotons(
+def distribute_photons(
     structures: lib.FloatArray2D,
     itime: float,
     frames: int,
@@ -363,7 +356,7 @@ def distphotons(
     return photonsinframe, timetrace, spotkinetics
 
 
-def distphotonsxy(
+def distribute_photons_xy(
     runner: int,
     photondist: lib.FloatArray2D,
     structures: lib.FloatArray2D,
@@ -371,6 +364,7 @@ def distphotonsxy(
     mode3Dstate: bool,
     cx: list,
     cy: list,
+    pixelsize: float | None = None,
 ) -> lib.FloatArray2D:
     """Distribute photons in a PSF, with an option for astigmatic PSF
     in 3D.
@@ -386,20 +380,36 @@ def distphotonsxy(
         Array containing the binding sites' coordinates and exchange
         information.
     psf : float
-        The point spread function (PSF) size (only for 2D).
+        The point spread function (PSF) size in camera pixels (only for
+        2D).
     mode3Dstate : bool
         If True, uses a 3D astigmatic PSF; if False, uses a 2D Gaussian
         PSF.
     cx, cy : list
-        Calibration coefficients for the x/y dimension of the PSF, used
+        Calibration coefficients for the x/y dimension of the PSF (spot
+        widths in nm against z in nm, see :func:`calculate_zpsf`), used
         if mode3Dstate is True.
+    pixelsize : float, optional
+        Camera pixel size in nm, which converts the astigmatic spot
+        widths (nm) to the camera pixel grid of the movie. Required if
+        ``mode3Dstate`` is True. Default is None.
 
     Returns
     -------
     photonposframe : lib.FloatArray2D
         Array containing the positions of the photons emitted in the
-        current frame for the specified binding site.
+        current frame for the specified binding site (camera pixels).
     """
+    if mode3Dstate and pixelsize is None:
+        raise ValueError(
+            "The 3D (astigmatic) simulation needs the camera pixel size "
+            "(pixelsize, nm) to express the calibration's spot widths (nm) "
+            "in camera pixels."
+        )
+    if mode3Dstate:
+        # arrays: numba is dropping (reflected) list arguments
+        cx = np.asarray(cx, dtype=np.float64)
+        cy = np.asarray(cy, dtype=np.float64)
     bindingsitesx = structures[0, :]
     bindingsitesy = structures[1, :]
     bindingsitesz = structures[4, :]
@@ -416,6 +426,10 @@ def distphotonsxy(
         photoncount = int(photondist[i, runner])
         if mode3Dstate:
             wx, wy = calculate_zpsf(bindingsitesz[i], cx, cy)
+            # the calibration's spot widths are nm; the movie is sampled
+            # on the camera pixel grid
+            wx = wx / pixelsize
+            wy = wy / pixelsize
             cov = [[wx * wx, 0], [0, wy * wy]]
         else:
             cov = [[psf * psf, 0], [0, psf * psf]]
@@ -430,7 +444,7 @@ def distphotonsxy(
     return photonposframe
 
 
-def convertMovie(
+def convert_movie(
     runner: int,
     photondist: lib.FloatArray2D,
     structures: lib.FloatArray2D,
@@ -443,6 +457,7 @@ def convertMovie(
     mode3Dstate: bool,
     cx: list,
     cy: list,
+    pixelsize: float | None = None,
 ):
     """Convert the photon distribution into a simulated movie frame.
 
@@ -462,7 +477,7 @@ def convertMovie(
         Number of frames in the movie.
     psf : float
         The point spread function (PSF) size (sx/sy) for the binding
-        sites.
+        sites, in camera pixels.
     photonrate : float
         Mean photon rate for the binding sites (in photons per frame).
     background : float
@@ -473,8 +488,12 @@ def convertMovie(
         If True, uses a 3D astigmatic PSF; if False, uses a 2D Gaussian
         PSF.
     cx, cy : list
-        Calibration coefficients for the x/y dimension of the PSF, used
-        if mode3Dstate is True.
+        Calibration coefficients for the x/y dimension of the PSF (spot
+        widths in nm against z in nm), used if mode3Dstate is True.
+    pixelsize : float, optional
+        Camera pixel size in nm, which converts the astigmatic spot
+        widths to camera pixels. Required if ``mode3Dstate`` is True.
+        Default is None.
 
     Returns
     -------
@@ -484,8 +503,8 @@ def convertMovie(
     """
     edges = range(0, imagesize + 1)
 
-    photonposframe = distphotonsxy(
-        runner, photondist, structures, psf, mode3Dstate, cx, cy
+    photonposframe = distribute_photons_xy(
+        runner, photondist, structures, psf, mode3Dstate, cx, cy, pixelsize
     )
 
     if len(photonposframe) == 0:
@@ -499,7 +518,7 @@ def convertMovie(
     return simframe
 
 
-def saveMovie(filename: str, movie: lib.IntArray3D, info: dict) -> None:
+def save_movie(filename: str, movie: lib.IntArray3D, info: dict) -> None:
     """Save the simulated movie to a file.
 
     Parameters
@@ -516,7 +535,7 @@ def saveMovie(filename: str, movie: lib.IntArray3D, info: dict) -> None:
 
 # Function to store the coordinates of a structure in a container.
 # The coordinates wil be adjustet so that the center of mass is the origin
-def defineStructure(
+def define_structure(
     structurexxpx: lib.FloatArray1D,
     structureyypx: lib.FloatArray1D,
     structureex: lib.FloatArray1D,
@@ -530,15 +549,16 @@ def defineStructure(
     Parameters
     ----------
     structurexxpx : lib.FloatArray1D
-        Array containing the x-coordinates of the structure in pixels.
+        Array containing the x-coordinates of the structure in nm.
     structureyypx : lib.FloatArray1D
-        Array containing the y-coordinates of the structure in pixels.
+        Array containing the y-coordinates of the structure in nm.
     structureex : lib.FloatArray1D
         Array containing the exchange information for the structure.
     structure3d : lib.FloatArray1D
-        Array containing the 3D coordinates of the structure.
+        Array containing the z coordinates of the structure in nm.
     pixelsize : float
-        The pixel size in nanometers.
+        The camera pixel size in nm, which converts the lateral
+        coordinates to the camera pixel grid the movie is simulated on.
     mean : bool, optional
         If True, centers the structure by subtracting the mean of the
         coordinates. Default is True.
@@ -546,8 +566,8 @@ def defineStructure(
     Returns
     -------
     structure : lib.FloatArray2D
-        Array containing the structure's x-positions, y-positions,
-        exchange information, and 3D coordinates.
+        Array containing the structure's x-positions and y-positions
+        (camera pixels), exchange information, and z coordinates (nm).
     """
     if mean:
         structurexxpx = structurexxpx - np.mean(structurexxpx)
@@ -567,7 +587,7 @@ def defineStructure(
     return structure
 
 
-def generatePositions(
+def generate_positions(
     number: int,
     imagesize: int,
     frame: int,
@@ -610,7 +630,7 @@ def generatePositions(
     return gridpos
 
 
-def rotateStructure(structure: lib.FloatArray2D) -> lib.FloatArray2D:
+def rotate_structure(structure: lib.FloatArray2D) -> lib.FloatArray2D:
     """Rotate a structure randomly.
 
     Parameters
@@ -639,7 +659,7 @@ def rotateStructure(structure: lib.FloatArray2D) -> lib.FloatArray2D:
     return newstructure
 
 
-def incorporateStructure(
+def incorporate_structure(
     structure: lib.FloatArray2D, incorporation: float
 ) -> lib.FloatArray2D:
     """Return a subset of the structure to reflect incorporation of
@@ -665,7 +685,7 @@ def incorporateStructure(
     return newstructure
 
 
-def randomExchange(pos: lib.FloatArray2D) -> lib.FloatArray2D:
+def random_exchange(pos: lib.FloatArray2D) -> lib.FloatArray2D:
     """Randomly shuffle exchange parameters for random labeling.
 
     Parameters
@@ -686,7 +706,7 @@ def randomExchange(pos: lib.FloatArray2D) -> lib.FloatArray2D:
     return newpos
 
 
-def prepareStructures(
+def prepare_structures(
     structure: lib.FloatArray2D,
     gridpos: lib.FloatArray2D,
     orientation: int,
@@ -731,12 +751,12 @@ def prepareStructures(
         if orientation == 0:
             structure = oldstructure
         else:
-            structure = rotateStructure(oldstructure)
+            structure = rotate_structure(oldstructure)
 
         if incorporation == 1:
             pass
         else:
-            structure = incorporateStructure(structure, incorporation)
+            structure = incorporate_structure(structure, incorporation)
 
         newx = structure[0, :] + gridpos[i, 0]
         newy = structure[1, :] + gridpos[i, 1]
@@ -755,5 +775,5 @@ def prepareStructures(
             newpos = np.concatenate((newpos, newstruct), axis=1)
 
     if exchange == 1:
-        newpos = randomExchange(newpos)
+        newpos = random_exchange(newpos)
     return newpos

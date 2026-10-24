@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import os
 import math
-import time
 import warnings
 from concurrent import futures
 from concurrent.futures import ProcessPoolExecutor
@@ -23,11 +22,17 @@ from numba import cuda
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from tqdm import tqdm
 from scipy.optimize import minimize_scalar
 
-from . import io, lib, __version__
+from . import io, lib
 from .fitting import precision
+
+__all__ = [
+    "calibrate_z",
+    "zfit",
+    "axial_localization_precision",
+    "axial_localization_precision_astig",
+]
 
 plt.style.use("ggplot")
 
@@ -52,9 +57,27 @@ def _interpolate_nan(data: lib.FloatArray1D) -> lib.FloatArray1D:
     return data
 
 
+def _identification_from_info(info: list[dict]) -> dict | None:
+    """How the localizations were identified, read from the most recent
+    identification step of their metadata ``info`` and normalized with
+    ``localize.IdentificationParameters``; None if ``info`` holds no
+    (complete) identification parameters."""
+    from . import localize  # localize imports this module
+
+    for entry in reversed(info):
+        if isinstance(entry, dict) and "Box Size" in entry:
+            try:
+                parameters = localize.IdentificationParameters.from_info(entry)
+            except (TypeError, ValueError):
+                return None
+            return parameters.to_info()
+    return None
+
+
 def calibrate_z(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     d: float,
     magnification_factor: float,
     path: str | None = None,
@@ -78,7 +101,8 @@ def calibrate_z(
         Localizations of a calibration sample.
     info : list of dicts
         Information about the calibration sample, including the number
-        of frames.
+        of frames. The identification parameters of the localizations,
+        if ``info`` has them, are recorded in the calibration.
     d : float
         Step size in nm, i.e., the distance between the z positions of
         the calibration sample.
@@ -125,10 +149,14 @@ def calibrate_z(
     -------
     calibration : dict
         Dictionary containing the calibration coefficients (i.e.,
-        polynomial coefficients), number of frames, step size, z binning
-        and magnification factor.
+        polynomial coefficients of the spot width/height in nm against
+        z in nm), number of frames, step size, z binning, magnification
+        factor, how the beads were identified (``"Identification"``, see
+        ``localize.IdentificationParameters.from_info``; only if ``info``
+        records it) and the format marker (``io.FORMAT_VERSION_ATTR``).
     """
     n_frames = info[0]["Frames"]
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     frames_per_step = max(1, int(frames_per_step))
     # number of distinct z (stage) positions; any trailing frames that do
     # not complete a step are ignored
@@ -220,7 +248,8 @@ def calibrate_z(
     spot_width = np.poly1d(cx)
     spot_height = np.poly1d(cy)
     z_zero = z[np.argmin(np.abs(spot_width(z) - spot_height(z)))]
-    z_range -= z_zero
+    # not in place: without binning, z_bins may share z_range's data
+    z_range = z_range - z_zero
     z_bins = z_bins - z_zero
     cx = np.polyfit(z_bins, mean_sx_bins, 6, full=False)
     cy = np.polyfit(z_bins, mean_sy_bins, 6, full=False)
@@ -236,12 +265,15 @@ def calibrate_z(
         "Frames per step": int(frames_per_step),
         "Frame order": frame_order,
         "Z binning": int(z_binning),
+        io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION,
     }
+    identification = _identification_from_info(info)
+    if identification is not None:
+        calibration["Identification"] = identification
     if path is not None:
         io.save_calibration(path, calibration)
 
-    # pixelsize does not matter here anyway
-    locs = _fit_z(locs, info, calibration, magnification_factor, pixelsize=130)
+    locs = _fit_z(locs, info, calibration, magnification_factor, pixelsize)
     locs["z"] /= magnification_factor
     # position of each localization's z (stage) position within step_range
     locs_step = step_of_frame[locs["frame"].to_numpy()]
@@ -254,8 +286,8 @@ def calibrate_z(
     plt.plot(z_bins, mean_sy_bins, ".-", label="y")
     plt.plot(z_range, np.polyval(cx, z_range), "0.3", lw=1.5, label="x fit")
     plt.plot(z_range, np.polyval(cy, z_range), "0.3", lw=1.5, label="y fit")
-    plt.xlabel("Stage position")
-    plt.ylabel("Mean spot width/height")
+    plt.xlabel("Stage position (nm)")
+    plt.ylabel("Mean spot width/height (nm)")
     plt.xlim(z_range.min(), z_range.max())
     plt.legend(loc="best")
 
@@ -269,8 +301,8 @@ def calibrate_z(
     )
     plt.plot()
     ax.set_aspect("equal")
-    plt.xlabel("Spot width")
-    plt.ylabel("Spot height")
+    plt.xlabel("Spot width (nm)")
+    plt.ylabel("Spot height (nm)")
     plt.legend(loc="best")
 
     plt.subplot(233)
@@ -285,8 +317,8 @@ def calibrate_z(
     )
     plt.plot(z_range, np.polyval(cy, z_range), "0.3", lw=1.5)
     plt.xlim(z_range.min(), z_range.max())
-    plt.xlabel("Estimated z")
-    plt.ylabel("Spot width/height")
+    plt.xlabel("Estimated z (nm)")
+    plt.ylabel("Spot width/height (nm)")
     plt.legend(loc="best")
 
     ax = plt.subplot(234)
@@ -300,28 +332,34 @@ def calibrate_z(
     plt.xlim(z_range.min(), z_range.max())
     plt.ylim(z_range.min(), z_range.max())
     ax.set_aspect("equal")
-    plt.xlabel("Stage position")
-    plt.ylabel("Estimated z")
+    plt.xlabel("Stage position (nm)")
+    plt.ylabel("Estimated z (nm)")
     plt.legend(loc="best")
 
     ax = plt.subplot(235)
     deviation = locs["z"] - z_range[pos]
     bins = lib.calculate_optimal_bins(deviation, max_n_bins=1000)
     plt.hist(deviation, bins)
-    plt.xlabel("Deviation to true position")
+    plt.xlabel("Deviation to true position (nm)")
     plt.ylabel("Occurence")
 
     ax = plt.subplot(236)
     square_deviation = deviation.to_numpy() ** 2
+    # a step without localizations has no precision (a gap in the plot)
     mean_square_deviation_step = [
-        np.mean(square_deviation[locs_step == _]) for _ in step_range
+        (
+            np.mean(square_deviation[locs_step == _])
+            if np.any(locs_step == _)
+            else np.nan
+        )
+        for _ in step_range
     ]
     rmsd_step = np.sqrt(mean_square_deviation_step)
     plt.plot(z_range, rmsd_step, ".-", color="0.3")
     plt.xlim(z_range.min(), z_range.max())
     plt.gca().set_ylim(bottom=0)
-    plt.xlabel("Stage position")
-    plt.ylabel("Mean z precision")
+    plt.xlabel("Stage position (nm)")
+    plt.ylabel("Mean z precision (nm)")
 
     plt.tight_layout(pad=2)
 
@@ -342,11 +380,12 @@ def _fit_z_target(
     cy: lib.FloatArray1D,
 ) -> float:
     """Target function that's to be minimized for fitting the z
-    coordinates given the single-emitter image width and height as well
-    as the calibration curve coefficients. It calculates the difference
-    between the square root of the spot width/height and the polynomial
-    fit of the z-axis calibration curve. Based on Huang et al. Science,
-    2008. DOI: 10.1126/science.1153529."""
+    coordinates given the single-emitter image width and height (nm) as
+    well as the calibration curve coefficients (spot widths in nm
+    against z in nm). It calculates the difference between the square
+    root of the spot width/height and the polynomial fit of the z-axis
+    calibration curve. Based on Huang et al. Science, 2008. DOI:
+    10.1126/science.1153529."""
     z2 = z * z
     z3 = z * z2
     z4 = z * z3
@@ -381,28 +420,33 @@ def _fit_z(
     pixelsize: float,
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
     filter: int = 2,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
-) -> pd.DataFrame:
+    progress: lib.Progress | None = None,
+    abort_callback: Callable[[], bool] | None = None,
+) -> pd.DataFrame | None:
     """Internal function for fitting z coordinates to the localizations.
-    See `zfit` for details."""
+    See `zfit` for details. ``calibration`` and the spot widths of
+    ``locs`` are in nm; ``pixelsize`` (nm) is only used to evaluate the
+    spot width uncertainties, whose formulas work in camera pixels.
+
+    ``progress`` is a normalized tracker whose phase the caller started;
+    it is advanced to the number of localizations fitted. None (only for
+    the worker processes of :func:`_fit_z_parallel`, which cannot report
+    to the caller's tracker) reports nothing. Returns None if
+    ``abort_callback``, polled between localizations, asked to stop."""
     locs = locs.copy()
     cx = np.array(calibration["X Coefficients"])
     cy = np.array(calibration["Y Coefficients"])
-    # in multiprocessing, pandas Series causes issues!
+    # pandas Series cause issues in the worker processes
     sx = locs["sx"].to_numpy()
     sy = locs["sy"].to_numpy()
     z = np.zeros_like(locs["x"])
     square_d_zcalib = np.zeros_like(z)
 
-    use_tqdm = progress_callback == "console"
-    if use_tqdm:
-        iter_range = tqdm(range(len(z)), desc="Fitting z...", unit="locs")
-    else:
-        iter_range = range(len(z))
-
-    for i in iter_range:
+    if progress is None:
+        progress = lib.MockProgress()
+    for i in range(len(z)):
+        if callable(abort_callback) and abort_callback():
+            return None
         # set bounds to avoid potential gaps in the calibration curve,
         # credits to Loek Andriessen
         result = minimize_scalar(
@@ -412,9 +456,7 @@ def _fit_z(
         )
         z[i] = result.x
         square_d_zcalib[i] = result.fun
-
-        if callable(progress_callback):
-            progress_callback(i)
+        progress.set_value(i + 1)
 
     locs["z"] = z * magnification_factor
     locs["d_zcalib"] = np.sqrt(square_d_zcalib)
@@ -437,12 +479,21 @@ def _fit_z_parallel(
     calibration: dict,
     magnification_factor: float,
     pixelsize: float,
-    fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
-    filter: int = 2,
-    asynch: bool = False,
-) -> pd.DataFrame | list[futures.Future]:
+    fitting_method: Literal["gausslq", "gaussmle"],
+    filter: int,
+    progress: lib.Progress,
+    abort_callback: Callable[[], bool] | None = None,
+) -> pd.DataFrame | None:
     """Internal function for fitting z coordinates to the localizations
-    using multiprocessing. See `zfit` for details."""
+    in a pool of worker processes. See `zfit` for details.
+
+    Submits the localizations in chunks to a process pool and waits for
+    them, advancing ``progress`` (a normalized tracker whose phase the
+    caller started) to the number of localizations whose chunk has
+    finished. ``abort_callback`` is polled while waiting; returning True
+    cancels the pending chunks and returns None. The pool is shut down
+    in any case, also when the tracker raises ``lib.OperationCanceled``.
+    """
     n_workers = lib.n_workers()
     n_locs = len(locs)
     n_tasks = 100 * n_workers
@@ -455,11 +506,12 @@ def _fit_z_parallel(
         for _ in range(n_tasks)
     ]
     start_indices = np.cumsum([0] + spots_per_task[:-1])
-    fs = []
     executor = ProcessPoolExecutor(n_workers)
-    for i, n_locs_task in zip(start_indices, spots_per_task):
-        fs.append(
-            executor.submit(
+    completed = False
+    try:
+        fs = {}
+        for i, n_locs_task in zip(start_indices, spots_per_task):
+            future = executor.submit(
                 _fit_z,
                 locs[i : i + n_locs_task],
                 info,
@@ -469,13 +521,20 @@ def _fit_z_parallel(
                 fitting_method=fitting_method,
                 filter=0,
             )
-        )
-    if asynch:
-        return fs
-    with tqdm(total=n_tasks, unit="task") as progress_bar:
-        for f in futures.as_completed(fs):
-            progress_bar.update()
-    return locs_from_futures(fs, filter=filter)
+            fs[future] = n_locs_task
+        n_finished = 0
+        pending = set(fs)
+        while pending:
+            if abort_callback is not None and abort_callback():
+                return None
+            done, pending = futures.wait(pending, timeout=0.2)
+            n_finished += sum(fs[f] for f in done)
+            progress.set_value(n_finished)
+        completed = True
+    finally:
+        # on abort, cancellation or a worker error, drop the queued chunks
+        executor.shutdown(wait=completed, cancel_futures=not completed)
+    return locs_from_futures(list(fs), filter=filter)
 
 
 @cuda.jit(device=True, inline=True)
@@ -627,7 +686,8 @@ def _minimize_z_device(
     (Brent's method with golden-section fallback, the algorithm used by
     ``scipy.optimize.minimize_scalar`` when ``bounds`` are given), so the
     GPU fit reproduces the CPU (``_fit_z``) result. Returns the minimizer
-    ``xf`` and the objective value ``fx`` at that point."""
+    ``xf`` and the objective value ``fx`` at that point. License
+    (BSD-3-Clause): ``LICENSES/SciPy-LICENSE.txt``."""
     xatol = 1e-5
     maxfun = 500
     sqrt_eps = 1.4901161193847656e-08  # sqrt(2.2e-16)
@@ -711,13 +771,14 @@ def _fit_z_gpu(
     pixelsize: float,
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
     filter: int = 2,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
-) -> pd.DataFrame:
+    progress: lib.Progress | None = None,
+    abort_callback: Callable[[], bool] | None = None,
+) -> pd.DataFrame | None:
     """GPU (numba.cuda) equivalent of ``_fit_z``. Fits the z coordinate
     of every localization in parallel on the GPU, reproducing the CPU
-    result. See ``_fit_z`` for details."""
+    result. See ``_fit_z`` for details; ``progress`` is advanced, and
+    ``abort_callback`` polled, once per chunk of a million localizations.
+    Returns None if aborted."""
     if not CUDA_AVAILABLE:
         raise RuntimeError(
             "GPU z fitting requested but no CUDA-capable GPU is available."
@@ -739,13 +800,11 @@ def _fit_z_gpu(
         threads_per_block = 128
         # Process in chunks to bound device memory and report progress.
         chunk = 1_000_000
-        use_tqdm = progress_callback == "console"
-        pbar = (
-            tqdm(total=N, desc="Fitting z...", unit="locs")
-            if use_tqdm
-            else None
-        )
+        if progress is None:
+            progress = lib.MockProgress()
         for start in range(0, N, chunk):
+            if callable(abort_callback) and abort_callback():
+                return None
             end = min(start + chunk, N)
             n = end - start
             d_sx = cuda.to_device(sx[start:end])
@@ -758,12 +817,7 @@ def _fit_z_gpu(
             )
             z[start:end] = d_z.copy_to_host()
             square_d_zcalib[start:end] = d_fun.copy_to_host()
-            if use_tqdm:
-                pbar.update(n)
-            elif callable(progress_callback):
-                progress_callback(end)
-        if use_tqdm:
-            pbar.close()
+            progress.set_value(end)
 
     locs["z"] = (z * magnification_factor).astype(np.float32)
     locs["d_zcalib"] = np.sqrt(square_d_zcalib).astype(np.float32)
@@ -790,11 +844,9 @@ def zfit(
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
     filter: int = 2,
     lateral_transforms: dict | list | str | None = None,
-    multiprocess: bool = False,
+    parallel: bool = False,
     gpu: bool = False,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]] | tuple[None, None]:
     """Main function for fitting z coordinates to the localizations.
@@ -805,7 +857,8 @@ def zfit(
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations (2D fitted).
+        Localizations (2D fitted), with the spot widths ``sx``, ``sy``
+        in nm.
     info : list of dicts
         Localizations metadata. Should include a "Pixelsize" key with
         the effective camera pixel size in nm. If not, must be provided
@@ -814,7 +867,8 @@ def zfit(
         Calibration dictionary containing the following keys:
 
         - "X Coefficients": list of 7 floats, polynomial coefficients
-            for the x-axis calibration curve;
+            for the x-axis calibration curve (spot width in nm against
+            z in nm);
         - "Y Coefficients": list of 7 floats, polynomial coefficients
             for the y-axis calibration curve;
         - "Magnification factor": float, magnification factor of the
@@ -824,7 +878,12 @@ def zfit(
 
         Note that "Magnification factor" can be overwritten by the
         `magnification_factor` argument. See ``io.load_calibration``
-        on how to open a calibration YAML file.
+        on how to open a calibration YAML file. A calibration written
+        before Picasso 1.0 (spot widths in camera pixels, no
+        ``picasso_format`` key) is converted to nm with the camera pixel
+        size (``pixelsize`` or the metadata's "Pixelsize"), with a
+        warning; ``picasso convert-units`` converts the file once and
+        for all.
     magnification_factor : float, optional
         Magnification factor of the microscope, i.e., the ratio between
         the actual z position of the calibration sample and the
@@ -832,7 +891,10 @@ def zfit(
         value must be given in `calibration`.
     pixelsize : float, optional
         Camera pixel size in nm. If given, the value in `info` will be
-        ignored. If None, the value must be given in `info`.
+        ignored. If None, the value must be given in `info`. It is used
+        to evaluate the spot width uncertainties (whose formulas work in
+        camera pixels) and to convert a calibration written before
+        Picasso 1.0.
     fitting_method : {"gausslq", "gaussmle"}, optional
         Fitting method used to obtain 2D localization parameters. Used
         to determine axial localization precision. Default is "gausslq".
@@ -854,23 +916,28 @@ def zfit(
         twice; both lists are reported in the returned metadata, under
         ``"Lateral corrections applied"`` and ``"Lateral corrections
         skipped"``. Default is None.
-    multiprocess : bool, optional
-        Whether to use multiprocessing for fitting the z coordinates.
-        Ignored when ``gpu`` is True. Default is False.
+    parallel : bool, optional
+        If True, the z coordinates are fitted in a pool of worker
+        processes (75% of the CPU cores, see ``lib.n_workers``); if
+        False, in the calling process. Ignored when ``gpu`` is True.
+        Default is False.
     gpu : bool, optional
         Whether to fit the z coordinates on a CUDA-capable GPU
         (numba.cuda). Reproduces the CPU result. Requires
         ``zfit.CUDA_AVAILABLE`` to be True. Takes precedence over
-        ``multiprocess``. Default is False.
-    progress_callback : callable, "console", or None, optional
-        If a callable is provided, it will be called with the current
-        progress (number of localizations processed) as an argument. If
-        "console", a progress bar will be displayed in the console. If
-        None, no progress will be reported. Default is None.
+        ``parallel``. Default is False.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting z" over the
+        localizations (per localization when serial, per finished chunk
+        with ``parallel``, per million localizations with ``gpu``).
+        Default is None.
     abort_callback : callable or None, optional
-        A callable for aborting multiprocessing in the GUI. If a
+        A callable for aborting the fit, e.g., from the GUI. If a
         callable provided, it must accept no input and return a boolean
-        indicating whether the fitting should be aborted.
+        indicating whether the fitting should be aborted. Polled
+        throughout the fit, on every device.
 
     Returns
     -------
@@ -878,8 +945,9 @@ def zfit(
         Localizations with columns 'z', 'd_zcalib', and 'lpz' appended.
         If processing is aborted, returns None.
     info : list of dicts
-        Updated info with the z fitting parameters attached. If
-        processing is aborted, returns None.
+        Metadata of ``locs``: ``info`` with an entry recording the z
+        fitting appended, see ``lib.append_metadata``. If processing is
+        aborted, returns None.
     """
     assert fitting_method in ["gausslq", "gaussmle"], "Invalid fitting method."
     assert filter >= 0, "Filter must be non-negative."
@@ -891,6 +959,19 @@ def zfit(
         calibration,
         dict,
     ), "Calibration must be a dict, see ``io.load_calibration``."
+    if pixelsize is not None:
+        assert isinstance(
+            pixelsize, (int, float)
+        ), "Pixelsize must be a number in nm."
+        pixelsize = float(pixelsize)
+    else:
+        pixelsize = lib.get_from_metadata(info, "Pixelsize")
+        if pixelsize is None:
+            raise ValueError(
+                "Camera pixel size (nm) is missing. Enter it either in the "
+                "info metadata ('Pixelsize'), or as the pixelsize argument."
+            )
+    calibration = _calibration_in_nm(calibration, pixelsize)
     if magnification_factor is not None:
         assert isinstance(
             magnification_factor, (int, float)
@@ -900,88 +981,59 @@ def zfit(
         assert (
             "Magnification factor" in calibration
         ), "Magnification factor is missing in calibration."
-    if pixelsize is not None:
-        assert isinstance(
-            pixelsize, (int, float)
-        ), "Pixelsize must be a number in nm."
-        pixelsize = float(pixelsize)
-        info.append({"Pixelsize": pixelsize})
-    else:
-        assert lib.get_from_metadata(info, "Pixelsize") is not None, (
-            "Camera pixel size (nm) is missing. Enter it either in the "
-            "info metadata, or as an argument."
+
+    with lib.tracked_progress(progress, "Fitting z", unit="loc") as progress:
+        return _zfit(
+            locs,
+            info,
+            calibration,
+            pixelsize,
+            fitting_method,
+            filter,
+            lateral_transforms,
+            parallel,
+            gpu,
+            progress,
+            abort_callback,
         )
 
-    return _zfit(
-        locs,
-        info,
-        calibration,
-        fitting_method,
-        filter,
-        lateral_transforms,
-        multiprocess,
-        gpu,
-        progress_callback,
-        abort_callback,
-    )
 
+def _calibration_in_nm(calibration: dict, pixelsize: float | None) -> dict:
+    """A copy of ``calibration`` with its spot widths in nm.
 
-def _await_parallel_z_fit(
-    fs: list,
-    N: int,
-    filter: int,
-    progress_callback: Callable[[int], None] | Literal["console"] | None,
-    abort_callback: Callable[[], bool] | None,
-) -> pd.DataFrame | None:
-    """Poll the futures submitted by ``_fit_z_parallel`` until done.
-
-    Progress is reported along the way.
-
-    Parameters
-    ----------
-    fs : list
-        Futures returned by ``_fit_z_parallel``.
-    N : int
-        Total number of localizations being fitted, for progress.
-    filter : int
-        Filter for the z fits, passed on to :func:`locs_from_futures`. If
-        set to 0, no filtering is applied; if set to 2, the z fits are
-        filtered based on the RMSD of the z calibration.
-    progress_callback : callable, "console" or None
-        A callable receives the number of localizations fitted so far;
-        "console" shows a tqdm bar; None disables progress tracking.
-    abort_callback : callable or None
-        Polled while waiting; returning True cancels the pending tasks.
-
-    Returns
-    -------
-    pd.DataFrame or None
-        The combined localizations, or None if ``abort_callback``
-        requested cancellation.
+    A calibration carrying the format marker (``io.FORMAT_VERSION_ATTR``,
+    written by Picasso 1.0 or later, or loaded with
+    ``io.load_calibration``) is in nm already. One without it was
+    recorded in camera pixels and is converted with ``pixelsize`` (see
+    ``legacy.calibration_to_nm``), with a warning; without a pixel size
+    a ValueError is raised.
     """
-    use_tqdm = progress_callback == "console"
-    if use_tqdm:
-        iter_range = tqdm(range(N), desc="Fitting z...", unit="locs")
-    n_tasks = len(fs)
-    while lib.n_futures_done(fs) < n_tasks:
-        # check for abort
-        if abort_callback is not None and abort_callback():
-            for f in fs:
-                f.cancel()
-            if use_tqdm:
-                iter_range.close()
-            return None
+    if io.FORMAT_VERSION_ATTR in calibration:
+        io.check_format_version(
+            calibration[io.FORMAT_VERSION_ATTR],
+            calibration.get("Path", ""),
+            kind="3D calibration",
+        )
+        return dict(calibration)
+    if pixelsize is None:
+        raise ValueError(
+            "The 3D calibration has no 'picasso_format' key, i.e., it was "
+            "written before Picasso 1.0 with spot widths in camera pixels. "
+            "Pass the camera pixel size (pixelsize, nm) to convert it, or "
+            "convert the file once with 'picasso convert-units'."
+        )
+    from . import legacy
 
-        n_finished = round(N * lib.n_futures_done(fs) / n_tasks)
-        if use_tqdm:
-            iter_range.update(n_finished - iter_range.n)
-        elif callable(progress_callback):
-            progress_callback(n_finished)
-        time.sleep(0.2)
-    if use_tqdm:
-        iter_range.update(N - iter_range.n)
-        iter_range.close()
-    return locs_from_futures(fs, filter=filter)
+    warnings.warn(
+        "The 3D calibration has no 'picasso_format' key, i.e., it was "
+        "written before Picasso 1.0 with spot widths in camera pixels; "
+        f"converting it to nm with a camera pixel size of {pixelsize:g} nm "
+        "(assumed to be the one the calibration was recorded with). "
+        "Convert the file once with 'picasso convert-units'.",
+        UserWarning,
+        stacklevel=3,
+    )
+    return legacy.calibration_to_nm(calibration, pixelsize)
 
 
 def _apply_lateral_transforms_and_build_info(
@@ -990,6 +1042,7 @@ def _apply_lateral_transforms_and_build_info(
     calibration: dict,
     lateral_transforms: dict | list | str | None,
     filter: int,
+    pixelsize: float | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Apply the calibration's lateral corrections plus any extra ones,
     and assemble the info dict describing the z fit.
@@ -1003,7 +1056,7 @@ def _apply_lateral_transforms_and_build_info(
     # both counts once - applying it twice would correct twice.
     own = lib.lateral_transforms(calibration)
     extra, duplicates = lib.drop_duplicate_lateral_transforms(
-        lib.resolve_lateral_transforms(lateral_transforms), own
+        lib.resolve_lateral_transforms(lateral_transforms, pixelsize), own
     )
     if duplicates:
         warnings.warn(
@@ -1018,7 +1071,7 @@ def _apply_lateral_transforms_and_build_info(
     affine = lib.describe_lateral_transforms(own + extra)
     locs = lib.apply_lateral_transforms(locs, own + extra)
     new_info = {
-        "Generated by": f"Picasso v{__version__} Fit 3D",
+        **lib.step_info("Fit 3D"),
         "Calibration path": calibration.get("Path", "N/A"),
         "Filter range": filter,
     }
@@ -1028,26 +1081,35 @@ def _apply_lateral_transforms_and_build_info(
         new_info["Lateral corrections skipped"] = (
             lib.describe_lateral_transforms(duplicates)
         )
-    new_info = info + [new_info | calibration]
-    return locs, new_info
+    # the format marker describes the calibration file, not the
+    # metadata, and its path is recorded above
+    recorded = {
+        k: v
+        for k, v in calibration.items()
+        if k not in (io.FORMAT_VERSION_ATTR, "Path")
+    }
+    return locs, lib.append_metadata(info, new_info | recorded)
 
 
 def _zfit(
     locs: pd.DataFrame,
     info: list[dict],
     calibration: dict,
+    pixelsize: float,
     fitting_method: Literal["gausslq", "gaussmle"],
     filter: int,
     lateral_transforms: dict | list | str | None,
-    multiprocess: bool,
+    parallel: bool,
     gpu: bool,
-    progress_callback: Callable[[int], None] | Literal["console"] | None,
+    progress: lib.Progress,
     abort_callback: Callable[[], bool] | None,
 ) -> tuple[pd.DataFrame, list[dict]] | tuple[None, None]:
     """Internal function for fitting z coordinates to the localizations.
-    See `zfit` for details."""
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    See `zfit` for details. ``calibration`` is in nm; ``progress`` is a
+    normalized tracker, see ``lib.normalize_progress``."""
     N = len(locs)
+    lib.start_phase(progress, "Fitting z", N, unit="loc")
+    progress.set_value(0)
     if gpu:
         locs = _fit_z_gpu(
             locs=locs,
@@ -1057,24 +1119,21 @@ def _zfit(
             pixelsize=pixelsize,
             fitting_method=fitting_method,
             filter=filter,
-            progress_callback=progress_callback,
+            progress=progress,
+            abort_callback=abort_callback,
         )
-    elif multiprocess:
-        fs = _fit_z_parallel(
+    elif parallel:
+        locs = _fit_z_parallel(
             locs=locs,
             info=info,
             calibration=calibration,
             magnification_factor=calibration["Magnification factor"],
             pixelsize=pixelsize,
             fitting_method=fitting_method,
-            filter=0,  # will be applied later
-            asynch=True,
+            filter=filter,
+            progress=progress,
+            abort_callback=abort_callback,
         )
-        locs = _await_parallel_z_fit(
-            fs, N, filter, progress_callback, abort_callback
-        )
-        if locs is None:
-            return None, None
     else:
         locs = _fit_z(
             locs=locs,
@@ -1084,19 +1143,24 @@ def _zfit(
             pixelsize=pixelsize,
             fitting_method=fitting_method,
             filter=filter,
-            progress_callback=progress_callback,
+            progress=progress,
+            abort_callback=abort_callback,
         )
+    if locs is None:  # aborted
+        return None, None
+    progress.set_value(N)
     return _apply_lateral_transforms_and_build_info(
-        locs, info, calibration, lateral_transforms, filter
+        locs, info, calibration, lateral_transforms, filter, pixelsize
     )
 
 
 def locs_from_futures(
     futures: list[futures.Future], filter: int = 2
 ) -> pd.DataFrame:
-    """Combine the results from a list of futures (i.e.,
-    multiprocessing results) into a single DataFrame of localizations
-    with fitted z coordinates and their residuals (d_zcalib).
+    """Combine the results from a list of futures (of the worker
+    processes of :func:`_fit_z_parallel`) into a single DataFrame of
+    localizations with fitted z coordinates and their residuals
+    (d_zcalib).
 
     Parameters
     ----------
@@ -1152,6 +1216,7 @@ def filter_z_fits(locs: pd.DataFrame, range: int) -> pd.DataFrame:
 def axial_localization_precision(
     locs: np.recarray,
     info: list[dict],
+    *,
     calibration: dict,
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
     modality: Literal["astigmatic"] = "astigmatic",
@@ -1162,12 +1227,13 @@ def axial_localization_precision(
     Parameters
     ----------
     locs : np.recarray
-        Localizations.
+        Localizations (spot widths in nm).
     info : list of dicts
-        Localizations metadata.
+        Localizations metadata (with the camera pixel size "Pixelsize"
+        in nm).
     calibration : dict
-        Calibration dictionary with x and y coefficients and
-        magnification factor.
+        Calibration dictionary with x and y coefficients (spot widths in
+        nm against z in nm) and magnification factor.
     fitting_method : {"gausslq", "gaussmle"}, optional
         Fitting method used to obtain 2D localization parameters (x, y,
         sx, sy). Default is "gausslq".
@@ -1185,7 +1251,7 @@ def axial_localization_precision(
             "Currently only 'astigmatic' modality is supported."
         )
     lpz = axial_localization_precision_astig(
-        locs, info, calibration, fitting_method
+        locs, info, calibration=calibration, fitting_method=fitting_method
     )
     return lpz
 
@@ -1193,6 +1259,7 @@ def axial_localization_precision(
 def axial_localization_precision_astig(
     locs: np.recarray,
     info: list[dict],
+    *,
     calibration: dict,
     fitting_method: Literal["gausslq", "gaussmle"] = "gausslq",
 ) -> lib.FloatArray1D:
@@ -1206,12 +1273,14 @@ def axial_localization_precision_astig(
     Parameters
     ----------
     locs : np.recarray
-        Localizations.
+        Localizations (spot widths in nm).
     info : list of dicts
-        Localizations metadata.
+        Localizations metadata (with the camera pixel size "Pixelsize"
+        in nm).
     calibration : dict
         Calibration dictionary with the keys "X Coefficients",
-        "Y Coefficients" and "Magnification factor".
+        "Y Coefficients" (spot widths in nm against z in nm) and
+        "Magnification factor".
     fitting_method : {"gausslq", "gaussmle"}, optional
         Fitting method used to obtain 2D localization parameters (x, y,
         sx, sy). Default is "gausslq".
@@ -1265,10 +1334,11 @@ def _axial_localization_precision_astig(
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations. Must include columns 'photons', 'sx', 'sy', 'bg',
-        and 'z', see https://picassosr.readthedocs.io/en/latest/files.html#files-localization-hdf5  # noqa: E501
+        Localizations. Must include columns 'photons', 'sx', 'sy' (nm),
+        'bg', and 'z', see https://picassosr.readthedocs.io/en/latest/files.html#files-localization-hdf5  # noqa: E501
     cx : lib.FloatArray1D
-        3D calibration coefficients for x.
+        3D calibration coefficients for x (spot width in nm against z
+        in nm).
     cy : lib.FloatArray1D
         3D calibration coefficients for y.
     magnification_factor : float
@@ -1276,7 +1346,10 @@ def _axial_localization_precision_astig(
         the actual z position of the calibration sample and the
         estimated z position from the localization data.
     pixelsize : float
-        Camera pixel size in nm.
+        Camera pixel size in nm. The spot width uncertainty formulas
+        (``picasso.fitting.precision``) work in camera pixels, e.g., the
+        pixelation term; the spot widths are converted for them and the
+        uncertainties back to nm.
     fitting_method : {"gausslq", "gaussmle"}, optional
         Fitting method used to obtain 2D localization parameters (x, y,
         sx, sy). Default is "gausslq".
@@ -1286,16 +1359,18 @@ def _axial_localization_precision_astig(
     lpz : lib.FloatArray1D
         Calculated lpz values for the given localizations in nm.
     """
+    sx_px = locs["sx"] / pixelsize
+    sy_px = locs["sy"] / pixelsize
     if fitting_method == "gausslq":
         se_sx = (
             precision.sigma_uncertainty_lsq(
-                locs["sx"], locs["sy"], locs["photons"], locs["bg"]
+                sx_px, sy_px, locs["photons"], locs["bg"]
             )
             * pixelsize
         )
         se_sy = (
             precision.sigma_uncertainty_lsq(
-                locs["sy"], locs["sx"], locs["photons"], locs["bg"]
+                sy_px, sx_px, locs["photons"], locs["bg"]
             )
             * pixelsize
         )
@@ -1303,34 +1378,34 @@ def _axial_localization_precision_astig(
         if "sx_unc" not in locs.columns or "sy_unc" not in locs.columns:
             se_sx = (
                 precision.sigma_uncertainty_mle(
-                    locs["sx"], locs["sy"], locs["photons"], locs["bg"]
+                    sx_px, sy_px, locs["photons"], locs["bg"]
                 )
                 * pixelsize
             )
             se_sy = (
                 precision.sigma_uncertainty_mle(
-                    locs["sy"], locs["sx"], locs["photons"], locs["bg"]
+                    sy_px, sx_px, locs["photons"], locs["bg"]
                 )
                 * pixelsize
             )
         else:
-            se_sx = locs["sx_unc"] * pixelsize
-            se_sy = locs["sy_unc"] * pixelsize
+            se_sx = locs["sx_unc"]
+            se_sy = locs["sy_unc"]
     else:
         raise ValueError("fitting_method must be 'gausslq' or 'gaussmle'.")
 
     # to pinpoint what was the actual spot size during measurement
     z = locs["z"] / magnification_factor
-    wx_calib = _get_calib_size(cx, z) * pixelsize
-    wy_calib = _get_calib_size(cy, z) * pixelsize
-    wx_calib_prime = _get_prime_calib_size(cx, z) * pixelsize
-    wy_calib_prime = _get_prime_calib_size(cy, z) * pixelsize
+    wx_calib = _get_calib_size(cx, z)
+    wy_calib = _get_calib_size(cy, z)
+    wx_calib_prime = _get_prime_calib_size(cx, z)
+    wy_calib_prime = _get_prime_calib_size(cy, z)
     sqrt_wx_calib = np.sqrt(wx_calib)
     sqrt_wx_calib_prime = wx_calib_prime / (2 * sqrt_wx_calib)
     sqrt_wy_calib = np.sqrt(wy_calib)
     sqrt_wy_calib_prime = wy_calib_prime / (2 * sqrt_wy_calib)
-    delta_sqrt_wx = (1 / (2 * np.sqrt(locs["sx"] * pixelsize))) * se_sx
-    delta_sqrt_wy = (1 / (2 * np.sqrt(locs["sy"] * pixelsize))) * se_sy
+    delta_sqrt_wx = (1 / (2 * np.sqrt(locs["sx"]))) * se_sx
+    delta_sqrt_wy = (1 / (2 * np.sqrt(locs["sy"]))) * se_sy
     swxc2 = sqrt_wx_calib_prime**2
     swyc2 = sqrt_wy_calib_prime**2
     swx2 = delta_sqrt_wx**2

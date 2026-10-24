@@ -22,6 +22,7 @@ from scipy.interpolate import CubicSpline
 
 from picasso import localize
 
+from tests._progress_tracking import RecordingProgress, assert_phases_complete
 from tests.conftest import affine, apply_transform
 from picasso.fitting import precision, splinefit
 
@@ -746,6 +747,7 @@ class TestNoisyBatch:
         _drain(fit)
         theta, chi_squares, states, _ = fit.results()
         assert fit.current[0] == n_spots
+        assert fit.n_done == n_spots
         assert np.all(np.isfinite(chi_squares))
         assert np.all(states == splinefit.FIT_STATE_CONVERGED)
 
@@ -826,12 +828,40 @@ class TestNoisyBatch:
         fit.stop()
         _drain(fit)
         assert fit.current[0] < n_spots
+        # the spots claimed before the stop were all fitted
+        assert fit.n_done == fit.current[0]
 
-    def test_progress_callback_counts_every_spot(self):
-        calibration, spots, initial, _, _, _ = self._batch(n_spots=16)
+    def test_async_finished_count_trails_the_claimed_count(self):
+        """``n_done`` counts finished spots: never ahead of the claimed count,
+        monotone while the fit runs and equal to the spot count at the
+        end."""
+        calibration, spots, initial, _, _, _ = self._batch(n_spots=64)
         n_spots = len(spots)
+        fit = splinefit.fit_spots_async(
+            splinefit.KIND_3D,
+            spots,
+            precision._spline_coeff_reshaped(calibration),
+            np.tile(IDENTITY, (n_spots, 1, 1)),
+            np.zeros((n_spots, 1, 2)),
+            initial,
+            _default_seeds(calibration),
+            True,
+            n_threads=2,
+        )
         seen = []
-        splinefit.fit_spots(
+        while not fit.finished():
+            done = fit.n_done
+            assert done <= fit.current[0]
+            seen.append(done)
+            time.sleep(0.001)
+        fit.raise_errors()
+        assert seen == sorted(seen)
+        assert fit.n_done == fit.done[0] == n_spots
+
+    def _serial_args(self, n_spots=16):
+        calibration, spots, initial, _, _, _ = self._batch(n_spots=n_spots)
+        n_spots = len(spots)
+        return (
             splinefit.KIND_3D,
             spots,
             precision._spline_coeff_reshaped(calibration),
@@ -840,9 +870,24 @@ class TestNoisyBatch:
             initial,
             np.zeros(1),
             False,
-            progress_callback=seen.append,
         )
-        assert seen == list(range(1, n_spots + 1))
+
+    def test_progress_counts_every_spot(self):
+        args = self._serial_args()
+        n_spots = len(args[1])
+        tracker = RecordingProgress()
+        splinefit.fit_spots(*args, progress=tracker)
+        assert_phases_complete(tracker, ["Fitting spots"])
+        assert tracker.phases[0]["maximum"] == n_spots
+        assert tracker.phases[0]["values"] == list(range(n_spots + 1))
+
+    def test_progress_none_is_silent_and_console_works(self, capsys):
+        args = self._serial_args(n_spots=4)
+        splinefit.fit_spots(*args, progress=None)
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        splinefit.fit_spots(*args, progress="console")
+        assert "Fitting spots" in capsys.readouterr().err
 
 
 class TestPerSpotJacobians:
@@ -1093,7 +1138,6 @@ class TestFit2DIntegration:
             "Sensitivity": 1.0,
             "Gain": 1,
             "Pixelsize": 130,
-            "Qe": 1.0,
         }
         return calibration, movie, info, camera_info, identifications, truth
 
@@ -1109,8 +1153,10 @@ class TestFit2DIntegration:
             spline_calibration=calibration,
         )
         assert len(locs) == len(truth)
-        dx = locs.x.values - np.array([t[1] for t in truth])
-        dy = locs.y.values - np.array([t[2] for t in truth])
+        # the coordinates are in nm, the truth on the camera pixel grid
+        ps = camera_info["Pixelsize"]
+        dx = locs.x.values / ps - np.array([t[1] for t in truth])
+        dy = locs.y.values / ps - np.array([t[2] for t in truth])
         dz = _native_z(locs, calibration) - np.array([t[3] for t in truth])
         assert abs(dx.mean() - DX) < 0.02
         assert abs(dy.mean() - DY) < 0.02
@@ -1133,15 +1179,15 @@ class TestFit2DIntegration:
             fitting_method="spline",
             spline_calibration=calibration,
         )
-        assert fit_info["Fit method"] == "spline"
-        assert fit_info["Spline fit device"] == "CPU"
-        assert fit_info["Convergence criterion"] == (
+        assert fit_info[-1]["Fit method"] == "spline"
+        assert fit_info[-1]["Spline fit device"] == "CPU"
+        assert fit_info[-1]["Convergence criterion"] == (
             splinefit.TOLERANCE_MULTI_START
         )
-        assert fit_info["Max iterations"] == (
+        assert fit_info[-1]["Max iterations"] == (
             splinefit.MAX_ITERATIONS_MULTI_START
         )
-        assert fit_info["Axial seeds"] == localize._default_n_z_starts(
+        assert fit_info[-1]["Axial seeds"] == localize._default_n_z_starts(
             calibration
         )
 
@@ -1157,12 +1203,12 @@ class TestFit2DIntegration:
             eps=1e-6,
             max_it=7,
         )
-        assert fit_info["Convergence criterion"] == 1e-6
-        assert fit_info["Max iterations"] == 7
+        assert fit_info[-1]["Convergence criterion"] == 1e-6
+        assert fit_info[-1]["Max iterations"] == 7
 
     def test_progress_and_abort(self, scene):
         calibration, movie, info, camera_info, identifications, truth = scene
-        seen = []
+        tracker = RecordingProgress()
         locs, _ = localize.fit(
             movie,
             camera_info=camera_info,
@@ -1170,11 +1216,11 @@ class TestFit2DIntegration:
             box=BOX,
             fitting_method="spline",
             spline_calibration=calibration,
-            progress_callback=seen.append,
+            progress=tracker,
         )
-        # progress is reported at least once and ends at the spot count
-        assert seen and seen[-1] == len(truth)
-        assert all(0 <= n <= len(truth) for n in seen)
+        # every phase ends at its maximum, and one runs over the spots
+        assert_phases_complete(tracker)
+        assert len(truth) in [phase["maximum"] for phase in tracker.phases]
 
         aborted, _ = localize.fit(
             movie,
@@ -1195,7 +1241,7 @@ class TestFit2DIntegration:
             camera_info=camera_info,
             identifications=identifications,
             box=BOX,
-            multiprocess=False,
+            parallel=False,
             **common,
         )
         threaded, _ = localize.fit(
@@ -1203,7 +1249,7 @@ class TestFit2DIntegration:
             camera_info=camera_info,
             identifications=identifications,
             box=BOX,
-            multiprocess=True,
+            parallel=True,
             **common,
         )
         for column in ("x", "y", "z", "photons", "bg"):
@@ -1318,7 +1364,6 @@ class TestMultichannelIntegration:
                 "Sensitivity": 1.0,
                 "Gain": 1,
                 "Pixelsize": 130,
-                "Qe": 1.0,
             }
             for _ in range(2)
         ]
@@ -1338,22 +1383,26 @@ class TestMultichannelIntegration:
     )
     def test_recovers_shared_position(self, scene, mle, link_photons):
         calibration, movies, camera_infos, identifications, truth = scene
-        progress = []
-        locs = localize.fit_spline_multichannel(
+        tracker = RecordingProgress()
+        locs, _ = localize.fit_spline_multichannel(
             movies,
-            camera_infos,
-            identifications,
-            BOX,
-            calibration,
+            camera_infos=camera_infos,
+            identifications=identifications,
+            box=BOX,
+            calibration=calibration,
             mle=mle,
             link_photons=link_photons,
             use_gpu=False,
-            progress_callback=progress.append,
+            progress=tracker,
         )
         assert len(locs) == len(truth)
-        assert progress, "no progress was reported"
-        assert np.abs(locs.x.values - [t[1] for t in truth]).max() < 0.05
-        assert np.abs(locs.y.values - [t[2] for t in truth]).max() < 0.05
+        assert_phases_complete(tracker)
+        # the coordinates are in nm, the truth on the camera pixel grid
+        ps = camera_infos[0]["Pixelsize"]
+        x_px = locs.x.values / ps
+        y_px = locs.y.values / ps
+        assert np.abs(x_px - [t[1] for t in truth]).max() < 0.05
+        assert np.abs(y_px - [t[2] for t in truth]).max() < 0.05
         z_native = calibration["z_center"] - locs.z.values / (
             calibration["z_step_nm"]
         )
@@ -1368,12 +1417,12 @@ class TestMultichannelIntegration:
         calibration = dict(
             calibration, photon_ratios=np.array([[1.0, 0.25], [0.25, 1.0]])
         )
-        locs = localize.fit_spline_multichannel_ratiometric(
+        locs, _ = localize.fit_spline_multichannel_ratiometric(
             movies,
-            camera_infos,
-            identifications,
-            BOX,
-            calibration,
+            camera_infos=camera_infos,
+            identifications=identifications,
+            box=BOX,
+            calibration=calibration,
             use_gpu=False,
         )
         assert len(locs) == len(truth)
@@ -1387,10 +1436,10 @@ class TestMultichannelIntegration:
         with pytest.raises(ImportError, match="use_gpu=False"):
             localize.fit_spline_multichannel(
                 movies,
-                camera_infos,
-                identifications,
-                BOX,
-                calibration,
+                camera_infos=camera_infos,
+                identifications=identifications,
+                box=BOX,
+                calibration=calibration,
                 use_gpu=True,
             )
 

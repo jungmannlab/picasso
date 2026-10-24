@@ -102,12 +102,12 @@ class SplatBackend(abc.ABC):
             Display pixel size in nm, see ``splat.render``.
         viewport : tuple or None
             Field of view ``((y_min, x_min), (y_max, x_max))`` in
-            camera pixels, see ``splat.render``.
+            nm, see ``splat.render``.
         blur_method : {"gaussian", "gaussian_iso", "smooth", \
                 "convolve"} or None
             Blur method, see ``splat.render``.
         min_blur_width : float
-            Minimum size of blur (camera pixels), see ``splat.render``.
+            Minimum size of blur (nm), see ``splat.render``.
         ang : tuple or scipy.spatial.transform.Rotation or None
             Rotation of the localizations, see ``splat.render``.
         quadtree_capacity : int, optional
@@ -135,8 +135,11 @@ class SplatBackend(abc.ABC):
         """Human-readable device description (for the GUI's info)."""
         return self.name
 
-    def close(self) -> None:
-        """Release backend resources (no-op by default)."""
+    def close(self, wait: bool = True) -> bool:
+        """Release backend resources (no-op by default). Returns False
+        if ``wait`` is False and a render is in progress, in which case
+        nothing was released."""
+        return True
 
 
 _cpu_singleton: SplatBackend | None = None
@@ -417,24 +420,40 @@ def release_uploads() -> None:
         _gpu_singleton.release_uploads()
 
 
-def close() -> None:
+def close(wait: bool = True) -> bool:
     """Release the GPU backend and its device, if one is running.
 
-    Meant for a deterministic teardown while the interpreter is still
-    intact (the GUI calls it once its event loop has ended): leaving the
-    device to be collected at interpreter shutdown risks a native crash
-    in the driver on the way out. A failure here is logged and swallowed
-    - the process is exiting anyway, and the OS reclaims the device.
+    The next render that wants the GPU starts a new device, so this
+    also frees all GPU memory between renders: Picasso's GUIs call it
+    with ``wait=False`` after a period of inactivity (see
+    ``picasso.gui.idle``). And it is meant for a deterministic teardown
+    while the interpreter is still intact (Render calls it once its
+    event loop has ended): leaving the device to be collected at
+    interpreter shutdown risks a native crash in the driver on the way
+    out. A failure here is logged and swallowed - the OS reclaims the
+    device with the process at the latest.
+
+    Parameters
+    ----------
+    wait : bool, optional
+        If True (default), a render in progress finishes first. If
+        False, the backend is left running in that case.
+
+    Returns
+    -------
+    closed : bool
+        False if ``wait`` is False and a render was in progress.
     """
     global _gpu_singleton, _gpu_adapter, _gpu_unavailable
     with _singleton_lock:
         if _gpu_singleton is None:
-            return
+            return True
         try:
-            _gpu_singleton.close()
+            if not _gpu_singleton.close(wait=wait):
+                return False
         except Exception as error:  # pragma: no cover - driver teardown
             _log.info("Closing the GPU backend failed: %s", error)
-        finally:
-            _gpu_singleton = None
-            _gpu_adapter = None
-            _gpu_unavailable = False
+        _gpu_singleton = None
+        _gpu_adapter = None
+        _gpu_unavailable = False
+        return True

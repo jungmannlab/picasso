@@ -13,11 +13,11 @@ from __future__ import annotations
 
 import itertools
 import os
+import re
 import warnings
 from collections import OrderedDict
-from collections.abc import Callable
 from copy import deepcopy
-from typing import Literal
+from typing import Literal, NamedTuple
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 from threading import Thread
 
@@ -27,8 +27,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from scipy import interpolate
 from scipy.optimize import curve_fit, OptimizeWarning
-from scipy.spatial import distance, KDTree
-from tqdm import tqdm, trange
+from scipy.spatial import KDTree
+from scipy.stats import rankdata
 
 from . import (
     io,
@@ -38,8 +38,68 @@ from . import (
     imageprocess,
     masking,
     spatial_index,
-    __version__,
 )
+
+__all__ = [
+    # picks
+    "picked_locs",
+    "pick_similar",
+    "remove_locs_in_picks",
+    "pick_properties",
+    # binding events
+    "link",
+    "compute_dark_times",
+    "dark_times",
+    "select_binding_event_cores",
+    "combine_locs_in_picks",
+    "groupprops",
+    # drift and alignment
+    "undrift",
+    "undrift_from_fiducials",
+    "undrift_from_picked",
+    "apply_drift",
+    "plot_drift",
+    "align",
+    "align_rcc",
+    "align_from_picked",
+    # resolution
+    "nena",
+    "plot_nena",
+    "frc",
+    "frc_rois",
+    "plot_frc",
+    # spatial analysis
+    "nn_analysis",
+    "pair_correlation",
+    "distance_histogram",
+    "compute_local_density",
+    "cbc",
+    "cbc_all_pairs",
+    "resi",
+    # spatial statistics
+    "ripley_h",
+    "plot_ripley_h",
+    "rdf",
+    "plot_rdf",
+    "nnd_distributions",
+    "plot_nnd_distributions",
+]
+
+#: Convergence tolerance (nm) of the center-of-mass iterations of
+#: ``pick_similar``.
+PICK_CONVERGENCE = 0.1
+#: Pixel size (nm) of the images rendered for undrifting by RCC
+#: (``undrift``, ``segment``).
+UNDRIFT_PIXEL_SIZE = 100.0
+#: Largest shift (nm) between two segments considered by ``undrift``.
+UNDRIFT_MAX_SHIFT = 10000.0
+#: Fewest segments ``undrift`` accepts: the drift between them is
+#: interpolated by a cubic spline.
+MIN_UNDRIFT_SEGMENTS = 4
+#: Pixel size (nm) of the images rendered by ``align_rcc``.
+ALIGN_PIXEL_SIZE = 100.0
+#: Convergence tolerance (nm) of the iterations of ``align_rcc``.
+ALIGN_CONVERGENCE = 0.1
 
 
 def _is_pyramid(index_blocks) -> bool:
@@ -64,15 +124,15 @@ def get_index_blocks(
     info : list of dicts
         Metadata of the localizations list.
     size : float
-        Size of the blocks in camera pixels. For circular picks, this
-        is pick radius.
+        Size of the blocks in nm. For circular picks, this is the pick
+        radius.
 
     Returns
     -------
     locs : pd.DataFrame
         Localizations in the specified blocks.
     size : float
-        Size of the blocks in camera pixels.
+        Size of the blocks in nm.
     x_index : lib.IntArray1D
         x indices of the localizations in the blocks.
     y_index : lib.IntArray1D
@@ -118,15 +178,14 @@ def _index_blocks_shape(info: list[dict], size: float) -> tuple[int, int]:
     info : list of dicts
         Metadata of the localizations list.
     size : float
-        Size of the blocks.
+        Size of the blocks (nm).
 
     Returns
     -------
     n : tuple
         Number of blocks in y and x.
     """
-    width = lib.get_from_metadata(info, "Width", raise_error=True)
-    height = lib.get_from_metadata(info, "Height", raise_error=True)
+    width, height = lib.field_of_view(info)
     n_blocks_x = int(np.ceil(width / size))
     n_blocks_y = int(np.ceil(height / size))
     n = (n_blocks_y, n_blocks_x)
@@ -175,11 +234,10 @@ def _picked_circular_locs(
     locs: pd.DataFrame,
     info: list[dict],
     picks: list[tuple],
-    pick_size: float,
+    radius: float,
     index_blocks: tuple | None,
     add_group: bool,
-    callback: Callable[[int], None] | Literal["console"] | None,
-    progress: tqdm | None,
+    progress: lib.Progress,
 ) -> list[pd.DataFrame]:
     """Helper function for picking localizations using circular picks.
     See ``picked_locs`` for more details."""
@@ -192,16 +250,16 @@ def _picked_circular_locs(
     else:
         pyramid = None
         if index_blocks is None:
-            index_blocks = get_index_blocks(locs, info, pick_size)
+            index_blocks = get_index_blocks(locs, info, radius)
         locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
     for i, pick in enumerate(picks):
         x, y = pick
         if pyramid is not None:
-            idx = spatial_index.query_circle(pyramid, xs, ys, x, y, pick_size)
+            idx = spatial_index.query_circle(pyramid, xs, ys, x, y, radius)
             group_locs = locs.iloc[idx].copy()
         else:
-            x_, y_ = int(x / pick_size), int(y / pick_size)
-            block_locs_idx = _get_block_locs_at_numba(
+            x_, y_ = int(x / radius), int(y / radius)
+            block_locs_idx = _get_block_locs_at(
                 x_,
                 y_,
                 index_blocks[4],
@@ -210,8 +268,8 @@ def _picked_circular_locs(
                 index_blocks[7],
             )
             block_locs = index_blocks[0].iloc[block_locs_idx]
-            group_locs_idx = lib.is_loc_at_numba(
-                x, y, locs_xy[:, block_locs_idx], pick_size
+            group_locs_idx = lib.is_loc_in_circle(
+                x, y, locs_xy[:, block_locs_idx], radius
             )
             group_locs = block_locs.iloc[group_locs_idx].copy()
 
@@ -224,10 +282,7 @@ def _picked_circular_locs(
         )
         picked_locs.append(group_locs)
 
-        if callback == "console":
-            progress.update(1)
-        elif callback is not None:
-            callback(i + 1)
+        progress.set_value(i + 1)
     return picked_locs
 
 
@@ -236,8 +291,7 @@ def _picked_rectangular_locs(
     picks: list[tuple],
     pick_size: float,
     add_group: bool,
-    callback: Callable[[int], None] | Literal["console"] | None,
-    progress: tqdm | None,
+    progress: lib.Progress,
 ) -> list[pd.DataFrame]:
     """Helper function for picking localizations using rectangular
     picks. See ``picked_locs`` for more details."""
@@ -269,10 +323,7 @@ def _picked_rectangular_locs(
         group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
         picked_locs.append(group_locs)
 
-        if callback == "console":
-            progress.update(1)
-        elif callback is not None:
-            callback(i + 1)
+        progress.set_value(i + 1)
     return picked_locs
 
 
@@ -280,8 +331,7 @@ def _picked_polygonal_locs(
     locs: pd.DataFrame,
     picks: list[tuple],
     add_group: bool,
-    callback: Callable[[int], None] | Literal["console"] | None,
-    progress: tqdm | None,
+    progress: lib.Progress,
 ):
     """Helper function for picking localizations using polygonal picks. See
     ``picked_locs`` for more details."""
@@ -289,10 +339,7 @@ def _picked_polygonal_locs(
     for i, pick in enumerate(picks):
         X, Y = lib.get_pick_polygon_corners(pick)
         if X is None:
-            if callback == "console":
-                progress.update(1)
-            elif callback is not None:
-                callback(i + 1)
+            progress.set_value(i + 1)
             continue
         mask = (
             (locs["x"] > min(X))
@@ -306,10 +353,7 @@ def _picked_polygonal_locs(
         group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
         picked_locs.append(group_locs)
 
-        if callback == "console":
-            progress.update(1)
-        elif callback is not None:
-            callback(i + 1)
+        progress.set_value(i + 1)
     return picked_locs
 
 
@@ -318,8 +362,7 @@ def _picked_square_locs(
     picks: list[tuple],
     pick_size: float,
     add_group: bool,
-    callback: Callable[[int], None] | Literal["console"] | None,
-    progress: tqdm | None,
+    progress: lib.Progress,
 ) -> list[pd.DataFrame]:
     """Helper function for picking localizations using square picks. See
     ``picked_locs`` for more details."""
@@ -343,10 +386,7 @@ def _picked_square_locs(
         group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
         picked_locs.append(group_locs)
 
-        if callback == "console":
-            progress.update(1)
-        elif callback is not None:
-            callback(i + 1)
+        progress.set_value(i + 1)
     return picked_locs
 
 
@@ -354,8 +394,7 @@ def _picked_box_locs(
     locs: pd.DataFrame,
     picks: list[tuple],
     add_group: bool,
-    callback: Callable[[int], None] | Literal["console"] | None,
-    progress: tqdm | None,
+    progress: lib.Progress,
 ) -> list[pd.DataFrame]:
     """Helper function for picking localizations using box picks. See
     ``picked_locs`` for more details."""
@@ -376,10 +415,7 @@ def _picked_box_locs(
         group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
         picked_locs.append(group_locs)
 
-        if callback == "console":
-            progress.update(1)
-        elif callback is not None:
-            callback(i + 1)
+        progress.set_value(i + 1)
     return picked_locs
 
 
@@ -387,8 +423,7 @@ def _picked_brush_locs(
     locs: pd.DataFrame,
     picks: list[tuple],
     add_group: bool,
-    callback: Callable[[int], None] | Literal["console"] | None,
-    progress: tqdm | None,
+    progress: lib.Progress,
 ) -> list[pd.DataFrame]:
     """Helper function for picking localizations using brush picks. See
     ``picked_locs`` for more details."""
@@ -407,16 +442,14 @@ def _picked_brush_locs(
         group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
         picked_locs.append(group_locs)
 
-        if callback == "console":
-            progress.update(1)
-        elif callback is not None:
-            callback(i + 1)
+        progress.set_value(i + 1)
     return picked_locs
 
 
 def picked_locs(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     picks: list[tuple],
     pick_shape: Literal[
         "Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"
@@ -424,7 +457,7 @@ def picked_locs(
     pick_size: float = None,
     add_group: bool = True,
     index_blocks: tuple = None,
-    callback: Callable[[int], None] | Literal["console"] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> list[pd.DataFrame]:
     """Find picked localizations, i.e., localizations within the given
     regions of interest.
@@ -440,7 +473,7 @@ def picked_locs(
     pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square', 'Box', 'Brush'}
         Shape of the pick.
     pick_size : float, optional
-        Size of the pick in camera pixels. Radius for the circles, width
+        Size of the pick in nm. Diameter for the circles, width
         for the rectangles, side length for squares, None for the
         polygons, boxes and brush picks (they carry their own extent).
         Default is None.
@@ -450,13 +483,15 @@ def picked_locs(
     index_blocks : tuple or spatial_index.RenderIndexPyramid, optional
         Used only for circular picks. Precomputed index blocks for
         localizations, see ``get_index_blocks`` (built with block size
-        ``pick_size``), or the pick-size independent pyramid of
+        ``pick_size / 2``, the pick radius), or the pick-size
+        independent pyramid of
         ``spatial_index.build_render_index``. If None, index blocks
         will be calculated internally. Default is None.
-    callback : Callable[[int], None] | Literal["console"] | None, optional
-        Function to display progress. If "console", tqdm is used to
-        display the progress. If None, no progress is displayed. Default
-        is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Picking localizations" over
+        the picks. Default is None.
 
     Returns
     -------
@@ -470,75 +505,68 @@ def picked_locs(
     if len(picks) == 0:
         return []
 
-    picked_locs = []
-    if callback == "console":
-        progress = tqdm(
-            range(len(picks)),
-            desc="Picking locs",
-            unit="pick",
+    with lib.tracked_progress(
+        progress, "Picking localizations", unit="pick"
+    ) as progress:
+        lib.start_phase(
+            progress, "Picking localizations", len(picks), unit="pick"
         )
-    else:
-        progress = None
-
-    if pick_shape == "Circle":
-        picked_locs = _picked_circular_locs(
-            locs=locs,
-            info=info,
-            picks=picks,
-            pick_size=pick_size,
-            index_blocks=index_blocks,
-            add_group=add_group,
-            callback=callback,
-            progress=progress,
-        )
-    elif pick_shape == "Rectangle":
-        picked_locs = _picked_rectangular_locs(
-            locs=locs,
-            picks=picks,
-            pick_size=pick_size,
-            add_group=add_group,
-            callback=callback,
-            progress=progress,
-        )
-    elif pick_shape == "Polygon":
-        picked_locs = _picked_polygonal_locs(
-            locs=locs,
-            picks=picks,
-            add_group=add_group,
-            callback=callback,
-            progress=progress,
-        )
-    elif pick_shape == "Square":
-        picked_locs = _picked_square_locs(
-            locs=locs,
-            picks=picks,
-            pick_size=pick_size,
-            add_group=add_group,
-            callback=callback,
-            progress=progress,
-        )
-    elif pick_shape == "Box":
-        picked_locs = _picked_box_locs(
-            locs=locs,
-            picks=picks,
-            add_group=add_group,
-            callback=callback,
-            progress=progress,
-        )
-    elif pick_shape == "Brush":
-        picked_locs = _picked_brush_locs(
-            locs=locs,
-            picks=picks,
-            add_group=add_group,
-            callback=callback,
-            progress=progress,
-        )
+        progress.set_value(0)
+        if pick_shape == "Circle":
+            picked_locs = _picked_circular_locs(
+                locs=locs,
+                info=info,
+                picks=picks,
+                radius=pick_size / 2,
+                index_blocks=index_blocks,
+                add_group=add_group,
+                progress=progress,
+            )
+        elif pick_shape == "Rectangle":
+            picked_locs = _picked_rectangular_locs(
+                locs=locs,
+                picks=picks,
+                pick_size=pick_size,
+                add_group=add_group,
+                progress=progress,
+            )
+        elif pick_shape == "Polygon":
+            picked_locs = _picked_polygonal_locs(
+                locs=locs,
+                picks=picks,
+                add_group=add_group,
+                progress=progress,
+            )
+        elif pick_shape == "Square":
+            picked_locs = _picked_square_locs(
+                locs=locs,
+                picks=picks,
+                pick_size=pick_size,
+                add_group=add_group,
+                progress=progress,
+            )
+        elif pick_shape == "Box":
+            picked_locs = _picked_box_locs(
+                locs=locs,
+                picks=picks,
+                add_group=add_group,
+                progress=progress,
+            )
+        elif pick_shape == "Brush":
+            picked_locs = _picked_brush_locs(
+                locs=locs,
+                picks=picks,
+                add_group=add_group,
+                progress=progress,
+            )
+        progress.set_value(len(picks))
     return picked_locs
 
 
 def pick_similar(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     picks: list[tuple],
     pick_shape: Literal["Circle", "Rectangle", "Square", "Box"] = "Circle",
     pick_size: float = None,
@@ -581,8 +609,8 @@ def pick_similar(
     pick_shape : {'Circle', 'Rectangle', 'Square', 'Box'}, optional
         Shape of the picks. Default is 'Circle'.
     pick_size : float, optional
-        Size of the pick in camera pixels. Diameter for circles, side
-        length for squares, width for rectangles. Ignored for boxes,
+        Size of the pick in nm. Diameter for circles, side length for
+        squares, width for rectangles. Ignored for boxes,
         which carry their own extent. Default is None.
     std_range : float, optional
         Standard deviation range for picking similar localizations.
@@ -593,8 +621,8 @@ def pick_similar(
         size does not match the one required by ``pick_shape``. Default
         is None.
     grid_spacing : float, optional
-        Distance between neighboring candidate positions in camera
-        pixels. Only used for rectangular picks, where the default
+        Distance between neighboring candidate positions in nm. Only
+        used for rectangular picks, where the default
         (a quarter of the median pick length) trades speed for the
         chance of missing closely spaced structures. Default is None.
 
@@ -733,7 +761,7 @@ def _pick_similar_circular(
             idx = spatial_index.query_circle(pyramid, xs, ys, x, y, r)
             pick_locs_xy = np.stack((xs[idx], ys[idx]))
         else:
-            block_locs_xy = get_block_locs_at_numba(
+            block_locs_xy = get_block_locs_at(
                 int(x / r),
                 int(y / r),
                 locs_xy,
@@ -742,7 +770,7 @@ def _pick_similar_circular(
                 index_blocks[6],
                 index_blocks[7],
             )
-            pick_locs_xy = lib.locs_at_numba(x, y, block_locs_xy, r)
+            pick_locs_xy = lib.locs_in_circle(x, y, block_locs_xy, r)
         n_locs.append(pick_locs_xy.shape[1])
         rmsd.append(lib.rmsd_at_com(pick_locs_xy))
 
@@ -761,8 +789,9 @@ def _pick_similar_circular(
     y_similar = np.array([_[1] for _ in picks], dtype=np.float64)
 
     # preparations for grid search
-    x_range = np.arange(d / 2, info[0]["Width"], np.sqrt(3) * d / 2)
-    y_range_base = np.arange(d / 2, info[0]["Height"] - d / 2, d)
+    fov_width, fov_height = lib.field_of_view(info)
+    x_range = np.arange(d / 2, fov_width, np.sqrt(3) * d / 2)
+    y_range_base = np.arange(d / 2, fov_height - d / 2, d)
     y_range_shift = y_range_base + d / 2
     locs_temp, size, _, _, block_starts, block_ends, K, L = index_blocks
     locs_xy = np.stack((locs_temp.x, locs_temp.y))
@@ -885,7 +914,7 @@ def _pick_similar(  # noqa: C901
                 block_ends,
             )
             if n_block_locs >= min_n_locs:
-                block_locs_xy = get_block_locs_at_numba(
+                block_locs_xy = get_block_locs_at(
                     x_range,
                     y_range,
                     locs_xy,
@@ -894,7 +923,7 @@ def _pick_similar(  # noqa: C901
                     K,
                     L,
                 )
-                picked_locs_xy = lib.locs_at_numba(
+                picked_locs_xy = lib.locs_in_circle(
                     x_grid, y_grid, block_locs_xy, r
                 )
                 if picked_locs_xy.shape[1] > 1:
@@ -905,8 +934,8 @@ def _pick_similar(  # noqa: C901
                     y_test = np.mean(picked_locs_xy[1])
                     count = 0
                     while (
-                        np.abs(x_test - x_test_old) > 1e-3
-                        or np.abs(y_test - y_test_old) > 1e-3
+                        np.abs(x_test - x_test_old) > PICK_CONVERGENCE
+                        or np.abs(y_test - y_test_old) > PICK_CONVERGENCE
                     ):
                         count += 1
                         # skip the locs if the loop is too long
@@ -914,7 +943,7 @@ def _pick_similar(  # noqa: C901
                             break
                         x_test_old = x_test
                         y_test_old = y_test
-                        picked_locs_xy = lib.locs_at_numba(
+                        picked_locs_xy = lib.locs_in_circle(
                             x_test, y_test, block_locs_xy, r
                         )
                         if picked_locs_xy.shape[1] > 1:
@@ -953,15 +982,14 @@ def _pick_similar_grid(
     info : list of dicts
         Metadata of the localizations.
     spacing : float
-        Distance between neighboring candidates in camera pixels.
+        Distance between neighboring candidates in nm.
 
     Returns
     -------
     grid_x, grid_y : lib.FloatArray1D
-        Coordinates of the candidate positions.
+        Coordinates of the candidate positions (nm).
     """
-    width = lib.get_from_metadata(info, "Width", raise_error=True)
-    height = lib.get_from_metadata(info, "Height", raise_error=True)
+    width, height = lib.field_of_view(info)
     x_range = np.arange(spacing / 2, width, np.sqrt(3) * spacing / 2)
     y_range = np.arange(spacing / 2, height - spacing / 2, spacing)
     n_cols = len(x_range)
@@ -1014,7 +1042,7 @@ def _circle_moments_at(
     to avoid loss of precision in the second moments.
 
     Note that the block bounds are inclusive of the first row and
-    column (``0 <= k < K``), like ``_get_block_locs_at_numba`` and
+    column (``0 <= k < K``), like ``_get_block_locs_at`` and
     unlike ``_n_block_locs_at``.
 
     Parameters
@@ -1357,7 +1385,7 @@ def _pick_similar_square_kernel(
     K, L : int
         Number of blocks in y and x direction.
     block_size : float
-        Size of the index blocks in camera pixels.
+        Size of the index blocks in nm.
     a : float
         Side length of the square picks.
     min_n_locs, max_n_locs : float
@@ -1396,7 +1424,10 @@ def _pick_similar_square_kernel(
             dy = my - y_test
             x_test = mx
             y_test = my
-            if np.abs(dx) <= 1e-3 and np.abs(dy) <= 1e-3:
+            if (
+                np.abs(dx) <= PICK_CONVERGENCE
+                and np.abs(dy) <= PICK_CONVERGENCE
+            ):
                 break
         if n < 2:
             continue
@@ -1594,7 +1625,7 @@ def _pick_similar_box_kernel(
     K, L : int
         Number of blocks in y and x direction.
     block_size : float
-        Size of the index blocks in camera pixels.
+        Size of the index blocks in nm.
     w, h : float
         Width and height of the candidate boxes.
     min_n_locs, max_n_locs : float
@@ -1639,7 +1670,10 @@ def _pick_similar_box_kernel(
             dy = my - y_test
             x_test = mx
             y_test = my
-            if np.abs(dx) <= 1e-3 and np.abs(dy) <= 1e-3:
+            if (
+                np.abs(dx) <= PICK_CONVERGENCE
+                and np.abs(dy) <= PICK_CONVERGENCE
+            ):
                 break
         if n < 2:
             continue
@@ -1722,7 +1756,7 @@ def _pick_similar_rectangular(
         length_similar.append(drawn_length)
         # initialize from the pick as drawn, using all localizations
         # because a long pick may reach outside its block neighborhood
-        drawn_locs_xy = lib.locs_in_rectangle_numba(
+        drawn_locs_xy = lib.locs_in_oriented_rectangle(
             xc, yc, theta, drawn_length, width, locs_xy
         )
         if drawn_locs_xy.shape[1] < 3:
@@ -1866,7 +1900,7 @@ def _refine_rectangle(
     theta : float
         Initial angle of the center axis (radians).
     length, width : float
-        Size of the rectangle in camera pixels.
+        Size of the rectangle in nm.
     locs_xy : lib.FloatArray2D
         Localization coordinates, shape ``(2, N)``, sorted by index
         blocks.
@@ -1875,7 +1909,7 @@ def _refine_rectangle(
     K, L : int
         Number of blocks in y and x direction.
     block_size : float
-        Size of the index blocks in camera pixels.
+        Size of the index blocks in nm.
     max_iter : int, optional
         Maximum number of iterations. Default is 100.
 
@@ -1920,8 +1954,8 @@ def _refine_rectangle(
         yc = my
         theta = theta_new
         if (
-            np.abs(dx) <= 1e-3
-            and np.abs(dy) <= 1e-3
+            np.abs(dx) <= PICK_CONVERGENCE
+            and np.abs(dy) <= PICK_CONVERGENCE
             and np.abs(d_theta) <= 1e-4
         ):
             break
@@ -2003,9 +2037,9 @@ def _pick_similar_rectangle_kernel(
     K, L : int
         Number of blocks in y and x direction.
     block_size : float
-        Size of the index blocks in camera pixels.
+        Size of the index blocks in nm.
     length, width : float
-        Size of the candidate rectangles in camera pixels.
+        Size of the candidate rectangles in nm.
     r_circ : float
         Circumscribed circle radius of the candidate rectangles.
     min_n_locs, max_n_locs : float
@@ -2113,7 +2147,7 @@ def remove_locs_in_picks(
     ],
     pick_size: float | None = None,
     index_blocks: tuple = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Remove localizations in picks.
 
     Parameters
@@ -2128,7 +2162,7 @@ def remove_locs_in_picks(
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"}
         Shape of picks.
     pick_size : float or None
-        Size of picks in camera pixels. For circles - diameters. For
+        Size of picks in nm. For circles - diameters. For
         rectangles - width. For squares - side length. For polygons,
         boxes and brush picks - ignored. Ignored if picks are loaded
         from a YAML file.
@@ -2141,6 +2175,9 @@ def remove_locs_in_picks(
     -------
     locs : pd.DataFrame
         Localizations with localizations in picks removed.
+    info : list of dicts
+        Metadata of the remaining localizations: ``info`` with an entry
+        recording the removal appended, see ``lib.append_metadata``.
     """
     assert (
         pick_shape in lib.PICK_SHAPES
@@ -2149,13 +2186,11 @@ def remove_locs_in_picks(
         assert isinstance(
             pick_size, (int, float)
         ), "pick_size must be a number."
-    if pick_shape == "Circle":
-        pick_size /= 2  # convert diameter to radius
-    else:
+    if pick_shape != "Circle":
         index_blocks = None  # ignore index blocks, only used for circle picks
     all_picked_locs = picked_locs(
-        locs=locs,
-        info=info,
+        locs,
+        info,
         picks=picks,
         pick_shape=pick_shape,
         pick_size=pick_size,
@@ -2164,8 +2199,31 @@ def remove_locs_in_picks(
     )
     # store indices of picked locs
     idx = np.concatenate([_.index for _ in all_picked_locs])
-    locs.drop(index=idx, inplace=True)
-    return locs
+    locs = locs.drop(index=idx)
+    entry = _picks_entry(
+        "Remove picked localizations", picks, pick_shape, pick_size
+    )
+    return locs, lib.append_metadata(info, entry)
+
+
+def _picks_entry(
+    step: str,
+    picks: list[tuple],
+    pick_shape: str,
+    pick_size: float | None,
+) -> dict:
+    """Metadata entry recording a step on picked localizations: the
+    number, shape and size of the picks (the diameter for circles)."""
+    entry = {
+        **lib.step_info(step),
+        "Number of picks": len(picks),
+        "Pick shape": pick_shape,
+    }
+    if pick_shape == "Circle":
+        entry["Pick diameter (nm)"] = float(pick_size)
+    elif pick_size is not None:
+        entry["Pick size (nm)"] = float(pick_size)
+    return entry
 
 
 @numba.jit(nopython=True, nogil=True)
@@ -2197,7 +2255,7 @@ def _n_block_locs_at(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def _get_block_locs_at_numba(
+def _get_block_locs_at(
     x_index: int,
     y_index: int,
     block_starts: lib.IntArray2D,
@@ -2238,7 +2296,7 @@ def _get_block_locs_at_numba(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def get_block_locs_at_numba(
+def get_block_locs_at(
     x_index: int,
     y_index: int,
     locs_xy: lib.FloatArray2D,
@@ -2267,7 +2325,7 @@ def get_block_locs_at_numba(
         ``(2, n_neighbors)`` coordinates of the localizations in the
         neighborhood.
     """
-    indices = _get_block_locs_at_numba(
+    indices = _get_block_locs_at(
         x_index,
         y_index,
         block_starts,
@@ -2323,6 +2381,7 @@ def _distance_histogram(  # noqa: C901
 def distance_histogram(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     bin_size: float,
     r_max: float,
 ) -> lib.IntArray1D:
@@ -2336,9 +2395,9 @@ def distance_histogram(
     info : list[dict]
         Metadata of the localizations.
     bin_size : float
-        Size of the bins for the histogram.
+        Size of the bins for the histogram (nm).
     r_max : float
-        Maximum distance probed in the histogram.
+        Maximum distance probed in the histogram (nm).
 
     Returns
     -------
@@ -2376,8 +2435,9 @@ def distance_histogram(
 
 def nena(
     locs: pd.DataFrame,
-    info: any = None,
-    callback: Callable[[int], None] | None = None,
+    info: list[dict] | None = None,
+    *,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[dict, float]:
     """Calculate NeNA - experimental estimate of localization
     precision. Please refer to the original paper for details:
@@ -2388,21 +2448,29 @@ def nena(
     ----------
     locs : pd.DataFrame
         Localizations.
-    info : any
-        Metadata of the localizations. Not used.
-    callback : function or None
-        Function to display progress (takes in an integer). If None, no
-        progress is displayed.
+    info : list of dicts or None, optional
+        Metadata of ``locs``. Not used; accepted so that the call
+        matches the other functions on localizations. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating NeNA" over the
+        localizations. Default is None.
 
     Returns
     -------
     result : dict
-        Data on the results, including the distances probed, best fit
-        and fitted parameters.
+        Data on the results, including the distances probed (nm), best
+        fit and fitted parameters.
     s : float
-        Estimated localization precision in camera pixels.
+        Estimated localization precision in nm.
     """
-    bin_centers, dnfl = _next_frame_neighbor_distance_histogram(locs, callback)
+    with lib.tracked_progress(
+        progress, "Calculating NeNA", unit="loc"
+    ) as progress:
+        bin_centers, dnfl = _next_frame_neighbor_distance_histogram(
+            locs, progress
+        )
 
     def func(d, delta_a, s, ac, dc, sc):
         a = ac + delta_a  # make sure a >= ac
@@ -2464,7 +2532,6 @@ def nena(
             "dc": popt[3],
             "sc": popt[4],
         },
-        "pixelsize": lib.get_from_metadata(info, "Pixelsize", default="N/A"),
     }
     return result, s
 
@@ -2481,9 +2548,7 @@ def plot_nena(
     ----------
     nena_result : dict
         Data on the results from function ``nena``, including the
-        distances probed, best fit and fitted parameters. If "pixelsize"
-        is included, the distances will be plotted in nm, otherwise in
-        camera pixels.
+        distances probed (nm), best fit and fitted parameters.
     fig : plt.Figure
         Figure to plot on. If None, a new figure and axes are
         created.
@@ -2502,14 +2567,9 @@ def plot_nena(
         fig.clear()
     d = deepcopy(nena_result["d"])
     ax = fig.add_subplot(111)
-    pixelsize = (
-        nena_result["pixelsize"] if nena_result["pixelsize"] != "N/A" else 1
-    )
-    unit = "nm" if nena_result["pixelsize"] != "N/A" else "pixels"
-    d *= nena_result["pixelsize"]
     ax.set_title(
         "Next frame neighbor distance histogram, "
-        f"\u03c3 = {nena_result['best_values']['s'] * pixelsize:.2f} {unit}"
+        f"\u03c3 = {nena_result['best_values']['s']:.2f} nm"
     )
     # the data is a histogram over bin centers: draw it as filled bars
     d = np.asarray(d, dtype=float)
@@ -2528,7 +2588,7 @@ def plot_nena(
     )
     ax.plot(d, nena_result["best_fit"], color=fit_color, label="Fit")
     ax.set_ylim(bottom=0)
-    ax.set_xlabel(f"Distance ({unit})")
+    ax.set_xlabel("Distance (nm)")
     ax.set_ylabel("Counts")
     ax.legend(loc="best")
     return fig
@@ -2536,7 +2596,7 @@ def plot_nena(
 
 def _next_frame_neighbor_distance_histogram(
     locs: pd.DataFrame,
-    callback: Callable[[int], None] | None = None,
+    progress: lib.Progress,
 ) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Calculate the next frame neighbor distance histogram (NFNDH).
 
@@ -2544,13 +2604,15 @@ def _next_frame_neighbor_distance_histogram(
     ----------
     locs : pd.DataFrame
         Localizations.
-    callback : function or None
-        Function to display progress. If None, no progress is displayed.
+    progress : lib.Progress
+        Normalized progress tracker; reports "Calculating NeNA" over the
+        localizations.
 
     Returns
     -------
     bin_centers : lib.FloatArray1D
-        Centers of the bins for the histogram.
+        Centers of the bins for the histogram (nm, 0.2 nm bins up to
+        200 nm).
     dnfl : lib.FloatArray1D
         Distance histogram of next frame neighbors.
     """
@@ -2564,9 +2626,9 @@ def _next_frame_neighbor_distance_histogram(
         group = locs["group"].to_numpy()
     else:
         group = np.zeros(len(locs), dtype=np.int32)
-    bin_size = 0.001
-    d_max = 1.0
-    return _nfndh(frame, x, y, group, d_max, bin_size, callback)
+    bin_size = 0.2  # nm
+    d_max = 200.0  # nm
+    return _nfndh(frame, x, y, group, d_max, bin_size, progress)
 
 
 def _nfndh(
@@ -2576,19 +2638,25 @@ def _nfndh(
     group: lib.IntArray1D,
     d_max: float,
     bin_size: float,
-    callback: Callable[[int], None] | None = None,
+    progress: lib.Progress,
 ) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
-    """Calculate the next frame neighbor distance histogram (NFNDH)."""
+    """Calculate the next frame neighbor distance histogram (NFNDH) of
+    localizations sorted by frame.
+
+    All localizations are processed, in up to 100 chunks; ``progress``
+    reports "Calculating NeNA" over the localizations after each chunk.
+    """
     N = len(frame)
     bins = np.arange(0, d_max, bin_size)
     dnfl = np.zeros(len(bins))
-    one_percent = int(N / 100)
-    starts = one_percent * np.arange(100)
-    for k, start in enumerate(starts):
-        for i in range(start, start + one_percent):
+    lib.start_phase(progress, "Calculating NeNA", N, unit="loc")
+    progress.set_value(0)
+    bounds = np.linspace(0, N, min(N, 100) + 1).astype(np.int64)
+    for start, stop in zip(bounds[:-1], bounds[1:]):
+        for i in range(start, stop):
             _fill_dnfl(N, frame, x, y, group, i, d_max, dnfl, bin_size)
-        if callback is not None:
-            callback(k + 1)
+        progress.set_value(int(stop))
+    progress.set_value(N)
     bin_centers = bins + bin_size / 2
     return bin_centers, dnfl
 
@@ -2611,14 +2679,14 @@ def _fill_dnfl(
     x_i = x[i]
     y_i = y[i]
     group_i = group[i]
-    min_frame = frame_i + 1
-    for min_index in range(i + 1, N):
-        if frame[min_index] >= min_frame:
-            break
-    max_frame = frame_i + 1
-    for max_index in range(min_index, N):
-        if frame[max_index] > max_frame:
-            break
+    # locs are sorted by frame: [min_index, max_index) is the next frame
+    next_frame = frame_i + 1
+    min_index = i + 1
+    while min_index < N and frame[min_index] < next_frame:
+        min_index += 1
+    max_index = min_index
+    while max_index < N and frame[max_index] <= next_frame:
+        max_index += 1
     d_max_2 = d_max**2
     for j in range(min_index, max_index):
         if group[j] == group_i:
@@ -2627,8 +2695,11 @@ def _fill_dnfl(
                 dy2 = (y_i - y[j]) ** 2
                 if dy2 <= d_max_2:
                     d = np.sqrt(dx2 + dy2)
-                    if d <= d_max:
-                        bin = int(d / bin_size)
+                    # the last bin ends below d_max; numba does not
+                    # check the index, so a distance of d_max wrote
+                    # outside the histogram
+                    bin = int(d / bin_size)
+                    if d < d_max and bin < dnfl.shape[0]:
                         dnfl[bin] += 1
 
 
@@ -2684,8 +2755,8 @@ def plot_frc(
 def frc(
     locs: pd.DataFrame,
     info: list[dict],
-    viewport: tuple[tuple[float, float], tuple[float, float]],
     *,
+    viewport: tuple[tuple[float, float], tuple[float, float]],
     random_seed: int = 42,
     lp: float | None = None,
 ) -> dict:
@@ -2700,15 +2771,15 @@ def frc(
     info : list of dicts
         Metadata of the localizations list.
     viewport : tuple of floats
-        Viewport ((y_min, x_min), (y_max, x_max)) for rendering the
-        images. Note that the origin of the image is in the top-left
+        Viewport ((y_min, x_min), (y_max, x_max)) in nm for rendering
+        the images. Note that the origin of the image is in the top-left
         corner.
     random_seed : int, optional
         Random seed for splitting the data into halves. Default is 42.
     lp : float or None, optional
-        Localization precision (camera pixels) that sets the bin size of
-        the rendered images. If None (default), NeNA of ``locs`` is
-        used.
+        Localization precision (nm) that sets the bin size of the
+        rendered images (``lp / 2``). If None (default), NeNA of
+        ``locs`` is used.
 
     Returns
     -------
@@ -2718,7 +2789,6 @@ def frc(
         "resolution" (estimated resolution in nm) and "images"
         (2 grayscale images rendered and masked).
     """
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     if lp is None:
         lp = nena(locs, info)[1]
     # correct for the viewport to be square
@@ -2752,7 +2822,7 @@ def frc(
     locs2 = locs.iloc[r_idx[len(r_idx) // 2 :]]
     # run FRC
     frc_curve, frc_curve_smooth, frequencies, resolution, images = _frc(
-        locs1, locs2, pixelsize, lp, viewport
+        locs1, locs2, info, lp, viewport
     )
     # smooth the FRC curve and summarize findings
     frc_result = {
@@ -2768,13 +2838,13 @@ def frc(
 def frc_rois(
     locs: pd.DataFrame,
     info: list[dict],
-    viewport: tuple[tuple[float, float], tuple[float, float]],
     *,
+    viewport: tuple[tuple[float, float], tuple[float, float]],
     n_rois: int = 30,
     roi_size: float = 5000.0,
     min_locs: int = 1000,
     random_seed: int = 42,
-    callback: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> dict:
     """Calculate the FRC resolution in several random ROIs.
 
@@ -2791,8 +2861,8 @@ def frc_rois(
     info : list of dicts
         Metadata of the localizations list.
     viewport : tuple of floats
-        Region ((y_min, x_min), (y_max, x_max)) in camera pixels in
-        which the ROIs are placed.
+        Region ((y_min, x_min), (y_max, x_max)) in nm in which the ROIs
+        are placed.
     n_rois : int, optional
         Maximum number of ROIs. Default is 30.
     roi_size : float, optional
@@ -2802,18 +2872,21 @@ def frc_rois(
     random_seed : int, optional
         Random seed for the ROI placement and the splitting into
         halves. Default is 42.
-    callback : function or None, optional
-        Function to display progress, called with the number of ROIs
-        processed. If None, no progress is displayed.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating NeNA" over the
+        localizations, then "Calculating FRC" over the ROIs. Default is
+        None.
 
     Returns
     -------
     result : dict
-        Dictionary with keys "rois" (viewports of the ROIs in camera
-        pixels), "n_locs" (localizations per ROI), "frc_results"
-        (list of ``frc`` results, one per ROI), "resolutions" (in nm,
-        NaN where the FRC curve does not cross the 1/7 threshold) and
-        "lp" (NeNA in camera pixels).
+        Dictionary with keys "rois" (viewports of the ROIs in nm),
+        "n_locs" (localizations per ROI), "frc_results" (list of
+        ``frc`` results, one per ROI), "resolutions" (in nm, NaN where
+        the FRC curve does not cross the 1/7 threshold) and "lp" (NeNA
+        in nm).
     """
     rois = lib.select_frc_rois(
         locs,
@@ -2824,28 +2897,31 @@ def frc_rois(
         min_locs=min_locs,
         random_seed=random_seed,
     )
-    lp = nena(locs, info)[1]
-    x = locs["x"].to_numpy()
-    y = locs["y"].to_numpy()
-    n_locs = []
-    frc_results = []
-    for k, ((y0, x0), (y1, x1)) in enumerate(rois):
-        if callable(callback):
-            callback(k)
-        in_roi = (x > x0) & (y > y0) & (x < x1) & (y < y1)
-        n_locs.append(int(in_roi.sum()))
-        frc_result = frc(
-            locs.loc[in_roi],
-            info,
-            ((y0, x0), (y1, x1)),
-            random_seed=random_seed,
-            lp=lp,
-        )
-        # drop the rendered images: tens of ROIs would hold GBs
-        del frc_result["images"]
-        frc_results.append(frc_result)
-    if callable(callback):
-        callback(len(rois))
+    with lib.tracked_progress(
+        progress, "Calculating NeNA", unit="loc"
+    ) as progress:
+        lp = nena(locs, info, progress=progress)[1]
+        x = locs["x"].to_numpy()
+        y = locs["y"].to_numpy()
+        n_locs = []
+        frc_results = []
+        lib.start_phase(progress, "Calculating FRC", len(rois), unit="ROI")
+        progress.set_value(0)
+        for k, ((y0, x0), (y1, x1)) in enumerate(rois):
+            in_roi = (x > x0) & (y > y0) & (x < x1) & (y < y1)
+            n_locs.append(int(in_roi.sum()))
+            frc_result = frc(
+                locs.loc[in_roi],
+                info,
+                viewport=((y0, x0), (y1, x1)),
+                random_seed=random_seed,
+                lp=lp,
+            )
+            # drop the rendered images: tens of ROIs would hold GBs
+            del frc_result["images"]
+            frc_results.append(frc_result)
+            progress.set_value(k + 1)
+        progress.set_value(len(rois))
     resolutions = np.array(
         [
             np.nan if _["resolution"] is None else _["resolution"]
@@ -2864,7 +2940,7 @@ def frc_rois(
 def _frc(
     locs1: pd.DataFrame,
     locs2: pd.DataFrame,
-    pixelsize: float,
+    info: list[dict],
     lp: float,
     viewport: tuple[tuple[float, float], tuple[float, float]],
 ) -> tuple[
@@ -2887,14 +2963,14 @@ def _frc(
     ----------
     locs1, locs2 : pd.DataFrame
         Localization lists already split to render images.
-    pixelsize : float
-        Camera pixel size in nm.
+    info : list of dicts
+        Metadata of the localizations.
     lp : float
-        Average localization precision (NeNA), used for bin size of the
-        rendered images (binsize = lp / 2).
+        Average localization precision (NeNA, nm), used for bin size of
+        the rendered images (binsize = lp / 2).
     viewport : tuple of floats
-        Viewport ((y_min, x_min), (y_max, x_max)) for rendering the
-        images. Note that the origin of the image is in the top-left
+        Viewport ((y_min, x_min), (y_max, x_max)) in nm for rendering
+        the images. Note that the origin of the image is in the top-left
         corner.
 
     Returns
@@ -2912,9 +2988,7 @@ def _frc(
         2 grayscale images used for calculating FRC. Already masked.
     """
     # render images
-    binsize = lp / 2
-    disp_px_size = pixelsize * binsize
-    info = {"Pixelsize": pixelsize}
+    disp_px_size = lp / 2  # nm
     im1 = render.render(
         locs1,
         info,
@@ -2959,9 +3033,7 @@ def _frc(
     frc_curve_smooth = masking.loess_smooth(frc_curve, sspan)
 
     # find the frequencies (q) and resolution
-    frequencies = (
-        np.arange(len(frc_curve)) / im1.shape[0] / (pixelsize * binsize)
-    )
+    frequencies = np.arange(len(frc_curve)) / im1.shape[0] / disp_px_size
     threshold = 1 / 7  # resolution at 1/7 threshold
     resolution = None
     for i in range(1, len(frc_curve_smooth)):
@@ -2983,11 +3055,15 @@ def _frc(
 def pair_correlation(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     bin_size: float,
     r_max: float,
 ) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Calculate the pair correlation function for the given
-    localizations.
+    localizations, as the histogram of their distances divided by the
+    area of each ring (1/nm^2, no edge correction or normalization by
+    the density). See ``rdf`` for the normalized, edge-corrected radial
+    distribution function.
 
     Parameters
     ----------
@@ -2996,18 +3072,18 @@ def pair_correlation(
     info : list of dicts
         Metadata of the localizations.
     bin_size : float
-        Size of the bins for the histogram.
+        Size of the bins for the histogram (nm).
     r_max : float
-        Maximum distance for the histogram.
+        Maximum distance for the histogram (nm).
 
     Returns
     -------
     bins_lower : lib.FloatArray1D
-        Lower bounds of the bins for the histogram.
+        Lower bounds of the bins for the histogram (nm).
     pc : lib.FloatArray1D
-        Pair correlation function.
+        Pair correlation function (1/nm^2).
     """
-    dh = distance_histogram(locs, info, bin_size, r_max)
+    dh = distance_histogram(locs, info, bin_size=bin_size, r_max=r_max)
     # Start with r-> otherwise area will be 0
     bins_lower = np.arange(bin_size, r_max + bin_size, bin_size)
 
@@ -3060,8 +3136,9 @@ def _local_density(
 def compute_local_density(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     radius: float,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Compute the local density of localizations in blocks around
     each localization.
 
@@ -3072,12 +3149,15 @@ def compute_local_density(
     info : list of dicts
         Metadata of the localizations.
     radius : float
-        Radius for local density computation.
+        Radius for local density computation (nm).
 
     Returns
     -------
     locs : pd.DataFrame
         Localizations with added 'density' field/column.
+    info : list of dicts
+        Metadata of ``locs``: ``info`` with an entry recording the step
+        appended, see ``lib.append_metadata``.
     """
     locs, size, x_index, y_index, block_starts, block_ends, K, L = (
         get_index_blocks(locs, info, radius)
@@ -3104,7 +3184,8 @@ def compute_local_density(
         futures = [executor.submit(_local_density, *_) for _ in args]
     density = np.sum([future.result() for future in futures], axis=0)
     locs["density"] = density
-    return locs
+    entry = lib.step_info("Density", **{"Radius (nm)": radius})
+    return locs, lib.append_metadata(info, entry)
 
 
 def evaluate_picks(
@@ -3112,9 +3193,7 @@ def evaluate_picks(
     info: list[dict],
     *,
     max_dark_time: int = 3,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[
     lib.FloatArray1D,
     lib.FloatArray1D,
@@ -3141,10 +3220,11 @@ def evaluate_picks(
         Maximum dark time (in frames) between detected localizations to
         consider them as part of the same binding event. Default is 3
         frames.
-    progress_callback : function, "console" or None
-        Function to display progress (takes in an integer). If "console",
-        progress is printed to the console. If None, no progress is
-        displayed.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Evaluating picks" over the
+        picks. Default is None.
 
     Returns
     -------
@@ -3164,15 +3244,6 @@ def evaluate_picks(
         Dataframe containing the localizations in all picked regions
         with added 'length' and 'dark' fields/columns.
     """
-    use_tqdm = progress_callback == "console"
-    if use_tqdm:
-        iter_range = tqdm(
-            range(len(picked_locs)), desc="Evaluating picks", unit="pick"
-        )
-    else:
-        iter_range = range(len(picked_locs))
-
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", default=1.0)
     n_picks = len(picked_locs)
     N = np.empty(n_picks)  # number of locs per pick
     n_events = np.empty(n_picks)  # number of events per pick
@@ -3182,42 +3253,47 @@ def evaluate_picks(
     has_z = "z" in picked_locs[0].columns
     rmsd_z = np.empty(n_picks)
     new_locs = []  # linked locs in each pick
-    warnings.simplefilter("ignore", category=RuntimeWarning)
-    for i in iter_range:
-        if callable(progress_callback):
-            progress_callback(i)
-        pick_locs = picked_locs[i]
-        if not len(pick_locs):
-            continue
+    # e.g., the statistics of one-localization picks; scoped, so that
+    # the warning filters of the caller are kept
+    with (
+        lib.tracked_progress(
+            progress, "Evaluating picks", unit="pick"
+        ) as progress,
+        warnings.catch_warnings(),
+    ):
+        warnings.simplefilter("ignore", category=RuntimeWarning)
+        lib.start_phase(progress, "Evaluating picks", n_picks, unit="pick")
+        progress.set_value(0)
+        for i in range(n_picks):
+            pick_locs = picked_locs[i]
+            if not len(pick_locs):
+                progress.set_value(i + 1)
+                continue
 
-        N[i] = len(pick_locs)
-        com_x = pick_locs["x"].mean()
-        com_y = pick_locs["y"].mean()
-        rmsd[i] = (
-            np.sqrt(
+            N[i] = len(pick_locs)
+            com_x = pick_locs["x"].mean()
+            com_y = pick_locs["y"].mean()
+            rmsd[i] = np.sqrt(
                 np.mean(
                     (pick_locs["x"] - com_x) ** 2
                     + (pick_locs["y"] - com_y) ** 2
                 )
             )
-            * pixelsize
-        )
-        if has_z:
-            rmsd_z[i] = np.sqrt(
-                np.mean((pick_locs["z"] - pick_locs["z"].mean()) ** 2)
-            )
-        if "len" not in pick_locs.columns:
-            pick_locs = link(
-                pick_locs, info, r_max=999999, max_dark_time=max_dark_time
-            )
-        pick_locs = compute_dark_times(pick_locs)
-        n_events[i] = len(pick_locs)  # linked locs are binding events
-        length[i] = lib.estimate_kinetic_rate(pick_locs["len"].to_numpy())
-        dark[i] = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
-        new_locs.append(pick_locs)
-    warnings.simplefilter("default", category=RuntimeWarning)
-    if callable(progress_callback):
-        progress_callback(n_picks)
+            if has_z:
+                rmsd_z[i] = np.sqrt(
+                    np.mean((pick_locs["z"] - pick_locs["z"].mean()) ** 2)
+                )
+            if "len" not in pick_locs.columns:
+                pick_locs = _link(
+                    pick_locs, info, r_max=999999, max_dark_time=max_dark_time
+                )
+            pick_locs = _compute_dark_times(pick_locs)
+            n_events[i] = len(pick_locs)  # linked locs are binding events
+            length[i] = lib.estimate_kinetic_rate(pick_locs["len"].to_numpy())
+            dark[i] = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
+            new_locs.append(pick_locs)
+            progress.set_value(i + 1)
+        progress.set_value(n_picks)
     new_locs = pd.concat(new_locs, ignore_index=True)
     return N, n_events, rmsd, rmsd_z, length, dark, new_locs
 
@@ -3232,7 +3308,7 @@ def _pick_kinetics_single(
     if not len(pick_locs):
         return None
     if "len" not in pick_locs.columns:
-        pick_locs = link(
+        pick_locs = _link(
             pick_locs,
             info,
             r_max=999999,  # link all locs in the pick
@@ -3240,7 +3316,7 @@ def _pick_kinetics_single(
         )
     if not len(pick_locs):
         return None
-    pick_locs = compute_dark_times(pick_locs)
+    pick_locs = _compute_dark_times(pick_locs)
     if not len(pick_locs):
         return None
     try:
@@ -3256,9 +3332,7 @@ def pick_kinetics(
     info: list[dict],
     *,
     max_dark_time: int = 3,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[
     lib.FloatArray1D,
     lib.FloatArray1D,
@@ -3280,10 +3354,11 @@ def pick_kinetics(
         Maximum dark time (in frames) between detected localizations
         to consider them as part of the same binding event. Default is 3
         frames.
-    progress_callback : function, "console" or None
-        Function to display progress (takes in an integer). If "console",
-        progress is printed to the console. If None, no progress is
-        displayed.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating kinetics" over
+        the picks. Default is None.
 
     Returns
     -------
@@ -3306,38 +3381,39 @@ def pick_kinetics(
         i.e., those for which kinetics could be estimated. Aligns
         row-for-row with ``length``, ``dark`` and ``no_locs``.
     """
-    use_tqdm = progress_callback == "console"
-    if use_tqdm:
-        iter_range = tqdm(
-            range(len(picked_locs)), desc="Calculating kinetics", unit="pick"
-        )
-    else:
-        iter_range = range(len(picked_locs))
-
+    n_picks = len(picked_locs)
     out_locs = []
     dark = []  # estimated mean dark time
     length = []  # estimated mean bright time
     no_locs = []  # number of locs
     kept_indices = []  # picks for which kinetics could be estimated
-    for i in iter_range:
-        if callable(progress_callback):
-            progress_callback(i)
-        result = _pick_kinetics_single(picked_locs[i], info, max_dark_time)
-        if result is None:
-            continue
-        pick_locs, l_, d_ = result
-        length.append(l_)
-        dark.append(d_)
-        no_locs.append(len(picked_locs[i]))
-        out_locs.append(pick_locs)
-        kept_indices.append(i)
-    if callable(progress_callback):
-        progress_callback(i + 1)
+    with lib.tracked_progress(
+        progress, "Calculating kinetics", unit="pick"
+    ) as progress:
+        lib.start_phase(progress, "Calculating kinetics", n_picks, unit="pick")
+        progress.set_value(0)
+        for i in range(n_picks):
+            result = _pick_kinetics_single(picked_locs[i], info, max_dark_time)
+            if result is not None:
+                pick_locs, l_, d_ = result
+                length.append(l_)
+                dark.append(d_)
+                no_locs.append(len(picked_locs[i]))
+                out_locs.append(pick_locs)
+                kept_indices.append(i)
+            progress.set_value(i + 1)
+        progress.set_value(n_picks)
     length = np.array(length)
     dark = np.array(dark)
     no_locs = np.array(no_locs)
     kept_indices = np.array(kept_indices, dtype=int)
-    out_locs = pd.concat(out_locs, ignore_index=True)
+    if out_locs:
+        out_locs = pd.concat(out_locs, ignore_index=True)
+    elif n_picks:
+        # no pick survived: keep the columns of the input
+        out_locs = picked_locs[0].iloc[:0].copy()
+    else:
+        out_locs = pd.DataFrame()
     return length, dark, no_locs, out_locs, kept_indices
 
 
@@ -3348,14 +3424,9 @@ def pick_properties(
     max_dark_time: int = 3,
     influx_rate: float = 0.03,
     pick_areas: lib.FloatArray1D | None = None,
-    kinetics_progress: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
-    groupprops_progress: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> pd.DataFrame:
-    """Calculate pick properties and save them to ``path``.
+    """Calculate pick properties.
 
     Properties include number of localizations, mean and std of all
     localizations dtypes (x, y, photons, etc), qPAINT number of binding
@@ -3374,16 +3445,24 @@ def pick_properties(
         (``n_units = 1 / (influx_rate * dark)``).
     pick_areas : FloatArray1D or None
         Optional per-pick area in um^2 to attach to the output.
-    kinetics_progress, groupprops_progress : callable, "console" or None
-        Progress callbacks forwarded to ``pick_kinetics`` and
-        ``groupprops``, respectively.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating kinetics" over
+        the picks, then "Calculating group properties" over the picks
+        whose kinetics could be estimated. Default is None.
 
     Returns
     -------
     pick_props : pd.DataFrame
         Each row gives the properties per pick.
     """
-    with warnings.catch_warnings():
+    with (
+        lib.tracked_progress(
+            progress, "Calculating kinetics", unit="pick"
+        ) as progress,
+        warnings.catch_warnings(),
+    ):
         warnings.simplefilter(
             "ignore", category=(OptimizeWarning, RuntimeWarning)
         )
@@ -3391,9 +3470,9 @@ def pick_properties(
             picked_locs=picked_locs,
             info=info,
             max_dark_time=max_dark_time,
-            progress_callback=kinetics_progress,
+            progress=progress,
         )
-        pick_props = groupprops(out_locs, callback=groupprops_progress)
+        pick_props = groupprops(out_locs, progress=progress)
         if pick_areas is not None:
             # only the picks that survived kinetics estimation are present
             # in pick_props, so subset the areas accordingly to avoid a
@@ -3411,14 +3490,19 @@ def pick_properties(
 
 def compute_dark_times(
     locs: pd.DataFrame,
+    info: list[dict] | None = None,
+    *,
     group: lib.IntArray1D | None = None,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Compute dark time for each binding event.
 
     Parameters
     ----------
     locs : pd.DataFrame
         Localizations that were linked, i.e., binding events.
+    info : list of dicts or None, optional
+        Metadata of ``locs``, carried over into the returned metadata.
+        Default is None.
     group : lib.IntArray1D, optional
         Grouping array for binding events. If None, all binding events
         are considered to be in the same group.
@@ -3431,15 +3515,28 @@ def compute_dark_times(
         ``dark_times`` for the convention). Binding events that are not
         preceded by another binding event in the same group are
         removed.
+    info : list of dicts
+        Metadata of ``locs``: ``info`` with an entry recording the step
+        (``"Step": "Dark"``) appended, see ``lib.append_metadata``.
+        ``io.load_locs`` reads the Picasso version of this entry to
+        tell the dark-time convention.
     """
+    locs = _compute_dark_times(locs, group)
+    return locs, lib.append_metadata(info, lib.step_info("Dark"))
+
+
+def _compute_dark_times(
+    locs: pd.DataFrame, group: lib.IntArray1D | None = None
+) -> pd.DataFrame:
+    """The binding events with dark times of ``compute_dark_times``,
+    without the metadata (for loops over picks)."""
     if "len" not in locs.columns:
         raise AttributeError(
             "Length not found. Please link localizations first."
         )
     dark = dark_times(locs, group)
-    locs["dark"] = np.int32(dark)
-    locs = locs[locs.dark != -1]
-    return locs
+    locs = locs.assign(dark=np.int32(dark))
+    return locs[locs.dark != -1]
 
 
 def dark_times(
@@ -3523,11 +3620,11 @@ def _dark_times(
 def link(
     locs: pd.DataFrame,
     info: list[dict],
-    r_max: float = 0.05,
+    *,
+    r_max: float = 10.0,
     max_dark_time: int = 3,
-    combine_mode: Literal["average", "refit"] = "average",
     remove_ambiguous_lengths: bool = True,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Link localizations, i.e., group them into binding events based
     on their spatiotemporal proximity.
 
@@ -3538,20 +3635,16 @@ def link(
     info : list of dicts
         Metadata of the localizations.
     r_max : float, optional
-        Maximum distance for linking localizations. Default is 0.05.
+        Maximum distance (nm) for linking localizations. Default is 10.
     max_dark_time : int, optional
         Maximum number of frames without a localization between two
         localizations that are still linked into one binding event.
         Default is 3.
-    combine_mode : {'average', 'refit'}, optional
-        Mode for combining linked localizations. 'average' calculates
-        the average position and properties of the linked localizations,
-        while 'refit' would refit the linked localizations to a model.
-        'refit' is not implemented yet. Default is 'average'.
     remove_ambiguous_lengths : bool, optional
-        If True, removes linked localizations with ambiguous lengths,
-        i.e., localizations that are linked to multiple binding events
-        with different lengths. Default is True.
+        If True, removes binding events whose length is ambiguous,
+        i.e., those that start in the first frame or end in the last
+        frame of the movie and may thus extend beyond it. Default is
+        True.
 
     Returns
     -------
@@ -3562,7 +3655,37 @@ def link(
         frame (``last_frame - first_frame + 1``), including frames
         bridged by ``max_dark_time``. See ``dark_times`` for the
         matching dark time convention.
+    info : list of dicts
+        Metadata of the linked localizations: ``info`` with an entry
+        recording the linking appended, see ``lib.append_metadata``.
     """
+    linked_locs = _link(
+        locs,
+        info,
+        r_max,
+        max_dark_time,
+        remove_ambiguous_lengths=remove_ambiguous_lengths,
+    )
+    entry = lib.step_info(
+        "Link",
+        **{
+            "Max. distance (nm)": r_max,
+            "Max. transient dark frames": max_dark_time,
+            "Removed ambiguous lengths": remove_ambiguous_lengths,
+        },
+    )
+    return linked_locs, lib.append_metadata(info, entry)
+
+
+def _link(
+    locs: pd.DataFrame,
+    info: list[dict],
+    r_max: float,
+    max_dark_time: int,
+    remove_ambiguous_lengths: bool = True,
+) -> pd.DataFrame:
+    """The linked localizations of ``link``, without the metadata (for
+    loops over picks, which need no metadata of their own)."""
     if len(locs) == 0:  # special case of an empty localization list
         linked_locs = locs.copy()
         if "frame" in locs.columns:
@@ -3580,26 +3703,23 @@ def link(
         x = locs["x"].to_numpy()
         y = locs["y"].to_numpy()
         link_group = _get_link_groups(frame, x, y, r_max, max_dark_time, group)
-        if combine_mode == "average":
-            linked_locs = _link_loc_groups(
-                locs,
-                info,
-                link_group,
-                remove_ambiguous_lengths=remove_ambiguous_lengths,
-            )
-        elif combine_mode == "refit":
-            raise NotImplementedError(
-                "Refit mode is not implemented yet. Please use 'average' mode."
-            )
+        linked_locs = _link_loc_groups(
+            locs,
+            info,
+            link_group,
+            remove_ambiguous_lengths=remove_ambiguous_lengths,
+        )
     return linked_locs
 
 
 def select_binding_event_cores(
     locs: pd.DataFrame,
-    r_max: float = 0.1,
+    info: list[dict] | None = None,
+    *,
+    r_max: float = 10.0,
     max_dark_time: int = 0,
     min_n_locs: int = 3,
-) -> pd.DataFrame:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Select the localizations in the temporal centers of binding
     events.
 
@@ -3621,10 +3741,12 @@ def select_binding_event_cores(
     ----------
     locs : pd.DataFrame
         Localizations.
+    info : list of dicts or None, optional
+        Metadata of ``locs``, carried over into the returned metadata.
+        Default is None.
     r_max : float, optional
-        Maximum distance (camera pixels) between localizations to be
-        considered as originating from the same binding event. Default
-        is 0.1.
+        Maximum distance (nm) between localizations to be considered as
+        originating from the same binding event. Default is 10.
     max_dark_time : int, optional
         Maximum number of frames between localizations to be considered
         as originating from the same binding event. Default is 0.
@@ -3642,10 +3764,23 @@ def select_binding_event_cores(
         column assigned uniquely to each binding event. If ``locs`` was
         already grouped, the previous grouping is kept in
         'group_input'.
+    info : list of dicts
+        Metadata of ``out_locs``: ``info`` with an entry recording the
+        selection appended, see ``lib.append_metadata``.
     """
+    entry = lib.step_info(
+        "Binding event cores",
+        **{
+            "Max. distance (nm)": r_max,
+            "Max. transient dark frames": max_dark_time,
+            "Min. localizations per event": min_n_locs,
+        },
+    )
+    info = lib.append_metadata(info, entry)
     out_locs = locs.sort_values(kind="quicksort", by="frame")
     if len(out_locs) == 0:
-        return lib.append_group(out_locs.copy(), np.array([], dtype=np.int32))
+        empty = np.array([], dtype=np.int32)
+        return lib.append_group(out_locs.copy(), empty), info
 
     if "group" in out_locs.columns:
         group = out_locs["group"].to_numpy()
@@ -3673,7 +3808,7 @@ def select_binding_event_cores(
     out_locs = out_locs[keep].copy()
     # relabel the surviving events with consecutive group ids
     event_id = np.unique(link_group[keep], return_inverse=True)[1]
-    return lib.append_group(out_locs, event_id.astype(np.int32))
+    return lib.append_group(out_locs, event_id.astype(np.int32)), info
 
 
 def combine_locs_in_picks(
@@ -3686,11 +3821,10 @@ def combine_locs_in_picks(
     ],
     pick_size: float | None = None,
     index_blocks: tuple | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
-) -> pd.DataFrame:
-    """Combine localizations in picked regions.
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Combine localizations in picked regions, i.e., link all
+    localizations in each pick into one.
 
     Parameters
     ----------
@@ -3713,16 +3847,21 @@ def combine_locs_in_picks(
         radius). When provided, used to skip re-indexing inside circular
         ``picked_locs``. Ignored for non-circular pick shapes. Default
         is None (index is computed on demand).
-    progress_callback : callable, 'console' or None, optional
-        Function to display progress (takes in an integer, maximum is
-        the number of picks). If 'console', progress is displayed in the
-        console. If None, no progress is displayed. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Picking localizations" over
+        the picks, then "Combining picks" over the picks. Default is
+        None.
 
     Returns
     -------
     out_locs : pd.DataFrame
         Localizations after combining localizations in the picked
         regions.
+    info : list of dicts
+        Metadata of ``out_locs``: ``info`` with an entry recording the
+        combining appended, see ``lib.append_metadata``.
     """
     assert (
         pick_shape in lib.PICK_SHAPES
@@ -3731,295 +3870,41 @@ def combine_locs_in_picks(
         assert (
             pick_size is not None
         ), "Pick size must be provided for this pick shape."
-    if pick_shape == "Circle":
-        pick_size /= 2  # convert diameter to radius
-    pl = picked_locs(
-        locs=locs,
-        info=info,
-        picks=picks,
-        pick_shape=pick_shape,
-        pick_size=pick_size,
-        index_blocks=index_blocks,
-    )
-    # use very large values for linking localizations
-    r_max = 2 * max(
-        lib.get_from_metadata(info, "Height"),
-        lib.get_from_metadata(info, "Width"),
-    )
-    max_dark = lib.get_from_metadata(info, "Frames", default=10_000)
-
-    # link every localization in each pick
-    if progress_callback == "console":
-        iter_range = tqdm(range(len(pl)), desc="Combining picks", unit="pick")
-    else:
-        iter_range = range(len(pl))
-    out_locs = []
-    for i in iter_range:
-        if callable(progress_callback):
-            progress_callback(i)
-        pick_locs = pl[i]
-        pick_locs_out = link(
-            pick_locs,
+    with lib.tracked_progress(
+        progress, "Picking localizations", unit="pick"
+    ) as progress:
+        pl = picked_locs(
+            locs,
             info,
-            r_max=r_max,
-            max_dark_time=max_dark,
-            remove_ambiguous_lengths=False,
+            picks=picks,
+            pick_shape=pick_shape,
+            pick_size=pick_size,
+            index_blocks=index_blocks,
+            progress=progress,
         )
-        if len(pick_locs_out):
-            out_locs.append(pick_locs_out)
-    if callable(progress_callback):
-        progress_callback(len(pl))
+        # use very large values for linking localizations
+        r_max = 2 * max(lib.field_of_view(info))
+        max_dark = lib.get_from_metadata(info, "Frames", default=10_000)
+
+        # link every localization in each pick
+        lib.start_phase(progress, "Combining picks", len(pl), unit="pick")
+        progress.set_value(0)
+        out_locs = []
+        for i, pick_locs in enumerate(pl):
+            pick_locs_out = _link(
+                pick_locs,
+                info,
+                r_max=r_max,
+                max_dark_time=max_dark,
+                remove_ambiguous_lengths=False,
+            )
+            if len(pick_locs_out):
+                out_locs.append(pick_locs_out)
+            progress.set_value(i + 1)
+        progress.set_value(len(pl))
     out_locs = pd.concat(out_locs, ignore_index=True)
-    return out_locs
-
-
-# Combine localizations: calculate the properties of the group
-def cluster_combine(locs: pd.DataFrame) -> pd.DataFrame:
-    """Combine localizations into clusters and calculate their
-    properties such as center of mass, standard deviation, and number
-    of localizations in each cluster.
-
-    Parameters
-    ----------
-    locs : pd.DataFrame
-        Localizations with 'group' and 'cluster' columns.
-
-    Returns
-    -------
-    combined_locs : pd.DataFrame
-        Combined localizations with calculated properties for each
-        cluster.
-    """
-    combined_locs = []
-    if "z" in locs.columns:
-        for group in tqdm(np.unique(locs["group"])):
-            temp = locs[locs["group"] == group]
-            cluster = np.unique(temp["cluster"].to_numpy())
-            n_cluster = len(cluster)
-            mean_frame = np.zeros(n_cluster)
-            std_frame = np.zeros(n_cluster)
-            com_x = np.zeros(n_cluster)
-            com_y = np.zeros(n_cluster)
-            com_z = np.zeros(n_cluster)
-            std_x = np.zeros(n_cluster)
-            std_y = np.zeros(n_cluster)
-            std_z = np.zeros(n_cluster)
-            group_id = np.zeros(n_cluster)
-            n = np.zeros(n_cluster, dtype=np.int32)
-            for i, clusterval in enumerate(cluster):
-                cluster_locs = temp[temp["cluster"] == clusterval]
-                mean_frame[i] = cluster_locs["frame"].mean()
-                com_x[i] = np.average(
-                    cluster_locs["x"].to_numpy(),
-                    weights=cluster_locs["photons"].to_numpy(),
-                )
-                com_y[i] = np.average(
-                    cluster_locs["y"].to_numpy(),
-                    weights=cluster_locs["photons"].to_numpy(),
-                )
-                com_z[i] = np.average(
-                    cluster_locs["z"].to_numpy(),
-                    weights=cluster_locs["photons"].to_numpy(),
-                )
-                std_frame[i] = cluster_locs["frame"].std()
-                std_x[i] = cluster_locs["x"].std() / np.sqrt(len(cluster_locs))
-                std_y[i] = cluster_locs["y"].std() / np.sqrt(len(cluster_locs))
-                std_z[i] = cluster_locs["z"].std() / np.sqrt(len(cluster_locs))
-                n[i] = len(cluster_locs)
-                group_id[i] = group
-            clusters = pd.DataFrame(
-                {
-                    "group": group_id,
-                    "cluster": cluster,
-                    "mean_frame": mean_frame.astype(np.float32),
-                    "x": com_x.astype(np.float32),
-                    "y": com_y.astype(np.float32),
-                    "z": com_z.astype(np.float32),
-                    "std_frame": std_frame.astype(np.float32),
-                    "lpx": std_x.astype(np.float32),
-                    "lpy": std_y.astype(np.float32),
-                    "lpz": std_z.astype(np.float32),
-                    "n": n.astype(np.int32),
-                }
-            )
-            combined_locs.append(clusters)
-    else:
-        for group in tqdm(np.unique(locs["group"])):
-            temp = locs[locs["group"] == group]
-            cluster = np.unique(temp["cluster"].to_numpy())
-            n_cluster = len(cluster)
-            mean_frame = np.zeros(n_cluster)
-            std_frame = np.zeros(n_cluster)
-            com_x = np.zeros(n_cluster)
-            com_y = np.zeros(n_cluster)
-            std_x = np.zeros(n_cluster)
-            std_y = np.zeros(n_cluster)
-            group_id = np.zeros(n_cluster)
-            n = np.zeros(n_cluster, dtype=np.int32)
-            for i, clusterval in enumerate(cluster):
-                cluster_locs = temp[temp["cluster"] == clusterval]
-                mean_frame[i] = cluster_locs["frame"].mean()
-                com_x[i] = np.average(
-                    cluster_locs["x"].to_numpy(),
-                    weights=cluster_locs["photons"].to_numpy(),
-                )
-                com_y[i] = np.average(
-                    cluster_locs["y"].to_numpy(),
-                    weights=cluster_locs["photons"].to_numpy(),
-                )
-                std_frame[i] = cluster_locs["frame"].std()
-                std_x[i] = cluster_locs["x"].std() / np.sqrt(len(cluster_locs))
-                std_y[i] = cluster_locs["y"].std() / np.sqrt(len(cluster_locs))
-                n[i] = len(cluster_locs)
-                group_id[i] = group
-            clusters = pd.DataFrame(
-                {
-                    "group": group_id,
-                    "cluster": cluster,
-                    "mean_frame": mean_frame.astype(np.float32),
-                    "x": com_x.astype(np.float32),
-                    "y": com_y.astype(np.float32),
-                    "std_frame": std_frame.astype(np.float32),
-                    "lpx": std_x.astype(np.float32),
-                    "lpy": std_y.astype(np.float32),
-                    "n": n.astype(np.int32),
-                }
-            )
-            combined_locs.append(clusters)
-
-    combined_locs = pd.concat(combined_locs, ignore_index=True)
-    return combined_locs
-
-
-def cluster_combine_dist(
-    locs: pd.DataFrame, pixelsize: float | None = None
-) -> pd.DataFrame:
-    """Similar to ``cluster_combine``, but also calculates the distance
-    to the nearest neighbor in the same group and the distance to the
-    nearest neighbor in the same cluster in the same group.
-
-    Parameters
-    ----------
-    locs : pd.DataFrame
-        Localizations with 'group' and 'cluster' fields.
-    pixelsize : float or None, optional
-        Pixel size in nm for z-scaling. If None, defaults to 130 nm.
-
-    Returns
-    -------
-    combined_locs : pd.DataFrame
-        Combined localizations with calculated properties for each
-        cluster, including distances to nearest neighbors.
-    """
-    if "z" in locs.columns:
-        pixelsize = 130 if pixelsize is None else pixelsize
-        combined_locs = []
-        for group in tqdm(np.unique(locs["group"])):
-            temp = locs[locs["group"] == group]
-            cluster = np.unique(temp["cluster"])
-            n_cluster = len(cluster)
-            mean_frame = temp["mean_frame"].to_numpy()
-            std_frame = temp["std_frame"].to_numpy()
-            com_x = temp["x"].to_numpy()
-            com_y = temp["y"].to_numpy()
-            com_z = temp["z"].to_numpy()
-            std_x = temp["lpx"].to_numpy()
-            std_y = temp["lpy"].to_numpy()
-            std_z = temp["lpz"].to_numpy()
-            group_id = temp["group"].to_numpy()
-            n = temp["n"].to_numpy()
-            min_dist = np.zeros(n_cluster)
-            min_dist_xy = np.zeros(n_cluster)
-            for i, clusterval in enumerate(cluster):
-                # find nearest neighbor in xyz
-                group_locs = temp[temp["cluster"] != clusterval]
-                cluster_locs = temp[temp["cluster"] == clusterval]
-                ref_point = np.stack(
-                    (
-                        cluster_locs["x"].to_numpy(),
-                        cluster_locs["y"].to_numpy(),
-                        cluster_locs["z"].to_numpy() / pixelsize,
-                    ),
-                    axis=1,
-                )
-                all_points = np.stack(
-                    (
-                        group_locs["x"].to_numpy(),
-                        group_locs["y"].to_numpy(),
-                        group_locs["z"].to_numpy() / pixelsize,
-                    ),
-                    axis=1,
-                )
-                distances = distance.cdist(ref_point, all_points)
-                min_dist[i] = np.amin(distances)
-                # find nearest neighbor in xy
-                ref_point_xy = np.array(cluster_locs[["x", "y"]])
-                all_points_xy = np.array(group_locs[["x", "y"]])
-                distances_xy = distance.cdist(ref_point_xy, all_points_xy)
-                min_dist_xy[i] = np.amin(distances_xy)
-
-            clusters = pd.DataFrame(
-                {
-                    "group": group_id,
-                    "cluster": cluster,
-                    "mean_frame": mean_frame.astype(np.float32),
-                    "x": com_x.astype(np.float32),
-                    "y": com_y.astype(np.float32),
-                    "z": com_z.astype(np.float32),
-                    "std_frame": std_frame.astype(np.float32),
-                    "lpx": std_x.astype(np.float32),
-                    "lpy": std_y.astype(np.float32),
-                    "lpz": std_z.astype(np.float32),
-                    "n": n.astype(np.int32),
-                    "min_dist": min_dist.astype(np.float32),
-                    "mind_dist_xy": min_dist_xy.astype(np.float32),
-                }
-            )
-            combined_locs.append(clusters)
-
-    else:  # 2D case
-        combined_locs = []
-        for group in tqdm(np.unique(locs["group"])):
-            temp = locs[locs["group"] == group]
-            cluster = np.unique(temp["cluster"])
-            n_cluster = len(cluster)
-            mean_frame = temp["mean_frame"].to_numpy()
-            std_frame = temp["std_frame"].to_numpy()
-            com_x = temp["x"].to_numpy()
-            com_y = temp["y"].to_numpy()
-            std_x = temp["lpx"].to_numpy()
-            std_y = temp["lpy"].to_numpy()
-            group_id = temp["group"].to_numpy()
-            n = temp["n"].to_numpy()
-            min_dist = np.zeros(n_cluster)
-
-            for i, clusterval in enumerate(cluster):
-                # find nearest neighbor in xyz
-                group_locs = temp[temp["cluster"] != clusterval]
-                cluster_locs = temp[temp["cluster"] == clusterval]
-                ref_point_xy = np.array(cluster_locs[["x", "y"]])
-                all_points_xy = np.array(group_locs[["x", "y"]])
-                distances_xy = distance.cdist(ref_point_xy, all_points_xy)
-                min_dist[i] = np.amin(distances_xy)
-
-            clusters = pd.DataFrame(
-                {
-                    "group": group_id,
-                    "cluster": cluster,
-                    "mean_frame": mean_frame.astype(np.float32),
-                    "x": com_x.astype(np.float32),
-                    "y": com_y.astype(np.float32),
-                    "std_frame": std_frame.astype(np.float32),
-                    "lpx": std_x.astype(np.float32),
-                    "lpy": std_y.astype(np.float32),
-                    "n": n.astype(np.int32),
-                    "min_dist": min_dist.astype(np.float32),
-                }
-            )
-            combined_locs.append(clusters)
-
-    combined_locs = pd.concat(combined_locs, ignore_index=True)
-    return combined_locs
+    entry = _picks_entry("Combine picks", picks, pick_shape, pick_size)
+    return out_locs, lib.append_metadata(info, entry)
 
 
 @numba.jit(nopython=True)
@@ -4265,9 +4150,10 @@ def _link_loc_groups(  # noqa: C901
     link_group : lib.IntArray1D
         Array that defines the link groups for the localizations.
     remove_ambiguous_lengths : bool, optional
-        If True, removes linked localizations with ambiguous lengths,
-        i.e., localizations that are linked to multiple binding events
-        with different lengths. Default is True.
+        If True, removes binding events whose length is ambiguous,
+        i.e., those that start in the first frame or end in the last
+        frame of the movie and may thus extend beyond it. Default is
+        True.
 
     Returns
     -------
@@ -4392,9 +4278,10 @@ def _link_loc_groups(  # noqa: C901
         columns["photon_rate"] = np.float32(columns["photons"] / n_)
     linked_locs = pd.DataFrame(columns)
     if remove_ambiguous_lengths:
+        # events touching the first or the last frame of the movie
         valid = np.logical_and(
             first_frame_ > 0,
-            last_frame_ < info[0]["Frames"],
+            last_frame_ < info[0]["Frames"] - 1,
         )
         linked_locs = linked_locs[valid]
     return linked_locs
@@ -4427,7 +4314,7 @@ def segment(
     info: list[dict],
     segmentation: int,
     kwargs: dict = {},
-    callback: Callable[[int], None] = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[lib.IntArray1D, lib.FloatArray3D]:
     """Split localizations into temporal segments (number of segments
     is defined by the segmentation parameter) and render each segment
@@ -4442,12 +4329,14 @@ def segment(
     segmentation : int
         Number of segments to divide the data into.
     kwargs : dict, optional
-        Additional keyword arguments for the rendering function.
-        Default is an empty dictionary.
-    callback : Callable[[int], None], optional
-        Callback function to report progress. It should accept an
-        integer argument representing the current segment index.
-        Default is None, which means no callback is used.
+        Additional keyword arguments for the rendering function, e.g.,
+        ``disp_px_size`` (nm, default ``UNDRIFT_PIXEL_SIZE``) and
+        ``min_blur_width`` (nm). Default is an empty dictionary.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Generating segments" over the
+        segments. Default is None.
 
     Returns
     -------
@@ -4458,42 +4347,43 @@ def segment(
         3D array of segments, where each segment is a 2D image of the
         localizations in that segment.
     """
-    Y = lib.get_from_metadata(info, "Height", raise_error=True)
-    X = lib.get_from_metadata(info, "Width", raise_error=True)
+    X, Y = lib.field_of_view(info)
     n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-    disp_px_size = kwargs.get("disp_px_size", pixelsize)
-    oversampling = pixelsize / disp_px_size
+    kwargs = dict(kwargs)
+    disp_px_size = kwargs.pop("disp_px_size", UNDRIFT_PIXEL_SIZE)
+    oversampling = 1 / disp_px_size  # rendered pixels per nm
     n_pixel_y = int(np.ceil(oversampling * Y))
     n_pixel_x = int(np.ceil(oversampling * X))
     n_seg = n_segments(info, segmentation)
     bounds = np.linspace(0, n_frames - 1, n_seg + 1, dtype=np.uint32)
     segments = np.zeros((n_seg, n_pixel_y, n_pixel_x))
-    if callback is None:
-        it = trange(n_seg, desc="Generating segments", unit="segments")
-    else:
-        callback(0)
-        it = range(n_seg)
-    for i in it:
-        segment_locs = locs[
-            (locs["frame"] >= bounds[i]) & (locs["frame"] < bounds[i + 1])
-        ]
-        _, segments[i] = render.render(
-            segment_locs, info, disp_px_size=disp_px_size, **kwargs
-        )
-        if callback is not None:
-            callback(i + 1)
+    with lib.tracked_progress(
+        progress, "Generating segments", unit="segment"
+    ) as progress:
+        lib.start_phase(progress, "Generating segments", n_seg, unit="segment")
+        progress.set_value(0)
+        for i in range(n_seg):
+            segment_locs = locs[
+                (locs["frame"] >= bounds[i]) & (locs["frame"] < bounds[i + 1])
+            ]
+            _, segments[i] = render.render(
+                segment_locs, info, disp_px_size=disp_px_size, **kwargs
+            )
+            progress.set_value(i + 1)
+        progress.set_value(n_seg)
     return bounds, segments
 
 
 def undrift(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     segmentation: int,
     display: bool = True,
-    segmentation_callback: Callable[[int], None] = None,
-    rcc_callback: Callable[[int], None] = None,
-) -> tuple[pd.DataFrame, pd.DataFrame]:
+    progress: lib.Progress | Literal["console"] | None = None,
+    disp_px_size: float = UNDRIFT_PIXEL_SIZE,
+    max_shift: float = UNDRIFT_MAX_SHIFT,
+) -> tuple[pd.DataFrame, list[dict], pd.DataFrame]:
     """Undrift by RCC. See Wang, Schnitzbauer, et al. Optics Express,
     2014.
 
@@ -4507,32 +4397,76 @@ def undrift(
         Number of segments to divide the data into for undrifting.
     display : bool, optional
         If True, displays the estimated drift. Default is True.
-    segmentation_callback : Callable[[int], None], optional
-        Callback function to report progress during segmentation. It
-        should accept an integer argument representing the current
-        segment index. Default is None, which means no callback is used.
-    rcc_callback : Callable[[int], None], optional
-        Callback function to report progress during RCC calculation.
-        It should accept an integer argument representing the current
-        segment index. Default is None, which means no callback is used.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Generating segments" over the
+        segments, then "Correlating image pairs" over the segment pairs.
+        Default is None.
+    disp_px_size : float, optional
+        Pixel size (nm) of the rendered segments, which are blurred by
+        one pixel. Default is 100.
+    max_shift : float, optional
+        Largest shift (nm) between two segments considered. Default is
+        10000.
 
     Returns
     -------
-    drift : pd.DataFrame
-        Estimated drift as a DataFrame with columns 'x' and 'y'.
     locs : pd.DataFrame
         Undrifted localization list with the drift applied to the 'x'
         and 'y' coordinates.
+    info : list of dicts
+        Metadata of the undrifted localizations: ``info`` with an entry
+        recording the undrifting appended, see ``lib.append_metadata``.
+    drift : pd.DataFrame
+        Estimated drift (nm) as a DataFrame with columns 'x' and 'y'.
+
+    Raises
+    ------
+    ValueError
+        If the segmentation is not positive or divides the movie into
+        fewer than 4 segments, the fewest the drift interpolation needs.
     """
+    n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
+    if not segmentation > 0:
+        raise ValueError(
+            f"The segmentation must be a positive number of frames, got "
+            f"{segmentation:g}."
+        )
+    n_segs = n_segments(info, segmentation)
+    if n_segs < MIN_UNDRIFT_SEGMENTS:
+        message = (
+            f"A segmentation of {segmentation:g} frames divides the "
+            f"{n_frames} frames into {n_segs} segment(s), but undrifting "
+            f"by RCC needs at least {MIN_UNDRIFT_SEGMENTS}."
+        )
+        if n_frames >= MIN_UNDRIFT_SEGMENTS:
+            message += (
+                " Use a segmentation of at most "
+                f"{n_frames // MIN_UNDRIFT_SEGMENTS} frames."
+            )
+        raise ValueError(message)
     locs = locs.copy()
-    bounds, segments = segment(
-        locs,
-        info,
-        segmentation,
-        {"blur_method": "gaussian", "min_blur_width": 1},
-        segmentation_callback,
-    )
-    shift_y, shift_x = imageprocess.rcc(segments, 32, rcc_callback)
+    with lib.tracked_progress(
+        progress, "Generating segments", unit="segment"
+    ) as progress:
+        bounds, segments = segment(
+            locs,
+            info,
+            segmentation,
+            {
+                "disp_px_size": disp_px_size,
+                "blur_method": "gaussian",
+                "min_blur_width": disp_px_size,  # one rendered pixel
+            },
+            progress=progress,
+        )
+        # rcc works in rendered pixels; the shifts are converted to nm
+        shift_y, shift_x = imageprocess.rcc(
+            segments, max_shift / disp_px_size, progress=progress
+        )
+    shift_x = np.asarray(shift_x, dtype=np.float64) * disp_px_size
+    shift_y = np.asarray(shift_y, dtype=np.float64) * disp_px_size
     t = (bounds[1:] + bounds[:-1]) / 2
     drift_x_pol = interpolate.InterpolatedUnivariateSpline(t, shift_x, k=3)
     drift_y_pol = interpolate.InterpolatedUnivariateSpline(t, shift_y, k=3)
@@ -4540,16 +4474,25 @@ def undrift(
     drift_ = (drift_x_pol(t_inter), drift_y_pol(t_inter))
     drift = pd.DataFrame({"x": drift_[0], "y": drift_[1]})
     if display:
-        pixelsize = lib.get_from_metadata(info, "Pixelsize", 1.0)
-        plot_drift(drift, pixelsize)
+        plot_drift(drift)
         plt.show()
-    locs = apply_drift(locs, info, drift=drift)
-    return drift, locs
+    locs = _apply_drift(locs, drift)
+    entry = lib.step_info(
+        "Undrift",
+        **{
+            "Method": "RCC",
+            "Segmentation": segmentation,
+            "Display pixel size (nm)": disp_px_size,
+            "Max. shift (nm)": max_shift,
+        },
+    )
+    return locs, lib.append_metadata(info, entry), drift
 
 
 def undrift_from_fiducials(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     picks: list[tuple] | None = None,
     pick_size: float | None = None,
     pick_shape: Literal[
@@ -4557,7 +4500,7 @@ def undrift_from_fiducials(
     ] = "Circle",
     undrift_z: bool = True,
     index_blocks: tuple | None = None,
-    progress: lib.ProgressDialog | Literal["console"] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict], pd.DataFrame]:
     """Undrift localizations based on picked regions (fiducial markers).
 
@@ -4573,8 +4516,8 @@ def undrift_from_fiducials(
         automatically detected using
         ``picasso.imageprocess.find_fiducials``.
     pick_size : float or None, optional
-        Size of the picks in camera pixels: the pick **radius** for
-        circles, the width for rectangles, the side length for squares.
+        Size of the picks in nm: the diameter for circles, the width
+        for rectangles, the side length for squares.
         Required when ``picks`` is a list of coordinates, unless
         ``pick_shape`` carries its own extent ("Polygon", "Box").
         Ignored when ``picks`` is None (determined by
@@ -4587,25 +4530,29 @@ def undrift_from_fiducials(
         localizations. Default is True.
     index_blocks : tuple or None, optional
         Precomputed spatial index over ``locs`` as returned by
-        ``get_index_blocks`` (built with block size equal to
-        ``pick_size``). When provided, used to skip re-indexing inside
-        circular ``picked_locs``. Ignored for every other pick shape,
-        and when ``picks`` is None (auto-detected fiducials use a radius
-        that may not match the precomputed index). Default is None.
-    progress : picasso.lib.ProgressDialog or "console" or None, optional
-        Tracks progress of picking the localizations, one step per pick.
-        If "console", a tqdm progress bar is shown in the console. If a
-        ProgressDialog, a GUI progress bar is updated. If None (default),
-        no progress is displayed. Same convention as ``picasso.aim.aim``.
+        ``get_index_blocks`` (built with block size equal to the pick
+        radius, ``pick_size / 2``). When provided, used to skip
+        re-indexing inside circular ``picked_locs``. Ignored for every
+        other pick shape, and when ``picks`` is None (auto-detected
+        fiducials use a size that may not match the precomputed index).
+        Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Finding fiducials" (busy
+        indicator, only when ``picks`` is None), then "Picking
+        localizations" over the picks, then "Calculating drift" (busy
+        indicator). Default is None.
 
     Returns
     -------
     locs : pd.DataFrame
         Undrifted localizations.
-    new_info : list of dicts
-        Updated metadata.
+    info : list of dicts
+        Metadata of the undrifted localizations: ``info`` with an entry
+        recording the undrifting appended, see ``lib.append_metadata``.
     drift : pd.DataFrame
-        Drift in x and y (and optionally z) directions.
+        Drift in x and y (and optionally z) directions, in nm.
 
     Raises
     ------
@@ -4617,73 +4564,62 @@ def undrift_from_fiducials(
         pick_shape in lib.PICK_SHAPES
     ), f"pick_shape must be one of {lib.PICK_SHAPES}."
     locs = locs.copy()
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
 
-    if picks is None:
-        # auto-detect fiducials; these are always circular
-        picks, box = imageprocess.find_fiducials(locs, info)
-        pick_shape = "Circle"
-        pick_radius = box / 2
-        # passed-in index_blocks was built for a different radius; drop
-        # (the pyramid serves any radius)
-        if not _is_pyramid(index_blocks):
+    with lib.tracked_progress(
+        progress, "Picking localizations", unit="pick"
+    ) as progress:
+        if picks is None:
+            # auto-detect fiducials; these are always circular
+            lib.start_phase(progress, "Finding fiducials", 0)
+            progress.set_value(0)
+            picks, box = imageprocess.find_fiducials(locs, info)
+            progress.set_value(0)
+            pick_shape = "Circle"
+            pick_size = box
+            # passed-in index_blocks was built for a different size;
+            # drop (the pyramid serves any size)
+            if not _is_pyramid(index_blocks):
+                index_blocks = None
+        else:
+            # user-provided list of pick coordinates
+            needs_size = pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE
+            if pick_size is None and needs_size:
+                raise ValueError(
+                    "pick_size (diameter in nm for circular picks) "
+                    "must be provided when picks are given as a list of "
+                    "coordinates."
+                )
+
+        if pick_shape != "Circle":
+            # the index is built for circular lookups only
             index_blocks = None
-    else:
-        # user-provided list of pick coordinates
-        needs_size = pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE
-        if pick_size is None and needs_size:
-            raise ValueError(
-                "pick_size (radius in camera pixels for circular picks) "
-                "must be provided when picks are given as a list of "
-                "coordinates."
-            )
-        pick_radius = pick_size
 
-    if pick_shape != "Circle":
-        # the index is built for circular lookups only
-        index_blocks = None
+        if len(picks) == 0:
+            raise ValueError("No picks found for drift correction.")
 
-    if len(picks) == 0:
-        raise ValueError("No picks found for drift correction.")
+        # get picked localizations
+        pl = picked_locs(
+            locs,
+            info,
+            picks=picks,
+            pick_shape=pick_shape,
+            pick_size=pick_size,
+            add_group=False,
+            index_blocks=index_blocks,
+            progress=progress,
+        )
 
-    # get picked localizations
-    progress = lib.normalize_progress(
-        progress, description="Picking localizations", unit="pick"
-    )
-    progress.setMaximum(len(picks))
-    progress.zero_progress("Picking localizations")
-    pl = picked_locs(
-        locs,
-        info,
-        picks,
-        pick_shape,
-        pick_size=pick_radius,
-        add_group=False,
-        index_blocks=index_blocks,
-        callback=progress.set_value,
-    )
-
-    # calculate drift
-    progress.setMaximum(0)
-    progress.zero_progress("Calculating drift")
-    drift = undrift_from_picked(pl, info)
-    progress.close()
+        # calculate drift
+        lib.start_phase(progress, "Calculating drift", 0)
+        progress.set_value(0)
+        drift = undrift_from_picked(pl, info)
+        progress.set_value(0)
     if not undrift_z:
         drift = drift.drop(columns="z", errors="ignore")
-    locs = apply_drift(locs, info, drift=drift)
+    locs = _apply_drift(locs, drift)
 
-    pick_info = {
-        "Generated by": (f"Picasso v{__version__} Undrift from picked"),
-        "Number of picks": len(picks),
-        "Pick shape": pick_shape,
-    }
-    if pick_shape == "Circle":
-        pick_info["Pick radius (nm)"] = pick_radius * pixelsize
-    elif pick_radius is not None:
-        pick_info["Pick size (nm)"] = pick_radius * pixelsize
-    new_info = info + [pick_info]
-
-    return locs, new_info, drift
+    entry = _picks_entry("Undrift from picked", picks, pick_shape, pick_size)
+    return locs, lib.append_metadata(info, entry), drift
 
 
 def undrift_from_picked(
@@ -4839,9 +4775,10 @@ def apply_drift(
     info: list[dict],
     *,
     drift: pd.DataFrame | lib.FloatArray2D,
-):
+) -> tuple[pd.DataFrame, list[dict]]:
     """Convenience function to apply drift to localizations. Runs checks
-    to ensure correct formats.
+    to ensure correct formats. The coordinates of ``locs`` are shifted
+    in place, i.e., the returned localizations are ``locs`` itself.
 
     Parameters
     ----------
@@ -4860,6 +4797,9 @@ def apply_drift(
     locs : pd.DataFrame
         Localizations with drift applied to the 'x' and 'y' coordinates
         (and 'z' if it exists in the drift).
+    info : list of dicts
+        Metadata of ``locs``: ``info`` with an entry recording the step
+        appended, see ``lib.append_metadata``.
     """
     assert isinstance(
         drift, (pd.DataFrame, np.ndarray)
@@ -4881,12 +4821,12 @@ def apply_drift(
             drift,
             columns=["x", "y"] + (["z"] if drift.shape[1] == 3 else []),
         )
-    return _apply_drift(locs, drift)
+    entry = lib.step_info("Apply drift")
+    return _apply_drift(locs, drift), lib.append_metadata(info, entry)
 
 
 def plot_drift(
     drift: pd.DataFrame,
-    pixelsize: int | float,
     fig: plt.Figure | None = None,
 ) -> plt.Figure:
     """Convenience function to plot 2D or 3D drift from a DataFrame.
@@ -4894,11 +4834,8 @@ def plot_drift(
     Parameters
     ----------
     drift : pd.DataFrame
-        DataFrame containing the drift to plot. Should have columns 'x'
-        and 'y', and optionally 'z'.
-    pixelsize : int or float
-        Pixel size in nm to convert drift from pixels to nm for
-        plotting.
+        DataFrame containing the drift (nm) to plot. Should have columns
+        'x' and 'y', and optionally 'z'.
     fig : plt.Figure or None, optional
         Matplotlib figure to plot on. If None (default), a new figure is
         created.
@@ -4919,15 +4856,15 @@ def plot_drift(
 
     if "z" in drift.columns:
         ax1 = fig.add_subplot(131)
-        ax1.plot(drift["x"] * pixelsize, label="x")
-        ax1.plot(drift["y"] * pixelsize, label="y")
+        ax1.plot(drift["x"], label="x")
+        ax1.plot(drift["y"], label="y")
         ax1.legend(loc="best")
         ax1.set_xlabel("Frame")
         ax1.set_ylabel("Drift (nm)")
         ax2 = fig.add_subplot(132)
         ax2.plot(
-            drift.x * pixelsize,
-            drift.y * pixelsize,
+            drift.x,
+            drift.y,
             color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
         )
         ax2.set_aspect("equal")
@@ -4946,15 +4883,15 @@ def plot_drift(
         ax3.set_ylabel("Drift (nm)")
     else:
         ax1 = fig.add_subplot(121)
-        ax1.plot(drift["x"] * pixelsize, label="x")
-        ax1.plot(drift["y"] * pixelsize, label="y")
+        ax1.plot(drift["x"], label="x")
+        ax1.plot(drift["y"], label="y")
         ax1.legend(loc="best")
         ax1.set_xlabel("Frame")
         ax1.set_ylabel("Drift (nm)")
         ax2 = fig.add_subplot(122)
         ax2.plot(
-            drift.x * pixelsize,
-            drift.y * pixelsize,
+            drift.x,
+            drift.y,
             color=list(plt.rcParams["axes.prop_cycle"])[2]["color"],
         )
         ax2.set_xlabel("x (nm)")
@@ -4966,86 +4903,199 @@ def plot_drift(
 
 def align(
     locs: list[pd.DataFrame],
-    infos: list[dict],
-    display: bool = False,
+    infos: list[list[dict]],
     *,
-    apply_shifts: bool = True,
+    method: Literal["rcc", "picked"] = "rcc",
+    picks: list[tuple] | None = None,
+    pick_shape: Literal[
+        "Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"
+    ] = "Circle",
+    pick_size: float | None = None,
+    index_blocks: list[tuple | None] | None = None,
+    display: bool = False,
     return_shifts: bool = False,
-) -> pd.DataFrame:
-    """Align localizations from multiple channels (one per each element
-    in `locs`) by calculating the shifts between the rendered images
-    using RCC.
+    keep_non_overlapping: bool = True,
+) -> (
+    tuple[list[pd.DataFrame], list[list[dict]]]
+    | tuple[list[pd.DataFrame], list[list[dict]], tuple]
+):
+    """Align localizations from multiple channels (one per element in
+    ``locs``).
 
-    TODO: v1.0: This should be the main function that uses align_rcc or
-        align_from_picked.
+    The shifts between the channels are found either by RCC of the
+    rendered images (``method="rcc"``, see ``align_rcc``) or from the
+    localizations in picked regions (``method="picked"``, see
+    ``align_from_picked``). The input DataFrames are not modified.
 
     Parameters
     ----------
     locs : list of pd.DataFrames
-        List of localization datasets, where each element is a
-        DataFrame of localizations for a single image.
-    infos : list of dicts
-        List of metadata dictionaries corresponding to each
-        localization array in `locs`.
+        Localizations of each channel.
+    infos : list of list of dicts
+        Metadata of each channel in ``locs``.
+    method : {"rcc", "picked"}, optional
+        How the shifts are found. Default is "rcc".
+    picks : list or None, optional
+        Picked regions, in the format required by ``pick_shape``, see
+        ``io.load_picks``. Required for ``method="picked"`` and not
+        accepted otherwise. Default is None.
+    pick_shape : str, optional
+        Shape of the picks, one of ``lib.PICK_SHAPES``. Only used for
+        ``method="picked"``. Default is "Circle".
+    pick_size : float or None, optional
+        Size of the picks: the diameter of circular picks, the side
+        length of square picks and the width of rectangular picks. None
+        for polygon, box and brush picks. Only used for
+        ``method="picked"``. Default is None.
+    index_blocks : list of tuple or None, optional
+        Per-channel precomputed spatial indices for circular picks, see
+        ``align_from_picked``. Only used for ``method="picked"``.
+        Default is None.
     display : bool, optional
-        Not used.
-    apply_shifts : bool, optional
-        If True, applies the calculated shifts to the 'x' and 'y'
-        coordinates of the localizations. If False, returns the original
-        localizations without applying the shifts. Default is True.
+        If True, plots the mean shift per RCC iteration. Only used for
+        ``method="rcc"``. Default is False.
     return_shifts : bool, optional
-        If True, also returns the calculated shifts for each channel.
+        If True, also returns the shifts that were subtracted from each
+        channel. Default is False.
+    keep_non_overlapping : bool, optional
+        If False, localizations outside the region where all aligned
+        channels overlap are removed, see
+        ``remove_non_overlapping_locs``. Default is True (all
+        localizations are kept).
 
     Returns
     -------
     locs : list of pd.DataFrames
-        Aligned localizations with the shifts applied to the 'x' and
+        Aligned localizations of each channel.
+    infos : list of lists of dicts
+        Metadata of each aligned channel: its ``infos`` element with an
+        entry recording the alignment (the method and the shift
+        subtracted from the channel) appended, see
+        ``lib.append_metadata``.
+    shifts : tuple of np.ndarrays
+        ``(shift_x, shift_y)``, or ``(shift_x, shift_y, shift_z)`` if
+        z is aligned too (picked regions only). Each
+        array holds the shift subtracted from each channel, in nm.
+        Returned only if ``return_shifts`` is True.
+
+    Raises
+    ------
+    ValueError
+        If ``method`` is unknown, if ``picks`` are missing for
+        ``method="picked"`` or given for ``method="rcc"``, or if
+        ``keep_non_overlapping`` is False and the aligned channels do
+        not overlap.
+    """
+    if method == "rcc":
+        if picks is not None:
+            raise ValueError(
+                "picks are only used with method='picked', not 'rcc'."
+            )
+        locs, infos, shifts = align_rcc(
+            locs,
+            infos,
+            display=display,
+            return_shifts=True,
+            keep_non_overlapping=keep_non_overlapping,
+        )
+    elif method == "picked":
+        if picks is None:
+            raise ValueError("method='picked' requires picks.")
+        locs, infos, shifts = align_from_picked(
+            locs,
+            infos,
+            picks=picks,
+            pick_shape=pick_shape,
+            pick_size=pick_size,
+            index_blocks=index_blocks,
+            return_shifts=True,
+            keep_non_overlapping=keep_non_overlapping,
+        )
+    else:
+        raise ValueError(
+            f"Unknown alignment method {method!r}, use 'rcc' or 'picked'."
+        )
+    if return_shifts:
+        return locs, infos, shifts
+    return locs, infos
+
+
+def _aligned_infos(
+    infos: list[list[dict]], shifts: tuple, entry: dict
+) -> list[list[dict]]:
+    """Metadata of aligned channels: each element of ``infos`` with a
+    copy of ``entry`` appended that also holds the shift subtracted
+    from the channel (nm)."""
+    new_infos = []
+    for i, info in enumerate(infos):
+        channel_entry = dict(entry)
+        for axis, shift in zip("xyz", shifts):
+            channel_entry[f"Shift {axis} (nm)"] = float(shift[i])
+        new_infos.append(lib.append_metadata(info, channel_entry))
+    return new_infos
+
+
+def _rcc_shifts(
+    locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+) -> tuple[np.ndarray, np.ndarray]:
+    """One RCC pass over the rendered images of all channels, see
+    ``align_rcc``.
+
+    Parameters
+    ----------
+    locs : list of pd.DataFrames
+        Localizations of each channel.
+    infos : list of list of dicts
+        Metadata of each channel in ``locs``.
+
+    Returns
+    -------
+    shift_x, shift_y : np.ndarrays
+        Shift of each channel in nm, to be subtracted from its 'x' and
         'y' coordinates.
-    shifts : tuple
-        ``(shift_x, shift_y)`` per channel, in camera pixels. Returned only
-        if ``return_shifts`` is True.
     """
     images = []
-    disp_px_size = 100  # nm
+    disp_px_size = ALIGN_PIXEL_SIZE
+    # one canvas for all channels, so that the images have the same
+    # shape even if the channels' canvases differ (e.g., after moving
+    # a channel in Render, see lib.fit_canvas)
+    fovs = [lib.field_of_view(info_) for info_ in infos]
+    width = max(fov[0] for fov in fovs)
+    height = max(fov[1] for fov in fovs)
+    viewport = ((0, 0), (height, width))
     for locs_, info_ in zip(locs, infos):
         _, image = render.render(
-            locs_, info_, disp_px_size=disp_px_size, blur_method="smooth"
+            locs_,
+            info_,
+            disp_px_size=disp_px_size,
+            viewport=viewport,
+            blur_method="smooth",
         )
         images.append(image)
-    shift_y, shift_x = imageprocess.rcc(
-        images, callback=lib.MockProgress().set_value
-    )
-    # `rcc` returns shifts in rendered-image pixels (disp_px_size = 100 nm
-    # per pixel). Convert them to camera pixels so that both the applied
-    # and the returned shifts are in the same units as the localizations'
-    # 'x' and 'y' coordinates.
-    shift_x = np.asarray(shift_x, dtype=float)
-    shift_y = np.asarray(shift_y, dtype=float)
-    for i, info_ in enumerate(infos):
-        pixelsize = lib.get_from_metadata(info_, "Pixelsize")
-        oversampling = pixelsize / disp_px_size
-        shift_x[i] /= oversampling
-        shift_y[i] /= oversampling
-    if apply_shifts:
-        for locs_, dx, dy in zip(locs, shift_x, shift_y):
-            locs_["y"] -= dy
-            locs_["x"] -= dx
-    if return_shifts:
-        shifts = (shift_x, shift_y)
-        return locs, shifts
-    else:
-        return locs
+    shift_y, shift_x = imageprocess.rcc(images)
+    # `rcc` returns shifts in rendered-image pixels; convert them to nm,
+    # the units of the localizations' 'x' and 'y' coordinates
+    shift_x = np.asarray(shift_x, dtype=float) * disp_px_size
+    shift_y = np.asarray(shift_y, dtype=float) * disp_px_size
+    return shift_x, shift_y
 
 
 def align_rcc(
     locs: list[pd.DataFrame],
     infos: list[list[dict]],
+    *,
     display: bool = False,
     return_shifts: bool = False,
-) -> pd.DataFrame:
+    keep_non_overlapping: bool = True,
+) -> (
+    tuple[list[pd.DataFrame], list[list[dict]]]
+    | tuple[list[pd.DataFrame], list[list[dict]], tuple]
+):
     """Align localizations from multiple channels (one per each element
     in `locs`) by calculating the shifts between the rendered images
-    using RCC. This is a wrapper around `align` for backward compatibility.
+    using RCC. The RCC is repeated until the shifts converge (at most
+    five times). The input DataFrames are not modified.
 
     Parameters
     ----------
@@ -5055,87 +5105,85 @@ def align_rcc(
         List of metadata dictionaries corresponding to each
         localization DataFrame in `locs`.
     display : bool, optional
-        If True, displays the estimated shifts. Default is False.
+        If True, plots the mean shift per iteration. Default is False.
     return_shifts : bool, optional
         If True, also returns the calculated shifts for each channel.
         Default is False.
+    keep_non_overlapping : bool, optional
+        If False, localizations outside the region where all aligned
+        channels overlap are removed, see
+        ``remove_non_overlapping_locs``. Default is True (all
+        localizations are kept).
 
     Returns
     -------
     locs : list of pd.DataFrames
         Aligned localizations with the shifts applied to the 'x' and
         'y' coordinates.
-    shifts : tuple
-        ``(shift_x, shift_y)`` per channel, in camera pixels. Returned only
-        if ``return_shifts`` is True.
+    infos : list of lists of dicts
+        Metadata of each aligned channel: its ``infos`` element with an
+        entry recording the alignment (and the shift subtracted from the
+        channel) appended, see ``lib.append_metadata``.
+    shifts : tuple of np.ndarrays
+        ``(shift_x, shift_y)``. Each array holds the total shift
+        subtracted from each channel, in nm. Returned only if
+        ``return_shifts`` is True.
+
+    Raises
+    ------
+    ValueError
+        If ``keep_non_overlapping`` is False and the aligned channels
+        do not overlap.
     """
-    locs = deepcopy(locs)
+    locs = [locs_.copy() for locs_ in locs]
     max_iterations = 5
-    iteration = 0
-    convergence = 0.001  # (camera pixels), around 0.1 nm
-    shift_x = []
-    shift_y = []
-    shift_z = []
-    for iteration in range(max_iterations):
-        completed = True
-
-        # find shift between channels
-        shift = align(
-            locs, infos, display=False, apply_shifts=False, return_shifts=True
-        )[1]
-        temp_shift_x = []
-        temp_shift_y = []
-        temp_shift_z = []
-        for i, locs_ in enumerate(locs):
-            if (
-                np.absolute(shift[0][i]) + np.absolute(shift[1][i])
-                > convergence
-            ):
-                completed = False
-
-            # shift each channel
-            locs_["x"] -= shift[0][i]
-            locs_["y"] -= shift[1][i]
-
-            temp_shift_x.append(shift[0][i])
-            temp_shift_y.append(shift[1][i])
-
-            if len(shift) == 3:
-                locs_["z"] -= shift[2][i]
-                temp_shift_z.append(shift[2][i])
-        shift_x.append(np.mean(temp_shift_x))
-        shift_y.append(np.mean(temp_shift_y))
-        if len(shift) == 3:
-            shift_z.append(np.mean(temp_shift_z))
-        iteration += 1
-
-        # Skip when converged:
-        if completed:
+    convergence = ALIGN_CONVERGENCE  # nm
+    total_x = np.zeros(len(locs))
+    total_y = np.zeros(len(locs))
+    mean_x = []
+    mean_y = []
+    for _ in range(max_iterations):
+        shift_x, shift_y = _rcc_shifts(locs, infos)
+        for locs_, dx, dy in zip(locs, shift_x, shift_y):
+            locs_["x"] -= dx
+            locs_["y"] -= dy
+        total_x += shift_x
+        total_y += shift_y
+        mean_x.append(np.mean(shift_x))
+        mean_y.append(np.mean(shift_y))
+        # skip when converged
+        if np.all(np.abs(shift_x) + np.abs(shift_y) <= convergence):
             break
 
-    # Plot shift
     if display:
         fig1 = plt.figure(figsize=(8, 8), constrained_layout=True)
         plt.suptitle("Shift")
         plt.subplot(1, 1, 1)
-        plt.plot(shift_x, "o-", label="x shift")
-        plt.plot(shift_y, "o-", label="y shift")
+        plt.plot(mean_x, "o-", label="x shift")
+        plt.plot(mean_y, "o-", label="y shift")
         plt.xlabel("Iteration")
-        plt.ylabel("Mean Shift per Iteration (Px)")
+        plt.ylabel("Mean shift per iteration (nm)")
         plt.legend(loc="best")
         fig1.show()
 
+    if not keep_non_overlapping:
+        locs = remove_non_overlapping_locs(locs)
+    shifts = (total_x, total_y)
+    entry = lib.step_info(
+        "Align",
+        **{
+            "Method": "RCC",
+            "Remove non-overlapping": not keep_non_overlapping,
+        },
+    )
+    infos = _aligned_infos(infos, shifts, entry)
     if return_shifts:
-        shifts = list(zip(shift_x, shift_y))
-        if len(shift) == 3:
-            shifts = list(zip(shift_x, shift_y, shift_z))
-        return locs, shifts
-    else:
-        return locs
+        return locs, infos, shifts
+    return locs, infos
 
 
 def align_from_picked(
-    all_locs: list[pd.DataFrame],
+    locs: list[pd.DataFrame],
     infos: list[list[dict]],
     *,
     picks: list[tuple],
@@ -5145,17 +5193,21 @@ def align_from_picked(
     pick_size: float | None = None,
     return_shifts: bool = False,
     index_blocks: list[tuple | None] | None = None,
+    keep_non_overlapping: bool = True,
+) -> (
+    tuple[list[pd.DataFrame], list[list[dict]]]
+    | tuple[list[pd.DataFrame], list[list[dict]], tuple]
 ):
-    """Align picked localizations from multiple channels using picked
-    localizations.
+    """Align localizations from multiple channels using picked
+    localizations. The input DataFrames are not modified.
 
     Parameters
     ----------
-    all_locs : list of pd.DataFrames
+    locs : list of pd.DataFrames
         List of localization datasets.
     infos : list of list of dicts
         List of metadata dictionaries corresponding to each localization
-        dataset in `all_locs`.
+        dataset in ``locs``.
     picks : list of (2,) tuples
         Coordinates of picked regions as (x, y) tuples. See
         ``io.load_picks``.
@@ -5171,11 +5223,16 @@ def align_from_picked(
         Default is False.
     index_blocks : list of tuple or None, optional
         Per-channel precomputed spatial indices (one entry per dataset
-        in ``all_locs``, aligned by position) as returned by
+        in ``locs``, aligned by position) as returned by
         ``get_index_blocks``. Each entry may be ``None`` to recompute
         for that channel. Used to skip re-indexing inside circular
         ``picked_locs``. Ignored for non-circular pick shapes. Default
         is None (all channels recompute on demand).
+    keep_non_overlapping : bool, optional
+        If False, localizations outside the region where all aligned
+        channels overlap are removed, see
+        ``remove_non_overlapping_locs``. Default is True (all
+        localizations are kept).
 
     Returns
     -------
@@ -5183,10 +5240,23 @@ def align_from_picked(
         List of aligned localization datasets, where the localizations
         have been shifted according to the average shift calculated from
         the picked localizations.
-    shifts : list of tuples
-        List of (dx, dy) shifts applied to each localization dataset in
-        `all_locs`, calculated as the average shift from the picked
-        localizations. Returned only if `return_shifts` is True.
+    infos : list of lists of dicts
+        Metadata of each aligned channel: its ``infos`` element with an
+        entry recording the alignment (the picks and the shift
+        subtracted from the channel) appended, see
+        ``lib.append_metadata``.
+    shifts : tuple of np.ndarrays
+        ``(shift_x, shift_y)``, or ``(shift_x, shift_y, shift_z)`` if
+        all channels have z. Each array holds the shift
+        subtracted from each dataset in ``locs``, calculated as the
+        average shift from the picked localizations, in nm. Returned
+        only if ``return_shifts`` is True.
+
+    Raises
+    ------
+    ValueError
+        If ``keep_non_overlapping`` is False and the aligned channels
+        do not overlap.
     """
     assert (
         pick_shape in lib.PICK_SHAPES
@@ -5195,14 +5265,17 @@ def align_from_picked(
         assert (
             pick_size is not None
         ), "pick_size must be provided when picks is a list of coordinates"
-    if pick_shape == "Circle":
-        pick_size = pick_size / 2  # convert diameter to radius
-    ib_list = (
-        index_blocks if index_blocks is not None else [None] * len(all_locs)
-    )
+    ib_list = index_blocks if index_blocks is not None else [None] * len(locs)
     pl = [
-        picked_locs(locs, i, picks, pick_shape, pick_size, index_blocks=ib)
-        for locs, i, ib in zip(all_locs, infos, ib_list)
+        picked_locs(
+            locs_,
+            info,
+            picks=picks,
+            pick_shape=pick_shape,
+            pick_size=pick_size,
+            index_blocks=ib,
+        )
+        for locs_, info, ib in zip(locs, infos, ib_list)
     ]
     dy = _shifts_from_picked_coordinate(pl, coordinate="y")
     dx = _shifts_from_picked_coordinate(pl, coordinate="x")
@@ -5210,21 +5283,104 @@ def align_from_picked(
         dz = _shifts_from_picked_coordinate(pl, coordinate="z")
     else:
         dz = None
-    shift = lib.minimize_shifts(dx, dy, shifts_z=dz)
+    # minimize_shifts returns (y, x[, z]); the shifts are returned
+    # x first, like those of align and align_rcc
+    shift_y, shift_x, *shift_z = lib.minimize_shifts(dx, dy, shifts_z=dz)
+    shifts = tuple(
+        np.asarray(_, dtype=float) for _ in (shift_x, shift_y, *shift_z)
+    )
 
     # align each channel
     aligned_locs = []
-    for i, locs_ in enumerate(all_locs):
-        locs_.y -= shift[0][i]
-        locs_.x -= shift[1][i]
-        if len(shift) == 3:
-            locs_.z -= shift[2][i]
-        aligned_locs.append(locs_.copy())
-
+    for i, locs_ in enumerate(locs):
+        locs_ = locs_.copy()
+        locs_["x"] -= shifts[0][i]
+        locs_["y"] -= shifts[1][i]
+        if len(shifts) == 3:
+            locs_["z"] -= shifts[2][i]
+        aligned_locs.append(locs_)
+    if not keep_non_overlapping:
+        aligned_locs = remove_non_overlapping_locs(aligned_locs)
+    entry = _picks_entry("Align", picks, pick_shape, pick_size)
+    entry["Method"] = "Picked"
+    entry["Remove non-overlapping"] = not keep_non_overlapping
+    infos = _aligned_infos(infos, shifts, entry)
     if return_shifts:
-        return aligned_locs, shift
-    else:
-        return aligned_locs
+        return aligned_locs, infos, shifts
+    return aligned_locs, infos
+
+
+def overlap_region(
+    locs: list[pd.DataFrame],
+) -> tuple[tuple[float, float], tuple[float, float]] | None:
+    """Find the region in which all channels overlap, i.e., the
+    intersection of the rectangles spanned by the x and y coordinates of
+    the localizations of each channel.
+
+    Parameters
+    ----------
+    locs : list of pd.DataFrames
+        Localizations of each channel, e.g., after alignment (see
+        ``align_rcc`` and ``align_from_picked``).
+
+    Returns
+    -------
+    region : tuple or None
+        ``((x_min, x_max), (y_min, y_max))`` of the overlap in nm, or
+        None if the channels do not overlap (or any channel has no
+        localizations).
+    """
+    if any(len(locs_) == 0 for locs_ in locs):
+        return None
+    x_min = max(locs_["x"].min() for locs_ in locs)
+    x_max = min(locs_["x"].max() for locs_ in locs)
+    y_min = max(locs_["y"].min() for locs_ in locs)
+    y_max = min(locs_["y"].max() for locs_ in locs)
+    if x_min > x_max or y_min > y_max:
+        return None
+    return (x_min, x_max), (y_min, y_max)
+
+
+def remove_non_overlapping_locs(
+    locs: list[pd.DataFrame],
+) -> list[pd.DataFrame]:
+    """Remove the localizations that lie outside the region in which
+    all channels overlap, see ``overlap_region``.
+
+    After aligning channels (``align_rcc`` and ``align_from_picked``),
+    large shifts can move parts of a channel to where the other channels
+    have no localizations, for example, when the channels were imaged
+    over shifted fields of view. Only x and y are considered.
+
+    Parameters
+    ----------
+    locs : list of pd.DataFrames
+        Localizations of each channel.
+
+    Returns
+    -------
+    locs : list of pd.DataFrames
+        Copies of the localizations of each channel inside the overlap
+        region, with a reset index.
+
+    Raises
+    ------
+    ValueError
+        If the channels do not overlap.
+    """
+    region = overlap_region(locs)
+    if region is None:
+        raise ValueError(
+            "The channels do not overlap, so no localizations would be"
+            " kept."
+        )
+    (x_min, x_max), (y_min, y_max) = region
+    return [
+        locs_[
+            locs_["x"].between(x_min, x_max) & locs_["y"].between(y_min, y_max)
+        ].reset_index(drop=True)
+        for locs_ in locs
+    ]
 
 
 def _shifts_from_picked_coordinate(
@@ -5271,7 +5427,7 @@ def _shifts_from_picked_coordinate(
 
 def groupprops(
     locs: pd.DataFrame,
-    callback: Callable[[int], None] | Literal["console"] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Calculate group statistics for localizations, such as mean and
     standard deviation.
@@ -5280,21 +5436,21 @@ def groupprops(
     ----------
     locs : pd.DataFrame
         Localizations with a 'group' field that defines the groups.
-    callback : callable, "console" or None, optional
-        Callback function to report progress. It should accept an
-        integer argument representing the current group index. If
-        "console", uses tqdm to display progress in the console.
-        Default is None, which means no progress is reported.
+        Binding events with ``dark == -1`` (no preceding event, see
+        ``compute_dark_times``) are excluded if a 'dark' column exists.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating group properties"
+        over the groups. Default is None.
 
     Returns
     -------
     groups : pd.DataFrame
         Group statistics for each group in the localization list.
     """
-    try:
+    if "dark" in locs.columns:
         locs = locs[locs["dark"] != -1]
-    except AttributeError:
-        pass
     group_ids = np.unique(locs["group"])
     n = len(group_ids)
     names = ["group", "n_events"] + list(
@@ -5302,29 +5458,23 @@ def groupprops(
     )
     groups = pd.DataFrame(np.empty((n, len(names))), columns=names)
 
-    # progress reporting
-    use_tqdm = callback == "console"
-    if use_tqdm:
-        iter_range = tqdm(
-            total=len(group_ids),
-            desc="Calculating group statistics",
-            unit="Groups",
+    with lib.tracked_progress(
+        progress, "Calculating group properties", unit="group"
+    ) as progress:
+        lib.start_phase(
+            progress, "Calculating group properties", n, unit="group"
         )
-    else:
-        iter_range = range(len(group_ids))
-
-    for i in iter_range:
-        if callable(callback):
-            callback(i)
-        group_id = group_ids[i]
-        group_locs = locs[locs["group"] == group_id]
-        groups.loc[i, "group"] = group_id
-        groups.loc[i, "n_events"] = len(group_locs)
-        for name in locs.columns:
-            groups.loc[i, name + "_mean"] = group_locs[name].mean()
-            groups.loc[i, name + "_std"] = group_locs[name].std()
-    if callable(callback):  # close the progress dialog
-        callback(len(group_ids))
+        progress.set_value(0)
+        for i in range(n):
+            group_id = group_ids[i]
+            group_locs = locs[locs["group"] == group_id]
+            groups.loc[i, "group"] = group_id
+            groups.loc[i, "n_events"] = len(group_locs)
+            for name in locs.columns:
+                groups.loc[i, name + "_mean"] = group_locs[name].mean()
+                groups.loc[i, name + "_std"] = group_locs[name].std()
+            progress.set_value(i + 1)
+        progress.set_value(n)
 
     # set dtypes
     groups = groups.astype(
@@ -5374,16 +5524,20 @@ def calculate_fret(
         max_frames = max([acc_locs["frame"].max(), don_locs["frame"].max()])
 
     # Initialize a vector filled with zeros for the duration of the movie
+    # (float: an integer trace would truncate the photon numbers)
     xvec = np.arange(max_frames + 1)
-    yvec = xvec[:] * 0
-    acc_trace = yvec.copy()
-    don_trace = yvec.copy()
+    acc_trace = np.zeros(len(xvec))
+    don_trace = np.zeros(len(xvec))
     # Fill vector with the photon numbers of events that happend
     acc_trace[acc_locs["frame"]] = acc_locs["photons"] - acc_locs["bg"]
     don_trace[don_locs["frame"]] = don_locs["photons"] - don_locs["bg"]
 
-    # Calculate the FRET efficiency
-    fret_trace = acc_trace / (acc_trace + don_trace)
+    # Calculate the FRET efficiency (0 in frames without any photons, which
+    # the selection below drops)
+    total = acc_trace + don_trace
+    fret_trace = np.divide(
+        acc_trace, total, out=np.zeros_like(total), where=total != 0
+    )
     # Only select FRET values between 0 and 1
     selector = np.logical_and(fret_trace > 0, fret_trace < 1)
 
@@ -5445,13 +5599,2797 @@ def nn_analysis(
     else:
         distances, indices = tree.query(X1, k=nn_count)
         nn = distances
-    nn.reshape(-1, nn_count)  # ensure the shape is (N, nn_count)
+    nn = nn.reshape(-1, nn_count)  # k=1 gives a flat array
     return nn
+
+
+def _cbc_column(name: str) -> str:
+    """Name of the column holding CBC values against a partner called
+    ``name``: ``"cbc_"`` followed by the name with every run of
+    characters other than letters, digits and underscores replaced by
+    one underscore (e.g., ``"Cav2.1"`` gives ``"cbc_Cav2_1"``), so that
+    it can be used in filter expressions. Raises ValueError if ``name``
+    contains no letter, digit or underscore."""
+    clean = re.sub(r"\W+", "_", str(name)).strip("_")
+    if not clean:
+        raise ValueError(f"Invalid CBC partner name: {name!r}.")
+    return f"cbc_{clean}"
+
+
+def cbc(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    partner_locs: pd.DataFrame | list[pd.DataFrame],
+    partner_names: str | list[str] | None = None,
+    r_max: float = 200.0,
+    steps: int = 100,
+    use_z: bool | None = None,
+    undefined: float = 0.0,
+    remove_undefined: bool = False,
+    chunk_size: int = 20_000,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Coordinate-based colocalization (CBC) of localizations with one
+    or more partner localization lists, following Malkusch, et al.
+    (2012), see References.
+
+    Every localization of ``locs`` gets a CBC value against each
+    partner, from -1 (anticorrelated) through 0 (uncorrelated) to 1
+    (colocalized). For a localization, the numbers of its own channel's
+    and of the partner's localizations within radii r up to ``r_max``
+    are normalized by the area (2D) or volume (3D) searched, the two
+    distributions are compared with the Spearman rank correlation and
+    the result is weighted by ``exp(-E / r_max)``, where E is the
+    distance to the nearest partner localization.
+
+    The CBC is not symmetric: the values of ``locs`` against a partner
+    differ from the values of the partner against ``locs``. To get both
+    directions, call the function with the roles swapped, or use
+    ``cbc_all_pairs`` to score every channel against every other one.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations that are scored.
+    info : list of dicts
+        Metadata of ``locs``.
+    partner_locs : pd.DataFrame or list of pd.DataFrames
+        Partner localizations that ``locs`` are scored against, in the
+        same coordinate system (nm) as ``locs``.
+        The neighbor counts of ``locs`` within their own channel are
+        shared between the partners, so passing several partners at
+        once is faster than one call per partner.
+    partner_names : str, list of str or None, optional
+        Short names of the partners, one per partner. The CBC values
+        against a partner are saved in the column ``cbc_<name>``, where
+        characters other than letters, digits and underscores are
+        replaced by underscores (e.g., ``"Cav2.1"`` gives
+        ``"cbc_Cav2_1"``). If None, the column is called ``"cbc"`` for a
+        single partner and ``"cbc_0"``, ``"cbc_1"``, ... for a list of
+        partners. Existing columns of the same name are overwritten.
+        Default is None.
+    r_max : float, optional
+        Maximum radius in nm. Default is 200.
+    steps : int, optional
+        Number of radii between 0 (excluded) and ``r_max``, at least
+        2. Default is 100.
+    use_z : bool or None, optional
+        Whether to compute the CBC in 3D (x, y, z). If None, 3D is used
+        when ``locs`` and all partners contain z. Default is None.
+    undefined : float, optional
+        CBC given to localizations without any partner localization, or
+        without any localization of their own channel other than
+        themselves, within ``r_max``, where the CBC is not defined.
+        Default is 0. ``np.nan`` marks them as missing, but
+        ``io.save_locs`` removes localizations with NaN values.
+    remove_undefined : bool, optional
+        If True, localizations where the CBC is not defined against at
+        least one partner are removed instead of getting ``undefined``.
+        Default is False.
+    chunk_size : int, optional
+        Number of localizations processed at once, limits memory usage.
+        Default is 20,000.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating CBC" over the
+        localizations of ``locs``. Default is None.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        Copy of the input localizations with the new CBC column(s)
+        (float32), without the localizations where the CBC is not
+        defined if ``remove_undefined``.
+    info : list of dicts
+        Metadata of the returned localizations: ``info`` with an entry
+        recording the CBC parameters appended, see
+        ``lib.append_metadata``.
+
+    Raises
+    ------
+    ValueError
+        If the parameters are invalid, the number of partner names does
+        not match the number of partners, two partner names give the
+        same column, or 3D is requested for localizations without z.
+
+    Warns
+    -----
+    UserWarning
+        If ``locs`` or any partner is not linked (no ``len`` column).
+        Unlinked localizations count every binding event several times
+        and inflate the neighbor counts; link them first with
+        ``postprocess.link``.
+
+    See Also
+    --------
+    cbc_all_pairs : CBC of every channel against every other channel.
+
+    References
+    ----------
+    Malkusch, S., Endesfelder, U., Mondry, J. et al. Coordinate-based
+    colocalization analysis of single-molecule localization microscopy
+    data. Histochem Cell Biol 137, 1-10 (2012).
+    https://doi.org/10.1007/s00418-011-0880-5
+    """
+    single = isinstance(partner_locs, pd.DataFrame)
+    partners = [partner_locs] if single else list(partner_locs)
+    if not partners:
+        raise ValueError("At least one partner is required.")
+    if partner_names is None:
+        columns = (
+            ["cbc"] if single else [f"cbc_{i}" for i in range(len(partners))]
+        )
+    else:
+        if isinstance(partner_names, str):
+            partner_names = [partner_names]
+        partner_names = list(partner_names)
+        if len(partner_names) != len(partners):
+            raise ValueError(
+                f"{len(partner_names)} partner names given for "
+                f"{len(partners)} partners."
+            )
+        columns = [_cbc_column(name) for name in partner_names]
+    use_z = _validate_cbc_args([locs] + partners, columns, r_max, steps, use_z)
+    _warn_if_not_linked([locs] + partners)
+    with lib.tracked_progress(
+        progress, "Calculating CBC", unit="loc"
+    ) as progress:
+        lib.start_phase(progress, "Calculating CBC", len(locs), unit="loc")
+        progress.set_value(0)
+        new_locs, new_info = _cbc_channel(
+            locs,
+            info,
+            partners,
+            partner_names,
+            columns,
+            r_max,
+            steps,
+            use_z,
+            undefined,
+            remove_undefined,
+            chunk_size,
+            progress,
+        )
+        progress.set_value(len(locs))
+    return new_locs, new_info
+
+
+def cbc_all_pairs(
+    locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+    *,
+    names: list[str] | None = None,
+    r_max: float = 200.0,
+    steps: int = 100,
+    use_z: bool | None = None,
+    undefined: float = 0.0,
+    remove_undefined: bool = False,
+    chunk_size: int = 20_000,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> tuple[list[pd.DataFrame], list[list[dict]]]:
+    """Coordinate-based colocalization (CBC) of every channel against
+    every other channel, following Malkusch, et al. (2012), see
+    References.
+
+    The CBC is not symmetric, so both directions of each pair are
+    computed: channel i gets one column ``cbc_<name of j>`` for every
+    other channel j. See ``cbc`` for the method.
+
+    Parameters
+    ----------
+    locs : list of pd.DataFrames
+        Localizations of at least two channels, in the same coordinate
+        system (nm).
+    infos : list of list of dicts
+        Metadata of each channel.
+    names : list of str or None, optional
+        Short names of the channels, used for the column names
+        ``cbc_<name>`` (see ``cbc``). If None, the channels are called ``"0"``,
+        ``"1"``, ... Default is None.
+    r_max : float, optional
+        Maximum radius in nm. Default is 200.
+    steps : int, optional
+        Number of radii between 0 (excluded) and ``r_max``, at least
+        2. Default is 100.
+    use_z : bool or None, optional
+        Whether to compute the CBC in 3D (x, y, z). If None, 3D is used
+        when all channels contain z. Default is None.
+    undefined : float, optional
+        CBC given to localizations without any partner localization, or
+        without any localization of their own channel other than
+        themselves, within ``r_max``. Default is 0. See ``cbc``.
+    remove_undefined : bool, optional
+        If True, localizations where the CBC is not defined against at
+        least one other channel are removed instead of getting
+        ``undefined``. Default is False.
+    chunk_size : int, optional
+        Number of localizations processed at once, limits memory usage.
+        Default is 20,000.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating CBC" over the
+        localizations of all channels. Default is None.
+
+    Returns
+    -------
+    locs : list of pd.DataFrames
+        Copy of each channel's localizations with one CBC column per
+        other channel (float32), without the localizations where the
+        CBC is not defined if ``remove_undefined``.
+    infos : list of list of dicts
+        Metadata of each channel with a new entry describing the CBC
+        parameters.
+
+    Raises
+    ------
+    ValueError
+        If fewer than two channels are given, the numbers of channels,
+        metadata and names differ, two names give the same column, or
+        the parameters are invalid.
+
+    Warns
+    -----
+    UserWarning
+        If any channel is not linked (no ``len`` column), see ``cbc``.
+
+    See Also
+    --------
+    cbc : CBC of one channel against one or more partners.
+
+    References
+    ----------
+    Malkusch, S., Endesfelder, U., Mondry, J. et al. Coordinate-based
+    colocalization analysis of single-molecule localization microscopy
+    data. Histochem Cell Biol 137, 1-10 (2012).
+    https://doi.org/10.1007/s00418-011-0880-5
+    """
+    n_channels = len(locs)
+    if n_channels < 2:
+        raise ValueError("CBC of all pairs requires at least two channels.")
+    if len(infos) != n_channels:
+        raise ValueError(
+            f"{len(infos)} metadata given for {n_channels} channels."
+        )
+    if names is None:
+        names = [str(i) for i in range(n_channels)]
+    names = list(names)
+    if len(names) != n_channels:
+        raise ValueError(
+            f"{len(names)} names given for {n_channels} channels."
+        )
+    columns = [_cbc_column(name) for name in names]
+    use_z = _validate_cbc_args(locs, columns, r_max, steps, use_z)
+    _warn_if_not_linked(locs)
+
+    total = sum(len(locs_) for locs_ in locs)
+    out_locs, out_infos = [], []
+    offset = 0
+    with lib.tracked_progress(
+        progress, "Calculating CBC", unit="loc"
+    ) as progress:
+        lib.start_phase(progress, "Calculating CBC", total, unit="loc")
+        progress.set_value(0)
+        for i in range(n_channels):
+            others = [j for j in range(n_channels) if j != i]
+            new_locs, new_info = _cbc_channel(
+                locs[i],
+                infos[i],
+                [locs[j] for j in others],
+                [names[j] for j in others],
+                [columns[j] for j in others],
+                r_max,
+                steps,
+                use_z,
+                undefined,
+                remove_undefined,
+                chunk_size,
+                progress,
+                offset,
+            )
+            new_info[-1]["CBC name"] = names[i]
+            out_locs.append(new_locs)
+            out_infos.append(new_info)
+            offset += len(locs[i])
+        progress.set_value(total)
+    return out_locs, out_infos
+
+
+def _validate_cbc_args(
+    all_locs: list[pd.DataFrame],
+    columns: list[str],
+    r_max: float,
+    steps: int,
+    use_z: bool | None,
+) -> bool:
+    """Check the CBC parameters shared by ``cbc`` and
+    ``cbc_all_pairs`` and return whether to use z."""
+    if len(set(columns)) != len(columns):
+        raise ValueError(
+            f"The CBC column names {columns} are not unique; please use "
+            "distinct names."
+        )
+    if r_max <= 0:
+        raise ValueError("r_max must be positive.")
+    if steps < 2:
+        raise ValueError("steps must be at least 2.")
+    has_z = all("z" in locs_.columns for locs_ in all_locs)
+    if use_z is None:
+        return has_z
+    if use_z and not has_z:
+        raise ValueError("3D CBC requires z in all localizations.")
+    return bool(use_z)
+
+
+def _warn_if_not_linked(all_locs: list[pd.DataFrame]) -> None:
+    """Warn if any of the localizations is not linked (no ``len``
+    column); the warning points at the caller of the public function."""
+    if not all("len" in locs_.columns for locs_ in all_locs):
+        warnings.warn(
+            "The localizations are not linked (no 'len' column), so each "
+            "binding event is counted several times in the CBC. Consider "
+            "linking them first with picasso.postprocess.link.",
+            UserWarning,
+            stacklevel=3,
+        )
+
+
+def _cbc_channel(
+    locs: pd.DataFrame,
+    info: list[dict],
+    partners: list[pd.DataFrame],
+    partner_names: list[str] | None,
+    columns: list[str],
+    r_max: float,
+    steps: int,
+    use_z: bool,
+    undefined: float,
+    remove_undefined: bool,
+    chunk_size: int,
+    progress: lib.Progress,
+    offset: int = 0,
+) -> tuple[pd.DataFrame, list[dict]]:
+    """CBC of one channel against its partners, with validated
+    parameters. See ``cbc``. ``progress`` is set to ``offset`` plus the
+    number of localizations processed after each chunk."""
+    coords = _cbc_coords(locs, use_z)
+    partner_coords = [_cbc_coords(p, use_z) for p in partners]
+    values, defined = _cbc(
+        coords,
+        partner_coords,
+        r_max,
+        steps,
+        undefined,
+        chunk_size,
+        progress,
+        offset,
+    )
+    locs = locs.copy()
+    for column, cbc_values in zip(columns, values):
+        locs[column] = cbc_values.astype(np.float32)
+    n_removed = 0
+    if remove_undefined:
+        keep = np.logical_and.reduce(defined)
+        n_removed = int(len(locs) - keep.sum())
+        locs = locs[keep].reset_index(drop=True)
+    new_info = {
+        **lib.step_info("CBC"),
+        "CBC columns": list(columns),
+    }
+    if partner_names is not None:
+        new_info["CBC partner names"] = list(partner_names)
+    new_info.update(
+        {
+            "Max. radius (nm)": float(r_max),
+            "Radius steps": int(steps),
+            "Dimensions": 3 if use_z else 2,
+        }
+    )
+    if remove_undefined:
+        new_info["Localizations without neighbors removed"] = n_removed
+    else:
+        new_info["Undefined CBC value"] = float(undefined)
+    return locs, lib.append_metadata(info, new_info)
+
+
+def _cbc_coords(locs: pd.DataFrame, use_z: bool) -> lib.FloatArray2D:
+    """Coordinates of localizations in nm, (N, 2) or (N, 3) if
+    ``use_z``."""
+    xy = locs[["x", "y"]].to_numpy(np.float64)
+    if use_z:
+        return np.column_stack([xy, locs["z"].to_numpy(np.float64)])
+    return xy
+
+
+def _cbc(
+    coords: lib.FloatArray2D,
+    partner_coords: list[lib.FloatArray2D],
+    r_max: float,
+    steps: int,
+    undefined: float,
+    chunk_size: int,
+    progress: lib.Progress,
+    offset: int = 0,
+) -> tuple[list[lib.FloatArray1D], list[lib.BoolArray1D]]:
+    """CBC values of ``coords`` against each array in
+    ``partner_coords`` (all in nm), and whether they are defined (the
+    localization has neighbors of both channels within ``r_max``), see
+    ``cbc`` for details. The localizations are processed in chunks; the
+    neighbor counts within the own channel are computed once per chunk
+    for all partners. After each chunk, ``progress`` is set to ``offset``
+    plus the number of localizations processed."""
+    n = len(coords)
+    radii = np.linspace(r_max / steps, r_max, steps)  # 0 excluded
+    # D(r) normalizes N(r) by the area (2D) or volume (3D) searched:
+    # D(r) = [N(r) / N(r_max)] * [r_max / r]^n_dims, with r = (i + 1) *
+    # r_max / steps. The Spearman correlation only uses the order of D(r)
+    # within each localization, so the constant factors are left out and
+    # D(r) is taken as N(r) / (i + 1)^n_dims: one correctly rounded
+    # division of integers, which keeps radii with exactly equal D(r)
+    # tied (several roundings break such ties at random)
+    shells = np.arange(1, steps + 1, dtype=np.float64) ** coords.shape[1]
+
+    values = [np.full(n, undefined, dtype=np.float64) for _ in partner_coords]
+    defined = [np.zeros(n, dtype=bool) for _ in partner_coords]
+    if n == 0:
+        return values, defined
+    tree = KDTree(coords)
+    partner_trees = [KDTree(c) if len(c) else None for c in partner_coords]
+
+    for start in range(0, n, chunk_size):
+        stop = min(start + chunk_size, n)
+        chunk_tree = KDTree(coords[start:stop])
+        # A-A counts, excluding the localization itself
+        n_a_r = _cbc_cumulative_counts(chunk_tree, tree, radii) - 1
+        for partner_tree, cbc_values, cbc_defined in zip(
+            partner_trees, values, defined
+        ):
+            if partner_tree is None:
+                continue  # no partner localizations, CBC undefined
+            n_b_r = _cbc_cumulative_counts(chunk_tree, partner_tree, radii)
+            # localizations without neighbors within r_max are undefined
+            valid = (n_a_r[:, -1] > 0) & (n_b_r[:, -1] > 0)
+            if not valid.any():
+                continue
+            s = _rowwise_spearman(n_a_r[valid] / shells, n_b_r[valid] / shells)
+            # weighting by the distance to the nearest partner
+            idx = start + np.flatnonzero(valid)
+            e_ab, _ = partner_tree.query(coords[idx], k=1)
+            cbc_values[idx] = s * np.exp(-e_ab / r_max)
+            cbc_defined[idx] = True
+        progress.set_value(offset + stop)
+    return values, defined
+
+
+def _cbc_cumulative_counts(
+    chunk_tree: KDTree,
+    other_tree: KDTree,
+    radii: lib.FloatArray1D,
+) -> lib.IntArray2D:
+    """Number of points of ``other_tree`` within each radius (<= r) of
+    each point of ``chunk_tree``, as an (n_chunk, len(radii)) array.
+    The neighbors within the largest radius are queried once and binned
+    into all radii."""
+    n_chunk = chunk_tree.n
+    steps = len(radii)
+    pairs = chunk_tree.sparse_distance_matrix(
+        other_tree, radii[-1], output_type="ndarray"
+    )
+    # first radius at which each neighbor is counted (d <= r)
+    bins = np.searchsorted(radii, pairs["v"], side="left")
+    counts = np.bincount(
+        pairs["i"] * steps + bins, minlength=n_chunk * steps
+    ).reshape(n_chunk, steps)
+    return np.cumsum(counts, axis=1, dtype=np.int32)
+
+
+def _rowwise_spearman(
+    x: lib.FloatArray2D, y: lib.FloatArray2D
+) -> lib.FloatArray1D:
+    """Spearman rank correlation between the corresponding rows of
+    ``x`` and ``y``. Rows with constant values (undefined correlation)
+    give 0."""
+    rx = rankdata(x, axis=1)
+    ry = rankdata(y, axis=1)
+    rx -= rx.mean(axis=1, keepdims=True)
+    ry -= ry.mean(axis=1, keepdims=True)
+    num = np.sum(rx * ry, axis=1)
+    den = np.sqrt(np.sum(rx**2, axis=1) * np.sum(ry**2, axis=1))
+    s = np.zeros(len(x))
+    valid = den > 0
+    s[valid] = num[valid] / den[valid]
+    return s
+
+
+# Spatial statistics: how the molecules of one species are distributed
+# (clustered, random or dispersed) within regions of interest
+
+#: Largest weight of Ripley's isotropic edge correction, as in
+#: spatstat's ``edge.Ripley``. Caps the influence of a pair whose circle
+#: lies almost entirely outside the region, e.g., close to a corner.
+_MAX_EDGE_WEIGHT = 100.0
+
+#: Number of angles sampled on a circle to measure the fraction of it
+#: inside a brush pick (exact for the other pick shapes).
+_BRUSH_ANGLES = 72
+
+#: Gauss-Legendre nodes and weights on [-1, 1] of the integration over
+#: heights in the 3D edge correction, see ``_sphere_fraction_inside``
+_SPHERE_NODES, _SPHERE_WEIGHTS = np.polynomial.legendre.leggauss(16)
+
+# kinds of regions of interest, see ``_Region``
+_REGION_CIRCLE = 0
+_REGION_POLYGON = 1
+_REGION_BRUSH = 2
+
+_point_segment_distance_sq = lib._point_segment_distance_sq
+
+#: Columns that molecules (one localization per molecule) have and
+#: localizations do not: written by ``clusterer.find_cluster_centers``
+#: and ``g5m.g5m``
+_MOLECULE_COLUMNS = ("n_events", "std_frame")
+
+
+def _are_molecules(locs: pd.DataFrame) -> bool:
+    """Whether ``locs`` are molecules rather than localizations, i.e.,
+    contain any of ``_MOLECULE_COLUMNS``."""
+    return any(column in locs.columns for column in _MOLECULE_COLUMNS)
+
+
+class _Region(NamedTuple):
+    """Geometry of a region of interest, in nm.
+
+    ``kind`` is ``_REGION_CIRCLE`` (``circle`` holds the center x, y
+    and the radius), ``_REGION_POLYGON`` (each row of ``segments`` is an
+    edge ``x0, y0, x1, y1``, the fifth column is unused) or
+    ``_REGION_BRUSH`` (each row of ``segments`` is a segment of a stroke
+    path with the stroke's radius in the fifth column). ``bounds`` is
+    ``(x_min, x_max, y_min, y_max)``. For a rectangular polygon,
+    ``rectangle`` holds a corner and the two edges leaving it, ``x0,
+    y0, e1x, e1y, e2x, e2y``, otherwise it is None."""
+
+    kind: int
+    circle: lib.FloatArray1D
+    segments: lib.FloatArray2D
+    bounds: tuple[float, float, float, float]
+    area: float
+    rectangle: lib.FloatArray1D | None = None
+
+
+def _polygon_region(X: lib.FloatArray1D, Y: lib.FloatArray1D) -> _Region:
+    """Region enclosed by the polygon with corners ``(X, Y)`` in nm,
+    given open or closed (first corner repeated at the end)."""
+    X = np.asarray(X, dtype=np.float64)
+    Y = np.asarray(Y, dtype=np.float64)
+    if len(X) > 1 and X[0] == X[-1] and Y[0] == Y[-1]:
+        X, Y = X[:-1], Y[:-1]
+    segments = np.column_stack(
+        [X, Y, np.roll(X, -1), np.roll(Y, -1), np.zeros(len(X))]
+    )
+    rectangle = None
+    if len(X) == 4:
+        e1 = np.array([X[1] - X[0], Y[1] - Y[0]])
+        e2 = np.array([X[3] - X[0], Y[3] - Y[0]])
+        scale = np.dot(e1, e1) + np.dot(e2, e2)
+        opposite = np.array([X[2] - X[0], Y[2] - Y[0]]) - e1 - e2
+        if (
+            scale > 0
+            and abs(np.dot(e1, e2)) <= 1e-9 * scale
+            and np.dot(opposite, opposite) <= 1e-18 * scale
+        ):
+            rectangle = np.array([X[0], Y[0], *e1, *e2])
+    return _Region(
+        _REGION_POLYGON,
+        np.zeros(3),
+        segments,
+        (X.min(), X.max(), Y.min(), Y.max()),
+        lib.polygon_area(X, Y),
+        rectangle,
+    )
+
+
+def _pick_region(
+    pick: tuple,
+    pick_shape: str,
+    pick_size: float | None,
+) -> _Region | None:
+    """Geometry of a pick (nm), or None for a pick without area (open
+    polygon, empty brush pick, zero-length rectangle)."""
+    if pick_shape == "Circle":
+        x, y = pick
+        radius = pick_size / 2
+        region = _Region(
+            _REGION_CIRCLE,
+            np.array([x, y, radius], dtype=np.float64),
+            np.zeros((0, 5)),
+            (x - radius, x + radius, y - radius, y + radius),
+            np.pi * radius**2,
+        )
+    elif pick_shape == "Brush":
+        if not len(pick):
+            return None
+        segments = []
+        for stroke in pick:
+            width, X, Y = lib.brush_stroke_arrays(stroke)
+            radius = width / 2
+            if len(X) == 1:  # a dot
+                segments.append([X[0], Y[0], X[0], Y[0], radius])
+            for k in range(len(X) - 1):
+                segments.append([X[k], Y[k], X[k + 1], Y[k + 1], radius])
+        x_min, x_max, y_min, y_max = lib._brush_bounds(pick)
+        region = _Region(
+            _REGION_BRUSH,
+            np.zeros(3),
+            np.array(segments, dtype=np.float64),
+            (x_min, x_max, y_min, y_max),
+            lib.pick_areas([pick], "Brush", None)[0],
+        )
+    else:
+        if pick_shape == "Square":
+            x, y = pick
+            half = pick_size / 2
+            X = [x - half, x + half, x + half, x - half]
+            Y = [y - half, y - half, y + half, y + half]
+        elif pick_shape == "Rectangle":
+            (xs, ys), (xe, ye) = pick
+            X, Y = lib.get_pick_rectangle_corners(xs, ys, xe, ye, pick_size)
+        elif pick_shape == "Box":
+            X, Y = lib.get_pick_box_corners(pick)
+        elif pick_shape == "Polygon":
+            X, Y = lib.get_pick_polygon_corners(pick)
+            if X is None:  # not closed
+                return None
+        else:
+            raise ValueError(f"Unknown pick shape: {pick_shape}")
+        region = _polygon_region(
+            np.asarray(X, dtype=np.float64),
+            np.asarray(Y, dtype=np.float64),
+        )
+    if not region.area > 0:
+        return None
+    return region
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _in_region(
+    x: float,
+    y: float,
+    kind: int,
+    circle: lib.FloatArray1D,
+    segments: lib.FloatArray2D,
+) -> bool:
+    """Whether the point ``(x, y)`` lies inside the region, see
+    ``_Region``."""
+    if kind == _REGION_CIRCLE:
+        dx = x - circle[0]
+        dy = y - circle[1]
+        return dx * dx + dy * dy < circle[2] * circle[2]
+    if kind == _REGION_POLYGON:  # ray casting
+        inside = False
+        for k in range(segments.shape[0]):
+            x0 = segments[k, 0]
+            y0 = segments[k, 1]
+            x1 = segments[k, 2]
+            y1 = segments[k, 3]
+            if (y0 > y) != (y1 > y):
+                if x < x0 + (x1 - x0) * (y - y0) / (y1 - y0):
+                    inside = not inside
+        return inside
+    for k in range(segments.shape[0]):
+        d2 = _point_segment_distance_sq(
+            x,
+            y,
+            segments[k, 0],
+            segments[k, 1],
+            segments[k, 2],
+            segments[k, 3],
+        )
+        if d2 <= segments[k, 4] ** 2:
+            return True
+    return False
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _in_region_many(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    kind: int,
+    circle: lib.FloatArray1D,
+    segments: lib.FloatArray2D,
+) -> lib.BoolArray1D:
+    """Which of the points ``(x, y)`` lie inside the region."""
+    inside = np.zeros(len(x), dtype=np.bool_)
+    for i in range(len(x)):
+        inside[i] = _in_region(x[i], y[i], kind, circle, segments)
+    return inside
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _boundary_distances(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    kind: int,
+    circle: lib.FloatArray1D,
+    segments: lib.FloatArray2D,
+) -> lib.FloatArray1D:
+    """Distance from each point inside the region to its boundary, or
+    a lower bound of it for brush picks. Circles up to this radius
+    around the point lie entirely inside the region."""
+    distances = np.zeros(len(x))
+    for i in range(len(x)):
+        if kind == _REGION_CIRCLE:
+            distances[i] = circle[2] - np.sqrt(
+                (x[i] - circle[0]) ** 2 + (y[i] - circle[1]) ** 2
+            )
+        elif kind == _REGION_POLYGON:
+            best = np.inf
+            for k in range(segments.shape[0]):
+                d2 = _point_segment_distance_sq(
+                    x[i],
+                    y[i],
+                    segments[k, 0],
+                    segments[k, 1],
+                    segments[k, 2],
+                    segments[k, 3],
+                )
+                if d2 < best:
+                    best = d2
+            distances[i] = np.sqrt(best)
+        else:
+            # depth inside the deepest stroke segment; the union of
+            # the strokes reaches at least as far
+            best = 0.0
+            for k in range(segments.shape[0]):
+                d2 = _point_segment_distance_sq(
+                    x[i],
+                    y[i],
+                    segments[k, 0],
+                    segments[k, 1],
+                    segments[k, 2],
+                    segments[k, 3],
+                )
+                depth = segments[k, 4] - np.sqrt(d2)
+                if depth > best:
+                    best = depth
+            distances[i] = best
+    return distances
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _circle_fraction_inside(
+    px: float,
+    py: float,
+    d: float,
+    kind: int,
+    circle: lib.FloatArray1D,
+    segments: lib.FloatArray2D,
+) -> float:
+    """Fraction of the circumference of the circle of radius ``d``
+    around ``(px, py)`` that lies inside the region. Exact for circles
+    and polygons (from the intersections of the circle with the edges),
+    sampled at ``_BRUSH_ANGLES`` angles for brush picks."""
+    if kind == _REGION_CIRCLE:
+        R = circle[2]
+        s = np.sqrt((px - circle[0]) ** 2 + (py - circle[1]) ** 2)
+        if d <= R - s:
+            return 1.0
+        if s == 0.0:
+            return 0.0
+        c = (s * s + d * d - R * R) / (2 * s * d)
+        if c >= 1.0:
+            return 0.0
+        if c <= -1.0:
+            return 1.0
+        return np.arccos(c) / np.pi
+    if kind == _REGION_POLYGON:
+        n_edges = segments.shape[0]
+        angles = np.empty(2 * n_edges)
+        m = 0
+        for k in range(n_edges):
+            fx = segments[k, 0] - px
+            fy = segments[k, 1] - py
+            ex = segments[k, 2] - segments[k, 0]
+            ey = segments[k, 3] - segments[k, 1]
+            a = ex * ex + ey * ey
+            if a == 0.0:
+                continue
+            b = 2 * (fx * ex + fy * ey)
+            c = fx * fx + fy * fy - d * d
+            disc = b * b - 4 * a * c
+            if disc < 0.0:
+                continue
+            sq = np.sqrt(disc)
+            t = (-b - sq) / (2 * a)
+            if 0.0 <= t <= 1.0:
+                angles[m] = np.arctan2(fy + t * ey, fx + t * ex)
+                m += 1
+            t = (-b + sq) / (2 * a)
+            if sq > 0.0 and 0.0 <= t <= 1.0:
+                angles[m] = np.arctan2(fy + t * ey, fx + t * ex)
+                m += 1
+        if m == 0:  # entirely inside or outside
+            if _in_region(px + d, py, kind, circle, segments):
+                return 1.0
+            return 0.0
+        angles = np.sort(angles[:m])
+        inside = 0.0
+        for k in range(m):
+            a0 = angles[k]
+            a1 = angles[k + 1] if k + 1 < m else angles[0] + 2 * np.pi
+            if a1 <= a0:
+                continue
+            mid = 0.5 * (a0 + a1)
+            if _in_region(
+                px + d * np.cos(mid),
+                py + d * np.sin(mid),
+                kind,
+                circle,
+                segments,
+            ):
+                inside += a1 - a0
+        return inside / (2 * np.pi)
+    n_inside = 0
+    for k in range(_BRUSH_ANGLES):
+        angle = (k + 0.5) * 2 * np.pi / _BRUSH_ANGLES
+        if _in_region(
+            px + d * np.cos(angle),
+            py + d * np.sin(angle),
+            kind,
+            circle,
+            segments,
+        ):
+            n_inside += 1
+    return n_inside / _BRUSH_ANGLES
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _sphere_fraction_inside(
+    px: float,
+    py: float,
+    pz: float,
+    d: float,
+    z_min: float,
+    z_max: float,
+    boundary_xy: float,
+    kind: int,
+    circle: lib.FloatArray1D,
+    segments: lib.FloatArray2D,
+) -> float:
+    """Fraction of the surface of the sphere of radius ``d`` around
+    ``(px, py, pz)`` that lies inside the region extended from
+    ``z_min`` to ``z_max``. The surface of a sphere is spread evenly
+    over its height (Archimedes), so the fraction is the mean over the
+    heights t inside the z range of the fraction of the circle of
+    radius ``sqrt(d**2 - t**2)`` inside the region in xy, integrated
+    by Gauss-Legendre quadrature. Circles up to ``boundary_xy`` lie
+    entirely inside the region in xy."""
+    t_low = max(-d, z_min - pz)
+    t_high = min(d, z_max - pz)
+    if t_high <= t_low:
+        return 0.0
+    if d <= boundary_xy:  # only the z planes cut the sphere
+        return (t_high - t_low) / (2 * d)
+    half = 0.5 * (t_high - t_low)
+    middle = 0.5 * (t_high + t_low)
+    total = 0.0
+    for k in range(len(_SPHERE_NODES)):
+        t = middle + half * _SPHERE_NODES[k]
+        radius = np.sqrt(max(d * d - t * t, 0.0))
+        if radius <= boundary_xy:
+            fraction = 1.0
+        else:
+            fraction = _circle_fraction_inside(
+                px, py, radius, kind, circle, segments
+            )
+        total += _SPHERE_WEIGHTS[k] * fraction
+    return total * half / (2 * d)
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _pair_counts(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    z: lib.FloatArray1D,
+    boundary: lib.FloatArray1D,
+    boundary_xy: lib.FloatArray1D,
+    cell_x: lib.IntArray1D,
+    cell_y: lib.IntArray1D,
+    tx: lib.FloatArray1D,
+    ty: lib.FloatArray1D,
+    tz: lib.FloatArray1D,
+    cell_starts: lib.IntArray1D,
+    n_cells_x: int,
+    n_cells_y: int,
+    r_max: float,
+    steps: int,
+    edge_correction: bool,
+    use_z: bool,
+    z_min: float,
+    z_max: float,
+    kind: int,
+    circle: lib.FloatArray1D,
+    segments: lib.FloatArray2D,
+    exclude_self: bool,
+    start: int,
+    end: int,
+) -> lib.FloatArray1D:
+    """Edge-corrected counts of the pairs of a center i in ``[start,
+    end)`` (``x``, ``y``, ``z``) and a target j (``tx``, ``ty``,
+    ``tz``) by distance (3D if ``use_z``, the region then extends from
+    ``z_min`` to ``z_max``): element k sums the weights of the pairs at
+    distances in ``(k, k + 1] * r_max / steps``, the weight being
+    centered on i. The targets are sorted by grid cell in xy (side at
+    least ``r_max``), ``cell_starts`` holds the first target of each
+    cell and ``cell_x``, ``cell_y`` the cell of each center.
+    ``boundary`` is the distance of each center to the region's
+    boundary (in 3D including the z planes), ``boundary_xy`` that in
+    xy only. If ``exclude_self``, the centers are the targets and the
+    pairs (i, i) are skipped."""
+    counts = np.zeros(steps)
+    dr = r_max / steps
+    r_max2 = r_max * r_max
+    # brush picks: the sampled fraction is computed once per radius
+    # step (at its center) and localization, not for every pair
+    sampled = kind == _REGION_BRUSH
+    fractions = np.empty(steps)
+    for i in range(start, end):
+        xi = x[i]
+        yi = y[i]
+        zi = z[i]
+        if sampled:
+            fractions[:] = -1.0
+        for cy in range(max(cell_y[i] - 1, 0), min(cell_y[i] + 2, n_cells_y)):
+            for cx in range(
+                max(cell_x[i] - 1, 0), min(cell_x[i] + 2, n_cells_x)
+            ):
+                cell = cy * n_cells_x + cx
+                for j in range(cell_starts[cell], cell_starts[cell + 1]):
+                    if exclude_self and j == i:
+                        continue
+                    d2 = (tx[j] - xi) ** 2 + (ty[j] - yi) ** 2
+                    if use_z:
+                        d2 += (tz[j] - zi) ** 2
+                    if d2 > r_max2:
+                        continue
+                    d = np.sqrt(d2)
+                    k = int(np.ceil(d / dr)) - 1
+                    if k < 0:
+                        k = 0
+                    elif k >= steps:
+                        k = steps - 1
+                    weight = 1.0
+                    if edge_correction and d > boundary[i]:
+                        if sampled and fractions[k] >= 0.0:
+                            fraction = fractions[k]
+                        else:
+                            radius = (k + 0.5) * dr if sampled else d
+                            if use_z:
+                                fraction = _sphere_fraction_inside(
+                                    xi,
+                                    yi,
+                                    zi,
+                                    radius,
+                                    z_min,
+                                    z_max,
+                                    boundary_xy[i],
+                                    kind,
+                                    circle,
+                                    segments,
+                                )
+                            else:
+                                fraction = _circle_fraction_inside(
+                                    xi, yi, radius, kind, circle, segments
+                                )
+                            if sampled:
+                                fractions[k] = fraction
+                        if fraction * _MAX_EDGE_WEIGHT <= 1.0:
+                            weight = _MAX_EDGE_WEIGHT
+                        else:
+                            weight = 1.0 / fraction
+                    counts[k] += weight
+    return counts
+
+
+class _GridPoints(NamedTuple):
+    """Points of a region in nm sorted by the cell of a grid in xy,
+    see ``_grid_points``."""
+
+    x: lib.FloatArray1D
+    y: lib.FloatArray1D
+    z: lib.FloatArray1D
+    cell_x: lib.IntArray1D
+    cell_y: lib.IntArray1D
+    cell_starts: lib.IntArray1D
+    n_cells_x: int
+    n_cells_y: int
+    boundary: lib.FloatArray1D
+    boundary_xy: lib.FloatArray1D
+
+
+def _grid_points(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    z: lib.FloatArray1D | None,
+    region: _Region,
+    z_range: tuple[float, float] | None,
+    r_max: float,
+) -> _GridPoints:
+    """Sort the points ``(x, y, z)`` (nm, inside ``region``; z None in
+    2D) by the cell of a grid over the region with cells of at least
+    ``r_max``, so that the neighbors within ``r_max`` of a point are in
+    the adjacent cells, and find their distances to the boundary of
+    the region (in 3D extended over ``z_range``)."""
+    use_z = z is not None
+    if not use_z:
+        z = np.zeros(len(x))
+    x_min, x_max, y_min, y_max = region.bounds
+    # at most ~1000 cells per side
+    cell_size = max(r_max, (x_max - x_min) / 1024, (y_max - y_min) / 1024)
+    n_cells_x = int((x_max - x_min) // cell_size) + 1
+    n_cells_y = int((y_max - y_min) // cell_size) + 1
+    cell_x = np.clip(
+        ((x - x_min) // cell_size).astype(np.int64), 0, n_cells_x - 1
+    )
+    cell_y = np.clip(
+        ((y - y_min) // cell_size).astype(np.int64), 0, n_cells_y - 1
+    )
+    cell = cell_y * n_cells_x + cell_x
+    order = np.argsort(cell, kind="stable")
+    x = np.ascontiguousarray(x[order], dtype=np.float64)
+    y = np.ascontiguousarray(y[order], dtype=np.float64)
+    z = np.ascontiguousarray(z[order], dtype=np.float64)
+    cell_starts = np.searchsorted(
+        cell[order], np.arange(n_cells_x * n_cells_y + 1)
+    )
+    boundary_xy = _boundary_distances(
+        x, y, region.kind, region.circle, region.segments
+    )
+    if use_z:
+        z_min, z_max = z_range
+        boundary = np.minimum(boundary_xy, np.minimum(z - z_min, z_max - z))
+    else:
+        boundary = boundary_xy
+    return _GridPoints(
+        x,
+        y,
+        z,
+        cell_x[order],
+        cell_y[order],
+        cell_starts,
+        n_cells_x,
+        n_cells_y,
+        boundary,
+        boundary_xy,
+    )
+
+
+def _weighted_pair_counts(
+    centers: _GridPoints,
+    targets: _GridPoints,
+    region: _Region,
+    z_range: tuple[float, float] | None,
+    r_max: float,
+    steps: int,
+    edge_correction: bool,
+    exclude_self: bool,
+) -> lib.FloatArray1D:
+    """Edge-corrected counts of the pairs of ``centers`` and
+    ``targets`` (the same object if ``exclude_self``) in the ``steps``
+    shells up to ``r_max``, see ``_pair_counts``; in 3D if
+    ``z_range`` is given."""
+    use_z = z_range is not None
+    z_min, z_max = z_range if use_z else (0.0, 0.0)
+    args = (
+        centers.x,
+        centers.y,
+        centers.z,
+        centers.boundary,
+        centers.boundary_xy,
+        centers.cell_x,
+        centers.cell_y,
+        targets.x,
+        targets.y,
+        targets.z,
+        targets.cell_starts,
+        targets.n_cells_x,
+        targets.n_cells_y,
+        float(r_max),
+        int(steps),
+        bool(edge_correction),
+        use_z,
+        float(z_min),
+        float(z_max),
+        region.kind,
+        region.circle,
+        region.segments,
+        exclude_self,
+    )
+    n = len(centers.x)
+    n_threads = lib.n_workers() if n > 1_000 else 1
+    if n_threads > 1:
+        bounds = np.linspace(0, n, n_threads + 1).astype(int)
+        with _ThreadPoolExecutor(n_threads) as executor:
+            futures = [
+                executor.submit(_pair_counts, *args, start, end)
+                for start, end in zip(bounds[:-1], bounds[1:])
+            ]
+            return np.sum([f.result() for f in futures], axis=0)
+    return _pair_counts(*args, 0, n)
+
+
+def _pair_statistic_region(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    z: lib.FloatArray1D | None,
+    region: _Region,
+    z_range: tuple[float, float] | None,
+    r_max: float,
+    steps: int,
+    edge_correction: bool,
+    statistic: Literal["h", "g"],
+    partner: tuple | None = None,
+) -> lib.FloatArray1D:
+    """Ripley's H function (``statistic="h"``) at the radii ``(1, ...,
+    steps) * r_max / steps`` or the radial distribution function
+    (``"g"``) in the ``steps`` shells between them of the points
+    ``(x, y)`` (nm, all inside ``region``); in 3D if ``z`` is given,
+    the region then extends over ``z_range`` (nm), which contains all
+    ``z``. With ``partner`` points ``(x, y, z)``, the cross function
+    between both sets of points, combining both directions (Lotwick
+    and Silverman, 1982); otherwise at least two points are needed."""
+    use_z = z is not None
+    z_range = tuple(z_range) if use_z else None
+    first = _grid_points(x, y, z, region, z_range, r_max)
+    kwargs = dict(
+        region=region,
+        z_range=z_range,
+        r_max=r_max,
+        steps=steps,
+        edge_correction=edge_correction,
+    )
+    size = region.area * (z_range[1] - z_range[0]) if use_z else region.area
+    n1 = len(x)
+    if partner is None:
+        counts = _weighted_pair_counts(
+            first, first, exclude_self=True, **kwargs
+        )
+        # counts per pair of localizations, relative to the density
+        counts *= size / (n1 * (n1 - 1))
+    else:
+        second = _grid_points(*partner, region, z_range, r_max)
+        n2 = len(partner[0])
+        counts_12 = _weighted_pair_counts(
+            first, second, exclude_self=False, **kwargs
+        )
+        counts_21 = _weighted_pair_counts(
+            second, first, exclude_self=False, **kwargs
+        )
+        # the edge correction centers on the first point of a pair, so
+        # both directions differ slightly; weighted by the number of
+        # points of the other set (Lotwick and Silverman, 1982)
+        counts = (
+            size * (n2 * counts_12 + n1 * counts_21) / ((n1 + n2) * n1 * n2)
+        )
+    r = np.arange(steps + 1) * (r_max / steps)  # shell edges
+    if statistic == "g":
+        if use_z:
+            shells = 4 / 3 * np.pi * np.diff(r**3)
+        else:
+            shells = np.pi * np.diff(r**2)
+        return counts / shells
+    k_function = np.cumsum(counts)
+    if use_z:
+        return np.cbrt(3 * k_function / (4 * np.pi)) - r[1:]
+    return np.sqrt(k_function / np.pi) - r[1:]
+
+
+def _locs_in_region(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    region: _Region,
+) -> lib.IntArray1D:
+    """Indices of the points ``(x, y)`` (nm) that lie inside
+    ``region``."""
+    x_min, x_max, y_min, y_max = region.bounds
+    near = np.flatnonzero(
+        (x >= x_min) & (x <= x_max) & (y >= y_min) & (y <= y_max)
+    )
+    inside = _in_region_many(
+        x[near], y[near], region.kind, region.circle, region.segments
+    )
+    return near[inside]
+
+
+def _uniform_in_region(
+    n: int,
+    region: _Region,
+    rng: np.random.Generator,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
+    """``n`` points drawn uniformly at random inside ``region``
+    (complete spatial randomness), by rejection from the bounding
+    box."""
+    x_min, x_max, y_min, y_max = region.bounds
+    box_area = (x_max - x_min) * (y_max - y_min)
+    acceptance = min(max(region.area / box_area, 1e-3), 1.0)
+    xs, ys = [], []
+    n_found = 0
+    while n_found < n:
+        m = int((n - n_found) / acceptance * 1.1) + 16
+        x = rng.uniform(x_min, x_max, m)
+        y = rng.uniform(y_min, y_max, m)
+        inside = _in_region_many(
+            x, y, region.kind, region.circle, region.segments
+        )
+        xs.append(x[inside])
+        ys.append(y[inside])
+        n_found += int(inside.sum())
+    return np.concatenate(xs)[:n], np.concatenate(ys)[:n]
+
+
+def _random_shift(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    z: lib.FloatArray1D | None,
+    region: _Region,
+    z_range: tuple[float, float] | None,
+    rng: np.random.Generator,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D, lib.FloatArray1D | None]:
+    """Shift the points ``(x, y, z)`` (nm) inside ``region`` by a random
+    offset, wrapping around a rectangular region (toroidal shift), or
+    rotate them by a random angle around the center of a circular one;
+    in 3D, also shift z by a random offset, wrapping around
+    ``z_range``. Keeps the arrangement of the points among themselves,
+    so that two channels are made independent of each other."""
+    if region.rectangle is not None:
+        x0, y0, e1x, e1y, e2x, e2y = region.rectangle
+        dx, dy = x - x0, y - y0
+        a = (dx * e1x + dy * e1y) / (e1x**2 + e1y**2)
+        b = (dx * e2x + dy * e2y) / (e2x**2 + e2y**2)
+        a = (a + rng.uniform()) % 1.0
+        b = (b + rng.uniform()) % 1.0
+        x = x0 + a * e1x + b * e2x
+        y = y0 + a * e1y + b * e2y
+    elif region.kind == _REGION_CIRCLE:
+        cx, cy, _ = region.circle
+        angle = rng.uniform(0, 2 * np.pi)
+        cos, sin = np.cos(angle), np.sin(angle)
+        dx, dy = x - cx, y - cy
+        x = cx + cos * dx - sin * dy
+        y = cy + sin * dx + cos * dy
+    else:
+        raise ValueError(_SHIFT_REGIONS_ERROR)
+    if z is not None:
+        z_min, z_max = z_range
+        depth = z_max - z_min
+        z = z_min + (z - z_min + rng.uniform(0, depth)) % depth
+    return x, y, z
+
+
+#: Error for random shifts in regions that cannot be wrapped around
+_SHIFT_REGIONS_ERROR = (
+    "Random shifts of the partner need rectangular regions (box, square "
+    "or rectangle picks, rectangular polygons, the current view or the "
+    "field of view) or circular picks; use cross_null='labels' for other "
+    "polygon picks and brush picks."
+)
+
+
+def _statistic_regions(
+    info: list[dict],
+    picks: list[tuple] | None,
+    pick_shape: str | None,
+    pick_size: float | None,
+    shift: bool,
+) -> list[_Region | None]:
+    """The regions of interest in nm: the picks (None for those
+    without area) or, if ``picks`` is None, the field of view. Raises
+    ValueError for invalid picks and, if ``shift`` (random shifts of a
+    channel are requested), for regions other than rectangles and
+    circles."""
+    if picks is None:
+        width, height = lib.field_of_view(info)
+        regions = [
+            _polygon_region(
+                np.array([0, width, width, 0], dtype=np.float64),
+                np.array([0, 0, height, height], dtype=np.float64),
+            )
+        ]
+    else:
+        if pick_shape not in lib.PICK_SHAPES:
+            raise ValueError(
+                f"Invalid pick shape: {pick_shape}. Choose one of "
+                f"{lib.PICK_SHAPES}."
+            )
+        if pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE and not pick_size:
+            raise ValueError(f"{pick_shape} picks require a pick size.")
+        regions = [_pick_region(pick, pick_shape, pick_size) for pick in picks]
+    if shift:
+        for region in regions:
+            if (
+                region is not None
+                and region.rectangle is None
+                and region.kind != _REGION_CIRCLE
+            ):
+                raise ValueError(_SHIFT_REGIONS_ERROR)
+    return regions
+
+
+def _warn_if_not_molecules(
+    locs: pd.DataFrame, subject: str, stacklevel: int
+) -> None:
+    """Warn if ``locs`` are not molecules; ``subject`` starts the
+    message (e.g., "The localizations are")."""
+    if not _are_molecules(locs):
+        warnings.warn(
+            f"{subject} not molecules (no 'n_events' or 'std_frame' "
+            "column), so each molecule is counted as many times as it was "
+            "localized, which appears as clustering at short distances. "
+            "Consider finding the molecules first, e.g., with "
+            "picasso.g5m.g5m or picasso.clusterer.find_cluster_centers.",
+            UserWarning,
+            stacklevel=stacklevel,
+        )
+
+
+def _pair_statistic(
+    locs: pd.DataFrame,
+    info: list[dict],
+    picks: list[tuple] | None,
+    pick_shape: str | None,
+    pick_size: float | None,
+    statistic: Literal["h", "g"],
+    *,
+    r_max: float,
+    steps: int,
+    edge_correction: bool,
+    n_simulations: int,
+    use_z: bool,
+    z_range: tuple[float, float] | None,
+    simulated_z: Literal["uniform", "observed"],
+    partner_locs: pd.DataFrame | None,
+    cross_null: Literal["shift", "labels"],
+    random_seed: int | None,
+    progress: lib.Progress,
+) -> dict:
+    """Ripley's H function (``statistic="h"``) or the radial
+    distribution function (``"g"``) of localizations in regions of
+    interest, or the cross function with ``partner_locs``, with the
+    envelope of the simulations; shared by ``ripley_h`` and ``rdf``,
+    see there for the parameters. Returns the radii ("r"), the
+    function of each region ("values") and their mean ("mean") along
+    with the keys common to both results. ``progress`` (a normalized
+    tracker) reports "Calculating Ripley's H" (or "Calculating RDF")
+    over the regions, then "Simulating envelope" over the
+    simulations."""
+    cross = partner_locs is not None
+    if r_max <= 0:
+        raise ValueError("r_max must be positive.")
+    if steps < 2:
+        raise ValueError("steps must be at least 2.")
+    if n_simulations < 0:
+        raise ValueError("n_simulations must not be negative.")
+    if cross and cross_null not in ("shift", "labels"):
+        raise ValueError(
+            f"Invalid cross_null: {cross_null!r}; choose 'shift' or "
+            "'labels'."
+        )
+    if use_z:
+        if "z" not in locs.columns or (
+            cross and "z" not in partner_locs.columns
+        ):
+            raise ValueError("3D requires z in the localizations.")
+        if z_range is not None and not z_range[0] < z_range[1]:
+            raise ValueError("z_range must be (z_min, z_max), z_min < z_max.")
+        if not cross and simulated_z not in ("uniform", "observed"):
+            raise ValueError(
+                f"Invalid simulated_z: {simulated_z!r}; choose 'uniform' "
+                "or 'observed'."
+            )
+    regions = _statistic_regions(
+        info, picks, pick_shape, pick_size, cross and cross_null == "shift"
+    )
+    for locs_, which in ((locs, "localizations"), (partner_locs, "partner")):
+        if locs_ is not None:
+            _warn_if_not_molecules(locs_, f"The {which} are", stacklevel=4)
+
+    # coordinates in nm, z None in 2D, of each channel
+    channels = [locs] + ([partner_locs] if cross else [])
+    coordinates = [
+        (
+            locs_["x"].to_numpy(dtype=np.float64),
+            locs_["y"].to_numpy(dtype=np.float64),
+            locs_["z"].to_numpy(dtype=np.float64) if use_z else None,
+        )
+        for locs_ in channels
+    ]
+    dr = r_max / steps
+    if statistic == "h":
+        r = np.arange(1, steps + 1) * dr
+    else:  # centers of the shells
+        r = (np.arange(steps) + 0.5) * dr
+    n_regions = len(regions)
+    values = np.full((n_regions, steps), np.nan)
+    n_locs = np.zeros((len(channels), n_regions), dtype=int)
+    areas = np.zeros(n_regions)
+    z_ranges = np.full((n_regions, 2), np.nan)
+    # coordinates of each channel's localizations in each region
+    region_points = [None] * n_regions
+    label = "Calculating Ripley's H" if statistic == "h" else "Calculating RDF"
+    lib.start_phase(progress, label, n_regions, unit="region")
+    progress.set_value(0)
+    for k, region in enumerate(regions):
+        if region is not None:
+            areas[k] = region.area
+            points = []
+            for x_all, y_all, z_all in coordinates:
+                inside = _locs_in_region(x_all, y_all, region)
+                if use_z and z_range is not None:
+                    z = z_all[inside]
+                    inside = inside[(z >= z_range[0]) & (z <= z_range[1])]
+                points.append(
+                    (
+                        x_all[inside],
+                        y_all[inside],
+                        z_all[inside] if use_z else None,
+                    )
+                )
+            n_locs[:, k] = [len(x) for x, _, _ in points]
+            if use_z and z_range is not None:
+                z_ranges[k] = z_range
+            elif use_z and n_locs[:, k].sum():
+                z = np.concatenate([z for _, _, z in points])
+                z_ranges[k] = z.min(), z.max()
+            region_points[k] = points
+            # in 3D, the region needs a depth
+            has_size = not use_z or z_ranges[k, 1] > z_ranges[k, 0]
+            enough = n_locs[:, k].min() >= 1 if cross else n_locs[0, k] >= 2
+            if enough and has_size:
+                values[k] = _pair_statistic_region(
+                    *points[0],
+                    region,
+                    tuple(z_ranges[k]),
+                    r_max,
+                    steps,
+                    edge_correction,
+                    statistic,
+                    points[1] if cross else None,
+                )
+        progress.set_value(k + 1)
+    progress.set_value(n_regions)
+    valid = np.flatnonzero(~np.isnan(values[:, 0]))
+    if not len(valid):
+        raise ValueError(
+            (
+                "No region contains localizations of both channels"
+                if cross
+                else "No region contains at least two localizations"
+            )
+            + (" at different z." if use_z else ".")
+        )
+    mean = values[valid].mean(axis=0)
+    if use_z:
+        depths = z_ranges[valid, 1] - z_ranges[valid, 0]
+        n_thin = int((3 * r_max > depths).sum())
+        if n_thin:
+            warnings.warn(
+                f"r_max ({r_max:g} nm) exceeds a third of the z range "
+                f"of {n_thin} of {len(valid)} regions (smallest z "
+                f"range: {depths.min():.0f} nm); {statistic.upper()} at "
+                "large radii relies on large edge correction weights and "
+                "is noisy.",
+                UserWarning,
+                stacklevel=3,
+            )
+
+    envelope_low = envelope_high = None
+    if n_simulations:
+        rng = np.random.default_rng(random_seed)
+        simulated = np.zeros((n_simulations, steps))
+        lib.start_phase(
+            progress,
+            "Simulating envelope",
+            n_simulations,
+            unit="simulation",
+        )
+        progress.set_value(0)
+        for s in range(n_simulations):
+            for k in valid:
+                region = regions[k]
+                z_range_k = tuple(z_ranges[k])
+                points = _simulated_points(
+                    region_points[k],
+                    region,
+                    z_range_k,
+                    cross,
+                    cross_null,
+                    simulated_z,
+                    rng,
+                )
+                simulated[s] += _pair_statistic_region(
+                    *points[0],
+                    region,
+                    z_range_k,
+                    r_max,
+                    steps,
+                    edge_correction,
+                    statistic,
+                    points[1] if cross else None,
+                )
+            simulated[s] /= len(valid)
+            progress.set_value(s + 1)
+        progress.set_value(n_simulations)
+        envelope_low = simulated.min(axis=0)
+        envelope_high = simulated.max(axis=0)
+
+    return {
+        "r": r,
+        "values": values,
+        "mean": mean,
+        "envelope_low": envelope_low,
+        "envelope_high": envelope_high,
+        "n_locs": n_locs[0],
+        "n_locs_partner": n_locs[1] if cross else None,
+        "areas": areas,
+        "z_ranges": z_ranges if use_z else None,
+        "volumes": (
+            areas * (z_ranges[:, 1] - z_ranges[:, 0]) if use_z else None
+        ),
+        "simulated_z": simulated_z if use_z and not cross else None,
+        "cross_null": cross_null if cross else None,
+    }
+
+
+def _simulated_points(
+    points: list[tuple],
+    region: _Region,
+    z_range: tuple[float, float],
+    cross: bool,
+    cross_null: Literal["shift", "labels"],
+    simulated_z: Literal["uniform", "observed"],
+    rng: np.random.Generator,
+) -> list[tuple]:
+    """The points ``(x, y, z)`` (z None in 2D) of each channel in a
+    region for one simulation: as many uniformly random points as
+    localizations (complete spatial randomness) for one channel; for
+    two channels, the partner (second channel) shifted at random
+    (``cross_null="shift"``) or the channels of all points shuffled
+    (``"labels"``)."""
+    x, y, z = points[0]
+    if not cross:
+        x_new, y_new = _uniform_in_region(len(x), region, rng)
+        z_new = None
+        if z is not None and simulated_z == "uniform":
+            z_new = rng.uniform(*z_range, len(x))
+        elif z is not None:
+            z_new = rng.permutation(z)
+        return [(x_new, y_new, z_new)]
+    if cross_null == "shift":
+        return [points[0], _random_shift(*points[1], region, z_range, rng)]
+    # random labels: the same points, channels shuffled
+    n1 = len(x)
+    order = rng.permutation(n1 + len(points[1][0]))
+    pooled = [
+        (None if values[0] is None else np.concatenate(values)[order])
+        for values in zip(points[0], points[1])
+    ]
+    return [
+        tuple(None if v is None else v[:n1] for v in pooled),
+        tuple(None if v is None else v[n1:] for v in pooled),
+    ]
+
+
+def ripley_h(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    picks: list[tuple] | None = None,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | None
+    ) = None,
+    pick_size: float | None = None,
+    r_max: float = 500.0,
+    steps: int = 100,
+    edge_correction: bool = True,
+    n_simulations: int = 99,
+    use_z: bool = False,
+    z_range: tuple[float, float] | None = None,
+    simulated_z: Literal["uniform", "observed"] = "uniform",
+    partner_locs: pd.DataFrame | None = None,
+    cross_null: Literal["shift", "labels"] = "shift",
+    random_seed: int | None = 0,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> dict:
+    """Ripley's H function of localizations in regions of interest,
+    which shows whether molecules are clustered, randomly distributed
+    or dispersed, and on which length scales.
+
+    Ripley's K function counts the neighbors within a distance r of
+    each localization, normalized by the density (Ripley, 1977, see
+    References)::
+
+        K(r) = A / (n (n - 1)) * sum_i sum_(j != i) w_ij * 1(d_ij <= r)
+
+    where A is the area of the region, n the number of localizations
+    in it, d_ij the distance between localizations i and j and w_ij the
+    edge correction weight. The H function, H(r) = sqrt(K(r) / pi) - r,
+    is 0 for complete spatial randomness (CSR), positive for clustering
+    and negative for dispersion at the scale r.
+
+    By default, the function is computed in 2D (x and y). With
+    ``use_z``, it is computed in 3D: each region extends over a z range
+    (by default that of its localizations), A is replaced by the
+    volume and H(r) = (3 K(r) / (4 pi))^(1/3) - r.
+
+    The function is computed in each region separately, and the mean
+    over the regions with at least two localizations (in 3D, at
+    different z) is reported. Each region is simulated
+    ``n_simulations`` times with as many uniformly random points as it
+    holds localizations; the lowest and highest mean H of the
+    simulations at each radius give the CSR envelope.
+
+    With ``partner_locs``, the cross H function between two channels
+    is computed instead (Lotwick and Silverman, 1982): K counts the
+    partner localizations around each localization, normalized by both
+    densities (A / (n1 n2) instead of A / (n (n - 1))), and both
+    directions are combined into one symmetric estimate. The cross H
+    function is positive if the channels are found near each other
+    (colocalization), 0 if they are independent and negative if they
+    avoid each other (segregation). The channels must be aligned.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Molecules, i.e., one localization per molecule, such as the
+        molecules found by ``g5m.g5m`` or the cluster centers of
+        ``clusterer.find_cluster_centers``, since H measures how the
+        molecules are distributed.
+    info : list of dicts
+        Metadata of the localizations, used for the field of view if
+        ``picks`` is None.
+    picks : list of tuples or None, optional
+        Regions of interest in nm, in the format of
+        ``pick_shape`` (see ``picked_locs``). Regions should be well
+        inside the area covered by the sample (e.g., the cell): the
+        density is the number of localizations divided by the area of
+        the region, so empty parts of a region appear as clustering. If
+        None, the whole field of view (``Width`` x ``Height`` in the
+        metadata) is used. Default is None.
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
+"Brush"} or None, optional
+        Shape of the picks. Required if ``picks`` is given. Default is
+        None.
+    pick_size : float or None, optional
+        Size of the picks in nm: diameter for circles, width for
+        rectangles, side length for squares, None for polygons, boxes
+        and brush picks. Default is None.
+    r_max : float, optional
+        Largest radius in nm. It should be well below the size of the
+        regions; the edge correction is less reliable for radii
+        approaching the region size. Default is 500.
+    steps : int, optional
+        Number of radii between 0 (excluded) and ``r_max``, at least 2.
+        Default is 100.
+    edge_correction : bool, optional
+        If True, Ripley's isotropic edge correction is applied: a pair
+        at distance d is weighted by the inverse of the fraction of the
+        circle (in 3D, the sphere surface) of radius d around the first
+        localization that lies inside the region (at most 100), since
+        neighbors outside the region are not seen. Without it, H is
+        biased downwards near the region edges. Default is True.
+    n_simulations : int, optional
+        Number of CSR simulations for the envelope. With the lowest
+        and highest simulated values as the envelope, a mean H outside
+        of it is significant at a pointwise level of
+        ``2 / (n_simulations + 1)``, i.e., 0.02 for 99 simulations. 0
+        skips the simulations. Default is 99.
+    use_z : bool, optional
+        If True, H is computed in 3D (x, y and z in nm), which requires
+        a ``z`` column. 3D samples are usually thin (about 1 um), so
+        most spheres reach the top or bottom of the region and H relies
+        on large edge correction weights; keep ``r_max`` below about a
+        third of the z range (a warning is given otherwise). The poorer
+        axial precision also stretches clusters in z. Default is False.
+    z_range : tuple of floats or None, optional
+        ``(z_min, z_max)`` in nm over which every region extends in 3D;
+        localizations outside of it are ignored. If None, each region
+        extends over the z range of its localizations. Only used in 3D.
+        Default is None.
+    simulated_z : {"uniform", "observed"}, optional
+        z of the simulated points in 3D. "uniform" spreads them evenly
+        over the z range, which is complete spatial randomness in 3D;
+        an uneven z distribution of the localizations (e.g., from the
+        detection falling off away from focus) then appears as
+        clustering. "observed" shuffles the z values of the
+        localizations in the region instead, which tests for clustering
+        beyond the z distribution but also hides real clustering in z
+        (e.g., a layer of molecules). Only used in 3D without
+        ``partner_locs``. Default is "uniform".
+    partner_locs : pd.DataFrame or None, optional
+        Molecules of a second channel, in the same coordinates as
+        ``locs`` (aligned). If given, the cross function between both
+        channels is computed in the same regions. Default is None.
+    cross_null : {"shift", "labels"}, optional
+        How the envelope is simulated with ``partner_locs``. "shift"
+        shifts the partner by a random offset, wrapping around the
+        region (toroidal shift; in circles, a random rotation; in 3D,
+        also a random shift in z), which keeps the arrangement of each
+        channel and tests whether the channels are independent. It
+        requires rectangular regions (box, square or rectangle picks,
+        rectangular polygons, the current view or the field of view)
+        or circular picks. "labels" shuffles which channel each
+        localization belongs to, which works in any region and tests
+        whether both channels follow the same distribution; a channel
+        whose molecules are clustered more strongly than the other's
+        then also differs from it. Default is "shift".
+    random_seed : int or None, optional
+        Seed of the CSR simulations. None gives a different envelope
+        on each call. Default is 0.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating Ripley's H" over
+        the regions, then (if ``n_simulations > 0``) "Simulating
+        envelope" over the simulations. Default is None.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with the keys:
+
+        - "r": radii in nm, shape (steps,).
+        - "h": H function of each region in nm, shape (n_regions,
+          steps); NaN for regions with fewer than two localizations or
+          without area (e.g., open polygons).
+        - "h_mean": mean H function over the regions with at least two
+          localizations, in nm.
+        - "envelope_low", "envelope_high": CSR envelope of the mean H
+          function in nm, or None without simulations.
+        - "n_locs": number of localizations in each region.
+        - "n_locs_partner": number of partner localizations in each
+          region, None without ``partner_locs``.
+        - "areas": area of each region in nm^2.
+        - "z_ranges": z range of each region in nm, shape (n_regions,
+          2), NaN for regions without localizations; None in 2D.
+        - "volumes": volume of each region in nm^3; None in 2D.
+        - "r_h_max": radius of maximum H of each region in nm (NaN
+          where H is NaN).
+        - "n_simulations": number of CSR simulations.
+        - "edge_correction": whether the edge correction was applied.
+        - "use_z": whether H was computed in 3D.
+        - "simulated_z": z of the simulated points in 3D, None in 2D
+          and with ``partner_locs``.
+        - "cross_null": how the envelope was simulated with
+          ``partner_locs``, None without.
+
+    Raises
+    ------
+    ValueError
+        If the parameters are invalid, z is missing in 3D, no region
+        contains at least two localizations (in 3D, at different z; with
+        ``partner_locs``, localizations of both channels) or random
+        shifts are requested in regions other than rectangles and
+        circles.
+
+    Warns
+    -----
+    UserWarning
+        If ``locs`` or ``partner_locs`` are not molecules (no
+        ``n_events`` or ``std_frame`` column). Each molecule is then
+        counted as many times as it was localized, which appears as
+        clustering at short distances. In 3D, also if ``r_max`` exceeds
+        a third of the z range of a region.
+
+    See Also
+    --------
+    plot_ripley_h : Plot the result.
+
+    References
+    ----------
+    Ripley, B. D. Modelling spatial patterns. J R Stat Soc B 39,
+    172-192 (1977). https://doi.org/10.1111/j.2517-6161.1977.tb01615.x
+
+    Lotwick, H. W., Silverman, B. W. Methods for analysing spatial
+    processes of several types of points. J R Stat Soc B 44, 406-413
+    (1982). https://doi.org/10.1111/j.2517-6161.1982.tb01221.x
+    """
+    with lib.tracked_progress(
+        progress, "Calculating Ripley's H", unit="region"
+    ) as progress:
+        result = _pair_statistic(
+            locs,
+            info,
+            picks,
+            pick_shape,
+            pick_size,
+            "h",
+            r_max=r_max,
+            steps=steps,
+            edge_correction=edge_correction,
+            n_simulations=n_simulations,
+            use_z=use_z,
+            z_range=z_range,
+            simulated_z=simulated_z,
+            partner_locs=partner_locs,
+            cross_null=cross_null,
+            random_seed=random_seed,
+            progress=progress,
+        )
+    h = result["values"]
+    valid = ~np.isnan(h[:, 0])
+    r_h_max = np.full(len(h), np.nan)
+    r_h_max[valid] = result["r"][np.argmax(h[valid], axis=1)]
+    return {
+        "r": result["r"],
+        "h": h,
+        "h_mean": result["mean"],
+        "envelope_low": result["envelope_low"],
+        "envelope_high": result["envelope_high"],
+        "n_locs": result["n_locs"],
+        "n_locs_partner": result["n_locs_partner"],
+        "areas": result["areas"],
+        "z_ranges": result["z_ranges"],
+        "volumes": result["volumes"],
+        "r_h_max": r_h_max,
+        "n_simulations": n_simulations,
+        "edge_correction": edge_correction,
+        "use_z": use_z,
+        "simulated_z": result["simulated_z"],
+        "cross_null": result["cross_null"],
+    }
+
+
+def rdf(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    picks: list[tuple] | None = None,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | None
+    ) = None,
+    pick_size: float | None = None,
+    r_max: float = 500.0,
+    steps: int = 50,
+    edge_correction: bool = True,
+    n_simulations: int = 99,
+    use_z: bool = False,
+    z_range: tuple[float, float] | None = None,
+    simulated_z: Literal["uniform", "observed"] = "uniform",
+    partner_locs: pd.DataFrame | None = None,
+    cross_null: Literal["shift", "labels"] = "shift",
+    random_seed: int | None = 0,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> dict:
+    """Radial distribution function (RDF), also called pair
+    correlation function, g(r), of localizations in regions of
+    interest: the density of neighbors at the distance r from a
+    localization, relative to the mean density.
+
+    g(r) is 1 for complete spatial randomness (CSR), above 1 at the
+    distances where molecules are more likely to be found than at
+    random (e.g., within clusters or at a regular spacing) and below 1
+    where they are depleted. Unlike Ripley's H function (``ripley_h``),
+    which accumulates all neighbors up to r, g(r) counts the neighbors
+    in a thin ring (in 3D, a shell) at r::
+
+        g(r) = A / (n (n - 1)) * sum_i sum_(j != i) w_ij
+               * 1(r - dr / 2 < d_ij <= r + dr / 2) / (ring area)
+
+    with the area A of the region (in 3D, the volume), n localizations
+    in it, the distance d_ij between localizations i and j, the edge
+    correction weight w_ij and the ring width dr = ``r_max / steps``.
+    The ring area is 2 pi r dr (in 3D, the shell volume 4 pi r^2 dr).
+
+    The regions, the edge correction, 3D, the CSR envelope and the
+    cross function between two channels (``partner_locs``) are the
+    same as for ``ripley_h``. The cross g(r) is the density of partner
+    localizations at the distance r from a localization, relative to
+    the mean density of the partner: above 1 at the distances where
+    the channels are found together, 1 if they are independent. Since
+    each ring holds fewer pairs than the disk of Ripley's K function,
+    g(r) is noisier; widen the rings (fewer ``steps``) for regions
+    with few localizations.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Molecules, i.e., one localization per molecule, such as the
+        molecules found by ``g5m.g5m`` or the cluster centers of
+        ``clusterer.find_cluster_centers``. Repeated localizations of
+        a molecule appear as a peak at short distances.
+    info : list of dicts
+        Metadata of the localizations, used for the field of view if
+        ``picks`` is None.
+    picks : list of tuples or None, optional
+        Regions of interest in nm, in the format of
+        ``pick_shape``. If None, the whole field of view is used. See
+        ``ripley_h``. Default is None.
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
+"Brush"} or None, optional
+        Shape of the picks. Required if ``picks`` is given. Default is
+        None.
+    pick_size : float or None, optional
+        Size of the picks in nm: diameter for circles, width for
+        rectangles, side length for squares, None for polygons, boxes
+        and brush picks. Default is None.
+    r_max : float, optional
+        Largest radius in nm. It should be well below the size of the
+        regions. Default is 500.
+    steps : int, optional
+        Number of rings between 0 and ``r_max``, at least 2. Default is
+        50, i.e., rings of 10 nm.
+    edge_correction : bool, optional
+        If True, Ripley's isotropic edge correction is applied, see
+        ``ripley_h``. Without it, g is biased downwards, increasingly
+        with the radius. Default is True.
+    n_simulations : int, optional
+        Number of CSR simulations for the envelope, see ``ripley_h``.
+        0 skips the simulations. Default is 99.
+    use_z : bool, optional
+        If True, g is computed in 3D (x, y and z in nm), which requires
+        a ``z`` column, see ``ripley_h``. Default is False.
+    z_range : tuple of floats or None, optional
+        ``(z_min, z_max)`` in nm over which every region extends in 3D.
+        If None, each region extends over the z range of its
+        localizations. Only used in 3D. Default is None.
+    simulated_z : {"uniform", "observed"}, optional
+        z of the simulated points in 3D, see ``ripley_h``. Only used in
+        3D without ``partner_locs``. Default is "uniform".
+    partner_locs : pd.DataFrame or None, optional
+        Molecules of a second channel, in the same coordinates as
+        ``locs`` (aligned). If given, the cross function between both
+        channels is computed, see ``ripley_h``. Default is None.
+    cross_null : {"shift", "labels"}, optional
+        How the envelope is simulated with ``partner_locs``: random
+        shifts of the partner (independent channels; rectangular and
+        circular regions only) or random labels (both channels follow
+        the same distribution), see ``ripley_h``. Default is "shift".
+    random_seed : int or None, optional
+        Seed of the CSR simulations. None gives a different envelope
+        on each call. Default is 0.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating RDF" over the
+        regions, then (if ``n_simulations > 0``) "Simulating envelope"
+        over the simulations. Default is None.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with the keys:
+
+        - "r": centers of the rings in nm, shape (steps,).
+        - "g": radial distribution function of each region, shape
+          (n_regions, steps); NaN for regions with fewer than two
+          localizations (in 3D, at different z) or without area.
+        - "g_mean": mean over the regions with at least two
+          localizations.
+        - "envelope_low", "envelope_high": CSR envelope of the mean,
+          or None without simulations.
+        - "n_locs", "n_locs_partner", "areas", "z_ranges", "volumes",
+          "n_simulations", "edge_correction", "use_z", "simulated_z",
+          "cross_null": as in ``ripley_h``.
+
+    Raises
+    ------
+    ValueError
+        If the parameters are invalid, z is missing in 3D, no region
+        contains enough localizations or random shifts are requested in
+        regions other than rectangles and circles, see ``ripley_h``.
+
+    Warns
+    -----
+    UserWarning
+        If ``locs`` or ``partner_locs`` are not molecules (no
+        ``n_events`` or ``std_frame`` column), and in 3D if ``r_max``
+        exceeds a third of the z range of a region.
+
+    See Also
+    --------
+    ripley_h : Ripley's H function, the cumulative counterpart.
+    plot_rdf : Plot the result.
+
+    References
+    ----------
+    Ripley, B. D. Modelling spatial patterns. J R Stat Soc B 39,
+    172-192 (1977). https://doi.org/10.1111/j.2517-6161.1977.tb01615.x
+
+    Lotwick, H. W., Silverman, B. W. Methods for analysing spatial
+    processes of several types of points. J R Stat Soc B 44, 406-413
+    (1982). https://doi.org/10.1111/j.2517-6161.1982.tb01221.x
+    """
+    with lib.tracked_progress(
+        progress, "Calculating RDF", unit="region"
+    ) as progress:
+        result = _pair_statistic(
+            locs,
+            info,
+            picks,
+            pick_shape,
+            pick_size,
+            "g",
+            r_max=r_max,
+            steps=steps,
+            edge_correction=edge_correction,
+            n_simulations=n_simulations,
+            use_z=use_z,
+            z_range=z_range,
+            simulated_z=simulated_z,
+            partner_locs=partner_locs,
+            cross_null=cross_null,
+            random_seed=random_seed,
+            progress=progress,
+        )
+    return {
+        "r": result["r"],
+        "g": result["values"],
+        "g_mean": result["mean"],
+        "envelope_low": result["envelope_low"],
+        "envelope_high": result["envelope_high"],
+        "n_locs": result["n_locs"],
+        "n_locs_partner": result["n_locs_partner"],
+        "areas": result["areas"],
+        "z_ranges": result["z_ranges"],
+        "volumes": result["volumes"],
+        "n_simulations": n_simulations,
+        "edge_correction": edge_correction,
+        "use_z": use_z,
+        "simulated_z": result["simulated_z"],
+        "cross_null": result["cross_null"],
+    }
+
+
+def plot_rdf(
+    rdf_result: dict,
+    fig: plt.Figure | None = None,
+) -> plt.Figure:
+    """Plot the radial distribution function: the mean over the
+    regions, the CSR envelope and, for several regions, each region's
+    function.
+
+    Parameters
+    ----------
+    rdf_result : dict
+        Result of ``rdf``.
+    fig : plt.Figure or None, optional
+        Figure to plot on, cleared first. If None, a new figure is
+        created. Default is None.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    r = rdf_result["r"]
+    return _plot_pair_statistic(
+        rdf_result,
+        rdf_result["g"],
+        rdf_result["g_mean"],
+        fig,
+        title=(
+            "Cross radial distribution function"
+            if rdf_result["cross_null"]
+            else "Radial distribution function"
+        ),
+        ylabel="g(r)",
+        label="g(r)",
+        random_value=1.0,
+        x_max=r[-1] + 0.5 * (r[1] - r[0]),
+    )
+
+
+def plot_ripley_h(
+    ripley_result: dict,
+    fig: plt.Figure | None = None,
+) -> plt.Figure:
+    """Plot Ripley's H function: the mean over the regions, the CSR
+    envelope and, for several regions, each region's function.
+
+    Parameters
+    ----------
+    ripley_result : dict
+        Result of ``ripley_h``.
+    fig : plt.Figure or None, optional
+        Figure to plot on, cleared first. If None, a new figure is
+        created. Default is None.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    return _plot_pair_statistic(
+        ripley_result,
+        ripley_result["h"],
+        ripley_result["h_mean"],
+        fig,
+        title=(
+            "Ripley's cross H function"
+            if ripley_result["cross_null"]
+            else "Ripley's H function"
+        ),
+        ylabel="H(r) (nm)",
+        label="H(r)",
+        random_value=0.0,
+        x_max=ripley_result["r"][-1],
+    )
+
+
+#: Legend of the envelope by how it was simulated (``cross_null``)
+_ENVELOPE_LABELS = {
+    None: "CSR envelope ({n} simulations)",
+    "shift": "Independence envelope ({n} random shifts)",
+    "labels": "Random labeling envelope ({n} simulations)",
+}
+
+
+def _plot_pair_statistic(
+    result: dict,
+    values: lib.FloatArray2D,
+    mean: lib.FloatArray1D,
+    fig: plt.Figure | None,
+    *,
+    title: str,
+    ylabel: str,
+    label: str,
+    random_value: float,
+    x_max: float,
+) -> plt.Figure:
+    """Plot the mean over the regions of ``ripley_h`` or ``rdf``
+    (``mean``), the CSR envelope, each region's function (``values``)
+    if there are several, and a dashed line at the value of a random
+    distribution."""
+    if fig is None:
+        fig = plt.Figure(constrained_layout=True)
+    else:
+        fig.clear()
+    ax = fig.add_subplot(111)
+    r = result["r"]
+    valid = ~np.isnan(values[:, 0])
+    n_valid = int(valid.sum())
+    # colors of the active style, resolved now (lines look "CN" colors
+    # up only when drawn)
+    data_color, envelope_color = plt.rcParams["axes.prop_cycle"].by_key()[
+        "color"
+    ][:2]
+    if n_valid > 1:
+        for k, region_values in enumerate(values[valid]):
+            ax.plot(
+                r,
+                region_values,
+                color=data_color,
+                alpha=0.25,
+                linewidth=0.8,
+                label=f"Regions ({n_valid})" if k == 0 else None,
+            )
+    if result["envelope_low"] is not None:
+        ax.fill_between(
+            r,
+            result["envelope_low"],
+            result["envelope_high"],
+            color=envelope_color,
+            alpha=0.3,
+            linewidth=0,
+            label=_ENVELOPE_LABELS[result["cross_null"]].format(
+                n=result["n_simulations"]
+            ),
+        )
+    ax.plot(
+        r,
+        mean,
+        color=data_color,
+        linewidth=2,
+        label="Mean" if n_valid > 1 else label,
+    )
+    ax.axhline(
+        random_value,
+        color=plt.rcParams["text.color"],
+        linewidth=0.8,
+        linestyle="--",
+    )
+    ax.set_title(title + (" (3D)" if result["use_z"] else ""))
+    ax.set_xlim(0, x_max)
+    ax.set_xlabel("r (nm)")
+    ax.set_ylabel(ylabel)
+    ax.legend(loc="best")
+    return fig
+
+
+def _ripley_h_tables(
+    ripley_result: dict,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The result of ``ripley_h`` as two tables: the H functions by
+    radius (mean, CSR envelope and each region) and the summary of each
+    region (number of localizations, area, density, maximum of H and
+    its radius). Used for saving the result as .csv files."""
+    curves = _pair_statistic_curves(
+        ripley_result, ripley_result["h"], ripley_result["h_mean"], "h", "_nm"
+    )
+    regions = _pair_statistic_regions(ripley_result)
+    regions["h_max_nm"] = np.max(ripley_result["h"], axis=1)
+    regions["r_at_h_max_nm"] = ripley_result["r_h_max"]
+    return pd.DataFrame(curves), pd.DataFrame(regions)
+
+
+def _rdf_tables(rdf_result: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The result of ``rdf`` as two tables: the radial distribution
+    functions by radius (mean, CSR envelope and each region) and the
+    summary of each region (number of localizations, area, density).
+    Used for saving the result as .csv files."""
+    curves = _pair_statistic_curves(
+        rdf_result, rdf_result["g"], rdf_result["g_mean"], "g", ""
+    )
+    return pd.DataFrame(curves), pd.DataFrame(
+        _pair_statistic_regions(rdf_result)
+    )
+
+
+def _pair_statistic_curves(
+    result: dict,
+    values: lib.FloatArray2D,
+    mean: lib.FloatArray1D,
+    name: str,
+    unit: str,
+) -> dict:
+    """Columns of the functions by radius: the radius, the mean, the
+    CSR envelope and each region's function, called ``<name>_...``
+    with the suffix ``unit``."""
+    curves = {"r_nm": result["r"], f"{name}_mean{unit}": mean}
+    if result["envelope_low"] is not None:
+        curves[f"envelope_low{unit}"] = result["envelope_low"]
+        curves[f"envelope_high{unit}"] = result["envelope_high"]
+    for k, region_values in enumerate(values):
+        curves[f"{name}_region_{k}{unit}"] = region_values
+    return curves
+
+
+def _pair_statistic_regions(result: dict) -> dict:
+    """Columns of the summary of each region: the number of
+    localizations, area and density (per area in 2D, per volume with
+    the z range and volume in 3D)."""
+    n_locs = result["n_locs"]
+    n_locs_partner = result["n_locs_partner"]
+    regions = {
+        "region": np.arange(len(n_locs)),
+        "n_locs": n_locs,
+    }
+    if n_locs_partner is not None:
+        regions["n_locs_partner"] = n_locs_partner
+    regions["area_um2"] = result["areas"] / 1e6
+    if result["use_z"]:
+        regions["z_min_nm"] = result["z_ranges"][:, 0]
+        regions["z_max_nm"] = result["z_ranges"][:, 1]
+        regions["volume_um3"] = result["volumes"] / 1e9
+        size, unit = regions["volume_um3"], "um3"
+    else:
+        size, unit = regions["area_um2"], "um2"
+    with np.errstate(invalid="ignore", divide="ignore"):
+        regions[f"density_per_{unit}"] = np.where(
+            size > 0, n_locs / size, np.nan
+        )
+        if n_locs_partner is not None:
+            regions[f"partner_density_per_{unit}"] = np.where(
+                size > 0, n_locs_partner / size, np.nan
+            )
+    return regions
+
+
+def nnd_distributions(
+    locs: pd.DataFrame | list[pd.DataFrame],
+    info: list[dict],
+    *,
+    picks: list[tuple] | None = None,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | None
+    ) = None,
+    pick_size: float | None = None,
+    names: list[str] | None = None,
+    r_max: float = 200.0,
+    steps: int = 40,
+    n_simulations: int = 99,
+    use_z: bool = False,
+    z_range: tuple[float, float] | None = None,
+    simulated_z: Literal["uniform", "observed"] = "uniform",
+    cross_null: Literal["shift", "labels"] = "shift",
+    random_seed: int | None = 0,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> dict:
+    """Distributions of the first nearest neighbor distances (NNDs)
+    within and between channels in regions of interest, with the
+    distributions expected without interaction from simulations.
+
+    For every ordered pair of channels (A, B), the distance from each
+    molecule of A to the nearest molecule of B in the same region is
+    histogrammed (within a channel, to the nearest other molecule). NNDs
+    are not symmetric: A to B differs from B to A, e.g., if B labels
+    only some of A's structures. Molecules of a region without a
+    molecule of B (within a channel, without another molecule) have no
+    NND. The NNDs of all regions are pooled.
+
+    Each region is simulated ``n_simulations`` times. Within a channel,
+    its molecules are replaced by as many uniformly random points
+    (complete spatial randomness, CSR). Between channels, B is shifted
+    at random, wrapping around the region, which keeps the arrangement
+    of each channel (``cross_null="shift"``, independent channels), or
+    the channel of each molecule of A and B is shuffled (``"labels"``,
+    both channels follow the same distribution); see ``ripley_h``. The
+    mean of the simulated histograms is the distribution expected
+    without interaction, and their lowest and highest values give the
+    envelope. The simulations are in the same regions as the data, so
+    NNDs that are longer near the edges of a region (where neighbors
+    outside are not seen) are expected; no edge correction is needed.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame or list of pd.DataFrames
+        Molecules of one or more channels in the same coordinates
+        (aligned), one localization per molecule, such as the molecules
+        found by ``g5m.g5m`` or the cluster centers of
+        ``clusterer.find_cluster_centers``.
+    info : list of dicts
+        Metadata of the localizations (e.g., of the first channel), used
+        for the field of view if ``picks`` is None.
+    picks : list of tuples or None, optional
+        Regions of interest in nm, in the format of
+        ``pick_shape``. If None, the whole field of view is used. See
+        ``ripley_h``. Default is None.
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
+"Brush"} or None, optional
+        Shape of the picks. Required if ``picks`` is given. Default is
+        None.
+    pick_size : float or None, optional
+        Size of the picks in nm: diameter for circles, width for
+        rectangles, side length for squares, None for polygons, boxes
+        and brush picks. Default is None.
+    names : list of str or None, optional
+        Names of the channels for the plot and the saved tables. If
+        None, the channels are called "0", "1", ... Default is None.
+    r_max : float, optional
+        Largest NND of the histograms in nm; longer NNDs are counted in
+        the totals, not in the histograms. Default is 200.
+    steps : int, optional
+        Number of histogram bins up to ``r_max``. Default is 40, i.e.,
+        bins of 5 nm.
+    n_simulations : int, optional
+        Number of simulations. 0 skips them. Default is 99.
+    use_z : bool, optional
+        If True, the NNDs are computed in 3D (x, y and z in nm), which
+        requires a ``z`` column in all channels. Default is False.
+    z_range : tuple of floats or None, optional
+        ``(z_min, z_max)`` in nm over which every region extends in 3D;
+        localizations outside of it are ignored. If None, each region
+        extends over the z range of the molecules of all channels in
+        it. Only used in 3D. Default is None.
+    simulated_z : {"uniform", "observed"}, optional
+        z of the simulated points within a channel in 3D, see
+        ``ripley_h``. Only used in 3D. Default is "uniform".
+    cross_null : {"shift", "labels"}, optional
+        How two channels are simulated: random shifts of the second
+        channel (independent channels; rectangular and circular regions
+        only) or random labels (both channels follow the same
+        distribution), see ``ripley_h``. Only used with several
+        channels. Default is "shift".
+    random_seed : int or None, optional
+        Seed of the simulations. None gives different simulations on
+        each call. Default is 0.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating NNDs" over the
+        regions, then (if ``n_simulations > 0``) "Simulating envelope"
+        over the simulations. Default is None.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with the keys:
+
+        - "names": names of the channels.
+        - "edges": edges of the histogram bins in nm, shape (steps + 1,).
+        - "histograms": fraction of the molecules of channel A (first
+          axis) whose NND to channel B (second axis) falls in each bin,
+          shape (n_channels, n_channels, steps); NaN for pairs without
+          any NND.
+        - "simulated_mean", "envelope_low", "envelope_high": mean,
+          lowest and highest simulated fractions, same shape, or None
+          without simulations.
+        - "n_molecules": number of NNDs of each pair, i.e., of molecules
+          of A with a molecule of B in their region.
+        - "medians": median NND of each pair in nm.
+        - "simulated_medians": mean over the simulations of the median
+          NND of each pair in nm, or None without simulations.
+        - "n_regions", "n_simulations", "use_z", "simulated_z" (None in
+          2D), "cross_null" (None for one channel).
+
+    Raises
+    ------
+    ValueError
+        If the parameters are invalid, z is missing in 3D, no pair of
+        channels has an NND or random shifts are requested in regions
+        other than rectangles and circles.
+
+    Warns
+    -----
+    UserWarning
+        If a channel is not molecules (no ``n_events`` or ``std_frame``
+        column).
+
+    See Also
+    --------
+    plot_nnd_distributions : Plot the result.
+    nn_analysis : NNDs of each localization.
+    """
+    if isinstance(locs, pd.DataFrame):
+        locs = [locs]
+    n_channels = len(locs)
+    if not n_channels:
+        raise ValueError("At least one channel is required.")
+    if names is None:
+        names = [str(i) for i in range(n_channels)]
+    names = [str(name) for name in names]
+    if len(names) != n_channels:
+        raise ValueError(
+            f"{len(names)} names given for {n_channels} channels."
+        )
+    if r_max <= 0:
+        raise ValueError("r_max must be positive.")
+    if steps < 1:
+        raise ValueError("steps must be at least 1.")
+    if n_simulations < 0:
+        raise ValueError("n_simulations must not be negative.")
+    cross = n_channels > 1
+    if cross and cross_null not in ("shift", "labels"):
+        raise ValueError(
+            f"Invalid cross_null: {cross_null!r}; choose 'shift' or "
+            "'labels'."
+        )
+    if use_z:
+        if not all("z" in locs_.columns for locs_ in locs):
+            raise ValueError("3D requires z in all channels.")
+        if z_range is not None and not z_range[0] < z_range[1]:
+            raise ValueError("z_range must be (z_min, z_max), z_min < z_max.")
+        if simulated_z not in ("uniform", "observed"):
+            raise ValueError(
+                f"Invalid simulated_z: {simulated_z!r}; choose 'uniform' "
+                "or 'observed'."
+            )
+    regions = _statistic_regions(
+        info, picks, pick_shape, pick_size, cross and cross_null == "shift"
+    )
+    for locs_, name in zip(locs, names):
+        _warn_if_not_molecules(locs_, f"Channel {name} is", stacklevel=3)
+
+    coordinates = [
+        (
+            locs_["x"].to_numpy(dtype=np.float64),
+            locs_["y"].to_numpy(dtype=np.float64),
+            locs_["z"].to_numpy(dtype=np.float64) if use_z else None,
+        )
+        for locs_ in locs
+    ]
+    edges = np.arange(steps + 1) * (r_max / steps)
+    pairs = [(a, b) for a in range(n_channels) for b in range(n_channels)]
+    counts = np.zeros((n_channels, n_channels, steps))
+    n_molecules = np.zeros((n_channels, n_channels), dtype=int)
+    nnds = {pair: [] for pair in pairs}
+    region_points = []  # (region, z range, points of each channel)
+    n_regions = len(regions)
+    with lib.tracked_progress(
+        progress, "Calculating NNDs", unit="region"
+    ) as progress:
+        lib.start_phase(progress, "Calculating NNDs", n_regions, unit="region")
+        progress.set_value(0)
+        for k, region in enumerate(regions):
+            data = _nnd_region_points(region, coordinates, use_z, z_range)
+            if data is not None:
+                points = data[1]
+                for a, b in pairs:
+                    region_nnds = _first_nnds(points[a], points[b], a == b)
+                    nnds[a, b].append(region_nnds)
+                    counts[a, b] += np.histogram(region_nnds, edges)[0]
+                    n_molecules[a, b] += len(region_nnds)
+                region_points.append((region, *data))
+            progress.set_value(k + 1)
+        progress.set_value(n_regions)
+        if not n_molecules.any():
+            raise ValueError(
+                "No region contains two molecules of a channel or "
+                "molecules of two channels."
+            )
+        with np.errstate(invalid="ignore", divide="ignore"):
+            histograms = counts / n_molecules[:, :, None]
+        medians = np.full((n_channels, n_channels), np.nan)
+        for a, b in pairs:
+            if n_molecules[a, b]:
+                medians[a, b] = np.median(np.concatenate(nnds[a, b]))
+
+        simulated_mean = envelope_low = envelope_high = None
+        simulated_medians = None
+        if n_simulations:
+            rng = np.random.default_rng(random_seed)
+            simulated = np.zeros(
+                (n_simulations, n_channels, n_channels, steps)
+            )
+            medians_sim = np.full(
+                (n_simulations, n_channels, n_channels), np.nan
+            )
+            lib.start_phase(
+                progress,
+                "Simulating envelope",
+                n_simulations,
+                unit="simulation",
+            )
+            progress.set_value(0)
+            for s in range(n_simulations):
+                sim_counts = np.zeros((n_channels, n_channels, steps))
+                sim_nnds = {pair: [] for pair in pairs}
+                for region, region_z, points in region_points:
+                    for a, b in pairs:
+                        if a == b:
+                            simulated_points = _simulated_points(
+                                [points[a]],
+                                region,
+                                region_z,
+                                False,
+                                cross_null,
+                                simulated_z,
+                                rng,
+                            )
+                            source = target = simulated_points[0]
+                        else:
+                            source, target = _simulated_points(
+                                [points[a], points[b]],
+                                region,
+                                region_z,
+                                True,
+                                cross_null,
+                                simulated_z,
+                                rng,
+                            )
+                        region_nnds = _first_nnds(source, target, a == b)
+                        sim_nnds[a, b].append(region_nnds)
+                        sim_counts[a, b] += np.histogram(region_nnds, edges)[0]
+                with np.errstate(invalid="ignore", divide="ignore"):
+                    simulated[s] = sim_counts / n_molecules[:, :, None]
+                for a, b in pairs:
+                    if n_molecules[a, b]:
+                        medians_sim[s, a, b] = np.median(
+                            np.concatenate(sim_nnds[a, b])
+                        )
+                progress.set_value(s + 1)
+            progress.set_value(n_simulations)
+            simulated_mean = simulated.mean(axis=0)
+            envelope_low = simulated.min(axis=0)
+            envelope_high = simulated.max(axis=0)
+            simulated_medians = medians_sim.mean(axis=0)
+
+    return {
+        "names": names,
+        "edges": edges,
+        "histograms": histograms,
+        "simulated_mean": simulated_mean,
+        "envelope_low": envelope_low,
+        "envelope_high": envelope_high,
+        "n_molecules": n_molecules,
+        "medians": medians,
+        "simulated_medians": simulated_medians,
+        "n_regions": n_regions,
+        "n_simulations": n_simulations,
+        "use_z": use_z,
+        "simulated_z": simulated_z if use_z else None,
+        "cross_null": cross_null if cross else None,
+    }
+
+
+def _nnd_region_points(
+    region: _Region | None,
+    coordinates: list[tuple],
+    use_z: bool,
+    z_range: tuple[float, float] | None,
+) -> tuple[tuple[float, float] | None, list[tuple]] | None:
+    """The z range of a region (None in 2D) and the points ``(x, y,
+    z)`` of each channel (``coordinates``, nm) inside it, or None for a
+    region without area or, in 3D, without depth."""
+    if region is None:
+        return None
+    points = []
+    for x_all, y_all, z_all in coordinates:
+        inside = _locs_in_region(x_all, y_all, region)
+        if use_z and z_range is not None:
+            z = z_all[inside]
+            inside = inside[(z >= z_range[0]) & (z <= z_range[1])]
+        points.append(
+            (x_all[inside], y_all[inside], z_all[inside] if use_z else None)
+        )
+    region_z = None
+    if use_z:
+        if z_range is not None:
+            region_z = tuple(z_range)
+        elif sum(len(x) for x, _, _ in points):
+            z = np.concatenate([z for _, _, z in points])
+            region_z = (z.min(), z.max())
+        if region_z is None or region_z[1] <= region_z[0]:
+            return None
+    return region_z, points
+
+
+def _first_nnds(source: tuple, target: tuple, same: bool) -> lib.FloatArray1D:
+    """Distances (nm) from each of the ``source`` points ``(x, y, z)``
+    (z None in 2D) to the nearest ``target`` point; if ``same``, the
+    source and target are the same points and the nearest other point
+    is used. Empty if there is no such point."""
+    n_targets = len(target[0])
+    if not len(source[0]) or n_targets < (2 if same else 1):
+        return np.zeros(0)
+    columns = [c for c in source if c is not None]
+    tree = KDTree(np.column_stack([c for c in target if c is not None]))
+    distances, _ = tree.query(np.column_stack(columns), k=2 if same else 1)
+    return distances[:, 1] if same else distances
+
+
+def plot_nnd_distributions(
+    nnd_result: dict,
+    fig: plt.Figure | None = None,
+) -> plt.Figure:
+    """Plot the first nearest neighbor distance (NND) distributions of
+    every ordered pair of channels in a grid (rows: from, columns: to),
+    with the mean and the range of the simulations.
+
+    Parameters
+    ----------
+    nnd_result : dict
+        Result of ``nnd_distributions``.
+    fig : plt.Figure or None, optional
+        Figure to plot on, cleared first. If None, a new figure is
+        created. Default is None.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    if fig is None:
+        fig = plt.Figure(constrained_layout=True)
+    else:
+        fig.clear()
+    names = nnd_result["names"]
+    n_channels = len(names)
+    edges = nnd_result["edges"]
+    simulated = nnd_result["simulated_mean"] is not None
+    # colors of the active style, resolved now (lines look "CN" colors
+    # up only when drawn)
+    data_color, simulation_color = plt.rcParams["axes.prop_cycle"].by_key()[
+        "color"
+    ][:2]
+    axes = fig.subplots(n_channels, n_channels, sharex=True, squeeze=False)
+    for a in range(n_channels):
+        for b in range(n_channels):
+            ax = axes[a, b]
+            ax.set_title(f"{names[a]} → {names[b]}" if n_channels > 1 else "")
+            histogram = nnd_result["histograms"][a, b]
+            if np.isnan(histogram).all():
+                ax.text(
+                    0.5,
+                    0.5,
+                    "No NNDs",
+                    ha="center",
+                    va="center",
+                    transform=ax.transAxes,
+                )
+                continue
+            if simulated:
+                ax.fill_between(
+                    edges,
+                    np.append(nnd_result["envelope_low"][a, b], np.nan),
+                    np.append(nnd_result["envelope_high"][a, b], np.nan),
+                    step="post",
+                    color=simulation_color,
+                    alpha=0.3,
+                    linewidth=0,
+                    label="Simulations (range)",
+                )
+                ax.stairs(
+                    nnd_result["simulated_mean"][a, b],
+                    edges,
+                    color=simulation_color,
+                    linewidth=1.2,
+                    linestyle="--",
+                    label="Simulations (mean)",
+                )
+            # the data on top of the simulations
+            ax.stairs(
+                histogram, edges, color=data_color, linewidth=1.5, label="Data"
+            )
+            ax.set_xlim(0, edges[-1])
+            ax.set_ylim(bottom=0)
+            if a == n_channels - 1:
+                ax.set_xlabel("1st NND (nm)")
+            if b == 0:
+                ax.set_ylabel("Fraction of molecules")
+    title = "Nearest neighbor distances" + (
+        " (3D)" if nnd_result["use_z"] else ""
+    )
+    if simulated:
+        axes[0, 0].legend(loc="best")
+        null = {
+            None: "random positions",
+            "shift": "random positions within channels,\nrandom shifts "
+            "between channels",
+            "labels": "random positions within channels,\nrandom labels "
+            "between channels",
+        }[nnd_result["cross_null"]]
+        title += f"\n{nnd_result['n_simulations']} simulations: {null}"
+    fig.suptitle(title)
+    return fig
+
+
+def _nnd_tables(nnd_result: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The result of ``nnd_distributions`` as two tables: the
+    histograms by bin (data, simulated mean and range of each ordered
+    pair of channels, as fractions of molecules) and the summary of
+    each pair (number of molecules and median NND, measured and
+    simulated). Used for saving the result as .csv files."""
+    names = nnd_result["names"]
+    edges = nnd_result["edges"]
+    curves = {"bin_start_nm": edges[:-1], "bin_end_nm": edges[1:]}
+    summary = []
+    for a, name_a in enumerate(names):
+        for b, name_b in enumerate(names):
+            pair = f"{name_a}_to_{name_b}"
+            curves[pair] = nnd_result["histograms"][a, b]
+            if nnd_result["simulated_mean"] is not None:
+                curves[f"{pair}_simulated_mean"] = nnd_result[
+                    "simulated_mean"
+                ][a, b]
+                curves[f"{pair}_envelope_low"] = nnd_result["envelope_low"][
+                    a, b
+                ]
+                curves[f"{pair}_envelope_high"] = nnd_result["envelope_high"][
+                    a, b
+                ]
+            row = {
+                "from": name_a,
+                "to": name_b,
+                "n_molecules": nnd_result["n_molecules"][a, b],
+                "median_nnd_nm": nnd_result["medians"][a, b],
+            }
+            if nnd_result["simulated_medians"] is not None:
+                row["simulated_median_nnd_nm"] = nnd_result[
+                    "simulated_medians"
+                ][a, b]
+            summary.append(row)
+    return pd.DataFrame(curves), pd.DataFrame(summary)
 
 
 def resi(
     locs: list[pd.DataFrame],
     infos: list[list[dict]],
+    *,
     radius_xy: float | list[float],
     radius_z: float | list[float] | None = None,
     min_locs: int | list[int] = 10,
@@ -5462,9 +8400,7 @@ def resi(
     output_paths: list[str] | None = None,
     suffix_locs: str = "_clustered",
     suffix_centers: str = "_cluster_centers",
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Perform RESI (REsolution by Sequential Imaging) analysis on
     multiple channels.
@@ -5480,11 +8416,11 @@ def resi(
     infos : list of list of dicts
         List of metadata dictionaries for each channel.
     radius_xy : float or list of float
-        Clustering radius in xy (camera pixels). If a single float is
-        provided, it is applied to all channels. If a list, must have
-        length equal to the number of channels.
+        Clustering radius in xy (nm). If a single float is provided, it
+        is applied to all channels. If a list, must have length equal
+        to the number of channels.
     radius_z : float, list of float, or None, optional
-        Clustering radius in z (camera pixels). Only used for 3D data.
+        Clustering radius in z (nm). Only used for 3D data.
         If a float, applied to all channels. If a list, must have length
         equal to the number of channels. Default is None.
     min_locs : int or list of int, optional
@@ -5514,11 +8450,13 @@ def resi(
     suffix_centers : str, optional
         Suffix appended to output_paths for saved cluster centers from
         individual channels. Default is "_cluster_centers".
-    progress_callback : {callable, "console", None}, optional
-        Callback function to report progress where the input integer is
-        the index of the channel currently processed. If "console", uses
-        a simple console print. If None, no progress is reported.
-        Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports, for each channel in turn, the
+        phases of ``clusterer.cluster`` ("Clustering" over the
+        localizations) and ``clusterer.find_cluster_centers``
+        ("Finding cluster centers" over the clusters). Default is None.
 
     Returns
     -------
@@ -5528,8 +8466,9 @@ def resi(
         indicating which channel each cluster belongs to. The 'group'
         column is renamed to 'cluster_id'.
     resi_info : list of dicts
-        Metadata for the RESI cluster centers, containing clustering
-        parameters for each channel.
+        Metadata of the RESI cluster centers: the metadata of the first
+        channel with an entry recording the clustering parameters of
+        each channel appended, see ``lib.append_metadata``.
 
     Raises
     ------
@@ -5581,21 +8520,22 @@ def resi(
             f"min_locs list length ({len(min_locs)}) must match "
             f"number of channels ({n_channels})"
         )
-    return _resi(
-        locs=locs,
-        infos=infos,
-        radius_xy=radius_xy,
-        radius_z=radius_z,
-        min_locs=min_locs,
-        apply_fa=apply_fa,
-        save_clustered_locs=save_clustered_locs,
-        save_cluster_centers=save_cluster_centers,
-        resi_path=resi_path,
-        output_paths=output_paths,
-        suffix_locs=suffix_locs,
-        suffix_centers=suffix_centers,
-        progress_callback=progress_callback,
-    )
+    with lib.tracked_progress(progress, "Clustering", unit="loc") as progress:
+        return _resi(
+            locs=locs,
+            infos=infos,
+            radius_xy=radius_xy,
+            radius_z=radius_z,
+            min_locs=min_locs,
+            apply_fa=apply_fa,
+            save_clustered_locs=save_clustered_locs,
+            save_cluster_centers=save_cluster_centers,
+            resi_path=resi_path,
+            output_paths=output_paths,
+            suffix_locs=suffix_locs,
+            suffix_centers=suffix_centers,
+            progress=progress,
+        )
 
 
 def _resi(
@@ -5611,27 +8551,17 @@ def _resi(
     output_paths: list[str] | None = None,
     suffix_locs: str = "_clustered",
     suffix_centers: str = "_cluster_centers",
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Internal function to perform RESI analysis, assumes all
     parameters are in the correct format and that there are at least 2
-    chennels. See `resi` for details."""
+    channels. See `resi` for details; ``progress`` is a normalized
+    tracker."""
     ndim = 3 if all(["z" in locs_.columns for locs_ in locs]) else 2
-    pixelsize = lib.get_from_metadata(infos[0], "Pixelsize", raise_error=True)
 
     # Process each channel
     resi_channels = []
-    if progress_callback == "console":
-        iter_range = tqdm(
-            total=len(locs), desc="Processing channels", unit="Channels"
-        )
-    else:
-        iter_range = range(len(locs))
-    for i in iter_range:
-        if callable(progress_callback):
-            progress_callback(i)
+    for i in range(len(locs)):
         locs_ = locs[i]
         info_ = infos[i]
         r_xy = radius_xy[i]
@@ -5639,42 +8569,42 @@ def _resi(
         min_locs_ = min_locs[i]
 
         # Cluster localizations for this channel
-        clustered_locs, new_info = clusterer.cluster(
+        clustered_locs, clustered_info = clusterer.cluster(
             locs_,
+            info_,
             radius_xy=r_xy,
             min_locs=min_locs_,
             frame_analysis=apply_fa,
             radius_z=r_z if ndim == 3 else None,
-            pixelsize=pixelsize,
+            progress=progress,
         )
-        if ndim == 3:
-            new_info["Clustering radius z (nm)"] = r_z * pixelsize
 
         # Save clustered localizations if requested
         if save_clustered_locs and output_paths is not None:
             save_path = (
                 os.path.splitext(output_paths[i])[0] + f"{suffix_locs}.hdf5"
             )
-            io.save_locs(save_path, clustered_locs, info_ + [new_info])
+            io.save_locs(save_path, clustered_locs, clustered_info)
 
         # Extract cluster centers from clustered localizations
-        centers = clusterer.find_cluster_centers(clustered_locs, pixelsize)
+        centers, centers_info = clusterer.find_cluster_centers(
+            clustered_locs, clustered_info, progress=progress
+        )
 
         # Save cluster centers if requested
         if save_cluster_centers and output_paths is not None:
             save_path = (
                 os.path.splitext(output_paths[i])[0] + f"{suffix_centers}.hdf5"
             )
-            io.save_locs(save_path, centers, info_ + [new_info])
+            io.save_locs(save_path, centers, centers_info)
 
-        # Add RESI channel ID to identify which channel this cluster belongs to
+        # Add RESI channel ID to identify which channel this cluster
+        # belongs to
         centers["resi_channel_id"] = i * np.ones(
             len(centers),
             dtype=np.int8,
         )
         resi_channels.append(centers)
-    if callable(progress_callback):  # close the progress dialog
-        progress_callback(len(locs))
 
     # Combine cluster centers from all channels; they carry the columns of
     # their channel's localizations, which need not all be the same
@@ -5685,19 +8615,19 @@ def _resi(
     all_resi.drop(columns=["group"], inplace=True)
     all_resi.sort_values(kind="quicksort", by="frame", inplace=True)
 
-    new_info = {
-        "Generated by": "RESI analysis",
+    entry = {
+        **lib.step_info("RESI"),
         "Clustering radius xy (nm) for each channel": [
-            float(r * pixelsize) for r in radius_xy
+            float(r) for r in radius_xy
         ],
         "Min. number of locs in a cluster for each channel": list(min_locs),
         "Basic frame analysis": apply_fa,
     }
     if ndim == 3:
-        new_info["Clustering radius z (nm) for each channel"] = [
-            float(r * pixelsize) for r in radius_z
+        entry["Clustering radius z (nm) for each channel"] = [
+            float(r) for r in radius_z
         ]
-    new_info = infos[0] + [new_info]
+    new_info = lib.append_metadata(infos[0], entry)
     # Save combined RESI results if output paths are provided
     if resi_path is not None:
         io.save_locs(resi_path, all_resi, new_info)

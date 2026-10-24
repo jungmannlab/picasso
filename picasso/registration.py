@@ -23,6 +23,14 @@ Two ways to measure it, both producing the same file:
     *same* frame; pairing those detections frame by frame registers the
     channels with no separate bead acquisition.
 
+Every position, radius and residual in this module is in camera pixels:
+a channel registration is detector geometry, used while fitting to place
+the fitting boxes on the raw images, not a correction of localizations
+(which are in nm; see ``picasso.localize.fit_lateral_transform`` for
+those). The stored ``channel_transforms`` therefore map camera pixel
+positions, and ``picasso.transforms.Transform.decompose`` reads them
+with ``unit="px"``.
+
 The matching machinery underneath is shared with :mod:`picasso.spline`, which
 registers the channels of its own multichannel PSF calibration the same way.
 That shared part is public API rather than module-private:
@@ -45,20 +53,21 @@ from __future__ import annotations
 import datetime
 import warnings
 from itertools import combinations
-from typing import Callable
+from typing import Callable, Literal
 
 import numpy as np
 from scipy.spatial import KDTree
 
-from . import io, localize, __version__
-
-# aliased: `wavelet` is the keyword that passes the wavelet identification
-# settings through this module
-from . import wavelet as wavelets
+from . import io, lib, localize
 
 # aliased: `transforms` is used as a local name for lists of channel
 # transforms throughout this module
 from . import transforms as tform
+
+__all__ = [
+    "calibrate_channel_registration_from_beads",
+    "calibrate_channel_registration_from_signal",
+]
 
 #: ``model`` of the standalone channel-registration calibration, so it can be
 #: told apart from a spline PSF calibration that also carries channel
@@ -290,14 +299,33 @@ def _ransac_msac_cost(
 
         return msac_cost
 
-    # one tree per field, so a bead can only find partners in its own
-    group_trees = [(ri, KDTree(c_xy[ci])) for ri, ci in groups]
+    # A bead may only find partners in its own field. One tree holds every
+    # field, each lifted to its own height: within a field the height adds an
+    # exact 0 (the distances are those of a tree per field), and a partner
+    # from another field is further than the cap, so it costs the cap either
+    # way. One query per candidate instead of one per field - which, with a
+    # field per frame in signal registration, was most of the calibration.
+    sep = 2.0 * np.sqrt(tol_sq) + 1.0
+    rows = np.concatenate([ri for ri, _ in groups])
+    ref_z = np.repeat(
+        np.arange(len(groups)) * sep, [len(ri) for ri, _ in groups]
+    )
+    c_rows = np.concatenate([ci for _, ci in groups])
+    c_z = np.repeat(
+        np.arange(len(groups)) * sep, [len(ci) for _, ci in groups]
+    )
+    tree = KDTree(np.column_stack([c_xy[c_rows], c_z]))
+    ends = np.cumsum([len(ri) for ri, _ in groups])
+    bounds = list(zip(ends - [len(ri) for ri, _ in groups], ends))
 
     def msac_cost(pred: np.ndarray) -> float:
+        dist, _ = tree.query(np.column_stack([pred[rows], ref_z]), k=1)
+        cost = np.minimum(dist**2, tol_sq)
+        # summed per field, then across the fields, as with a tree per field
+        # (np.add.reduceat would add up differently in the last bits)
         total = 0.0
-        for ri, tree in group_trees:
-            dist, _ = tree.query(pred[ri], k=1)
-            total += float(np.sum(np.minimum(dist**2, tol_sq)))
+        for start, end in bounds:
+            total += float(np.sum(cost[start:end]))
         return total
 
     return msac_cost
@@ -966,10 +994,9 @@ def register_from_point_sets(
 
 def detections_by_frame(
     movie,
-    minimum_ng: float | None,
+    identification_method: localize.IdentificationMethod,
     box: int,
     frames: np.ndarray,
-    wavelet: wavelets.WaveletParameters | None = None,
 ) -> dict:
     """Detect spots on selected frames, grouped by frame.
 
@@ -977,18 +1004,15 @@ def detections_by_frame(
     ----------
     movie : AbstractPicassoMovie
         The movie to detect in.
-    minimum_ng : float or None
-        Minimum net gradient for a spot to be kept. Ignored if
-        ``wavelet`` is given.
+    identification_method : NetGradient or wavelet.WaveletParameters
+        How the spots are detected: local maxima above a minimum net
+        gradient (``localize.NetGradient``) or wavelet segmentation (see
+        ``localize.IdentificationParameters``).
     box : int
         Box side length (camera pixels) used for the detection.
     frames : np.ndarray
         Indices of the frames to detect on, e.g. from
         :func:`frames_in_bounds`.
-    wavelet : wavelet.WaveletParameters, optional
-        Settings of the wavelet identification, see
-        :func:`picasso.localize.identify`. Default is None, i.e. the net
-        gradient identification.
 
     Returns
     -------
@@ -1001,7 +1025,10 @@ def detections_by_frame(
         frame indices rather than positions within that stack.
     """
     stack = np.stack([np.asarray(movie[int(f)]) for f in frames])
-    ids, _ = localize.identify(stack, minimum_ng, box, wavelet=wavelet)
+    parameters = localize.IdentificationParameters(
+        method=identification_method, box=box
+    )
+    ids, _ = localize.identify(stack, parameters=parameters)
     if len(ids) == 0:
         return {}
     frame = np.asarray(ids["frame"], dtype=np.int64)
@@ -1013,18 +1040,6 @@ def detections_by_frame(
     )
     frames = np.asarray(frames)
     return {int(frames[f]): xy[frame == f] for f in np.unique(frame)}
-
-
-def _minimum_ng_for(
-    minimum_ng: float | list | None, channel: int
-) -> float | None:
-    """``minimum_ng`` for one channel, from a scalar or a per-channel list;
-    None stays None (wavelet identification, which has no net gradient)."""
-    if minimum_ng is None:
-        return None
-    if isinstance(minimum_ng, (list, tuple, np.ndarray)):
-        return float(minimum_ng[channel])
-    return float(minimum_ng)
 
 
 def _region_mask(xy: np.ndarray, region: list) -> np.ndarray:
@@ -1097,37 +1112,23 @@ def _registration_calibration(
     reference: int,
     model: str,
     box: int,
-    minimum_ng: float | list | None,
+    identification_method: localize.IdentificationMethod | list,
     source: str,
     infos: list,
     channel_paths: list[str] | None,
     extra: dict | None = None,
-    wavelet: wavelets.WaveletParameters | list | None = None,
 ) -> dict:
     """Assemble the calibration dict both builders return.
 
     ``transforms`` is one entry per channel in channel order, the reference's
     being the identity, stored in the same wire format as a multichannel spline
     calibration's ``channel_transforms`` so every consumer of those works
-    unchanged. The detection settings are recorded for traceability: the
-    minimum net gradient, or the wavelet settings as a plain dict (the file is
-    YAML).
+    unchanged. They map camera pixel positions (detector geometry), as do
+    ``box`` and the ``rms`` residuals; nothing here is in nm. The detection
+    settings are recorded for traceability under ``"Identification"``, in
+    the format of the identification metadata of a localization file (see
+    ``localize.IdentificationParameters.to_info``).
     """
-    if wavelet is None:
-        detection = {
-            "identification_method": localize.IDENTIFY_METHOD_NET_GRADIENT,
-            "minimum_ng": minimum_ng,
-        }
-    else:
-        detection = {
-            "identification_method": localize.IDENTIFY_METHOD_WAVELET,
-            # one dict per channel when each has its own settings
-            "wavelet": (
-                wavelet.to_dict()
-                if isinstance(wavelet, wavelets.WaveletParameters)
-                else [_.to_dict() for _ in wavelet]
-            ),
-        }
     calibration = {
         "model": REGISTRATION_MODEL,
         "n_channels": len(transforms),
@@ -1136,14 +1137,16 @@ def _registration_calibration(
         "reference": int(reference),
         "source": source,
         "box": int(box),
-        **detection,
+        "Identification": localize._calibration_identification_info(
+            identification_method, box
+        ),
         # per non-reference channel, in channel order
         "n_pairs": [int(i["n_matches"]) for i in infos],
         "rms": [float(i["rms"]) for i in infos],
         "fitted_model": [i["model"] for i in infos],
         "channel_paths": list(channel_paths or []),
         "date": datetime.datetime.now().isoformat(),
-        "Generated by": f"Picasso v{__version__} Channel registration",
+        **lib.step_info("Channel registration"),
     }
     if extra:
         calibration.update(extra)
@@ -1260,8 +1263,9 @@ def _register_bead_channel(
 
 def calibrate_channel_registration_from_beads(
     movies: list,
+    *,
     box: int,
-    minimum_ng: float | list,
+    identification_method: localize.IdentificationMethod | list,
     model: str = "affine",
     reference: int = 0,
     regions: list | None = None,
@@ -1269,12 +1273,13 @@ def calibrate_channel_registration_from_beads(
     min_pairs: int | None = None,
     channel_paths: list[str] | None = None,
     path: str | None = None,
-    wavelet: wavelets.WaveletParameters | list | None = None,
 ) -> dict:
     """Register channels from images of fiducial beads.
 
     Beads are detected and refined to sub-pixel accuracy, matched to the
     reference channel's beads, and a transform is fitted per channel.
+
+    Since v1.0.0: only ``movies`` is accepted positionally.
 
     Parameters
     ----------
@@ -1284,9 +1289,10 @@ def calibrate_channel_registration_from_beads(
         channels. Multi-frame movies are averaged unless ``multi_fov``.
     box : int
         Box size used to detect and fit the beads.
-    minimum_ng : float, list or None
-        Minimum net gradient for a bead candidate, shared or per channel.
-        Ignored if ``wavelet`` is given.
+    identification_method : NetGradient, wavelet.WaveletParameters or list
+        How the bead candidates are detected: local maxima above a minimum
+        net gradient (``localize.NetGradient``) or wavelet segmentation (see
+        ``localize.IdentificationParameters``), shared or one per channel.
     model : str, optional
         Transform model, as in :mod:`picasso.transforms`. Default "affine".
     reference : int, optional
@@ -1312,10 +1318,6 @@ def calibrate_channel_registration_from_beads(
         Source paths, recorded in the calibration for traceability.
     path : str, optional
         If given, the calibration is saved there (YAML).
-    wavelet : wavelet.WaveletParameters or list of them, optional
-        Detect the bead candidates by wavelet segmentation with these
-        settings instead of by their net gradient; a list gives one per
-        channel, like ``minimum_ng``. Default is None.
 
     Returns
     -------
@@ -1334,6 +1336,7 @@ def calibrate_channel_registration_from_beads(
     needed = tform.min_points(model)
     if min_pairs is None:
         min_pairs = needed
+    methods = localize._as_method_list(identification_method, n_channels)
 
     def beads_by_frame(index: int) -> dict:
         """Sub-pixel bead positions of one channel, keyed by field of view.
@@ -1343,7 +1346,6 @@ def calibrate_channel_registration_from_beads(
         key, so a bead can only ever be paired within it; otherwise the frames
         are averaged into one image under a single key."""
         movie = movies[0] if split_fov else movies[index]
-        mng = _minimum_ng_for(minimum_ng, index)
         frames = (
             range(int(np.asarray(movie).shape[0])) if multi_fov else [None]
         )
@@ -1354,9 +1356,7 @@ def calibrate_channel_registration_from_beads(
                 if multi_fov
                 else localize._movie_to_image(movie)
             )
-            coarse = localize._lateral_detect_beads(
-                image, box, mng, wavelet=localize.wavelet_for(wavelet, index)
-            )
+            coarse = localize._lateral_detect_beads(image, box, methods[index])
             refined = localize._lateral_refine_bead_positions(
                 image, coarse, box
             )
@@ -1405,7 +1405,7 @@ def calibrate_channel_registration_from_beads(
         reference,
         model,
         box,
-        minimum_ng,
+        localize._validate_method(identification_method),
         "beads",
         infos,
         channel_paths,
@@ -1414,7 +1414,6 @@ def calibrate_channel_registration_from_beads(
             if split_fov
             else None
         ),
-        wavelet=wavelet,
     )
     if path:
         io.save_any_calibration(path, calibration)
@@ -1445,37 +1444,36 @@ def _signal_detections(
     movies: list,
     regions: list | None,
     reference: int,
-    minimum_ng: float | list | None,
+    methods: list,
     box: int,
     sample_frames: np.ndarray,
     split_fov: bool,
-    wavelet: wavelets.WaveletParameters | list | None = None,
+    progress: lib.Progress,
 ) -> list[dict]:
     """Per-frame detections for every channel, in channel order.
 
-    For split-FOV the single movie is detected once and split by region;
-    otherwise each channel's own movie is detected with its own
-    ``minimum_ng`` and wavelet settings.
+    For split-FOV the single movie is detected once, with the reference
+    channel's identification method, and split by region; otherwise each
+    channel's own movie is detected with its own method. Reports the phase
+    "Detecting spots" over the movies detected on ``progress`` (a
+    normalized tracker).
     """
+    n_movies = 1 if split_fov else len(movies)
+    lib.start_phase(progress, "Detecting spots", n_movies, unit="movie")
+    progress.set_value(0)
     if split_fov:
         movie_by_frame = detections_by_frame(
-            movies[0],
-            _minimum_ng_for(minimum_ng, reference),
-            box,
-            sample_frames,
-            wavelet=localize.wavelet_for(wavelet, reference),
+            movies[0], methods[reference], box, sample_frames
         )
+        progress.set_value(1)
         return [_by_frame_in_region(movie_by_frame, r) for r in regions]
-    return [
-        detections_by_frame(
-            m,
-            _minimum_ng_for(minimum_ng, c),
-            box,
-            sample_frames,
-            wavelet=localize.wavelet_for(wavelet, c),
+    by_channel = []
+    for c, m in enumerate(movies):
+        by_channel.append(
+            detections_by_frame(m, methods[c], box, sample_frames)
         )
-        for c, m in enumerate(movies)
-    ]
+        progress.set_value(c + 1)
+    return by_channel
 
 
 def _signal_channel_seed(
@@ -1528,10 +1526,72 @@ def _register_signal_channel(
     return info
 
 
+def _register_signal_channels(
+    by_channel: list[dict],
+    seed_transforms: list | None,
+    regions: list | None,
+    reference: int,
+    model: str,
+    box: int,
+    n_iter: int,
+    min_pairs: int,
+    n_channels: int,
+    split_fov: bool,
+    progress: lib.Progress,
+) -> tuple[list, list[dict]]:
+    """Register every channel to the reference from its per-frame
+    detections, reporting the phase "Registering channels" over the
+    channels other than the reference on ``progress`` (a normalized
+    tracker).
+
+    Returns
+    -------
+    transforms : list
+        One transform per channel, the identity for the reference.
+    infos : list of dict
+        The registration record of each non-reference channel.
+    """
+    ref_by_frame = by_channel[reference]
+    if not ref_by_frame:
+        raise ValueError(
+            "No detections in the reference channel; lower the minimum net "
+            "gradient (or the wavelet threshold) or check the frame range."
+        )
+
+    transforms: list = [None] * n_channels
+    transforms[reference] = tform.identity(model)
+    infos = []
+    lib.start_phase(
+        progress, "Registering channels", n_channels - 1, unit="channel"
+    )
+    progress.set_value(0)
+    for c in range(n_channels):
+        if c == reference:
+            continue
+        seed = _signal_channel_seed(
+            seed_transforms, regions, reference, c, split_fov
+        )
+        info = _register_signal_channel(
+            ref_by_frame,
+            by_channel[c],
+            model,
+            box,
+            seed,
+            n_iter,
+            min_pairs,
+            c,
+        )
+        transforms[c] = info["transform"]
+        infos.append(info)
+        progress.set_value(len(infos))
+    return transforms, infos
+
+
 def calibrate_channel_registration_from_signal(
     movies: list,
+    *,
     box: int,
-    minimum_ng: float | list,
+    identification_method: localize.IdentificationMethod | list,
     model: str = "affine",
     reference: int = 0,
     frame_bounds: tuple[int, int] | list | None = None,
@@ -1542,8 +1602,7 @@ def calibrate_channel_registration_from_signal(
     regions: list | None = None,
     channel_paths: list[str] | None = None,
     path: str | None = None,
-    progress_callback: Callable[[int], None] | None = None,
-    wavelet: wavelets.WaveletParameters | list | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> dict:
     """Register channels from the experimental (blinking) signal.
 
@@ -1552,15 +1611,21 @@ def calibrate_channel_registration_from_signal(
     spaced sample of frames and paired frame by frame, which registers the
     channels without a separate bead acquisition.
 
+    Since v1.0.0: only ``movies`` is accepted positionally.
+
     Parameters
     ----------
     movies : list
         One movie per channel, in channel order. For split field of view
         (``regions`` given) the single movie whose regions are the channels.
-    box, minimum_ng : int, float or list
-        Detection settings, as used for localization. ``minimum_ng`` may be
-        per channel, and is ignored (and may be None) if ``wavelet`` is
-        given.
+    box : int
+        Box side length (camera pixels) of the detection, as used for
+        localization.
+    identification_method : NetGradient, wavelet.WaveletParameters or list
+        How the molecules are detected, as used for localization: local
+        maxima above a minimum net gradient (``localize.NetGradient``) or
+        wavelet segmentation (see ``localize.IdentificationParameters``),
+        shared or one per channel.
     model : str, optional
         Transform model. Default "affine".
     reference : int, optional
@@ -1587,12 +1652,13 @@ def calibrate_channel_registration_from_signal(
         Source paths, recorded for traceability.
     path : str, optional
         If given, the calibration is saved there (YAML).
-    progress_callback : callable, optional
-        Called with the number of channels registered so far.
-    wavelet : wavelet.WaveletParameters or list of them, optional
-        Detect the molecules by wavelet segmentation with these settings
-        instead of by their net gradient; a list gives one per channel,
-        like ``minimum_ng``. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports two phases: "Detecting spots"
+        over the movies detected (one for split field of view, else one
+        per channel), then "Registering channels" over the channels other
+        than the reference. Default is None.
 
     Returns
     -------
@@ -1607,48 +1673,32 @@ def calibrate_channel_registration_from_signal(
         )
 
     sample_frames = _sample_frames_for_signal(movies, frame_bounds, max_frames)
-    by_channel = _signal_detections(
-        movies,
-        regions,
-        reference,
-        minimum_ng,
-        box,
-        sample_frames,
-        split_fov,
-        wavelet=wavelet,
-    )
-    ref_by_frame = by_channel[reference]
-    if not ref_by_frame:
-        raise ValueError(
-            "No detections in the reference channel; lower the minimum net "
-            "gradient or check the frame range."
+    with lib.tracked_progress(
+        progress, "Detecting spots", unit="movie"
+    ) as progress:
+        by_channel = _signal_detections(
+            movies,
+            regions,
+            reference,
+            localize._as_method_list(identification_method, n_channels),
+            box,
+            sample_frames,
+            split_fov,
+            progress,
         )
-
-    transforms: list = [None] * n_channels
-    transforms[reference] = tform.identity(model)
-    infos = []
-    done = 0
-    for c in range(n_channels):
-        if c == reference:
-            continue
-        seed = _signal_channel_seed(
-            seed_transforms, regions, reference, c, split_fov
-        )
-        info = _register_signal_channel(
-            ref_by_frame,
-            by_channel[c],
+        transforms, infos = _register_signal_channels(
+            by_channel,
+            seed_transforms,
+            regions,
+            reference,
             model,
             box,
-            seed,
             n_iter,
             min_pairs,
-            c,
+            n_channels,
+            split_fov,
+            progress,
         )
-        transforms[c] = info["transform"]
-        infos.append(info)
-        done += 1
-        if callable(progress_callback):
-            progress_callback(done)
 
     extra = {
         "frame_bounds": frame_bounds,
@@ -1664,12 +1714,11 @@ def calibrate_channel_registration_from_signal(
         reference,
         model,
         box,
-        minimum_ng,
+        localize._validate_method(identification_method),
         "signal",
         infos,
         channel_paths,
         extra=extra,
-        wavelet=wavelet,
     )
     if path:
         io.save_any_calibration(path, calibration)

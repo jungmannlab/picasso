@@ -1,8 +1,8 @@
 """Building 3D animations in the background (``AnimationDialog``).
 
 The frames are rendered and encoded on a worker thread at the
-resolution set in the dialog, with a cancellable, non-modal progress
-dialog; a cancelled build leaves no partial video behind.
+resolution set in the dialog, with a cancelable, non-modal progress
+dialog; a canceled build leaves no partial video behind.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -17,7 +17,7 @@ import numpy as np
 import pytest
 from PyQt6 import QtWidgets
 
-from picasso import lib
+from picasso import io, lib
 from picasso.gui import render as gui_render
 from picasso.gui import rotation
 
@@ -119,18 +119,21 @@ def test_resolution_follows_the_window_until_edited(dialog, qapp):
 def test_cancel_stops_the_build_and_leaves_no_file(dialog, qapp, monkeypatch):
     started = []
 
-    def slow_build(path, locs, info, *, progress_callback, cancel, **kwargs):
+    def slow_build(path, locs, info, *, progress, cancel, **kwargs):
         started.append(path)
+        lib.start_phase(progress, "Building animation", 1000)
         for i in range(1000):
             if cancel():
                 return False
-            progress_callback(i)
+            progress.set_value(i + 1)
             time.sleep(0.01)
-        raise AssertionError("never cancelled")
+        raise AssertionError("never canceled")
 
     monkeypatch.setattr(rotation.render, "build_animation", slow_build)
     dialog.build_animation()
     _wait_until(qapp, lambda: started and dialog._build_progress.value() >= 2)
+    # the bar runs up to the frames the build itself counts
+    assert dialog._build_progress.maximum() == 1000
     # the user clicks Cancel: the button emits ``canceled`` (Qt's
     # programmatic ``cancel()`` resets the dialog without emitting it)
     dialog._build_progress.canceled.emit()
@@ -153,7 +156,7 @@ def test_failure_is_reported_not_lost(dialog, qapp, monkeypatch):
 
 
 def test_closing_the_window_stops_a_build(dialog, qapp, monkeypatch):
-    def endless(path, locs, info, *, progress_callback, cancel, **kwargs):
+    def endless(path, locs, info, *, progress, cancel, **kwargs):
         while not cancel():
             time.sleep(0.01)
         return False
@@ -193,3 +196,31 @@ def test_help_button_links_to_the_animation_docs(dialog):
     buttons = dialog.findChildren(lib.HelpButton)
     assert [b.help_url for b in buttons] == [dialog.DOCS_URL]
     assert dialog.DOCS_URL.endswith("render/3d.html#render-animation")
+
+
+@pytest.mark.parametrize("shown", [True, False])
+def test_scale_bar_is_drawn_and_saved_when_selected(dialog, qapp, shown):
+    """The scale bar of the display settings appears in the frames and
+    its length in the settings file only when it is selected."""
+    disp_dlg = dialog.window.display_settings_dlg
+    disp_dlg.scalebar_groupbox.setChecked(shown)
+    disp_dlg.optimal_scalebar_check.setChecked(False)
+    disp_dlg.scalebar.setValue(int(5 * PIXELSIZE))
+    disp_dlg.scalebar_text.setChecked(False)
+    dialog.width_px.setValue(96)
+    dialog.height_px.setValue(64)
+    dialog.build_animation()
+    _wait_until(qapp, lambda: dialog._build_thread is None, timeout=60.0)
+    assert dialog.warnings == []
+    settings = io.load_info(str(dialog.output.with_suffix(".yaml")))[0]
+    if shown:
+        assert settings["Scale bar length (nm)"] == int(5 * PIXELSIZE)
+        assert settings["Scale bar length displayed"] is False
+    else:
+        assert settings["Scale bar length (nm)"] is None
+    # the bar sits 20 px above the bottom and 35 px from the right edge
+    # a plain array: imageio's Array subclass has a NumPy-2-deprecated
+    # __array_wrap__
+    frame = np.asarray(imageio.mimread(str(dialog.output))[-1])
+    patch = frame[64 - 25 : 64 - 22, 96 - 40 : 96 - 37].astype(int)
+    assert (patch.min() > 200) == shown

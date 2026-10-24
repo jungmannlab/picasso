@@ -66,6 +66,7 @@ import glob
 import hashlib
 import importlib.util
 import json
+import logging
 import os
 import re
 import sys
@@ -76,6 +77,10 @@ from typing import Any
 
 from . import io
 from .version import __version__ as PICASSO_VERSION
+
+__all__ = ["api", "load_api_plugins"]
+
+_log = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -361,11 +366,12 @@ def _report_load_failure(path: str, exc: BaseException, verbose: bool) -> None:
     if path in _reported_failures:
         return
     _reported_failures.add(path)
-    print(
-        f"Warning: plugin {os.path.basename(path)!r} failed to load "
-        f"({type(exc).__name__}: {exc}); run 'picasso plugins list' for "
+    _log.warning(
+        "Plugin %r failed to load (%s: %s); run 'picasso plugins list' for "
         "the full error.",
-        file=sys.stderr,
+        os.path.basename(path),
+        type(exc).__name__,
+        exc,
     )
 
 
@@ -427,15 +433,17 @@ def load_api_plugins() -> dict[str, Any]:
         try:
             contributed = _api_names(module)
         except Exception:
-            print(f"Failed to read PICASSO_API from plugin {path!r}:")
-            traceback.print_exc()
+            _log.exception("Failed to read PICASSO_API from plugin %r:", path)
             continue
         for key, value in contributed.items():
             if key in exports:
-                print(
-                    f"Plugin {name!r} exports {key!r}, which "
-                    f"{origin[key]!r} already provides; keeping the one from "
-                    f"{origin[key]!r}."
+                _log.warning(
+                    "Plugin %r exports %r, which %r already provides; "
+                    "keeping the one from %r.",
+                    name,
+                    key,
+                    origin[key],
+                    origin[key],
                 )
                 continue
             exports[key] = value
@@ -561,8 +569,9 @@ def register_cli_plugins(subparsers) -> set[str]:
         try:
             register(_GuardedSubparsers(subparsers, name))
         except Exception:
-            print(f"Failed to register CLI commands from plugin {path!r}:")
-            traceback.print_exc()
+            _log.exception(
+                "Failed to register CLI commands from plugin %r:", path
+            )
             # Drop any parser the plugin managed to add before it failed,
             # so a half-registered command cannot be invoked.
             for added in set(subparsers.choices) - before:
@@ -782,9 +791,11 @@ def fetch_manifest() -> list[dict]:
         if not isinstance(entry, dict) or not entry.get("id"):
             continue
         if not _is_usable_entry(entry):
-            print(
+            _log.warning(
                 "Skipping plugin registry entry with an unsafe id or file "
-                f"path: {entry.get('id')!r} -> {entry.get('file')!r}"
+                "path: %r -> %r",
+                entry.get("id"),
+                entry.get("file"),
             )
             continue
         entries.append(entry)

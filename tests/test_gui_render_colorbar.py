@@ -35,11 +35,11 @@ def _locs(n: int = 500, seed: int = 0) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "frame": rng.integers(0, 1000, size=n).astype(np.int32),
-            "x": rng.uniform(0.0, WIDTH, size=n),
-            "y": rng.uniform(0.0, HEIGHT, size=n),
+            "x": rng.uniform(0.0, WIDTH, size=n) * PIXELSIZE,
+            "y": rng.uniform(0.0, HEIGHT, size=n) * PIXELSIZE,
             "z": rng.uniform(Z_MIN, Z_MAX, size=n),
-            "lpx": np.full(n, 0.1),
-            "lpy": np.full(n, 0.1),
+            "lpx": np.full(n, 13.0),
+            "lpy": np.full(n, 13.0),
             "photons": np.full(n, 1000.0),
         }
     )
@@ -70,7 +70,10 @@ def window(qt_offscreen, tmp_path):
     window = gui_render.Window(plugins_loaded=True)
     path = str(tmp_path / "locs.hdf5")
     window.view.add(path, _locs(), _info(), render_=False)
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [
+        (0.0, 0.0),
+        (HEIGHT * PIXELSIZE, WIDTH * PIXELSIZE),
+    ]
     window.view.resize(128, 128)
     d_dialog = window.display_settings_dlg
     d_dialog.parameter.setCurrentText("z")

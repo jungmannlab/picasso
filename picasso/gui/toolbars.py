@@ -576,6 +576,19 @@ def refresh(window: QtWidgets.QWidget) -> None:
         toolbar.refresh()
 
 
+def clear_toolbars(widget: QtWidgets.QWidget) -> None:
+    """Take the actions off the toolbars of ``widget`` and of its child
+    windows before it is deleted.
+
+    A window deletes its actions while its toolbars still show them, and
+    a toolbar told so by a dying action crashed Picasso
+    (``QToolBar::actionEvent``), e.g., when a Render window was deleted
+    with its 3D window.
+    """
+    for toolbar in widget.findChildren(QtWidgets.QToolBar):
+        toolbar.clear()
+
+
 class CustomizeToolbarDialog(lib.Dialog):
     """Dialog for choosing the buttons of a toolbar, their order,
     labels and icons.

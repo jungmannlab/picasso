@@ -18,9 +18,11 @@ Report Bugs
 
 Report bugs at https://github.com/jungmannlab/picasso/issues.
 
-If you are reporting a bug, please include:
+Many problems are answered in the `FAQ <https://picassosr.readthedocs.io/en/latest/faq.html>`__. If you are reporting a bug, please include:
 
+* The version of Picasso (shown in the title bar of every window) and how you installed it (one-click installer or pip).
 * Your operating system name and version.
+* The log file ``~/.picasso/logs/picasso.log``, which holds the tracebacks of all errors (see `Reporting problems <https://picassosr.readthedocs.io/en/latest/getting-started/installation.html#error-log>`__).
 * Any details about your local setup that might be helpful in troubleshooting.
 * Detailed steps to reproduce the bug.
 
@@ -63,7 +65,7 @@ Here's how to set up ``picasso`` for local development. If you are new to git an
 
     $ git clone git@github.com:your_name_here/picasso.git
 
-3. Follow the installation instructions for developers here: https://github.com/jungmannlab/picasso?tab=readme-ov-file#for-developers-local-editable-installation.
+3. Follow the instructions in the *Developer installation* tab of the `installation guide <https://picassosr.readthedocs.io/en/latest/getting-started/installation.html>`__.
 
 4. Set up ``pre-commit`` hooks. This ensures your code is automatically formatted with ``black`` before each commit::
 
@@ -109,6 +111,10 @@ Testing
 
     $ pytest tests/test_render.py
 
+   To see which code the tests run (with ``pytest-cov`` installed; CI shows the same table on the summary page of the Linux, Python 3.14 job)::
+
+    $ pytest --cov --cov-report=term-missing
+
 Committing & Pushing
 ^^^^^^^^^^^^^^^^^^^^^
 
@@ -119,6 +125,82 @@ Committing & Pushing
     $ git push origin fix/broken-rendering
 
 5. Update the changelog (``changelog.md``) with a brief summary of your changes under the appropriate section.
+
+Changing Public Names
+^^^^^^^^^^^^^^^^^^^^^
+
+The functions and classes on the Python API pages (each module's ``__all__``), the commands and options of the command line and the file formats are public: see the stability policy in ``docs/versioning.rst``. Do not remove or rename them; deprecate them with ``picasso.deprecation`` instead, so that they keep working for two more minor releases. ``tests/test_stability.py`` compares the public names with snapshots in ``tests/data/stability``; after a deliberate change, record it with the command below, which refuses to record the removal of a name that was not deprecated first::
+
+    $ python tests/regen_stability_snapshots.py
+
+Functions on Localizations
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+A public function on localizations takes them and their metadata first, ``f(locs, info, *, ...)`` (lists for several channels, ``f(locs, infos, *, ...)``), and every other argument after a ``*``, so that it is passed by name. Writers take the path first, ``f(path, locs, info, *, ...)``. Make ``info`` optional (``info: list[dict] | None = None``) if the function does not need it.
+
+A function that returns new localizations (a processing step) returns ``locs, info`` first and further results after them. ``info`` is the complete metadata of the result: the input metadata with one entry recording the step appended by ``lib.append_metadata``, which copies the entries, so that the caller's metadata is not modified::
+
+    def my_step(
+        locs: pd.DataFrame,
+        info: list[dict] | None = None,
+        *,
+        radius: float = 10.0,
+    ) -> tuple[pd.DataFrame, list[dict]]:
+        """...
+
+        Returns
+        -------
+        locs : pd.DataFrame
+            ...
+        info : list of dicts
+            Metadata of ``locs``: ``info`` with an entry recording the
+            step appended, see ``lib.append_metadata``.
+        """
+        ...
+        entry = lib.step_info("My step", **{"Radius (nm)": radius})
+        return locs, lib.append_metadata(info, entry)
+
+Use ``lib.step_info`` for the entry, so that it records the Picasso version and the step. Functions that select localizations rather than process them (e.g., ``postprocess.picked_locs``) return no metadata, and ``lib.fit_canvas`` updates the canvas of the metadata it is given in place. A loop that calls a step many times (e.g., once per pick) calls a private core function that skips the metadata. The Picasso windows keep and save the metadata these functions return rather than building their own. ``tests/test_locs_info_api.py`` checks the signatures of all public functions and the metadata of the steps.
+
+Reporting Progress
+^^^^^^^^^^^^^^^^^^
+
+A public function that takes a while reports its progress through one argument, ``progress``, which is a tracker (an object with the ``picasso.lib.Progress`` interface, e.g., the dialog of a Picasso window), ``"console"`` (a tqdm bar for each step) or None (nothing is reported or printed). Annotate and document it in the same words, and say which steps it reports::
+
+    def my_analysis(
+        locs: pd.DataFrame,
+        info: list[dict],
+        progress: lib.Progress | Literal["console"] | None = None,
+    ) -> pd.DataFrame:
+        """...
+
+        Parameters
+        ----------
+        progress : lib.Progress, "console" or None, optional
+            Progress tracker, see ``picasso.lib.Progress``: e.g. a
+            ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+            or None for no reporting. Reports "Picking localizations" over
+            the picks, then "Fitting" over the groups. Default is None.
+        """
+        with lib.tracked_progress(progress, "My analysis") as progress:
+            lib.start_phase(progress, "Picking localizations", n, unit="pick")
+            for i in range(n):
+                ...
+                progress.set_value(i + 1)
+            fit_something(..., progress=progress)  # starts its own steps
+
+The rules:
+
+- The function names and sizes each of its steps with ``lib.start_phase(progress, label, maximum, unit=...)``; callers never compute totals. A maximum of 0 means that the size is unknown (a busy indicator).
+- ``progress.set_value(n)`` reports the number of items finished in the current step, never decreases within it and ends at the step's maximum.
+- ``lib.tracked_progress`` turns ``"console"`` and None into a tracker and closes it afterwards; a tracker passed in by the caller is never closed, so pass it on to the Picasso functions you call, which add their own steps. Private helpers take the tracker as ``progress: lib.Progress``.
+- Call the tracker only from the thread that called the function. Work done in other threads or processes is counted there and reported from the calling thread, e.g., while waiting for the futures.
+- ``set_value`` may raise ``lib.OperationCanceled`` when the user presses *Cancel*: let it propagate and shut down pools and close files in ``finally``.
+- Do not use tqdm or ``print`` directly: with None, nothing is printed.
+
+In the Picasso windows, run the function in a task (``lib.run_task``) and pass it the task's ``progress``; a ``lib.ProgressDialog`` passed directly must be closed by the window when the function returns. For a worker thread with its own signals, subclass ``lib.MockProgress`` and emit them from ``set_value`` and ``zero_progress``.
+
+``tests/test_progress_api.py`` checks the signature and the docstring of every public function. To test the steps of your function, pass the ``RecordingProgress`` of ``tests/_progress_tracking.py`` and check them with ``assert_phases_complete``; ``CancelingProgress`` simulates *Cancel*.
 
 6. Submit a pull request through the GitHub website. See below for guidelines!
 

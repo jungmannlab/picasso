@@ -27,7 +27,7 @@ Opening Files
    ``View > Display Settings`` (see :ref:`render-display-settings`):
 
    - The field 'Display pixel size (nm)' defines the size of the rendered
-     pixels of the super-resolution image. This cannot go smaller that the current screen pixel size.
+     pixels of the super-resolution image. This cannot go smaller than the size of a screen pixel at the current zoom.
    - The contrast settings ``Min. Density`` and ``Max. Density`` define at
      which number of localizations per super-resolution pixel the minimum and
      maximum color of the colormap should be applied. They can be typed in or dragged on the two-handle slider below them.
@@ -52,9 +52,9 @@ Opening Files
       n_locs, image = render.render(
           locs, info,
           disp_px_size=10,               # nm
-          viewport=((0, 0), (64, 64)),   # ((y_min, x_min), (y_max, x_max)) in camera px; None: whole FOV
+          viewport=((0, 0), (8320, 8320)),   # ((y_min, x_min), (y_max, x_max)) in nm; None: whole FOV
           blur_method="gaussian",        # None, "gaussian", "gaussian_iso", "smooth" or "convolve"
-          min_blur_width=0.0,            # camera pixels
+          min_blur_width=0.0,            # nm
       )
       plt.imsave("movie.png", image, vmin=0, vmax=0.2 * image.max(), cmap="magma")
 
@@ -91,8 +91,8 @@ tool, selected in the ``Tools`` menu:
   button to zoom into a rectangle, drag with the right button to pan.
 - :ref:`Pick <render-pick>` (:kbd:`Ctrl+P`) selects regions of localizations
   for further analysis (see :doc:`render/picking`): the left button draws a
-  pick, the right button removes the pick under the cursor (for polygon and
-  brush picks, it undoes the last vertex or stroke instead).
+  pick, the right button removes the pick under the cursor (for polygon
+  picks, it removes the last vertex instead).
 - :ref:`Measure <render-measure>` (:kbd:`Ctrl+M`) measures distances on the
   image: the left button adds a point, the right button finishes the current
   measurement or, clicked again, deletes the last one.
@@ -110,8 +110,9 @@ while picking or measuring, so the tool need not be changed to look around.
 - **Zoom**:
 
   - With the Zoom tool, drag a rectangle with the left mouse button to zoom
-    to it. The rectangle stretches towards the bottom right; releasing above
-    or left of the start cancels.
+    to it. The rectangle can be dragged in any direction. To cancel it,
+    click the right mouse button (or press :kbd:`Esc`) before releasing the
+    left one.
   - :kbd:`Shift` + the left button drags the same rectangle in *every tool*.
   - :kbd:`Ctrl` (:kbd:`Cmd` on macOS) + the mouse wheel (or trackpad scroll)
     and a trackpad pinch zoom about the cursor; :kbd:`Ctrl` +/- zoom about
@@ -156,19 +157,22 @@ events (`Jungmann et al., Nature Methods, 2016 <https://doi.org/10.1038/nmeth.38
 
    .. code-block:: python
 
-      from picasso import io, lib, postprocess
+      from picasso import io, postprocess
 
       locs, info = io.load_locs("movie_locs.hdf5")
-      pixelsize = lib.get_from_metadata(info, "Pixelsize")
-      radius = 100 / pixelsize / 2              # 100 nm picks
+      diameter = 100.0                          # pick diameter (nm)
 
       # Calibration on picks of structures with n_sites binding sites
-      calib = postprocess.picked_locs(locs, info, calib_picks, "Circle", pick_size=radius)
+      calib = postprocess.picked_locs(
+          locs, info, picks=calib_picks, pick_shape="Circle", pick_size=diameter
+      )
       props = postprocess.pick_properties(calib, info, max_dark_time=3, influx_rate=1.0)
       influx_rate = (1 / (props["dark_mean"] * n_sites)).mean()
 
       # Counting
-      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=radius)
+      picked = postprocess.picked_locs(
+          locs, info, picks=picks, pick_shape="Circle", pick_size=diameter
+      )
       props = postprocess.pick_properties(
           picked, info, max_dark_time=3, influx_rate=influx_rate
       )
@@ -199,7 +203,7 @@ Topics
       :link: render/display-settings
       :link-type: doc
 
-      Contrast, colormaps, blur methods, scale bar, render by property and the
+      Contrast, colormaps, render methods, scale bar, render by property and the
       info dialog.
 
    .. grid-item-card:: :octicon:`git-compare;1.5em;sd-mr-1` Drift correction
@@ -219,7 +223,14 @@ Topics
       :link: render/analysis
       :link-type: doc
 
-      RESI, G5M molecular mapping, clustering and nearest neighbor analysis.
+      RESI, G5M molecular mapping, clustering, nearest neighbor analysis.
+
+   .. grid-item-card:: :octicon:`pulse;1.5em;sd-mr-1` Single-particle tracking
+      :link: render/tracking
+      :link-type: doc
+
+      Linking localizations into tracks, displaying them, and MSD and jump
+      distance analysis.
 
    .. grid-item-card:: :octicon:`file;1.5em;sd-mr-1` File menu
       :link: render/menu-file
@@ -261,6 +272,7 @@ Topics
    render/drift
    render/3d
    render/analysis
+   render/tracking
    render/menu-file
    render/menu-view
    render/menu-tools

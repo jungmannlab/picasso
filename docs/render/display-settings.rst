@@ -6,11 +6,16 @@ Display Settings and Info
 This page describes two dialogs of the ``View`` menu:
 
 - :ref:`Display settings <render-display-settings>` (:kbd:`Ctrl+D`) control
-  how the localizations are rendered: zoom, contrast and colormap, blur
+  how the localizations are rendered: zoom, contrast and colormap, render
   method, scale bar and rendering by property.
 - :ref:`Info <render-show-info>` (:kbd:`Ctrl+I`) reports on the loaded data:
   the current field of view, the localization precision and NeNA, the FRC
   resolution and statistics of the picks.
+
+Click the header of a section to collapse or expand it. Picasso remembers
+which sections are open, also in the 3D view's display settings, in
+``Tools Settings``, so the dialogs keep the layout you set up (``Expanded sections`` in the :ref:`user-settings-file`). The checkbox in the header of ``Scale bar`` and
+``Grid`` turns them on or off.
 
 .. _render-display-settings:
 
@@ -28,13 +33,18 @@ General
 
 Adjust the general display settings.
 
-Zoom
-   The number of screen pixels per camera pixel. For example, at ``Zoom`` 10
-   with a camera pixel size of 130 nm, one screen pixel shows 13 nm. The value
-   follows every zoom in the window; typing in a new one zooms to it.
+Display width (µm)
+   The width of the region of the sample shown in the window, i.e., the zoom:
+   smaller values zoom in. The value follows every zoom in the window; typing
+   in a new one zooms to it. Before Picasso 1.0, the zoom was given as a
+   factor (``Zoom``, screen pixels per camera pixel).
 Display pixel size (nm)
    Set the size of the pixel in the rendered image. Choose ``dynamic`` to
-   automatically adjust to current window size when zooming.
+   automatically adjust to current window size when zooming (one rendered
+   pixel per screen pixel). A rendered pixel cannot be smaller than a screen
+   pixel: without ``dynamic``, a value below one screen pixel at the current
+   zoom is raised to that minimum, for example when you zoom out. To render
+   finer pixels, zoom in first.
 Minimap
    Click ``show minimap`` to display a minimap in the upper left corner to
    see where the current field of view is within the whole image.
@@ -49,6 +59,22 @@ display pixel that are mapped onto the lowest and the highest color of the
 colormap; they can also be dragged on the slider below them. ``Colormap``
 offers over 100 colormaps. The last option, ``Custom``, loads a ``.npy`` file
 with a numpy array of shape (256, 4) and values between 0 and 1.
+
+With several channels loaded, the contrast of each channel can be adjusted
+relative to this one in ``View > Files...``, see
+:ref:`Per-channel contrast <render-channel-contrast>`.
+
+.. _render-contrast-slider:
+
+The same slider can be shown at the bottom of the main window, below the
+image, so that the contrast can be dragged without opening the dialog. It
+takes the background color of the image (e.g., black, or white with
+inverted colors), so it continues the image. Its ``Auto`` button sets the
+contrast automatically, as when a file is opened.
+It is hidden by default; to show it, set ``contrast_slider: true`` in the
+``Render`` section of ``~/.picasso/settings.yaml``, e.g., via
+``File > Picasso settings`` (see :ref:`user-settings-file`). The change
+applies as soon as the settings are saved.
 
 The selected colormap will be saved when closing render, under ``Colormap`` in
 the ``Render`` section of ``~/.picasso/settings.yaml`` (see
@@ -66,11 +92,13 @@ the ``Render`` section of ``~/.picasso/settings.yaml`` (see
 
 .. _render-blur:
 
-Blur
-~~~~
+Render method
+~~~~~~~~~~~~~
 
-Select a blur method. ``Min. blur (nm)`` sets the smallest Gaussian width the
-precision-based methods draw. Available options are:
+Select how the localizations are drawn into the image: as a histogram,
+blurred with a Gaussian, adaptively binned or triangulated. ``Min. blur (nm)``
+sets the smallest Gaussian width the precision-based methods draw. Available
+options are:
 
 None
    Each localization adds one count to the display pixel it falls in (a
@@ -110,7 +138,7 @@ Adaptive Histogram (Quad-Tree)
    - A bin is never smaller than one display pixel. When zoomed out, a
      display pixel often holds more localizations than the leaf capacity, so
      most bins are single pixels and the image approaches the plain histogram
-     (blur ``None`` above).
+     (``None`` above).
    - The mode renders on the CPU from the spatial index of each channel (see
      :ref:`files <spatial-index>`), which makes it fast at any zoom.
    - In the 3D view the same method is applied to the projected
@@ -149,8 +177,8 @@ Jittered Triangulation
    :icon: code
    :class-container: api-example
 
-   The blur methods are the ``blur_method`` of ``render.render``;
-   ``min_blur_width`` is in camera pixels.
+   The render methods are the ``blur_method`` of ``render.render``;
+   ``min_blur_width`` is in nm.
 
    .. code-block:: python
 
@@ -164,24 +192,91 @@ Jittered Triangulation
       )
 
 
-.. _render-camera:
-
-Camera
-~~~~~~
-
-``Camera pixel size (nm)`` is read from the metadata (``.yaml`` file) of the
-localizations, or set to a default value if it is missing. It converts camera
-pixels to nm, e.g., for the scale bar and the ``Display pixel size``.
-
 .. _render-scale-bar:
 
 Scale bar
 ~~~~~~~~~
 
-Tick ``Scale bar`` to show a scale bar of ``Scale bar length (nm)``, based on
-the ``Camera pixel size``. ``Automatic length`` keeps it at roughly 1/8 of the
-window width as you zoom, and ``Print scale bar length`` prints the length
-next to it.
+Tick ``Scale bar`` to show a scale bar of ``Scale bar length (nm)``.
+``Automatic length`` keeps it at roughly 1/8 of the window width as you zoom,
+and ``Print scale bar length`` prints the length next to it.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``render.optimal_scalebar_length`` is the rounded length (nm) that
+   ``Automatic length`` picks for a view of a given width in nm.
+
+   .. code-block:: python
+
+      from picasso import render
+
+      length_nm = render.optimal_scalebar_length(width_nm=8320)
+
+.. _render-grid:
+
+Grid
+~~~~
+
+Tick ``Grid`` to draw a reference grid fixed to the data; its settings are
+grayed out while it is unticked. ``Show`` draws the ``Full grid`` (default)
+or ``Axes only``: an x axis along the bottom and a y axis along the left edge
+of the window, with a tick mark at each grid line, like the axes of a plot. The lines sit at whole multiples of ``Spacing (nm)``
+in the localizations' coordinates, so they stay in place as you pan and zoom.
+``Automatic`` keeps the spacing at roughly 1/10 of the window width, rounded
+like the automatic scale bar length; typing a spacing switches it off.
+
+``Draw`` places the grid ``Behind localizations`` (the default): it shows
+where there are no localizations and is covered the more, the brighter they
+are, so it never dims the data. ``Over localizations`` draws it on top.
+``Color`` (``Auto``: white on a dark, black on a light background), ``Line``,
+``Width`` and ``Opacity`` set the look of the lines; ``Reset`` restores the
+defaults. Lines closer together than 4 screen pixels are not drawn.
+
+``Labels`` (ticked by default) prints the coordinates of the lines along the
+top and left edges, in nm, or in µm for a spacing of at least 1 µm or
+coordinates beyond 10 µm. They are drawn in the line color, fully opaque and
+over the localizations, on a translucent background; ``Label size`` sets their
+size. When the labels of neighboring lines would overlap, only every second
+(third, ...) line is labeled, counted from the coordinate origin so the labels
+stay put as you pan. With ``Axes only``, the labels sit next to the ticks and
+the axes are named with their unit, e.g., ``x (µm)``.
+
+The grid is part of ``Export current view``, ``Export complete image`` and
+``Export view manually``, and its spacing is saved in the exported ``.yaml``
+file. Its settings, except whether it is shown, are saved under ``Grid`` in
+the ``Render`` section of ``~/.picasso/settings.yaml`` (see
+:ref:`user-settings-file`).
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   .. code-block:: python
+
+      from picasso import render
+
+      grid = render.GridOverlay(
+          spacing_nm=500,
+          style=render.OverlayStyle(color="gray", opacity=0.5),
+          blend="Behind localizations",
+          labels=True,                  # print the coordinates
+          kind="grid",                  # or "axes" for axes with ticks
+      )
+      # qimage shows the rendered viewport ((y_min, x_min), (y_max, x_max)) in nm
+      qimage = render.draw_grid(qimage, viewport, grid)
+
+.. _render-tracks:
+
+Tracks
+~~~~~~
+
+Tick ``Tracks`` to draw the tracks of channels tracked with
+``Postprocess > Single-particle tracking > Track particles`` as lines
+through their localizations. ``Max. tracks drawn`` limits the number of tracks
+drawn in one view, and ``Color``, ``Line``, ``Width`` and ``Opacity`` set the
+look of the lines; see :ref:`render-spt-overlay`.
 
 .. _render-properties:
 
@@ -244,18 +339,21 @@ Display
 ``Image width`` and ``Image height``
    The size of the image area of the window, in screen pixels.
 ``View X / Y`` and ``View width / height``
-   The top-left corner and the size of the current field of view, in camera
-   pixels.
+   The top-left corner and the size of the current field of view, in nm.
 ``Renderer``
    Whether the image is rendered on the GPU (with the GPU's name) or by CPU
    threads.
 ``Change field of view``
    Opens a dialog to type in the field of view (``X``, ``Y``, ``Width``,
-   ``Height`` in camera pixels).
+   ``Height`` in nm).
 ``Save FOV`` and ``Load FOV``
    Save the current field of view to a ``.txt`` file and restore it later,
-   e.g., to show the same region of several datasets. A saved ``.txt`` file
-   can also be dropped onto the main window.
+   e.g., to show the same region of several datasets. The file holds the
+   four values ``X``, ``Y``, ``Width``, ``Height`` in nm, one per line, after
+   the comment line ``# picasso_format 1.0 (nm)``; a file without that line
+   was saved before Picasso 1.0, in camera pixels, and is converted with the
+   pixel size of the first channel when it is loaded. A saved ``.txt`` file can also be
+   dropped onto the main window.
 
 .. _render-info-precision:
 
@@ -264,7 +362,10 @@ Precision
 
 .. _render-nena:
 
-``Median localization precision`` shows the median of the first channel.
+``Median localization precision`` shows the mean of the medians of ``lpx``
+and ``lpy`` (in nm). With several channels loaded, the menu below it chooses
+which channel is shown.
+
 ``Calculate NeNA`` estimates the average localization precision via the NeNA
 (nearest neighbor based analysis) approach, and ``Show NeNA plot`` displays
 its fit (`Endesfelder et al., Histochemistry and Cell Biology, 2014
@@ -275,17 +376,16 @@ the metadata of the channel, so it is saved with the localizations.
    :icon: code
    :class-container: api-example
 
-   NeNA is returned in camera pixels.
+   NeNA is returned in nm.
 
    .. code-block:: python
 
-      from picasso import io, lib, postprocess
+      from picasso import io, postprocess
 
       locs, info = io.load_locs("movie_locs.hdf5")
-      pixelsize = lib.get_from_metadata(info, "Pixelsize")
 
-      result, nena_px = postprocess.nena(locs, info)
-      print(f"NeNA: {nena_px * pixelsize:.1f} nm")
+      result, nena = postprocess.nena(locs, info)
+      print(f"NeNA: {nena:.1f} nm")
       fig = postprocess.plot_nena(result)
 
 
@@ -329,16 +429,17 @@ the FRC resolution:
    :class-container: api-example
 
    ``frc`` works on one viewport (``((y_min, x_min), (y_max, x_max))`` in
-   camera pixels), ``frc_rois`` on random ROIs over the whole image.
+   nm), ``frc_rois`` on random ROIs (``roi_size`` in nm) over the whole
+   image.
 
    .. code-block:: python
 
-      frc = postprocess.frc(locs, info, viewport=((0, 0), (64, 64)))
+      frc = postprocess.frc(locs, info, viewport=((0, 0), (8320, 8320)))
       print(frc["resolution"])                        # nm
       fig = postprocess.plot_frc(frc)
 
       rois = postprocess.frc_rois(
-          locs, info, viewport=((0, 0), (512, 512)),
+          locs, info, viewport=((0, 0), (66560, 66560)),   # nm
           n_rois=30, roi_size=5000.0, min_locs=1000,  # roi_size in nm
       )
       print(rois["resolutions"].mean(), rois["resolutions"].std())

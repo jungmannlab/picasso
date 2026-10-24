@@ -44,9 +44,44 @@ RST_LINK_RE = re.compile(r"`([^`<]+?)\s*<([^`>]+)>`_{1,2}")
 RST_CODE_RE = re.compile(r"``([^`]+)``")
 # leading "| " of an rst line block
 RST_LINE_BLOCK_RE = re.compile(r"^\| ?", re.MULTILINE)
+# ".. list-table::" directive with its indented options and rows
+RST_LIST_TABLE_RE = re.compile(
+    r"^\.\. list-table::[^\n]*\n(?P<content>(?:[ \t]+[^\n]*\n|[ \t]*\n)*)",
+    re.MULTILINE,
+)
+
+
+def list_table_to_text(match: re.Match) -> str:
+    """Flatten a list-table into "- first: rest" bullets.
+
+    The header row (``:header-rows: 1``) is dropped; the remaining cells
+    of each row are joined with "; ", skipping cells that are empty or
+    only "-" (placeholder for a missing value).
+    """
+    content = match.group("content")
+    header_rows = re.search(r":header-rows:\s*(\d+)", content)
+    n_header = int(header_rows.group(1)) if header_rows else 0
+    rows: list[list[str]] = []
+    for line in content.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("* - "):
+            rows.append([stripped[4:]])
+        elif stripped.startswith("- ") and rows:
+            rows[-1].append(stripped[2:])
+        elif stripped and rows and not stripped.startswith(":"):
+            # continuation line of the last cell
+            rows[-1][-1] += " " + stripped
+    bullets = []
+    for row in rows[n_header:]:
+        rest = [cell for cell in row[1:] if cell.strip() not in ("", "-")]
+        bullets.append(
+            f"- {row[0]}: {'; '.join(rest)}" if rest else f"- {row[0]}"
+        )
+    return "\n".join(bullets) + "\n"
 
 
 def rst_to_text(body: str) -> str:
+    body = RST_LIST_TABLE_RE.sub(list_table_to_text, body)
     body = RST_LINK_RE.sub(
         lambda m: f"{m.group(1).strip()} ({m.group(2)})", body
     )

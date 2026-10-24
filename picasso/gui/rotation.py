@@ -22,7 +22,8 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from scipy.spatial.transform import Rotation
 
 from .. import io, render, lib, lib_qt, __version__, docs_url
-from . import theme
+from . import idle, theme, toolbars
+from .grid_settings import GridGroupBox
 from .render_worker import (
     RenderWorker,
     global_precisions_for,
@@ -30,7 +31,7 @@ from .render_worker import (
 )
 
 
-DEFAULT_OVERSAMPLING = 1.0
+DEFAULT_DISP_PX_SIZE = 130.0  # initial display (render) pixel size, nm
 INITIAL_REL_MAXIMUM = 0.5
 
 
@@ -76,6 +77,8 @@ class DisplaySettingsRotationDialog(lib.Dialog):
     dynamic_disp_px : QCheckBox
         Tick to automatically adjust to current window size when
         zooming.
+    grid_box : GridGroupBox
+        Grid planes rotating with the data, tick to display.
     maximum : QDoubleSpinBox
         Defines at which number of localizations per super-resolution
         pixel the maximum color of the colormap should be applied.
@@ -88,7 +91,7 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         Contains the size of super-resolution pixels in nm.
     scalebar : QSpinBox
         Contains the scale bar's length (nm).
-    scalebar_groupbox : QGroupBox
+    scalebar_groupbox : CollapsibleGroupBox
         Group with options for customizing scale bar, tick to display.
     scalebar_text : QCheckBox
         Tick to display scale bar's length (nm).
@@ -101,23 +104,44 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         self.first_update = True
         self.window = window
         self.setWindowTitle("Display Settings - Rotation Window")
-        self.resize(200, 0)
         self.setModal(False)
-        vbox = QtWidgets.QVBoxLayout(self)
+        # the settings scroll once the dialog is taller than the screen
+        # allows, like the main window's display settings
+        self.scroll_area = QtWidgets.QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QtWidgets.QFrame.Shape.NoFrame)
+        container = QtWidgets.QWidget()
+        vbox = QtWidgets.QVBoxLayout(container)
+        self.scroll_area.setWidget(container)
+        main_layout = QtWidgets.QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.addWidget(self.scroll_area)
         # general
-        general_groupbox = QtWidgets.QGroupBox("General")
+        general_groupbox = lib.CollapsibleGroupBox("General")
         vbox.addWidget(general_groupbox)
-        general_grid = QtWidgets.QGridLayout(general_groupbox)
+        general_grid = QtWidgets.QGridLayout(general_groupbox.content)
         disp_px_label = QtWidgets.QLabel("Display pixel size (nm):")
-        disp_px_label.setToolTip("Size of the pixels in the rendered image.")
+        disp_px_tooltip = (
+            "Size of the pixels in the rendered image. With 'dynamic', it\n"
+            "follows the zoom: one rendered pixel per screen pixel.\n"
+            "It cannot be smaller than one screen pixel at the current\n"
+            "zoom; smaller values are raised to that minimum. To render\n"
+            "finer pixels, zoom in first."
+        )
+        disp_px_label.setToolTip(disp_px_tooltip)
         general_grid.addWidget(disp_px_label, 1, 0)
-        self._disp_px_size = 130 / DEFAULT_OVERSAMPLING
+        self._disp_px_size = DEFAULT_DISP_PX_SIZE
         self.disp_px_size = QtWidgets.QDoubleSpinBox()
         self.disp_px_size.setRange(0.00001, 100000)
         self.disp_px_size.setSingleStep(1)
         self.disp_px_size.setDecimals(5)
         self.disp_px_size.setValue(self._disp_px_size)
         self.disp_px_size.setKeyboardTracking(False)
+        self.disp_px_size.setToolTip(disp_px_tooltip)
+        # a typed value below the minimum becomes the minimum
+        self.disp_px_size.setCorrectionMode(
+            QtWidgets.QAbstractSpinBox.CorrectionMode.CorrectToNearestValue
+        )
         self.disp_px_size.valueChanged.connect(self.on_disp_px_changed)
         general_grid.addWidget(self.disp_px_size, 1, 1)
         self.dynamic_disp_px = QtWidgets.QCheckBox("dynamic")
@@ -126,9 +150,9 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         general_grid.addWidget(self.dynamic_disp_px, 2, 1)
 
         # contrast
-        contrast_groupbox = QtWidgets.QGroupBox("Contrast")
+        contrast_groupbox = lib.CollapsibleGroupBox("Contrast")
         vbox.addWidget(contrast_groupbox)
-        contrast_grid = QtWidgets.QGridLayout(contrast_groupbox)
+        contrast_grid = QtWidgets.QGridLayout(contrast_groupbox.content)
         minimum_label = QtWidgets.QLabel("Min. density:")
         minimum_label.setToolTip(
             "Minimum density (localizations per super-resolution pixel)"
@@ -176,22 +200,22 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         self.colormap.currentIndexChanged.connect(self.render_scene)
 
         # blur
-        blur_groupbox = QtWidgets.QGroupBox("Blur")
-        blur_grid = QtWidgets.QGridLayout(blur_groupbox)
+        blur_groupbox = lib.CollapsibleGroupBox("Render method")
+        blur_grid = QtWidgets.QGridLayout(blur_groupbox.content)
         self.blur_buttongroup = QtWidgets.QButtonGroup()
         points_button = QtWidgets.QRadioButton("None")
         points_button.setToolTip(
             "No blur applied; each localization is rendered as a point."
         )
         self.blur_buttongroup.addButton(points_button)
-        smooth_button = QtWidgets.QRadioButton("One-pixel blur")
+        smooth_button = QtWidgets.QRadioButton("One-Pixel-Blur")
         smooth_button.setToolTip(
             "Each localization is Gaussian blurred with a \u03c3 of one "
             "rendered pixel."
         )
         self.blur_buttongroup.addButton(smooth_button)
         convolve_button = QtWidgets.QRadioButton(
-            "Global localization precision"
+            "Global Localization Precision"
         )
         convolve_button.setToolTip(
             "Each localization is Gaussian blurred with a \u03c3 equal to\n"
@@ -199,7 +223,7 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         )
         self.blur_buttongroup.addButton(convolve_button)
         gaussian_button = QtWidgets.QRadioButton(
-            "Individual localization precision"
+            "Individual Localization Precision"
         )
         gaussian_button.setToolTip(
             "Each localization is Gaussian blurred with a \u03c3 equal to\n"
@@ -207,7 +231,7 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         )
         self.blur_buttongroup.addButton(gaussian_button)
         gaussian_iso_button = QtWidgets.QRadioButton(
-            "Individual localization precision, iso"
+            "Individual Localization Precision, iso"
         )
         gaussian_iso_button.setToolTip(
             "Each localization is Gaussian blurred with a \u03c3 equal to\n"
@@ -217,7 +241,7 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         # the same buttons as the main window's dialog, in the same
         # order (the windows sync by button id)
         quadtree_button = QtWidgets.QRadioButton(
-            "Adaptive histogram (quad-tree)"
+            "Adaptive Histogram (Quad-Tree)"
         )
         quadtree_button.setToolTip(
             "Histogram whose bins split while they hold more than the\n"
@@ -226,7 +250,7 @@ class DisplaySettingsRotationDialog(lib.Dialog):
             "built from the projected localizations for every orientation."
         )
         self.blur_buttongroup.addButton(quadtree_button)
-        triangulation_button = QtWidgets.QRadioButton("Jittered triangulation")
+        triangulation_button = QtWidgets.QRadioButton("Jittered Triangulation")
         triangulation_button.setToolTip(
             "Delaunay triangles drawn with an intensity inverse to their\n"
             "area, averaged over triangulations of the localizations\n"
@@ -252,7 +276,7 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         self.min_blur_widgets = QtWidgets.QWidget()
         min_blur_grid = QtWidgets.QGridLayout(self.min_blur_widgets)
         min_blur_grid.setContentsMargins(0, 0, 0, 0)
-        min_blur_label = QtWidgets.QLabel("Min. Blur (nm):")
+        min_blur_label = QtWidgets.QLabel("Min. blur (nm):")
         min_blur_label.setToolTip(
             "Minimum blur applied to all localizations in nm."
         )
@@ -374,12 +398,12 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         }
 
         # scalebar
-        self.scalebar_groupbox = QtWidgets.QGroupBox("Scale bar")
+        self.scalebar_groupbox = lib.CollapsibleGroupBox("Scale bar")
         self.scalebar_groupbox.setCheckable(True)
         self.scalebar_groupbox.setChecked(False)
         self.scalebar_groupbox.toggled.connect(self.render_scene)
         vbox.addWidget(self.scalebar_groupbox)
-        scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox)
+        scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox.content)
         scalebar_length_label = QtWidgets.QLabel("Scale bar length (nm):")
         scalebar_length_label.setToolTip("Set the length of the scale bar.")
         scalebar_grid.addWidget(scalebar_length_label, 0, 0)
@@ -405,7 +429,23 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         )
         scalebar_grid.addWidget(self.optimal_scalebar_check, 1, 1)
 
+        # grid planes rotating with the data
+        self.grid_box = GridGroupBox(
+            three_d=True,
+            optimal_spacing=self.window.view_rot.optimal_grid_spacing,
+        )
+        self.grid_box.changed.connect(self.render_scene)
+        vbox.addWidget(self.grid_box)
+        # collapsed sections stay at the top
+        vbox.addStretch(1)
+
         self._silent_disp_px_update = False
+
+        lib.remember_expanded_sections(self, "Render", "3D Display Settings")
+        lib.resize_with_sections(self, self.scroll_area)
+
+        # adjust the size of the dialog to fit its contents
+        lib.adjust_widget_size(self, container.sizeHint())
 
     def blur_method(self) -> str | None:
         """The selected blur method (``render`` name)."""
@@ -437,7 +477,7 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         change of its content (``_follow_content_height``), so it keeps
         the size the user gave it and shows no empty space."""
         method = self.blur_methods[self.blur_buttongroup.checkedButton()]
-        content = self
+        content = self.scroll_area.widget()
         if getattr(self, "_content_height", None) is None:
             self._content_height = content.sizeHint().height()
         self.min_blur_widgets.setVisible(
@@ -451,7 +491,7 @@ class DisplaySettingsRotationDialog(lib.Dialog):
     def _follow_content_height(self) -> None:
         """Resize the dialog by the change of its content's height since
         the last measurement (see ``_toggle_blur_widgets``)."""
-        content = self
+        content = self.scroll_area.widget()
         height = content.sizeHint().height()
         previous = self._content_height
         self._content_height = height
@@ -475,6 +515,20 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         """Change the value of display pixel size in the background."""
         self._silent_disp_px_update = True
         self.disp_px_size.setValue(disp_px_size)
+        self._silent_disp_px_update = False
+
+    def set_min_disp_px_silently(self, min_disp_px_size: float) -> None:
+        """Set the smallest allowed display pixel size (one screen
+        pixel at the current zoom) in the background. A smaller value
+        is raised to it, rescaling the contrast like any other change.
+
+        Parameters
+        ----------
+        min_disp_px_size : float
+            Minimum display pixel size (nm).
+        """
+        self._silent_disp_px_update = True
+        self.disp_px_size.setMinimum(min_disp_px_size)
         self._silent_disp_px_update = False
 
     def silent_minimum_update(self, value: float) -> None:
@@ -927,21 +981,20 @@ class AnimationDialog(lib.Dialog):
             return
         disp_dlg = self.window.display_settings_dlg
         data_dlg = self.window.window.dataset_dialog
-        pixelsize = self.window.window.view.pixelsize
         view = self.window.view_rot
         locs, infos = view._prepare_locs_for_rendering()
         if view._pan_z:
             locs = view._apply_pan_z(locs)
         n_frames = int(self.fps.value() * sum(durations))
         adjust_display_pixel = disp_dlg.dynamic_disp_px.isChecked()
-        intensities = self.window.window.view.read_relative_intensities()
+        channel_contrast = self.window.window.view.read_channel_contrast()
         positions = [(p["R"], p["viewport"]) for p in self.positions]
         segment_rotations = [p["segment_rotvec"] for p in self.positions[1:]]
         # the frames are rendered at the output resolution: the display
         # pixel size follows from the last position's field of view
         width, height = self.width_px.value(), self.height_px.value()
         last_viewport = positions[-1][1]
-        disp_px_size = pixelsize * render.viewport_width(last_viewport) / width
+        disp_px_size = render.viewport_width(last_viewport) / width  # nm
         kwargs = dict(
             positions=positions,
             durations=durations,
@@ -950,7 +1003,7 @@ class AnimationDialog(lib.Dialog):
             disp_px_size=float(disp_px_size),
             image_size=(width, height),
             blur_method=disp_dlg.blur_method(),
-            min_blur_width=disp_dlg.min_blur_width.value() / pixelsize,
+            min_blur_width=disp_dlg.min_blur_width.value(),
             quadtree_capacity=disp_dlg.quadtree_capacity.value(),
             triangulation_passes=disp_dlg.triangulation_passes.value(),
             triangulation_jitter=disp_dlg.triangulation_jitter.value(),
@@ -958,15 +1011,25 @@ class AnimationDialog(lib.Dialog):
             invert_colors=data_dlg.wbackground.isChecked(),
             single_channel_colormap=disp_dlg.colormap.currentText(),
             colors=self.window.window.view.read_colors(),
-            relative_intensities=intensities,
+            channel_contrast=channel_contrast,
             fps=self.fps.value(),
             adjust_pixel_size=adjust_display_pixel,
+            scalebar_length_nm=(
+                disp_dlg.scalebar.value()
+                if disp_dlg.scalebar_groupbox.isChecked()
+                else None
+            ),
+            scalebar_display_length=disp_dlg.scalebar_text.isChecked(),
         )
+        grid = disp_dlg.grid_box.grid()
+        if grid is not None and view._grid_bounds is not None:
+            bounds, origin = view.grid_geometry()
+            kwargs.update(grid=grid, grid_bounds=bounds, grid_origin=origin)
         self._start_build(path, locs, infos, kwargs, n_frames)
 
     def _start_build(self, path, locs, infos, kwargs, n_frames) -> None:
         """Render and encode the frames on a worker thread, with a
-        cancellable, non-modal progress dialog; the windows stay
+        cancelable, non-modal progress dialog; the windows stay
         usable meanwhile."""
         self._build_cancel = threading.Event()
         progress = QtWidgets.QProgressDialog(
@@ -987,7 +1050,7 @@ class AnimationDialog(lib.Dialog):
         )
         thread = QtCore.QThread()  # unparented, see ViewRotation
         worker.moveToThread(thread)
-        worker.progress.connect(progress.setValue)
+        worker.progress.connect(self._on_build_progress)
         worker.finished.connect(self._build_finished)
         self._build_thread = thread
         self._build_worker = worker
@@ -996,6 +1059,16 @@ class AnimationDialog(lib.Dialog):
         # not from ``started``: a build that finished before the loop
         # began would swallow the ``quit()`` and ``wait()`` forever
         worker.start()
+
+    def _on_build_progress(self, value: int, maximum: int) -> None:
+        """Advance the progress dialog to ``value`` of ``maximum`` video
+        frames, as reported by the build (see ``AnimationBuilder``)."""
+        progress = self._build_progress
+        if progress is None:
+            return
+        if maximum > 0 and progress.maximum() != maximum:
+            progress.setMaximum(maximum)
+        progress.setValue(value)
 
     def _build_finished(self, completed: bool, error: str) -> None:
         """Wrap up a build on the GUI thread."""
@@ -1031,19 +1104,42 @@ class AnimationDialog(lib.Dialog):
         self.build.setEnabled(True)
 
 
+class _SignalProgress(lib.MockProgress):
+    """Progress tracker (see ``lib.Progress``) emitting each value with
+    the maximum of its phase through ``emit``, from the thread that runs
+    the computation."""
+
+    def __init__(self, emit) -> None:
+        super().__init__()
+        self._emit = emit
+
+    def set_value(self, value, *args, **kwargs) -> None:
+        """Emit ``(value, maximum)``.
+
+        Parameters
+        ----------
+        value : int
+            Items finished in the current phase.
+        *args, **kwargs
+            Accepted and ignored.
+        """
+        self._emit(int(value), self._maximum)
+
+
 class AnimationBuilder(QtCore.QObject):
     """Runs ``render.build_animation`` on a worker thread.
 
     Attributes
     ----------
     progress : QtCore.pyqtSignal
-        The frame number just rendered (drives the progress dialog).
+        The number of frames rendered so far and the number of frames of
+        the video (drives the progress dialog).
     finished : QtCore.pyqtSignal
         Emitted with ``(completed, error)``: ``completed`` is False when
-        cancelled, ``error`` the message of a failure (empty otherwise).
+        canceled, ``error`` the message of a failure (empty otherwise).
     """
 
-    progress = QtCore.pyqtSignal(int)
+    progress = QtCore.pyqtSignal(int, int)
     finished = QtCore.pyqtSignal(bool, str)
     _start = QtCore.pyqtSignal()
 
@@ -1068,7 +1164,7 @@ class AnimationBuilder(QtCore.QObject):
                 self._path,
                 self._locs,
                 self._infos,
-                progress_callback=self.progress.emit,
+                progress=_SignalProgress(self.progress.emit),
                 cancel=self._cancel,
                 **self._kwargs,
             )
@@ -1153,7 +1249,7 @@ class RotateByAngleDialog(lib.Dialog):
         )
 
 
-class ViewRotation(QtWidgets.QLabel):
+class ViewRotation(QtWidgets.QLabel, idle.SpillableChannels):
     """Display rotated super-resolution datasets.
 
     Most functions were taken from ``picasso.gui.render.View``.
@@ -1183,7 +1279,7 @@ class ViewRotation(QtWidgets.QLabel):
     _pan : bool
         Indicates if image is currently panned.
     _pan_z : float
-        Z component of the current view target (camera pixels). The
+        Z component of the current view target (nm). The
         viewport stores only the X/Y components; this completes it so
         that screen-space panning works at any rotation.
     pan_start_x, pan_start_y : float
@@ -1203,7 +1299,7 @@ class ViewRotation(QtWidgets.QLabel):
         so a new set can be started; a further right click then deletes
         the last finalized set.
     _measure_cursor : tuple or None
-        Live cursor position (camera pixels) in Measure mode while the
+        Live cursor position (nm) in Measure mode while the
         cursor is followed; None otherwise.
     qimage : QImage
         Current image of rendered locs, picks and other drawings.
@@ -1229,6 +1325,8 @@ class ViewRotation(QtWidgets.QLabel):
         loaded.
     window : QMainWindow
         Instance of the rotation window.
+    zoom_rectangle : lib_qt.ZoomRectangle
+        The zoom rectangle dragged with Shift + left button.
     async_rendering : bool
         Class attribute: full renders run on a worker thread
         (``render_worker.RenderWorker``, latest request wins) and the
@@ -1282,6 +1380,12 @@ class ViewRotation(QtWidgets.QLabel):
         self.x_render_state = False
         self.x_locs = []
         self._z_shift = 0.0
+        # bounding box of the loaded localizations (nm, the loaded
+        # frame), spanned by the grid planes
+        self._grid_bounds = None
+        # colors of empty and full pixels of the last render, to draw
+        # the grid behind the localizations
+        self._color_range = ((0, 0, 0), (255, 255, 255))
         self._size_hint = (512, 512)
         self._mode = "Rotate"
         self._points = []  # active measurement set being drawn
@@ -1292,15 +1396,11 @@ class ViewRotation(QtWidgets.QLabel):
         self.block_x = False
         self.block_y = False
         self.block_z = False
-        # navigation gestures: the zoom rectangle being dragged (start
-        # and current position in widget pixels), and snapped rotation
-        # while S is held (rotation accumulates until a step is due)
-        self._zoom_rect = None
-        # the rectangle's outline, the same widget the 2D window uses
-        self.rubberband = QtWidgets.QRubberBand(
-            QtWidgets.QRubberBand.Shape.Rectangle, self
-        )
-        self.rubberband.setStyleSheet("selection-background-color: white")
+        # navigation gestures: the zoom rectangle dragged with Shift +
+        # left button (the same as the 2D window's), and snapped
+        # rotation while S is held (rotation accumulates until a step
+        # is due)
+        self.zoom_rectangle = lib_qt.ZoomRectangle(self)
         self._triple_click = lib_qt.TripleClick()
         self._snap = False
         self._snap_accum = np.zeros(3)
@@ -1447,8 +1547,6 @@ class ViewRotation(QtWidgets.QLabel):
         self.update_scene()
 
     def _sync_from_main_window(self, w):
-        # get pixelsize
-        self.pixelsize = w.view.pixelsize
         # update blur and colormap
         b = w.display_settings_dlg.blur_buttongroup.checkedId()
         color = w.display_settings_dlg.colormap.currentText()
@@ -1538,11 +1636,8 @@ class ViewRotation(QtWidgets.QLabel):
             self._append_channel(temp, w.view.infos[i])
 
     def _append_channel(self, temp, info):
-        """Store one channel's copied localizations with z and lpz in
-        camera pixels, as the rotation math expects them."""
-        temp["z"] /= self.pixelsize
-        if "lpz" in temp.columns:
-            temp["lpz"] /= self.pixelsize
+        """Store one channel's copied localizations (x, y, z in nm, as
+        the rotation math expects them)."""
         self.locs.append(temp)
         self.infos.append(info)
 
@@ -1552,14 +1647,9 @@ class ViewRotation(QtWidgets.QLabel):
         if self.x_property in self.locs[0].columns:
             min_value = self.x_min_val
             max_value = self.x_max_val
-            # z / lpz are rescaled to camera pixels here (see
-            # _collect_picked_locs), and z is additionally mean-shifted (see
-            # load_locs), whereas the property limits come from the main
-            # window in nm. Map the limits through the same transform so the
-            # color binning matches the main view.
-            if self.x_property in ("z", "lpz"):
-                min_value = min_value / self.pixelsize
-                max_value = max_value / self.pixelsize
+            # z is mean-shifted here (see load_locs), whereas the
+            # property limits come from the main window; map the limits
+            # through the same shift so the color binning matches
             if self.x_property == "z":
                 min_value -= self._z_shift
                 max_value -= self._z_shift
@@ -1605,13 +1695,23 @@ class ViewRotation(QtWidgets.QLabel):
         # shift z positions of locs so that the middle of the dataset is
         # at z = 0
         all_locs_z = np.concatenate([_["z"].to_numpy() for _ in self.locs])
-        z_shift = all_locs_z.mean()
-        # store shift (in camera pixels) so that render-by-property limits,
-        # which are given in the main window's z units (nm), can be mapped
-        # onto the transformed z used here (see _apply_render_property_split)
+        z_shift = all_locs_z.mean() if len(all_locs_z) else 0.0
+        # store the shift (nm) so that render-by-property limits, which
+        # are given in the main window's z, can be mapped onto the
+        # shifted z used here (see _apply_render_property_split)
         self._z_shift = z_shift
         for i in range(len(self.locs)):
             self.locs[i]["z"] -= z_shift
+        xyz = [
+            locs[["x", "y", "z"]].to_numpy(dtype=float)
+            for locs in self.locs
+            if len(locs)
+        ]
+        if xyz:
+            xyz = np.concatenate(xyz)
+            self._grid_bounds = (xyz.min(axis=0), xyz.max(axis=0))
+        else:
+            self._grid_bounds = None
 
         # assign self.group_color if single channel and group info present
         if len(self.locs) == 1 and "group" in self.locs[0].columns:
@@ -1677,7 +1777,16 @@ class ViewRotation(QtWidgets.QLabel):
         cmap = self.window.display_settings_dlg.colormap.currentText()
         contrast = None if autoscale else (vmin, vmax)
         raw_image = self.image if use_cache else None
-        intensities = self.window.window.view.read_relative_intensities()
+        channel_contrast = self.window.window.view.read_channel_contrast()
+        colors = self.window.window.view.read_colors()
+        invert = self.window.dataset_dialog.wbackground.isChecked()
+        self._color_range = render.color_range(
+            None if isinstance(locs, pd.DataFrame) else len(locs),
+            colors=colors,
+            invert_colors=invert,
+            single_channel_colormap=cmap,
+            channel_contrast=channel_contrast,
+        )
         return dict(
             locs=locs,
             info=infos,
@@ -1687,10 +1796,10 @@ class ViewRotation(QtWidgets.QLabel):
             **kwargs,
             ang=self._R,
             contrast=contrast,
-            invert_colors=self.window.dataset_dialog.wbackground.isChecked(),
+            invert_colors=invert,
             single_channel_colormap=cmap,
-            colors=self.window.window.view.read_colors(),
-            relative_intensities=intensities,
+            colors=colors,
+            channel_contrast=channel_contrast,
             raw_image_cache=raw_image,
             return_contrast_limits=True,
             return_raw_image=True,
@@ -1820,6 +1929,7 @@ class ViewRotation(QtWidgets.QLabel):
         self.viewport = self.adjust_viewport_to_view(viewport)
         if not use_cache:
             self.set_optimal_scalebar(silent=True)
+            self.set_optimal_grid_spacing()
         if use_cache or synchronous or not self.async_rendering:
             # cache redraws (contrast, colormap, the live measuring
             # cross) are cheap and stay synchronous for instant feedback
@@ -1845,15 +1955,24 @@ class ViewRotation(QtWidgets.QLabel):
             self.height(),
             QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
         )
-        # draw scalebar, legend, rotation and measuring points
+        # draw grid, scalebar, legend, rotation angles and measuring points
+        self.qimage = self.draw_grid(self.qimage)
         self.qimage = self.draw_scalebar(self.qimage)
         self.qimage = self.draw_legend(self.qimage)
-        self.qimage = self.draw_rotation(self.qimage)
         self.qimage = self.draw_rotation_angles(self.qimage)
         self.qimage = self.draw_points(self.qimage)
+        self.show_qimage()
 
-        # convert to pixmap
-        self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
+    def show_qimage(self) -> None:
+        """Display ``qimage``, as people with color blindness see it if
+        the main window's View > Color vision preview is on (``qimage``,
+        which saving uses, keeps its colors)."""
+        qimage = getattr(self, "qimage", None)
+        if qimage is None:
+            return
+        self.pixmap = QtGui.QPixmap.fromImage(
+            self.window.window.color_vision_image(qimage)
+        )
         self.setPixmap(self.pixmap)
 
     # --- asynchronous rendering --- #
@@ -1961,6 +2080,33 @@ class ViewRotation(QtWidgets.QLabel):
             self._render_thread = None
             self._render_worker = None
 
+    def idle_busy(self) -> bool:
+        """Whether an animation is built or a render is due, when
+        nothing is to be released (``picasso.gui.idle``)."""
+        return (
+            self._refine_timer.isActive()
+            or self.window.animation_dialog._build_thread is not None
+        )
+
+    def release_idle_memory(self) -> bool:
+        """Drop what is rebuilt on demand, while the GUI is idle (see
+        ``picasso.gui.idle``): the raw image of the last render and, if
+        the window is closed, its copies of the localizations, which
+        opening it loads again (see ``Window.open_3d_view``). The
+        rotation and the viewport stay. Returns False, releasing
+        nothing, while busy."""
+        if self.idle_busy():
+            return False
+        self.image = None
+        self.window.display_settings_dlg.contrast_slider.release_image()
+        if not self.window.isVisible():
+            self.stop_render_worker()
+            self.locs = []
+            self.infos = []
+            self.x_locs = []
+            self.group_color = []
+        return True
+
     def draw_scalebar(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw a scalebar.
 
@@ -1986,11 +2132,72 @@ class ViewRotation(QtWidgets.QLabel):
                 image=image,
                 viewport=self.viewport,
                 scalebar_length_nm=d_dialog.scalebar.value(),
-                pixelsize=self.window.window.view.pixelsize,
                 display_length=d_dialog.scalebar_text.isChecked(),
                 color=color,
+                text_fontsize=theme.scaled_text_size(
+                    render.SCALEBAR_FONT_SIZE
+                ),
             )
         return image
+
+    def grid_geometry(
+        self,
+    ) -> tuple[tuple[np.ndarray, np.ndarray], tuple[float, float, float]]:
+        """Bounding box spanned by the grid and a point on the grid,
+        in the frame of the rendered localizations (nm, z shifted by
+        the mean z and ``_pan_z``). The point keeps the grid
+        lines at whole multiples of the spacing in the original
+        coordinates, so z = 0 nm is on the grid."""
+        lower, upper = self._grid_bounds
+        shift = np.array([0.0, 0.0, self._pan_z])
+        origin = (0.0, 0.0, -self._z_shift - self._pan_z)
+        return (lower - shift, upper - shift), origin
+
+    def draw_grid(self, image: QtGui.QImage) -> QtGui.QImage:
+        """Draw the grid planes, rotated with the localizations.
+
+        Parameters
+        ----------
+        image : QImage
+            Image containing rendered localizations.
+
+        Returns
+        -------
+        image : QImage
+            Image with the drawn grid.
+        """
+        grid = self.window.display_settings_dlg.grid_box.grid()
+        if grid is None or self._grid_bounds is None:
+            return image
+        bounds, origin = self.grid_geometry()
+        return render.draw_grid_3d(
+            image,
+            self.viewport,
+            grid,
+            self._R,
+            bounds,
+            origin=origin,
+            color_range=self._color_range,
+        )
+
+    def optimal_grid_spacing(self) -> int | None:
+        """Automatic grid spacing (nm): approx. 1/10 of the current
+        viewport's width, rounded like the scale bar; None without a
+        view."""
+        if self.viewport is None:
+            return None
+        width = render.viewport_width(self.viewport)
+        spacing = render.optimal_scalebar_length(
+            width, fraction=render.AUTO_GRID_FRACTION
+        )
+        return spacing if spacing > 0 else None
+
+    def set_optimal_grid_spacing(self) -> None:
+        """Set the grid spacing to ``optimal_grid_spacing`` if the
+        spacing is automatic."""
+        spacing = self.optimal_grid_spacing()
+        if spacing is not None:
+            self.window.display_settings_dlg.grid_box.set_auto_spacing(spacing)
 
     def draw_legend(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw a legend for multichannel data.
@@ -2024,26 +2231,8 @@ class ViewRotation(QtWidgets.QLabel):
             image=image,
             channel_names=channel_names,
             channel_colors=channel_colors,
+            text_fontsize=theme.scaled_text_size(render.LEGEND_FONT_SIZE),
         )
-        return image
-
-    def draw_rotation(self, image: QtGui.QImage) -> QtGui.QImage:
-        """Draw a small 3 axes icon that rotates with locs.
-
-        Displayed in the bottom left corner.
-
-        Parameters
-        ----------
-        image : QImage
-            Image containing rendered localizations.
-
-        Returns
-        -------
-        image : QImage
-            Image with the drawn rotation axes icon.
-        """
-        if self.window.rotation_action.isChecked():
-            image = render.draw_rotation(image=image, ang=self._R)
         return image
 
     def draw_rotation_angles(self, image: QtGui.QImage) -> QtGui.QImage:
@@ -2055,7 +2244,12 @@ class ViewRotation(QtWidgets.QLabel):
         )
         if self.window.angles_action.isChecked():
             image = render.draw_rotation_angles(
-                image=image, ang=(self.angx, self.angy, self.angz), color=color
+                image=image,
+                ang=(self.angx, self.angy, self.angz),
+                color=color,
+                text_fontsize=theme.scaled_text_size(
+                    render.ROTATION_ANGLES_FONT_SIZE
+                ),
             )
         return image
 
@@ -2083,7 +2277,6 @@ class ViewRotation(QtWidgets.QLabel):
                 image=image,
                 viewport=self.viewport,
                 points=point_set,
-                pixelsize=self.window.window.view.pixelsize,
                 mark_width=mark_width,
                 style=style,
             )
@@ -2098,7 +2291,6 @@ class ViewRotation(QtWidgets.QLabel):
             image=image,
             viewport=self.viewport,
             points=self._points,
-            pixelsize=self.window.window.view.pixelsize,
             mark_width=mark_width,
             cursor=cursor,
             style=style,
@@ -2244,7 +2436,7 @@ class ViewRotation(QtWidgets.QLabel):
         )
         if force or optimal_scalebar.isChecked():
             width = render.viewport_width(self.viewport)
-            scalebar = render.optimal_scalebar_length(self.pixelsize, width)
+            scalebar = render.optimal_scalebar_length(width)
             scalebar_spinbox = self.window.display_settings_dlg.scalebar
             scalebar_spinbox.blockSignals(True)
             scalebar_spinbox.setValue(scalebar)
@@ -2258,7 +2450,7 @@ class ViewRotation(QtWidgets.QLabel):
         Parameters
         ----------
         dx, dy : float
-            Shift in x and y (camera pixels).
+            Shift in x and y (nm).
         """
         (y_min, x_min), (y_max, x_max) = self.viewport
         new_viewport = [(y_min + dy, x_min + dx), (y_max + dy, x_max + dx)]
@@ -2311,18 +2503,12 @@ class ViewRotation(QtWidgets.QLabel):
     def mouseMoveEvent(self, event: QtGui.QMouseEvent) -> None:
         """Define actions taken when moving mouse, for example, rotating
         locs, panning or live updating the measuring cross."""
-        if self._zoom_rect is not None:
-            (x0, y0), _ = self._zoom_rect
-            self._zoom_rect = (
-                self._zoom_rect[0],
-                (event.pos().x(), event.pos().y()),
-            )
-            # like the 2D window: the rectangle only stretches towards
-            # the bottom right; dragging the other way collapses it
-            self.rubberband.setGeometry(
-                QtCore.QRect(QtCore.QPoint(x0, y0), event.pos())
-            )
-            return
+        if self.zoom_rectangle.active:
+            if event.buttons() & QtCore.Qt.MouseButton.LeftButton:
+                self.zoom_rectangle.move(event.pos())
+                return
+            # its release was lost (e.g., another app took the mouse)
+            self.zoom_rectangle.drop()
         if self._pan:
             self._pan_drag(event)
             return
@@ -2430,7 +2616,7 @@ class ViewRotation(QtWidgets.QLabel):
 
     def _shift_view(self, screen_dx: float, screen_dy: float) -> None:
         """Move the view target by a shift given in the screen frame
-        (camera pixels along the screen axes): converted to world
+        (nm along the screen axes): converted to world
         coordinates through ``R^-1``, its X/Y components move the
         viewport and its Z component the depth ``_pan_z``, so the shift
         is right at any rotation, including ±90°."""
@@ -2498,16 +2684,14 @@ class ViewRotation(QtWidgets.QLabel):
         self.fit_in_view_rotated()
         event.accept()
 
-    def _finish_zoom_rectangle(self) -> None:
-        """Zoom to the rectangle dragged with Shift + left button (a
-        drag too small to be one is ignored)."""
-        (x0, y0), (x1, y1) = self._zoom_rect
-        self._zoom_rect = None
-        self.rubberband.hide()
-        # releasing above or left of the start cancels (as in 2D)
-        w_pix, h_pix = x1 - x0, y1 - y0
-        if w_pix < 5 or h_pix < 5 or not len(self.locs):
+    def _finish_zoom_rectangle(self, pos: QtCore.QPoint) -> None:
+        """Zoom to the rectangle dragged with Shift + left button and
+        released at ``pos`` (a drag too small to be one is ignored)."""
+        rect = self.zoom_rectangle.finish(pos)
+        if rect is None or not len(self.locs):
             return
+        x0, y0, x1, y1 = rect.left(), rect.top(), rect.right(), rect.bottom()
+        w_pix, h_pix = x1 - x0, y1 - y0
         vh, vw = render.viewport_size(self.viewport)
         # the rectangle's center becomes the view target, its extent
         # (widened to the window's aspect by draw_scene) the field
@@ -2548,7 +2732,8 @@ class ViewRotation(QtWidgets.QLabel):
         example, starting rotating locs or panning.
 
         Navigation works in every mode: Shift + left button drags a
-        zoom rectangle; the right button, the middle button or Alt
+        zoom rectangle (in any direction; any other button or Esc
+        cancels it); the right button, the middle button or Alt
         (Option) + left button pan. In Rotate mode a plain left drag
         rotates. In Measure mode the right button keeps its measuring
         role (freeze a set, delete the last set, see
@@ -2558,18 +2743,16 @@ class ViewRotation(QtWidgets.QLabel):
         right = event.button() == QtCore.Qt.MouseButton.RightButton
         middle = event.button() == QtCore.Qt.MouseButton.MiddleButton
         modifiers = event.modifiers()
+        # the right (or any other) button cancels a zoom rectangle
+        # being dragged
+        if self.zoom_rectangle.press(event.button()):
+            event.accept()
+            return
         if self._triple_click.is_third(event) and len(self.locs):
             self._triple_clicked(event)
             return
         if left and modifiers & QtCore.Qt.KeyboardModifier.ShiftModifier:
-            self._zoom_rect = (
-                (event.pos().x(), event.pos().y()),
-                (event.pos().x(), event.pos().y()),
-            )
-            self.rubberband.setGeometry(
-                QtCore.QRect(event.pos(), QtCore.QSize())
-            )
-            self.rubberband.show()
+            self.zoom_rectangle.start(event.pos())
             event.accept()
             return
         if (
@@ -2594,12 +2777,13 @@ class ViewRotation(QtWidgets.QLabel):
         """Define actions taken when releasing mouse buttons, for
         example, stopping rotating locs or panning, add or delete a measure
         point."""
-        if self._zoom_rect is not None:
-            self._zoom_rect = (
-                self._zoom_rect[0],
-                (event.pos().x(), event.pos().y()),
-            )
-            self._finish_zoom_rectangle()
+        # the releases ending a canceled zoom rectangle add no measure
+        # point
+        if self.zoom_rectangle.swallows_release(event.button()):
+            event.accept()
+            return
+        if self.zoom_rectangle.active:
+            self._finish_zoom_rectangle(event.pos())
             event.accept()
             return
         if self._pan:
@@ -2636,7 +2820,7 @@ class ViewRotation(QtWidgets.QLabel):
                 event.accept()
 
     def map_to_movie(self, position: QtCore.QPoint) -> tuple[float, float]:
-        """Convert coordinates from Qt display units to camera units."""
+        """Convert coordinates from screen pixels to nm."""
         x_rel = position.x() / self.width()
         x_movie = (
             x_rel * render.viewport_width(self.viewport) + self.viewport[0][1]
@@ -2745,16 +2929,22 @@ class ViewRotation(QtWidgets.QLabel):
             check_ext=check_ext,
         )
         if path:
-            self.qimage.save(path)
-            self.save_property_colorbar(path)
-            self.export_current_view_info(path)
-            if not scalebar:
-                self.set_optimal_scalebar(force=True)
-                scalebar_box.setChecked(True)
+            # exported with the text sizes they always had, not those of
+            # the windows: draw the view again for the export
+            with theme.unscaled_text():
                 self.update_scene(synchronous=True)
-                self.qimage.save(os.path.splitext(path)[0] + "_scalebar.png")
-                scalebar_box.setChecked(False)
-                self.update_scene(synchronous=True)
+                self.qimage.save(path)
+                self.save_property_colorbar(path)
+                self.export_current_view_info(path)
+                if not scalebar:
+                    self.set_optimal_scalebar(force=True)
+                    scalebar_box.setChecked(True)
+                    self.update_scene(synchronous=True)
+                    self.qimage.save(
+                        os.path.splitext(path)[0] + "_scalebar.png"
+                    )
+                    scalebar_box.setChecked(False)
+            self.update_scene(synchronous=True)
 
     def save_property_colorbar(self, path: str) -> None:
         """Save the color bar (LUT) of the rendered property next to an
@@ -2784,25 +2974,27 @@ class ViewRotation(QtWidgets.QLabel):
         colors = [
             _.currentText() for _ in self.window.dataset_dialog.colorselection
         ]
-        pixelsize = self.window.window.view.pixelsize
         rot_angles = [
             int(self.angx * 180 / np.pi),
             int(self.angy * 180 / np.pi),
             int(self.angz * 180 / np.pi),
         ]
         info = {
-            "Generated by": f"Picasso v{__version__} Render 3D",
+            **lib.step_info("Render 3D"),
+            io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION,
             "Rotation angles (deg)": rot_angles,
-            "FOV (X, Y, Width, Height)": fov,
+            "FOV (X, Y, Width, Height; nm)": fov,
             "Display pixel size (nm)": d.disp_px_size.value(),
             "Min. density": d.minimum.value(),
             "Max. density": d.maximum.value(),
             "Colormap": d.colormap.currentText(),
             "Blur method": d.blur_method(),
             "Scale bar length (nm)": d.scalebar.value(),
-            "Min. blur (nm)": d.min_blur_width.value() / pixelsize,
+            **d.grid_box.export_info(),
+            "Min. blur (nm)": d.min_blur_width.value(),
             "Localizations loaded": self.paths,
             "Colors": colors,
+            **self.window.dataset_dialog.export_channel_contrast(),
         }
         if self.x_render_state:  # rendering by property
             info["Render property"] = self.x_property
@@ -2878,7 +3070,7 @@ class ViewRotation(QtWidgets.QLabel):
         return xyz, in_view
 
     def _in_view_median_z(self) -> float | None:
-        """Median z (camera pixels, the loaded frame) of the localizations
+        """Median z (nm, the loaded frame) of the localizations
         whose rotated position falls inside the viewport; None when no
         localization is in view."""
         sample = self._in_view_sample()
@@ -2980,30 +3172,20 @@ class ViewRotation(QtWidgets.QLabel):
             blur width.
         """
         disp_dlg = self.window.display_settings_dlg
-        pixelsize = self.window.window.view.pixelsize
 
-        # oversampling
-        opt_oversampling = self.display_pixels_per_viewport_pixels(
+        # the display pixel size at which one rendered pixel is one
+        # screen pixel
+        opt_disp_px_size = 1 / self.display_pixels_per_viewport_pixels(
             viewport=viewport
         )
-        opt_disp_px_size = pixelsize / opt_oversampling
+        # a rendered pixel cannot be smaller than a screen pixel
+        disp_dlg.set_min_disp_px_silently(opt_disp_px_size)
         if disp_dlg.dynamic_disp_px.isChecked():
-            disp_px_size = opt_disp_px_size
             disp_dlg.set_disp_px_silently(opt_disp_px_size)
+            # exact, the spin box rounds to its decimals
+            disp_px_size = opt_disp_px_size
         else:
-            if disp_dlg.disp_px_size.value() < opt_disp_px_size:
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Display pixel size too low",
-                    (
-                        "Display pixel size will be adjusted to"
-                        " match the display pixel density."
-                    ),
-                )
-                disp_px_size = opt_disp_px_size
-                disp_dlg.set_disp_px_silently(opt_disp_px_size)
-            else:
-                disp_px_size = disp_dlg.disp_px_size.value()
+            disp_px_size = disp_dlg.disp_px_size.value()
 
         # viewport
         if viewport is None:
@@ -3013,9 +3195,7 @@ class ViewRotation(QtWidgets.QLabel):
             "disp_px_size": disp_px_size,
             "viewport": viewport,
             "blur_method": disp_dlg.blur_method(),
-            "min_blur_width": float(
-                disp_dlg.min_blur_width.value() / pixelsize
-            ),
+            "min_blur_width": float(disp_dlg.min_blur_width.value()),
             "quadtree_capacity": disp_dlg.quadtree_capacity.value(),
             "triangulation_passes": disp_dlg.triangulation_passes.value(),
             "triangulation_jitter": disp_dlg.triangulation_jitter.value(),
@@ -3028,8 +3208,8 @@ class ViewRotation(QtWidgets.QLabel):
             tuple[tuple[float, float], tuple[float, float]] | None
         ) = None,
     ) -> float:
-        """Return optimal oversampling, i.e., the number of display
-        pixels per camera pixel."""
+        """Return the number of screen pixels per nm of the viewport,
+        i.e., the inverse of the screen pixel size."""
         viewport = viewport or self.viewport
         os_horizontal = self.width() / render.viewport_width(viewport)
         os_vertical = self.height() / render.viewport_height(viewport)
@@ -3113,8 +3293,9 @@ class RotationWindow(QtWidgets.QMainWindow):
         Menu bar with menus: File, View, Tools.
     menus : list
         Contains File, View and Tools menus, used for plugins.
-    rotation_action : QtGui.QAction
-        Action to toggle the display of reference axes.
+    toolbar : toolbars.ToolBar
+        The most used actions of the menus, see
+        ``toolbars.add_toolbar``.
     view_rot : ViewRotation
         Instance of the class for displaying rendered localizations.
     window : QMainWindow
@@ -3177,15 +3358,11 @@ class RotationWindow(QtWidgets.QMainWindow):
         self.legend_action.setChecked(False)
         self.legend_action.setShortcut("Ctrl+L")
         self.legend_action.triggered.connect(self.update_scene)
-        self.rotation_action = view_menu.addAction("Show/hide rotation")
-        self.rotation_action.setCheckable(True)
-        self.rotation_action.setChecked(True)
-        self.rotation_action.setShortcut("Ctrl+P")
-        self.rotation_action.triggered.connect(self.update_scene)
         self.angles_action = view_menu.addAction("Show/hide rotation angles")
         self.angles_action.setCheckable(True)
         self.angles_action.setChecked(False)
         self.angles_action.triggered.connect(self.update_scene)
+        self.window.add_color_vision_menu(view_menu)
 
         view_menu.addSeparator()
         rotation_action = view_menu.addAction("Rotate by angle...")
@@ -3246,9 +3423,38 @@ class RotationWindow(QtWidgets.QMainWindow):
         )
         rotate_tool_action.setShortcut("Ctrl+R")
         rotate_tool_action.setIcon(theme.icon("view-3d"))
+        rotate_tool_action.setChecked(True)  # ``ViewRotation._mode``
         tools_menu.addAction(rotate_tool_action)
 
+        tools_menu.addSeparator()
+        clear_measure_action = tools_menu.addAction("Clear measurements")
+        clear_measure_action.triggered.connect(self.view_rot.remove_points)
+        clear_measure_action.setShortcut("Ctrl+Shift+C")
+
         self.menus = [file_menu, view_menu, tools_menu]
+
+        # toolbar of the most used actions, shared with the menus
+        self.toolbar = toolbars.add_toolbar(
+            self,
+            "Render 3D toolbar",
+            [
+                (save_action, "save", "Save"),
+                (export_view, "export-view", "Export view"),
+                (animation, "animation", "Animation"),
+                None,
+                (rotate_tool_action, "view-3d"),
+                (measure_tool_action, "tool-measure"),
+                (clear_measure_action, "clear", "Clear"),
+                None,
+                (xy_proj_action, "projection-xy", "XY"),
+                (xz_proj_action, "projection-xz", "XZ"),
+                (yz_proj_action, "projection-yz", "YZ"),
+                (delete_rotation_action, "reload", "Reset"),
+                (fit_in_view_action, "fit-view", "Fit view"),
+                None,
+                (display_settings_action, "display-settings", "Display"),
+            ],
+        )
         # the window is built here but shown only on demand; see
         # ``hideEvent`` for why its shortcuts must stay inert
         self.menu_bar.setEnabled(False)
@@ -3261,7 +3467,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         Parameters
         ----------
         dx, dy : float
-            Pick shift in x or y axis (camera pixels).
+            Pick shift in x or y axis (nm).
         """
         if self.view_rot.pick_shape is None:
             return  # the field of view is shown: no pick to move
@@ -3305,8 +3511,7 @@ class RotationWindow(QtWidgets.QMainWindow):
         self.window.view.update_scene()  # update scene in main window
 
     def _resolve_picks(self) -> tuple:
-        """Obtain pick coordiantes for saving given their shape."""
-        pixelsize = self.window.view.pixelsize
+        """Obtain pick coordinates (nm) for saving given their shape."""
         if self.view_rot.pick_shape is None:
             # the field of view: its bounds, like a box pick
             (y0, x0), (y1, x1) = self.view_rot.viewport
@@ -3321,7 +3526,7 @@ class RotationWindow(QtWidgets.QMainWindow):
             # same stroke form as the picks file, widths in nm
             pick = [
                 {
-                    "Width (nm)": float(stroke[0] * pixelsize),
+                    "Width (nm)": float(stroke[0]),
                     "Path": [[float(x), float(y)] for x, y in stroke[1]],
                 }
                 for stroke in self.view_rot.pick
@@ -3346,17 +3551,16 @@ class RotationWindow(QtWidgets.QMainWindow):
             angx = int(self.view_rot.angx * 180 / np.pi)
             angy = int(self.view_rot.angy * 180 / np.pi)
             angz = int(self.view_rot.angz * 180 / np.pi)
-            pixelsize = self.window.view.pixelsize
             pick = self._resolve_picks()
-            size = self.view_rot.pick_size
+            size = self.view_rot.pick_size  # nm
             new_info = [
                 {
-                    "Generated by": f"Picasso v{__version__} Render 3D",
+                    **lib.step_info("Render 3D"),
                     "Pick": pick,
                     "Pick shape": self.view_rot.pick_shape or "Field of view",
                     # polygons and boxes carry their own extent
                     "Pick size (nm)": (
-                        size * pixelsize if size is not None else None
+                        float(size) if size is not None else None
                     ),
                     # accumulated rotation angles incl. full turns
                     # (radians, codebase convention); legacy keys

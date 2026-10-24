@@ -1,8 +1,10 @@
 """Overlay of a PNG image (grayscale or RGB) on rendered localizations.
 
 The image is placed on the camera chip described by the localizations'
-metadata; a localization at ``x = j`` sits at the center of camera
-pixel ``j``, so the chip spans ``[-0.5, width - 0.5)``. These tests
+metadata; a localization at ``x = j * Pixelsize`` nm sits at the center
+of camera pixel ``j``, so the chip spans ``[-0.5, width - 0.5)`` camera
+pixels, i.e., ``[-Pixelsize / 2, (width - 0.5) * Pixelsize)`` nm. These
+tests
 cover the placement for every scaling mode, loading of the PNG
 and TIFF
 flavors, drawing, and the wiring into the Render window (display,
@@ -24,8 +26,21 @@ from PyQt6 import QtGui
 from picasso import io, render
 from picasso.gui import render as gui_render
 
-WIDTH, HEIGHT = 32.0, 16.0
+WIDTH, HEIGHT = 32.0, 16.0  # camera pixels
 PIXELSIZE = 130.0
+WIDTH_NM, HEIGHT_NM = WIDTH * PIXELSIZE, HEIGHT * PIXELSIZE
+CORNER = -0.5 * PIXELSIZE  # top left corner of the chip (nm)
+
+
+def _info(width: float = WIDTH, height: float = HEIGHT) -> list[dict]:
+    return [
+        {
+            "Width": width,
+            "Height": height,
+            "Frames": 1,
+            "Pixelsize": PIXELSIZE,
+        }
+    ]
 
 
 def _qimage_rgb(qimage: QtGui.QImage) -> np.ndarray:
@@ -47,47 +62,49 @@ def _qimage_rgb(qimage: QtGui.QImage) -> np.ndarray:
 
 
 def test_stretch_covers_the_chip():
-    extent = render.overlay_extent(
-        (8, 64), (HEIGHT, WIDTH), "Stretch to camera"
-    )
-    assert extent == (-0.5, -0.5, WIDTH, HEIGHT)
+    extent = render.overlay_extent((8, 64), _info(), "Stretch to camera")
+    assert extent == (CORNER, CORNER, WIDTH_NM, HEIGHT_NM)
 
 
 def test_fit_keeps_aspect_ratio_and_centers():
     # 64 x 64 image on a 32 x 16 chip: limited by the height
     x, y, w, h = render.overlay_extent(
-        (64, 64), (HEIGHT, WIDTH), "Fit to camera (keep aspect ratio)"
+        (64, 64), _info(), "Fit to camera (keep aspect ratio)"
     )
-    assert (w, h) == (HEIGHT, HEIGHT)
-    assert y == -0.5
-    assert x == pytest.approx(-0.5 + (WIDTH - HEIGHT) / 2)
+    assert (w, h) == (HEIGHT_NM, HEIGHT_NM)
+    assert y == CORNER
+    assert x == pytest.approx(CORNER + (WIDTH_NM - HEIGHT_NM) / 2)
 
 
 def test_fit_equals_stretch_for_matching_sizes():
     shape = (int(HEIGHT), int(WIDTH))
     fit = render.overlay_extent(
-        shape, (HEIGHT, WIDTH), "Fit to camera (keep aspect ratio)"
+        shape, _info(), "Fit to camera (keep aspect ratio)"
     )
-    stretch = render.overlay_extent(
-        shape, (HEIGHT, WIDTH), "Stretch to camera"
-    )
+    stretch = render.overlay_extent(shape, _info(), "Stretch to camera")
     assert fit == stretch
 
 
 def test_pixel_size_and_shift():
+    # 0.5 camera pixels per image pixel, shifted by (1.25, -2) camera px
     x, y, w, h = render.overlay_extent(
         (10, 20),
-        (HEIGHT, WIDTH),
+        _info(),
         "Image pixel size",
-        scale=0.5,
-        shift=(1.25, -2.0),
+        scale=0.5 * PIXELSIZE,
+        shift=(1.25 * PIXELSIZE, -2.0 * PIXELSIZE),
     )
-    assert (x, y, w, h) == (0.75, -2.5, 10.0, 5.0)
+    assert (x, y, w, h) == (
+        0.75 * PIXELSIZE,
+        -2.5 * PIXELSIZE,
+        10.0 * PIXELSIZE,
+        5.0 * PIXELSIZE,
+    )
 
 
 def test_unknown_mode_raises():
     with pytest.raises(ValueError):
-        render.overlay_extent((4, 4), (4, 4), "Nope")
+        render.overlay_extent((4, 4), _info(4, 4), "Nope")
 
 
 # --- loading ----------------------------------------------------------
@@ -191,9 +208,13 @@ def test_draw_maps_image_pixels_onto_camera_pixels(qt_offscreen):
     covers localization coordinates [j - 0.5, j + 0.5)."""
     data = np.array([[255, 0], [0, 0]], dtype=np.uint8)
     overlay = render.overlay_to_qimage(data)
-    extent = render.overlay_extent((2, 2), (2, 2), "Stretch to camera")
-    # the view shows [-0.5, 1.5) at 10 display px per camera px
-    viewport = ((-0.5, -0.5), (1.5, 1.5))
+    extent = render.overlay_extent((2, 2), _info(2, 2), "Stretch to camera")
+    # the view shows camera pixels [-0.5, 1.5) at 10 display px per
+    # camera px
+    viewport = (
+        (-0.5 * PIXELSIZE, -0.5 * PIXELSIZE),
+        (1.5 * PIXELSIZE, 1.5 * PIXELSIZE),
+    )
     image = render.draw_image_overlay(
         _black(20, 20), viewport, overlay, extent
     )
@@ -332,22 +353,14 @@ def window(qt_offscreen, tmp_path):
     locs = pd.DataFrame(
         {
             "frame": np.zeros(3, dtype=np.int32),
-            "x": [3.0, 10.0, 20.0],
-            "y": [3.0, 8.0, 12.0],
-            "lpx": np.full(3, 0.1),
-            "lpy": np.full(3, 0.1),
+            "x": [390.0, 1300.0, 2600.0],
+            "y": [390.0, 1040.0, 1560.0],
+            "lpx": np.full(3, 13.0),
+            "lpy": np.full(3, 13.0),
             "photons": np.full(3, 1000.0),
         }
     )
-    info = [
-        {
-            "Width": WIDTH,
-            "Height": HEIGHT,
-            "Frames": 1,
-            "Pixelsize": PIXELSIZE,
-        }
-    ]
-    window.view.add(str(tmp_path / "locs.hdf5"), locs, info, render_=False)
+    window.view.add(str(tmp_path / "locs.hdf5"), locs, _info(), render_=False)
     window.view.async_rendering = False
     window.view.resize(256, 128)
     window.view.fit_in_view()
@@ -440,12 +453,13 @@ def test_export_complete_includes_overlay(window, tmp_path, monkeypatch):
     assert (exported[:, -1] < 255).all() and (exported[-1] < 255).all()
     meta = io.load_info(out.replace(".png", ".yaml"))[0]
     assert meta["Overlay image"] == dialog.path
-    assert meta["Overlay extent (X, Y, Width, Height; camera px)"] == [
-        -0.5,
-        -0.5,
-        WIDTH,
-        HEIGHT,
+    assert meta["Overlay extent (X, Y, Width, Height; nm)"] == [
+        CORNER,
+        CORNER,
+        WIDTH_NM,
+        HEIGHT_NM,
     ]
+    assert meta["Overlay shift (x, y; nm)"] == [0.0, 0.0]
 
 
 def test_window_float_tiff_and_pages(window, tmp_path):

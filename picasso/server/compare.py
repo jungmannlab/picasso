@@ -1,6 +1,5 @@
 import streamlit as st
-from helper import db_filename
-from sqlalchemy import create_engine
+from helper import fetch_db, get_file_family
 import pandas as pd
 import os
 import numpy as np
@@ -33,31 +32,66 @@ def load_file(path: str):
     return locs, info
 
 
-def get_file_family(file: str):
-    """Return all files that belong to a parent file for picasso.
-
-    E.g. for a folder with 'file.hdf5' and 'file_undrift.hdf5', when
-    searching for 'file.hdf5', both files will be returned.
+def locs_per_frame(locs: pd.DataFrame, smooth: int) -> pd.DataFrame:
+    """Count the localizations in each frame, smoothed by a moving
+    average.
 
     Parameters
     ----------
-    file : str
-        Path to the parent file.
+    locs : pd.DataFrame
+        Localizations, with a ``frame`` column.
+    smooth : int
+        Number of frames averaged.
 
     Returns
     -------
-    files : list of str
-        Names of the ``.hdf5`` files sharing its base name.
-    folder : str
-        The folder they live in.
+    counts : pd.DataFrame
+        Columns ``frame`` (every frame from 0 to the last one with
+        localizations, also those without) and ``count`` (NaN for the
+        first ``smooth - 1`` frames).
     """
-    base = os.path.split(file)[1].split(".")[0]
-    folder = os.path.dirname(file)
+    n_frames = int(locs["frame"].max()) + 1 if len(locs) else 0
+    counts = np.bincount(
+        locs["frame"].to_numpy(dtype=np.int64), minlength=n_frames
+    )
+    return pd.DataFrame(
+        {
+            "frame": np.arange(n_frames),
+            "count": pd.Series(counts, dtype=float).rolling(smooth).mean(),
+        }
+    )
 
-    files = os.listdir(folder)
-    files = [f for f in files if f.startswith(base) and f.endswith(".hdf5")]
 
-    return files, folder
+def histograms(
+    values: dict, field: str, min_value: float, max_value: float, n_bins: int
+) -> pd.DataFrame:
+    """Histograms of a column of several files, on the same bins.
+
+    Parameters
+    ----------
+    values : dict
+        Maps each file name to the values of ``field``.
+    field : str
+        Name of the column.
+    min_value, max_value : float
+        Range of the bins.
+    n_bins : int
+        Number of bins.
+
+    Returns
+    -------
+    table : pd.DataFrame
+        Columns ``field`` (the bin centers), ``count`` and ``file``.
+    """
+    edges = np.linspace(min_value, max_value, n_bins + 1)
+    centers = (edges[:-1] + edges[1:]) / 2
+    tables = []
+    for file, file_values in values.items():
+        counts, _ = np.histogram(file_values, bins=edges)
+        tables.append(
+            pd.DataFrame({field: centers, "count": counts, "file": file})
+        )
+    return pd.concat(tables, axis=0, ignore_index=True)
 
 
 def locs_per_frame_plot(hdf_dict: dict):
@@ -72,12 +106,8 @@ def locs_per_frame_plot(hdf_dict: dict):
     summary = []
 
     for f, df in hdf_dict.items():
-        d = df[["frame", "photons"]].groupby("frame").count()
-        d.columns = ["count"]
-        d = d.rolling(smooth).mean()
+        d = locs_per_frame(df, smooth)
         d["file"] = f
-        d = d.reset_index()
-
         summary.append(d)
 
     plot_df = pd.concat(summary, axis=0)
@@ -141,19 +171,7 @@ def hist_plot(hdf_dict: dict, locs: pd.DataFrame):
             "Max value", value=upper, min_value=min_value, max_value=max_
         )
 
-        bins = np.linspace(min_value, max_value, n_bins)
-
-        summary = []
-        for f, vals in all_f.items():
-
-            counts, _ = np.histogram(vals, bins=bins)
-            sub_df = pd.DataFrame([bins[1:] + bins[0] / 2, counts]).T
-
-            sub_df.columns = [field, "count"]
-            sub_df["file"] = f
-            summary.append(sub_df)
-
-        plot_df = pd.concat(summary, axis=0)
+        plot_df = histograms(all_f, field, min_value, max_value, n_bins)
 
         fig = px.line(
             plot_df,
@@ -173,7 +191,7 @@ def hist_plot(hdf_dict: dict, locs: pd.DataFrame):
 
         st.plotly_chart(fig)
     except Exception as e:
-        st.warning(f"An error occured plotting field **{field}**.\n {e}")
+        st.warning(f"An error occurred plotting field **{field}**.\n {e}")
 
 
 def compare():  # noqa: C901
@@ -185,10 +203,10 @@ def compare():  # noqa: C901
         " base path as the movie will be selectable."
     )
 
-    engine = create_engine("sqlite:///" + db_filename(), echo=False)
-
     try:
-        df = pd.read_sql_table("files", con=engine)
+        df = fetch_db()
+        if df.empty:
+            raise ValueError("no files in the database")
 
         files = df["filename"].unique()
 

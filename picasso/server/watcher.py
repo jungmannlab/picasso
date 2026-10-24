@@ -1,37 +1,51 @@
+import argparse
 import streamlit as st
 import os
 import pandas as pd
 from multiprocessing import Process
 import time
-from sqlalchemy import create_engine
 from picasso import localize
-from helper import fetch_watcher, fetch_db
+from helper import fetch_watcher, fetch_db, write_table
 import psutil
+import re
+import shlex
 import subprocess
+import sys
 from datetime import datetime
-from picasso.__main__ import _localize
+from picasso.__main__ import _build_parser, _localize
 
 DEFAULT_UPDATE_TIME = 1
+#: the placeholders of the custom command
+_PLACEHOLDERS = re.compile(r"\$(FILENAME|LOCS)")
 
 FILETYPES = (".raw", ".ome.tif", ".ims")
 
 
-class aclass:
-    """Namespace object whose attributes are the keyword arguments given.
+def localize_args(settings: dict) -> argparse.Namespace:
+    """The arguments of ``picasso localize`` for the settings of a
+    parameter group: the command line defaults, overridden by the
+    settings.
 
-    Used to hand the localize settings to code that expects an argparse
-    namespace.
+    Parameters
+    ----------
+    settings : dict
+        Localize settings by argument name, with the movie as ``files``
+        and one fitting method (``fit_method``) and minimum net gradient
+        (``gradient``).
+
+    Returns
+    -------
+    args : argparse.Namespace
+        The arguments, as ``_localize`` takes them.
     """
-
-    def __init__(self, **entries):
-        """Set one attribute per keyword argument.
-
-        Parameters
-        ----------
-        **entries
-            The attributes to set.
-        """
-        self.__dict__.update(entries)
+    parser, _ = _build_parser()
+    args = parser.parse_args(["localize", settings["files"]])
+    vars(args).update(settings)
+    # the options that may be given once per region are lists
+    for name in ("fit_method", "gradient"):
+        if name in settings:
+            setattr(args, name, [settings[name]])
+    return args
 
 
 def check_new(path: str, processed: dict, logfile: str):
@@ -44,7 +58,7 @@ def check_new(path: str, processed: dict, logfile: str):
     path : str
         Folder to check.
     processed : dict
-        Files that are already processed, keyed by normalized path.
+        Files that are already processed, keyed by absolute path.
     logfile : str
         Path to the logfile new findings are reported to.
 
@@ -64,7 +78,7 @@ def check_new(path: str, processed: dict, logfile: str):
         _
         for _ in all_
         if (
-            os.path.normpath(_) not in processed.keys()
+            os.path.abspath(_) not in processed.keys()
             and _.endswith(FILETYPES)
         )
     ]
@@ -72,20 +86,21 @@ def check_new(path: str, processed: dict, logfile: str):
 
     print_to_file(
         logfile,
-        (
-            f"{datetime.now()} Checking: {len(all_)} files, {len(new)} "
-            f"unprocessed with valid ending and {len(locs)} `_locs.hdf5` "
-            " files in {path}.",
-        ),
+        f"{datetime.now()} Checking: {len(all_)} files, {len(new)} "
+        f"unprocessed with valid ending and {len(locs)} `_locs.hdf5` "
+        f"files in {path}.",
     )
 
-    for _ in new:
-        base, ext = os.path.splitext(_)
-        for ref in locs:
-            if base.startswith(ref):
-                processed[_] = True
-                new.remove(_)
-                break
+    # localized already: the localization files are named after the movie
+    # without its extension, followed by "_" (see helper.get_file_family)
+    localized = [
+        _
+        for _ in new
+        if any(ref.startswith(os.path.splitext(_)[0] + "_") for ref in locs)
+    ]
+    for _ in localized:
+        processed[os.path.abspath(_)] = True
+        new.remove(_)
 
     return new, processed
 
@@ -201,6 +216,60 @@ def print_to_file(path, text):
         f.write("\n")
 
 
+def custom_commands(
+    command: str, movie: str, locs: list[str]
+) -> list[str | list[str]]:
+    """The custom commands of the watcher for one processed movie, ready
+    for ``subprocess.run`` (without a shell).
+
+    ``$FILENAME`` is replaced with the path of the movie and ``$LOCS``
+    with the path of a localization file Localize saved from it. With
+    ``$LOCS``, the command runs once per localization file, e.g., once per
+    parameter group. The paths may contain spaces or quotes. On Windows,
+    the command line is passed on as text and split by the program it
+    starts, as usual there; elsewhere, it is split like a shell would,
+    e.g., ``python "my script.py" $LOCS``.
+
+    Parameters
+    ----------
+    command : str
+        The custom command, e.g., ``picasso undrift $LOCS``.
+    movie : str
+        Path of the processed movie.
+    locs : list of str
+        Paths of the localization files saved from the movie.
+
+    Returns
+    -------
+    commands : list of str or list of list of str
+        The command lines (Windows) or their arguments (elsewhere): one
+        command, one per localization file with ``$LOCS``, or none with
+        ``$LOCS`` but no localization file.
+    """
+    windows = sys.platform == "win32"
+    commands = []
+    for loc in locs if "$LOCS" in command else [None]:
+        values = {"$FILENAME": movie, "$LOCS": loc}
+        if windows:
+            # Windows splits the command line itself; quote the paths its
+            # way
+            commands.append(
+                _fill_in(
+                    command, values, lambda x: subprocess.list2cmdline([x])
+                )
+            )
+        else:
+            commands.append(
+                [_fill_in(arg, values, str) for arg in shlex.split(command)]
+            )
+    return commands
+
+
+def _fill_in(text: str, values: dict, quote) -> str:
+    """``text`` with each placeholder replaced by ``quote`` of its value."""
+    return _PLACEHOLDERS.sub(lambda match: quote(values[match.group(0)]), text)
+
+
 def check_new_and_process(  # noqa: C901
     settings_list: dict,
     path: str,
@@ -235,7 +304,7 @@ def check_new_and_process(  # noqa: C901
     processed = {}
 
     for _ in existing:
-        processed[_] = True
+        processed[os.path.abspath(_)] = True
 
     while True:
         new, processed = check_new(path, processed, logfile)
@@ -246,44 +315,53 @@ def check_new_and_process(  # noqa: C901
             children = wait_for_completion(file)
             print_to_file(logfile, f"{datetime.now()} Children {children}")
             try:
+                saved = []  # the localization files, for $LOCS
                 for settings in settings_list:
 
                     if len(settings_list) > 1:
                         print_to_file(
                             logfile,
-                            (
-                                f"{datetime.now()} Processing group "
-                                f"{settings['suffix']}",
-                            ),
+                            f"{datetime.now()} Processing group "
+                            f"{settings['suffix']}",
                         )
 
                     settings["files"] = file
 
-                    args_ = aclass(**settings)
-                    _localize(args_)
+                    saved += _localize(localize_args(settings))
 
                 if command != "":
-
-                    if "$FILENAME" in command:
-                        to_execute = command[:]
-                        to_execute = to_execute.replace(
-                            "$FILENAME",
-                            f'"{file}"',
+                    to_run = custom_commands(command, file, saved)
+                    if not to_run:
+                        print_to_file(
+                            logfile,
+                            f"{datetime.now()} No localization file saved, "
+                            f"so {command} was not executed.",
                         )
-
-                    print_to_file(
-                        logfile,
-                        f"{datetime.now()} Executing {to_execute}.",
-                    )
-
-                    subprocess.run(to_execute)
+                    for to_execute in to_run:
+                        if not isinstance(to_execute, str):
+                            executed = shlex.join(to_execute)
+                        else:
+                            executed = to_execute
+                        print_to_file(
+                            logfile,
+                            f"{datetime.now()} Executing {executed}.",
+                        )
+                        result = subprocess.run(to_execute)
+                        if result.returncode != 0:
+                            print_to_file(
+                                logfile,
+                                f"{datetime.now()} {executed} exited with "
+                                f"code {result.returncode}.",
+                            )
 
             except KeyboardInterrupt:
                 raise
-            except Exception as e:
+            # picasso localize exits on some errors, e.g., when undrifting a
+            # movie with too few frames; the watcher goes on
+            except (Exception, SystemExit) as e:
                 print_to_file(
                     logfile,
-                    f"{datetime.now()} Exception {e} occured.",
+                    f"{datetime.now()} Exception {e} occurred.",
                 )
 
             processed[file] = True
@@ -330,15 +408,7 @@ def watcher():  # noqa: C901
                 "Remove non-running watchers", icon=":material/delete_sweep:"
             ):
                 df = df[df["running"]]
-                engine = create_engine(
-                    "sqlite:///" + localize.db_filename(), echo=False
-                )
-                df.to_sql(
-                    "watcher",
-                    con=engine,
-                    if_exists="replace",
-                    index=False,
-                )
+                write_table(df, "watcher", if_exists="replace")
 
                 st.success("Removed. Please refresh this page.")
 
@@ -346,9 +416,12 @@ def watcher():  # noqa: C901
 
         logfile = st.selectbox("Select logfile", df["logfile"].iloc[::-1])
         with st.expander("Log"):
-            with open(logfile, "r") as f:
-                text = f.readlines()
-                st.text("".join(text))
+            if os.path.isfile(logfile):
+                with open(logfile, "r") as f:
+                    text = f.readlines()
+                    st.text("".join(text))
+            else:
+                st.warning(f"Logfile {logfile} not found.")
 
     else:
         st.write("None")
@@ -372,8 +445,8 @@ def watcher():  # noqa: C901
 
             if n_columns > 1:
                 st.text(
-                    "Parameter groups will be indiciated with a `pg` in the "
-                    "filename, e.g. `filename_pg_1_locs.hdf`"
+                    "Parameter groups will be indicated with a `pg` in the "
+                    "filename, e.g. `filename_pg_1_locs.hdf5`"
                 )
 
             columns = st.columns(n_columns)
@@ -410,18 +483,16 @@ def watcher():  # noqa: C901
                 settings[i]["sensitivity"] = col.number_input(
                     label="Sensitivity:", value=1.00, key=f"sensitivity_{i}"
                 )
-                settings[i]["qe"] = col.number_input(
-                    label="Quantum Efficiency:",
-                    value=0.9,
-                    min_value=0.01,
-                    max_value=1.0,
-                    key=f"qe_{i}",
-                )
+                # empty: like picasso localize, the movie's metadata or
+                # else the camera config give the pixel size
                 settings[i]["pixelsize"] = col.number_input(
                     label="Pixelsize (nm):",
-                    value=130,
+                    value=None,
                     min_value=10,
                     max_value=500,
+                    placeholder="From the movie or camera config",
+                    help="Leave empty to take the camera pixel size from "
+                    "the movie's metadata, else from the camera config.",
                     key=f"pixelsize_{i}",
                 )
 
@@ -443,7 +514,9 @@ def watcher():  # noqa: C901
                     settings[i]["methods"] = "lq-3d"
 
                     settings[i]["calib_file"] = col.text_input(
-                        "Enter path to calibration file.", os.getcwd()
+                        "Enter path to calibration file.",
+                        os.getcwd(),
+                        key=f"calib_file_{i}",
                     )
 
                     if not os.path.isfile(settings[i]["calib_file"]):
@@ -459,8 +532,18 @@ def watcher():  # noqa: C901
                     settings[i]["magnification_factor"] = None
 
             if st.checkbox("Chain Custom command"):
-                st.text("Allows to execute a custom command via shell.")
-                st.text("You can pass the filename with $FILENAME.")
+                st.text(
+                    "Runs a program after each file, e.g., a Python script "
+                    "(not a shell: no pipes or shell variables)."
+                )
+                st.text(
+                    "Pass the movie with $FILENAME and its localization file "
+                    "with $LOCS;"
+                )
+                st.text(
+                    "with $LOCS, the command runs once per localization "
+                    "file, e.g., per parameter group."
+                )
                 command = st.text_input("Command", "")
             else:
                 command = ""
@@ -489,8 +572,10 @@ def watcher():  # noqa: C901
                     settings_selected["sensitivity"] = settings[i][
                         "sensitivity"
                     ]
-                    settings_selected["qe"] = settings[i]["qe"]
-                    settings_selected["pixelsize"] = settings[i]["pixelsize"]
+                    if settings[i]["pixelsize"] is not None:
+                        settings_selected["pixelsize"] = settings[i][
+                            "pixelsize"
+                        ]
                     settings_selected["fit_method"] = settings[i]["methods"]
                     settings_selected["drift"] = settings[i]["undrift"]
                     if settings[i]["calib_file"]:
@@ -542,15 +627,7 @@ def watcher():  # noqa: C901
                     }
                 )
 
-                engine = create_engine(
-                    "sqlite:///" + localize.db_filename(), echo=False
-                )
-                df.to_sql(
-                    "watcher",
-                    con=engine,
-                    if_exists="append",
-                    index=False,
-                )
+                write_table(df, "watcher", if_exists="append")
 
                 for reset in range(3):
                     display.success(f"Restarting in {3-reset}.")

@@ -25,6 +25,50 @@ example:
 
    picasso render
 
+.. _cmd-renamed:
+
+Renamed commands and options
+----------------------------
+In Picasso 1.0, the commands and options got one style: words joined by
+hyphens, as in ``camera-calibrate``, and named after the Python parameter
+they set where there is one (``--r-max`` for ``r_max``). The old names keep
+working until Picasso 2.0; each use prints a warning with the new name. The
+format converters (``csv2hdf``, ``hdf2ts``, ...) keep their names. See
+:doc:`versioning` for how long deprecated names keep working.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 40 60
+
+   * - Old name
+     - New name
+   * - ``undrift_fiducials``
+     - `undrift-fiducials`_
+   * - ``nneighbor``
+     - `nearest-neighbor`_
+   * - ``clusterfilter``
+     - `cluster-filter`_, with ``--cluster-file``, ``--min-value`` and
+       ``--max-value`` (were ``--clusterfile``, ``--minval``, ``--maxval``)
+   * - ``smlm_cluster``
+     - `smlm-cluster`_
+   * - ``groupprops``
+     - `group-properties`_
+   * - ``pc``
+     - `pair-correlation`_, with ``--bin-size`` and ``--r-max`` (were
+       ``--binsize``, ``--rmax``)
+   * - ``localize --zc``, ``--mf``
+     - ``--z-calibration``, ``--magnification-factor``
+   * - ``undrift --fromfile``
+     - ``--from-file``
+   * - ``aim --intersectdist``, ``--roiradius``
+     - ``--intersect-distance``, ``--roi-radius``
+   * - ``dbscan --radius_z``
+     - ``--radius-z``
+   * - ``join --keepindex``
+     - ``--keep-index``
+   * - ``spinna --asynch``, ``g5m --asynch``
+     - ``--no-parallel``
+
 .. _cmd-localize:
 
 localize
@@ -57,7 +101,7 @@ Fitting
    spline PSF calibration for the spline fits, a magnification factor and a 3D
    calibration for the astigmatism fits).
 Camera
-   Baseline, sensitivity, gain and pixel size.
+   Baseline, sensitivity, gain and pixel size in nm.
 What is analyzed
    Region of interest, frame bounds, and the flags that change how several
    movies or several regions are grouped (``--concat``,
@@ -78,9 +122,10 @@ into the console):
 
    picasso localize foldername
 
-Picasso will analyze the folder and process all ``*.ome.tif`` files in it. If
-the files have consecutive names (e.g., ``File.ome.tif``, ``File_1.ome.tif``,
-``File_2.ome.tif``), they will be treated as one.
+Picasso will analyze the folder and process every movie in it, in all the
+formats that Localize opens (see :ref:`localize-file-formats`). If ``.tif``
+files have consecutive names (e.g., ``File.ome.tif``, ``File_1.ome.tif``,
+``File_2.ome.tif``), they will be treated as one movie.
 
 Drift correction
 ~~~~~~~~~~~~~~~~
@@ -97,6 +142,15 @@ the camera counts to photons, so wrong values give wrong photon counts and
 localization precisions. They also bias the maximum likelihood fits
 (``-a mle``, the default, and the other ``mle`` methods), which assume
 Poisson-distributed photon counts.
+
+The camera pixel size (``-px``, ``--pixelsize``, in nm) converts the fitted
+positions, spot widths and precisions from camera pixels to nm, the unit of
+every localization file (see :doc:`files`). If it is not given, Picasso takes
+the ``Pixelsize`` of the movie metadata, then the entry of the camera in the
+camera configuration (:ref:`localize-camera-config`); if none of them records
+it, ``picasso localize`` stops and asks for ``--pixelsize``. The value used is
+printed and saved as ``Pixelsize`` in the metadata. ``spline-calibrate``
+resolves it the same way; ``lateral-calibrate`` requires ``--pixelsize``.
 
 Pre-filters
 ~~~~~~~~~~~
@@ -123,7 +177,8 @@ gradient; ``--gradient`` is then ignored. See :ref:`localize-wavelet`.
    How the noise is estimated: ``image-std``, the default, or ``w1-mad``,
    which is robust to dense spots and uneven background.
 ``--wavelet-min-area``
-   The smallest region kept (default 4 pixels).
+   The smallest region kept (default 4 camera pixels, i.e., an area on the
+   detector grid).
 
 The localizations have no ``net_gradient`` column. See
 :ref:`localize-wavelet`. ``spline-calibrate`` and
@@ -191,6 +246,246 @@ a min. net gradient of 4000.
 
    picasso localize foldername -a lq -g 4000
 
+.. _cmd-camera-calibrate:
+
+camera-calibrate
+----------------
+Characterize an sCMOS camera: measure its per-pixel offset and readout
+variance maps from a dark movie and, optionally, its per-pixel gain map from
+movies at several illumination levels (see :ref:`localize-scmos-measuring`).
+The calibration is saved as ``.hdf5``, together with a diagnostic plot of the
+maps and their histograms, and is used with ``picasso localize -cm``.
+
+.. code-block:: bash
+
+   picasso camera-calibrate dark [-l light [-p power]] ... [-o output]
+
+For example:
+
+.. code-block:: bash
+
+   picasso camera-calibrate dark.raw -l light_01.raw -p 0.1 -l light_02.raw -p 1 -l light_03.raw -p 10 -o mycam_scmos_calib.hdf5
+   picasso localize movie.raw -cm mycam_scmos_calib.hdf5 -a mle
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 20 55
+
+   * - Argument
+     - Default
+     - Description
+   * - ``dark``
+     -
+     - Dark movie: frames recorded with no light on the sensor. Fewer than
+       10,000 frames give a warning.
+   * - ``-l``, ``--light`` (str)
+     - none
+     - Movie at a quasi-uniform illumination level, with the same camera
+       settings as the dark movie. Repeat for several levels to measure the
+       gain map; without it, only the offset and variance maps are measured.
+   * - ``-p``, ``--power`` (float)
+     - none
+     - The illumination each light movie was recorded at (laser power,
+       exposure time, ...), one per ``-l``, in the same order. It only labels
+       the linearity plot; the gain fit does not use it.
+   * - ``--power-unit`` (str)
+     - ``mW``
+     - The unit of ``-p``, for the plot axis.
+   * - ``-o``, ``--output`` (str)
+     - ``<dark>_scmos_calib.hdf5``
+     - The output calibration file.
+
+.. _cmd-camera-validate:
+
+camera-validate
+---------------
+Check whether an sCMOS calibration from `camera-calibrate`_ still describes
+the camera, using a short fresh dark movie (about 1,000 frames is plenty). The
+mean per-pixel p-value is printed; outside 0.5 ± 0.1 the camera has drifted
+and should be characterized again (see :ref:`localize-scmos-checking`).
+
+.. code-block:: bash
+
+   picasso camera-validate calibration movie
+
+``calibration``
+   The camera calibration (``.hdf5``).
+``movie``
+   The fresh dark movie.
+
+.. _cmd-spline-calibrate:
+
+spline-calibrate
+----------------
+Build a cubic-spline PSF calibration from a bead z-stack for the spline fit
+methods of ``picasso localize`` (``--spline-calibration``), see
+:ref:`localize-spline-building`. Pass one movie for a single-channel
+calibration, several movies (one per channel) for a multichannel
+calibration, or one movie with ``--split-fov`` when the channels are regions
+of the same movie (see :ref:`localize-multichannel-spline-calibrating`). Next
+to the calibration, a diagnostic plot and a bead gallery
+(``<base>_beads.png``) are saved.
+
+.. code-block:: bash
+
+   picasso spline-calibrate files -s step [options]
+
+For example, a z-stack with 20 nm steps:
+
+.. code-block:: bash
+
+   picasso spline-calibrate my_beads.tif -s 20
+
+The beads are identified with the same arguments as in ``picasso localize``
+(``-b``, ``-g``, ``-im`` and the ``--wavelet-*`` settings, see
+`B-spline wavelet identification`_), and the camera pixel size is resolved as
+described in `Camera settings`_.
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 20 55
+
+   * - Option
+     - Default
+     - Description
+   * - ``-s``, ``--step`` (float)
+     - required
+     - The z step between consecutive stage positions (nm).
+   * - ``-o``, ``--output`` (str)
+     - ``<movie>_spline_calib.hdf5``
+     - The output calibration file.
+   * - ``-b``, ``--box-side-length`` (int)
+     - ``13``
+     - Box side length (camera pixels).
+   * - ``-g``, ``--gradient`` (int)
+     - ``5000``
+     - Minimum net gradient for bead detection.
+   * - ``-fps``, ``--frames-per-step`` (int)
+     - ``1``
+     - Number of frames acquired per z position (multi-FOV).
+   * - ``-fo``, ``--frame-order``
+     - ``fov``
+     - ``fov`` or ``z``: the acquisition order when ``--frames-per-step`` is
+       above 1.
+   * - ``-zb``, ``--z-binning`` (int)
+     - ``1``
+     - Number of consecutive z steps averaged into one slice of the PSF
+       model; e.g., 10 turns a 5 nm scan into 50 nm slices, which suppresses
+       stage jitter that is correlated between neighboring steps.
+   * - ``-m``, ``--model``
+     - ``spline-3d``
+     - ``spline-3d`` (recovers z) or ``spline-2d`` (single plane).
+   * - ``-mf``, ``--magnification-factor`` (float)
+     - ``0.79``
+     - Scales the fitted z for the refractive-index mismatch. It is stored in
+       the calibration and applied at fit time.
+   * - ``-cz``, ``--correct-z-bias``
+     - off
+     - Set z = 0 at the axial intensity peak of the averaged PSF instead of
+       the center of the stage scan. Only meaningful for a PSF with one
+       well-defined focus (e.g., astigmatism).
+   * - ``-rm``, ``--registration-model``
+     - ``affine``
+     - How the channels of a multichannel calibration are registered to the
+       reference: ``translation``, ``affine``, ``projective``,
+       ``polynomial2`` or ``polynomial3`` (see
+       :ref:`localize-lateral-transform-models`). Ignored for one channel.
+   * - ``-pr``, ``--photon-ratios`` (str)
+     - none
+     - Multichannel only: candidate per-channel photon ratios for
+       ratiometric color assignment, hypotheses separated by ``;`` and
+       channels by ``,`` (e.g., ``"0.7,0.3;0.4,0.6"``). Only relative values
+       matter.
+   * - ``-sf``, ``--split-fov`` (str)
+     - none
+     - Use rectangular regions of one movie as the channels, separated by
+       ``;`` and given as ``y0,x0,y1,x1`` (camera pixels, all the same size),
+       e.g., ``"0,0,512,256;0,256,512,512"``.
+   * - ``-rf``, ``--reference`` (int)
+     - ``0``
+     - ``--split-fov`` only: the index of the reference region.
+   * - ``-bl``, ``--baseline`` (float)
+     - ``0``
+     - Camera baseline.
+   * - ``-se``, ``--sensitivity`` (float)
+     - ``1``
+     - Camera sensitivity.
+   * - ``-ga``, ``--gain`` (int)
+     - ``1``
+     - Camera gain.
+   * - ``-px``, ``--pixelsize`` (float)
+     - from the metadata
+     - Camera pixel size (nm), recorded in the calibration.
+
+.. _cmd-lateral-calibrate:
+
+lateral-calibrate
+-----------------
+Fit a lateral correction of ``x`` and ``y`` from two images of the same
+in-focus beads (see :ref:`localize-lateral-calibrating`):
+
+- ``--type astigmatism``: the ``reference`` without and the ``target`` with
+  the cylindrical lens.
+- ``--type chromatic``: the ``reference`` in the reference color channel and
+  the ``target`` in the channel to be corrected.
+
+The correction is appended to an existing 3D or spline calibration
+(``--calibration``), which then applies it whenever it is used to fit, or
+written to a standalone calibration (``--output``), which is loaded at fit
+time with ``picasso localize -ac`` (see :ref:`localize-lateral-storage`).
+
+.. code-block:: bash
+
+   picasso lateral-calibrate reference target -px pixelsize (-c calibration | -o output) [options]
+
+For example:
+
+.. code-block:: bash
+
+   picasso lateral-calibrate beads_without_lens.tif beads_with_lens.tif -px 130 -c beads_3d_calib.yaml
+   picasso lateral-calibrate beads_red.tif beads_green.tif -t chromatic -px 130 -o chromatic.yaml -p chromatic_check.png
+
+The beads are identified with the same arguments as in ``picasso localize``
+(``-b``, ``-g``, ``-im`` and the ``--wavelet-*`` settings, see
+`B-spline wavelet identification`_).
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 20 55
+
+   * - Option
+     - Default
+     - Description
+   * - ``-px``, ``--pixelsize`` (float)
+     - required
+     - Camera pixel size (nm). The correction is fitted on the bead images and
+       stored in nm.
+   * - ``-t``, ``--type``
+     - ``astigmatism``
+     - ``astigmatism`` or ``chromatic``: what the correction is for.
+   * - ``-m``, ``--model``
+     - ``affine``
+     - ``translation``, ``affine``, ``projective``, ``polynomial2`` or
+       ``polynomial3``, needing at least 1, 3, 4, 6 or 10 bead pairs (see
+       :ref:`localize-lateral-transform-models`).
+   * - ``-c``, ``--calibration`` (str)
+     - none
+     - An existing calibration (``.yaml`` or ``.hdf5``) to append the
+       correction to.
+   * - ``-o``, ``--output`` (str)
+     - ``--calibration``
+     - Where to write the calibration. Without ``--calibration``, a
+       standalone lateral calibration is written here.
+   * - ``-b``, ``--box-side-length`` (int)
+     - ``7``
+     - Box side length (camera pixels).
+   * - ``-g``, ``--gradient`` (int)
+     - ``5000``
+     - Minimum net gradient for bead detection.
+   * - ``-p``, ``--plot`` (str)
+     - none
+     - Save the diagnostic figure to this path.
+
 .. _cmd-render:
 
 render
@@ -211,14 +506,14 @@ rendered to image files.
      - Default
      - Description
    * - ``-px``, ``--disp-px-size`` (float)
-     - ``1.0``
+     - ``10.0``
      - The size of the rendered pixel in nm.
    * - ``-b``, ``--blur-method``
      - ``convolve``
      - One of ``none``, ``convolve``, ``gaussian``.
    * - ``-w``, ``--min-blur-width`` (float)
      - ``0.0``
-     - Minimum blur width if blur is applied.
+     - Minimum blur width (nm) if blur is applied.
    * - ``--vmin`` (float)
      - ``0.0``
      - Minimum colormap level in range 0-100 or absolute value.
@@ -237,13 +532,33 @@ rendered to image files.
      -
      - Do not open the rendered image file.
 
+.. _cmd-filter:
+
 filter
 ------
-Start the filter module (GUI).
+Start the filter module (GUI) or filter from the command line. With no
+arguments the GUI opens; with a ``files`` path and one or more conditions on
+the columns, written as in :ref:`Filter <filter-expression>`, the
+localizations that satisfy them are kept. Several conditions are applied in
+the given order. The result is saved as ``*_filter.hdf5`` with the conditions
+in its metadata, so that Filter can :ref:`reapply them <filter-metadata>`.
 
 .. code-block:: bash
 
-   picasso filter
+   picasso filter [files conditions [conditions ...]]
+
+For example:
+
+.. code-block:: bash
+
+   picasso filter "data/*_locs.hdf5" "100 < sx < 160" "lpx < 10"
+
+Positional arguments:
+
+``files``
+   One or more hdf5 localization files (a unix style path pattern).
+``conditions``
+   One or more conditions; quote each one.
 
 design
 ------
@@ -269,13 +584,36 @@ Start the 2D averaging module (GUI).
 
    picasso average
 
-server
-------
-Start the Picasso server (web browser GUI), see :doc:`server`.
+nanotron
+--------
+Start the nanoTRON module (GUI), see :doc:`nanotron`.
 
 .. code-block:: bash
 
-   picasso server
+   picasso nanotron
+
+server
+------
+Start the Picasso server (web browser GUI), see :doc:`server`. By default,
+only this computer can open it, at ``http://localhost:8501``.
+
+.. code-block:: bash
+
+   picasso server [options]
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 20 55
+
+   * - Option
+     - Default
+     - Description
+   * - ``--network``
+     -
+     - Listen on all network interfaces, so that other computers can open
+       the server. The server has no login, so anyone who can reach this
+       computer can then use it, including the custom commands of the
+       watcher, see :ref:`server-browser-app`.
 
 .. _cmd-spinna:
 
@@ -298,8 +636,8 @@ CSV structure).
      - Description
    * - ``-p``, ``--parameters`` (str)
      - .csv file containing the parameters for SPINNA batch analysis.
-   * - ``-a``, ``--asynch``
-     - Do not perform fitting asynchronously (multiprocessing).
+   * - ``-a``, ``--no-parallel``
+     - Fit in this process instead of a pool of worker processes.
    * - ``-b``, ``--bootstrap``
      - Perform bootstrapping.
    * - ``-v``, ``--verbose``
@@ -307,10 +645,43 @@ CSV structure).
 
 .. _cmd-conversion:
 
+.. _cmd-convert-units:
+
+convert-units
+-------------
+Convert files written before Picasso 1.0, whose lengths are in camera pixels,
+to the current format in nm (see :ref:`files-legacy`): localizations (and
+their ``.yaml`` metadata), pick regions, drift ``.txt`` files, astigmatism and
+lateral calibrations, SPINNA masks and nanoTRON models. Files that are in nm
+already are skipped.
+
+.. code-block:: bash
+
+   picasso convert-units FILE [FILE ...] [--pixelsize PS] [--in-place]
+
+.. list-table::
+   :header-rows: 1
+
+   * - Argument
+     - Description
+   * - ``files``
+     - The files to convert.
+   * - ``-px``, ``--pixelsize``
+     - Camera pixel size in nm for files that do not record it (pick regions,
+       drift files, calibrations and nanoTRON models always need it;
+       localizations use the ``Pixelsize`` of their metadata). Default: from
+       the metadata.
+   * - ``--in-place``
+     - Replace the original files. By default, the converted files are
+       written next to the originals with ``_nm`` appended to their names
+       (``movie_locs_nm.hdf5``).
+
 csv2hdf
 -------
-Convert csv files (ThunderSTORM) to ``.hdf5``. ``-p/--pixelsize`` in nm is
-required.
+Convert csv files (ThunderSTORM) to ``.hdf5``. ``-p/--pixelsize`` is the
+camera pixel size in nm, recorded in the metadata (``Pixelsize``) and used to
+derive the field of view (``Width``, ``Height``) from the coordinates; it is
+required. The coordinates stay in nm, as in ThunderSTORM.
 
 .. code-block:: bash
 
@@ -376,8 +747,9 @@ Convert hdf5 files to ViSP ``.3d`` files.
 smap2hdf
 --------
 Convert `SMAP <https://github.com/jries/SMAP>`_ ``_sml.mat`` files to
-``.hdf5``. ``-p/--pixelsize`` in nm is required, since SMAP stores coordinates
-in nm while Picasso uses camera pixels.
+``.hdf5``. ``-p/--pixelsize`` is the camera pixel size in nm, recorded in
+the metadata (``Pixelsize``) and used to derive the field of view from the
+coordinates; it is required. The coordinates stay in nm, as in SMAP.
 
 .. code-block:: bash
 
@@ -396,25 +768,105 @@ file) and can be loaded directly in SMAP via ``File > Load``.
 
    picasso hdf2smap files
 
-join
-----
-Combine two hdf5 localization files. A new joined file will be created.
+pyme2hdf
+--------
+Convert PyME (`python-microscopy <https://python-microscopy.org>`_) ``.h5r``
+(raw fit results) and ``.hdf`` (saved in PYMEVisualize) files to ``.hdf5``.
+The camera pixel size is read from the file; ``-p/--pixelsize`` in nm is used
+for files that do not store it. A file with several channels (PyME's ``probe``
+column) is saved as one file per channel, ``<file>_probe<k>_locs.hdf5``. See
+:ref:`render-export-pyme` for how the columns are converted.
 
 .. code-block:: bash
 
-   picasso join file1 file2
+   picasso pyme2hdf filepath [-p pixelsize]
+
+hdf2pyme
+--------
+Convert hdf5 files to PyME ``.hdf`` files, which can be opened in
+PYMEVisualize. The output is named ``<file>.hdf`` (PyME does not recognize the
+``.hdf5`` extension).
+
+.. code-block:: bash
+
+   picasso hdf2pyme files
+
+join
+----
+Combine two or more hdf5 localization files into one, saved as
+``<first file>_join.hdf5``.
+
+.. code-block:: bash
+
+   picasso join file1 file2 [-k]
+
+By default, the frames of each file are renumbered to follow those of the
+file before it, as if the movies had been recorded one after the other, and
+``Frames`` in the metadata grows accordingly.
 
 .. warning::
 
-   The frame information of consecutive files is reindexed, i.e., frame 1 now
-   can contain localizations from file 1 and file 2. Therefore, do not perform
-   kinetic analysis and drift correction on joined files. Pass
-   ``-k/--keepindex`` to keep the original frame numbers instead of
-   reindexing.
+   With ``-k/--keep-index``, the original frame numbers are kept, so one frame
+   can hold localizations from several files. Do not perform kinetic analysis
+   or drift correction on such a joined file.
 
 Columns that not all files have (e.g., ``z`` when joining 2D and 3D files, or
 ``net_gradient`` when only some were identified by their net gradient) are
 dropped with a warning, so that no localizations are lost.
+
+.. _cmd-stitch:
+
+stitch
+------
+Stitch hdf5 localization files of tiles recorded at different stage
+positions into one file, see :ref:`render-stitch-tiles`. The tiles are placed
+by the stage positions in the Micro-Manager metadata and aligned by matching
+their overlaps. Files at the same stage position (e.g., the targets of an
+Exchange-PAINT experiment) are aligned together, and the tiles of each target
+(the n-th file of each position, in the order given) are saved as one file,
+``<first file>_stitched.hdf5``. The tile positions and the offsets between
+overlapping tiles are printed.
+
+The stage positions are required. Files without them (e.g., not acquired with
+Micro-Manager) can be stitched in Render after placing the tiles with the
+Move tool, see :ref:`render-stitch-without-stage-positions`, or with
+``stitch.stitch`` and its ``positions`` argument in Python.
+
+.. code-block:: bash
+
+   picasso stitch files [-o output] [-r search_radius] [--orientation auto] [--2d] [--keep-overlaps] [--keep-frames]
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-o``, ``--output`` (str)
+     - ``<first file>_stitched.hdf5``
+     - The output file. With several targets, ``_target<n>`` is appended.
+   * - ``-r``, ``--search-radius`` (float)
+     - ``10``
+     - How far the true offset of two tiles may be from the one given by the
+       stage positions (µm).
+   * - ``--orientation`` (str)
+     - ``auto``
+     - How the stage axes run in the image, i.e., where a tile at a larger
+       stage position lies: e.g., ``"-x, -y"`` if a larger stage X is to the
+       left and a larger stage Y above (the image y axis points down). All
+       eight are listed in :ref:`render-stitch-stage-orientation`. ``auto``
+       finds the one whose overlaps match best.
+   * - ``--2d``
+     - off
+     - Do not correct the z offsets of the tiles.
+   * - ``--keep-overlaps``
+     - off
+     - Keep the localizations of all tiles in the overlaps instead of cutting
+       them at the seams.
+   * - ``--keep-frames``
+     - off
+     - Do not offset the frames of consecutive tiles.
 
 link
 ----
@@ -432,21 +884,111 @@ Link localizations in consecutive frames.
      - Default
      - Description
    * - ``-d``, ``--distance`` (float)
-     - ``1.0``
+     - ``10``
      - Maximum distance between localizations to consider them the same
-       binding event (camera pixels).
+       binding event (nm).
    * - ``-t``, ``--tolerance`` (int)
      - ``1``
      - Maximum dark time between localizations to still consider them the
        same binding event.
 
-clusterfilter
--------------
+.. _cmd-track:
+
+track
+-----
+Link localizations into tracks by nearest-neighbor tracking (single-particle
+tracking, see :ref:`render-spt-track`). Takes one or more hdf5 localization
+files (unix style path patterns). Each is saved as
+``<file name>_tracks.hdf5``, with the track id of every localization in the
+``group`` column; a previous ``group`` column is kept as ``group_input``.
+Linked localizations (see `link`_) are skipped.
+
+.. code-block:: bash
+
+   picasso track files [-d max-jump] [-g max-gap] [-m min-length] [-t frame-time]
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-d``, ``--max-jump`` (float)
+     - ``500``
+     - Maximum distance between consecutive localizations of a track (nm).
+   * - ``-g``, ``--max-gap`` (int)
+     - ``1``
+     - Maximum number of frames a track may skip.
+   * - ``-m``, ``--min-length`` (int)
+     - ``2``
+     - Minimum number of localizations of a track.
+   * - ``-t``, ``--frame-time`` (float)
+     - none
+     - Time between two consecutive frames (ms), stored in the metadata for
+       ``picasso diffusion``.
+
+.. _cmd-diffusion:
+
+diffusion
+---------
+Diffusion analysis of tracked localizations (see `track`_ and
+:ref:`render-spt-analysis`): the mean squared displacement, the fits of the
+jump distances and a summary of every track. For each file, saves
+``<file name>_track_stats.csv``, ``<file name>_msd.csv`` and
+``<file name>_diffusion.yaml``, and prints the diffusion coefficients.
+
+.. code-block:: bash
+
+   picasso diffusion files [-t frame-time] [-l max-lag] [-n n-fit] [-k populations] [-s sigma] [--truncate] [--plot]
+
+For example, fits of one and two populations with the localization error set
+to the median localization precision, saving the plots:
+
+.. code-block:: bash
+
+   picasso diffusion movie_locs_tracks.hdf5 -k 1 2 -s lp --plot
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-t``, ``--frame-time`` (float)
+     - from the metadata
+     - Time between two consecutive frames (ms).
+   * - ``-l``, ``--max-lag`` (int)
+     - ``10``
+     - Largest time lag of the MSD (frames).
+   * - ``-n``, ``--n-fit`` (int)
+     - ``4``
+     - Number of time lags fitted in the MSD analysis.
+   * - ``-k``, ``--populations`` (int)
+     - ``1 2 3``
+     - Number(s) of diffusing populations fitted to the jump distances.
+   * - ``-s``, ``--sigma`` (float or ``lp``)
+     - ``0``
+     - Localization error for the jump distance fit (nm), or ``lp`` for the
+       median localization precision. 0 gives apparent diffusion
+       coefficients.
+   * - ``--truncate``
+     - off
+     - Correct the jump distance fit for the maximum jump distance of the
+       tracking.
+   * - ``--plot``
+     - off
+     - Save the plots of the MSD, the jump distances and the track lengths
+       as ``.png`` files.
+
+cluster-filter
+--------------
 Filter localizations by properties of their clusters.
 
 .. code-block:: bash
 
-   picasso clusterfilter files -c clusterfile -p parameter --minval min --maxval max
+   picasso cluster-filter files -c cluster_file -p parameter --min-value min --max-value max
 
 .. list-table::
    :header-rows: 1
@@ -454,13 +996,13 @@ Filter localizations by properties of their clusters.
 
    * - Option
      - Description
-   * - ``-c``, ``--clusterfile`` (str)
-     - A hdf5 clusterfile.
+   * - ``-c``, ``--cluster-file`` (str)
+     - The cluster centers, e.g., ``_cluster_centers.hdf5``.
    * - ``-p``, ``--parameter`` (str)
      - Parameter to be filtered.
-   * - ``--minval`` (float)
+   * - ``--min-value`` (float)
      - Lower boundary.
-   * - ``--maxval`` (float)
+   * - ``--max-value`` (float)
      - Upper boundary.
 
 undrift
@@ -480,8 +1022,9 @@ Correct localization coordinates for drift with RCC.
      - Description
    * - ``-s``, ``--segmentation`` (float)
      - ``1000``
-     - The number of frames to be combined for one temporal segment.
-   * - ``-f``, ``--fromfile`` (str)
+     - The number of frames to be combined for one temporal segment. RCC
+       needs at least 4 segments, i.e., at most a quarter of the frames.
+   * - ``-f``, ``--from-file`` (str)
      -
      - Apply drift from specified file instead of computing it.
    * - ``-d``, ``--display``
@@ -506,28 +1049,30 @@ Correct localization coordinates for drift with AIM.
    * - ``-s``, ``--segmentation`` (float)
      - ``100``
      - The number of frames to be combined for one temporal segment.
-   * - ``-i``, ``--intersectdist`` (float)
-     - ``20/130``
-     - Max. distance (camera pixels) between localizations in consecutive
-       segments to be considered as intersecting.
-   * - ``-r``, ``--roiradius`` (float)
-     - ``60/130``
-     - Max. drift (camera pixels) between two consecutive segments.
+   * - ``-i``, ``--intersect-distance`` (float)
+     - ``20``
+     - Max. distance (nm) between localizations in consecutive segments to
+       be considered as intersecting.
+   * - ``-r``, ``--roi-radius`` (float)
+     - ``60``
+     - Max. drift (nm) between two consecutive segments.
 
-undrift_fiducials
+undrift-fiducials
 -----------------
 Correct localization coordinates for drift using fiducial markers
 (automatically picked). Takes one or more hdf5 localization files as
-positional arguments.
+positional arguments. Before the fiducials are picked, the drift is roughly
+corrected by RCC with segments of 2000 frames (a quarter of the frames for
+movies shorter than 8000 frames).
 
 .. code-block:: bash
 
-   picasso undrift_fiducials files
+   picasso undrift-fiducials files
 
 density
 -------
 Compute the local density of localizations. Takes positional ``files`` and
-``radius`` (float): the maximal distance between two localizations to be
+``radius`` (float): the maximal distance (nm) between two localizations to be
 considered local.
 
 .. code-block:: bash
@@ -540,19 +1085,16 @@ Cluster localizations with the DBSCAN clustering algorithm.
 
 .. code-block:: bash
 
-   picasso dbscan files radius density [pixelsize]
+   picasso dbscan files radius density
 
 Positional arguments:
 
 ``files``
    One or more hdf5 localization files.
 ``radius`` (float)
-   Maximal distance (camera pixels) between two localizations to be
-   considered local.
+   Maximal distance (nm) between two localizations to be considered local.
 ``density`` (int)
    Minimum local density for localizations to be assigned to a cluster.
-``pixelsize`` (int)
-   Camera pixel size in nm (required for 3D localizations only).
 
 hdbscan
 -------
@@ -560,7 +1102,7 @@ Cluster localizations with the HDBSCAN clustering algorithm.
 
 .. code-block:: bash
 
-   picasso hdbscan files min_cluster min_samples [pixelsize]
+   picasso hdbscan files min_cluster min_samples
 
 Positional arguments:
 
@@ -570,10 +1112,8 @@ Positional arguments:
    Smallest size grouping that is considered a cluster.
 ``min_samples`` (int)
    The higher, the more points are considered noise.
-``pixelsize`` (int)
-   Camera pixel size in nm (required for 3D localizations only).
 
-smlm_cluster
+smlm-cluster
 ------------
 Cluster localizations with the custom SMLM clustering algorithm. The algorithm
 finds localizations with the most neighbors within a specified radius and
@@ -581,22 +1121,22 @@ finds clusters based on such "local maxima".
 
 .. code-block:: bash
 
-   picasso smlm_cluster files radius min_locs [pixelsize] [basic_fa] [radius_z]
+   picasso smlm-cluster files radius min_locs [basic_fa] [radius_z]
 
 Positional arguments:
 
 ``files``
    One or more hdf5 localization files.
 ``radius`` (float)
-   Clustering radius (in camera pixels).
+   Clustering radius (nm).
 ``min_locs`` (int)
    Minimum number of localizations in a cluster.
-``pixelsize`` (int)
-   Camera pixel size in nm (required for 3D localizations only).
-``basic_fa`` (bool)
-   Whether to perform basic frame analysis (sticking event removal).
-``radius_z`` (float)
-   Clustering radius in axial direction (MUST BE SET FOR 3D!).
+``basic_fa`` (yes/no, optional)
+   Whether to perform basic frame analysis (sticking event removal):
+   ``yes`` or ``no`` (also ``true``/``false`` or ``1``/``0``). Default: ``no``.
+``radius_z`` (float, optional)
+   Clustering radius (nm) in axial direction (MUST BE SET FOR 3D!). Give
+   ``basic_fa`` before it, e.g., ``picasso smlm-cluster locs.hdf5 20 10 no 50``.
 
 g5m
 ---
@@ -654,9 +1194,9 @@ analyzed. If omitted, the GUI is launched.
      - ``100000``
      - Maximum number of localizations to process per cluster; useful for
        excluding fiducials.
-   * - ``-a``, ``--asynch``
+   * - ``-a``, ``--no-parallel``
      -
-     - Do not perform fitting asynchronously (multiprocessing).
+     - Fit in this process instead of a pool of worker processes.
 
 dark
 ----
@@ -668,28 +1208,33 @@ Compute the dark time for grouped localizations.
 
 align
 -----
-Align one localization file to another via RCC (two or more files). Pass
-``-d/--display`` to display the correlation.
+Align one localization file to another via RCC, 2D only (two or more files). The
+RCC is repeated until the shifts converge, as in Render. Pass ``-d/--display``
+to plot the mean shift per iteration. All localizations are kept by
+default; pass ``-r/--remove-non-overlapping`` to remove the localizations
+outside the region where all aligned files overlap (see
+:ref:`render-align-non-overlapping`).
 
 .. code-block:: bash
 
    picasso align file1 file2 [...]
+   picasso align file1 file2 --remove-non-overlapping
 
-groupprops
-----------
+group-properties
+----------------
 Calculate the properties of localization groups.
 
 .. code-block:: bash
 
-   picasso groupprops files
+   picasso group-properties files
 
-pc
---
+pair-correlation
+----------------
 Calculate the pair-correlation of localizations.
 
 .. code-block:: bash
 
-   picasso pc files [-b binsize] [-r rmax]
+   picasso pair-correlation files [-b bin_size] [-r r_max]
 
 .. list-table::
    :header-rows: 1
@@ -698,38 +1243,242 @@ Calculate the pair-correlation of localizations.
    * - Option
      - Default
      - Description
-   * - ``-b``, ``--binsize`` (float)
-     - ``0.1``
-     - The bin size (camera pixels).
-   * - ``-r``, ``--rmax`` (float)
+   * - ``-b``, ``--bin-size`` (float)
      - ``10``
-     - The maximum distance to calculate the pair-correlation.
+     - The bin size (nm).
+   * - ``-r``, ``--r-max`` (float)
+     - ``1000``
+     - The maximum distance (nm) to calculate the pair-correlation.
 
-nneighbor
----------
+nearest-neighbor
+----------------
 Calculate the nearest neighbor within a clustered dataset.
 
 .. code-block:: bash
 
-   picasso nneighbor files
+   picasso nearest-neighbor files
 
-cluster_combine
----------------
-Combines the localizations in each cluster of a group (to be deprecated in
-1.0).
+cbc
+---
+Coordinate-based colocalization (CBC) of localizations with other
+localization files (Malkusch, et al., Histochem Cell Biol, 2012, DOI:
+`10.1007/s00418-011-0880-5 <https://doi.org/10.1007/s00418-011-0880-5>`__).
+Takes two or more hdf5 localization files (unix style path patterns). The
+first file is scored against all others; with ``-a``, every file is scored
+against every other file, i.e., both directions of every pair (also for two
+files). The CBC is not symmetric, so both directions of a pair differ. Each
+scored file is saved as ``<file name>_cbc.hdf5`` with a column
+``cbc_<name>`` per partner, where the names are the file names or those given
+with ``-n``. z is used if all files contain it.
+The files should be linked first (see `link`_); a warning lists the ones
+that are not.
 
 .. code-block:: bash
 
-   picasso cluster_combine files
+   picasso cbc files [-r r_max] [-s steps] [-u undefined] [-a] [--2d] [-n names]
 
-cluster_combine_dist
---------------------
-Calculate the nearest neighbor for each combined cluster (to be deprecated in
-1.0).
+For example, both directions for two files with short names:
 
 .. code-block:: bash
 
-   picasso cluster_combine_dist files
+   picasso cbc long_name_bassoon_locs.hdf5 long_name_psd95_locs.hdf5 -a -n Bassoon PSD95
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-r``, ``--r-max`` (float)
+     - ``200``
+     - The maximum radius (nm).
+   * - ``-s``, ``--steps`` (int)
+     - ``100``
+     - The number of radii up to the maximum radius.
+   * - ``-u``, ``--undefined`` (float or ``remove``)
+     - ``0``
+     - The CBC given to localizations without neighbors within the maximum
+       radius, between -1 and 1, or ``remove`` to remove them (if they
+       have no neighbors for at least one partner).
+   * - ``-a``, ``--all-pairs``
+     - off
+     - Score every file against every other file (both directions).
+   * - ``-n``, ``--names`` (str)
+     - file names
+     - Short names of the files in the order given, used for the column
+       names ``cbc_<name>``.
+   * - ``--2d``
+     - off
+     - Ignore z and compute the CBC in 2D.
+
+ripley-h
+--------
+Ripley's H function of localizations (Ripley, J R Stat Soc B, 1977, DOI:
+`10.1111/j.2517-6161.1977.tb01615.x
+<https://doi.org/10.1111/j.2517-6161.1977.tb01615.x>`__): whether the
+molecules are clustered (H > 0), randomly distributed (H = 0) or dispersed
+(H < 0), and on which length scales. Computed in 2D or, with ``--3d``, in 3D
+in the picks given with ``-p`` (averaged over the picks) or in the whole field
+of view, with Ripley's
+isotropic edge correction and an envelope of complete spatial randomness
+(CSR) from simulations. The files should contain molecules, i.e., one
+localization per molecule, such as those found by `g5m`_ or the cluster
+centers saved by `dbscan`_, `hdbscan`_ or `smlm-cluster`_; a warning lists the
+files without molecules (no ``n_events`` or ``std_frame`` column). See
+:ref:`render-ripley-h` for details.
+
+Saves next to each file ``<file name>_ripley_h.csv`` (the functions by
+radius: mean, CSR envelope and each region), ``<file
+name>_ripley_h_regions.csv`` (number of localizations, area, density, maximum
+of H and its radius in each region) and the plot ``<file
+name>_ripley_h.png``.
+
+.. code-block:: bash
+
+   picasso ripley-h files [-p picks] [-r r_max] [-s steps] [-n simulations] [--no-edge-correction] [--3d] [--z-range zmin zmax] [--observed-z] [--partner file] [--cross-null shift|labels]
+
+For example, in the picks saved in Render, and in 3D between z = -300 and 300
+nm:
+
+.. code-block:: bash
+
+   picasso ripley-h molecules.hdf5 -p picks.yaml -r 300
+   picasso ripley-h molecules.hdf5 -p picks.yaml -r 200 --3d --z-range -300 300
+
+and between two channels, with random shifts of the second one:
+
+.. code-block:: bash
+
+   picasso ripley-h protein_a_molecules.hdf5 --partner protein_b_molecules.hdf5 -r 300
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-p``, ``--picks`` (str)
+     - whole field of view
+     - Picks (.yaml) saved in Render; the regions of interest in which H is
+       computed.
+   * - ``-r``, ``--r-max`` (float)
+     - ``500``
+     - The maximum radius (nm).
+   * - ``-s``, ``--steps`` (int)
+     - ``100``
+     - The number of radii up to the maximum radius.
+   * - ``-n``, ``--simulations`` (int)
+     - ``99``
+     - The number of CSR simulations for the envelope, ``0`` to skip them.
+   * - ``--no-edge-correction``
+     - off
+     - Do not apply Ripley's isotropic edge correction.
+   * - ``--3d``
+     - off
+     - Compute H in 3D (x, y and z); requires z. See
+       :ref:`render-ripley-h-3d`.
+   * - ``--z-range`` (float float)
+     - z of each region
+     - The z range (nm) over which the regions extend in 3D. By default, each
+       region extends over the z range of its localizations.
+   * - ``--observed-z``
+     - off
+     - In 3D, give the simulated points the observed z values (shuffled)
+       instead of spreading them uniformly over the z range.
+   * - ``--partner`` (str)
+     - none
+     - A localization file of a second channel (aligned). The cross function
+       of each file with it is computed and saved as
+       ``<file name>_ripley_h_cross.csv``, etc. See
+       :ref:`render-cross-functions`.
+   * - ``--cross-null`` (``shift`` or ``labels``)
+     - ``shift``
+     - With ``--partner``, how the envelope is simulated: random shifts of
+       the partner (independent channels; rectangular or circular regions
+       only) or random labels (both channels follow the same distribution).
+
+rdf
+---
+Radial distribution function g(r) of localizations: the density of neighbors
+at the distance r from a molecule, relative to the mean density (1 for
+complete spatial randomness, above 1 at the distances where molecules are more
+likely to be found than at random, below 1 where they are depleted). Computed
+like `ripley-h`_, with the same options and outputs (``<file name>_rdf.csv``,
+``<file name>_rdf_regions.csv`` and ``<file name>_rdf.png``), except that the
+radius steps are rings of ``rmax / steps`` and the default number of steps is
+50. See :ref:`render-rdf` for details.
+
+.. code-block:: bash
+
+   picasso rdf files [-p picks] [-r r_max] [-s steps] [-n simulations] [--no-edge-correction] [--3d] [--z-range zmin zmax] [--observed-z] [--partner file] [--cross-null shift|labels]
+
+For example, in the picks saved in Render with rings of 5 nm:
+
+.. code-block:: bash
+
+   picasso rdf molecules.hdf5 -p picks.yaml -r 300 -s 60
+
+nnd
+---
+Distributions of the first nearest neighbor distances (NNDs) within and
+between channels, compared with random simulations (complete spatial
+randomness within channels; random shifts or random labels between channels).
+Takes the localization files of the channels (aligned molecules, unix style
+path patterns), in the picks given with ``-p`` or in the whole field of view.
+Saves next to the first file ``<file name>_nnd.csv`` (the histograms of every
+ordered pair of channels), ``<file name>_nnd_summary.csv`` (number of
+molecules and median NND, measured and simulated, of every pair) and the plot
+``<file name>_nnd.png``, and prints the summary. See
+:ref:`render-nnd-distributions` for details.
+
+.. code-block:: bash
+
+   picasso nnd files [--names names] [-p picks] [-r r_max] [-s steps] [-n simulations] [--3d] [--z-range zmin zmax] [--observed-z] [--cross-null shift|labels]
+
+For example, two channels with short names:
+
+.. code-block:: bash
+
+   picasso nnd protein_a_molecules.hdf5 protein_b_molecules.hdf5 --names A B
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``--names`` (str)
+     - file names
+     - Names of the channels in the order of the files.
+   * - ``-p``, ``--picks`` (str)
+     - whole field of view
+     - Picks (.yaml) saved in Render; the regions of interest.
+   * - ``-r``, ``--r-max`` (float)
+     - ``200``
+     - The largest distance of the histograms (nm).
+   * - ``-s``, ``--steps`` (int)
+     - ``40``
+     - The number of histogram bins up to the largest distance.
+   * - ``-n``, ``--simulations`` (int)
+     - ``99``
+     - The number of random simulations, ``0`` to skip them.
+   * - ``--3d``
+     - off
+     - Compute the distances in 3D (x, y and z); requires z.
+   * - ``--z-range`` (float float)
+     - z of each region
+     - The z range (nm) over which the regions extend in 3D.
+   * - ``--observed-z``
+     - off
+     - In 3D, give the simulated points within a channel the observed z
+       values (shuffled) instead of spreading them uniformly.
+   * - ``--cross-null`` (``shift`` or ``labels``)
+     - ``shift``
+     - How pairs of channels are simulated: random shifts of the second
+       channel (rectangular or circular regions only) or random labels.
 
 .. _cmd-plugins:
 

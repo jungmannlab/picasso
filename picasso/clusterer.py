@@ -21,17 +21,34 @@ SMLM clusterer is based on:
 from __future__ import annotations
 
 import itertools
-from typing import Callable, Literal
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 from pandas.api.types import is_numeric_dtype
-from tqdm import tqdm
 from scipy.spatial import ConvexHull, KDTree, QhullError
 from scipy.ndimage import gaussian_filter
 from sklearn.cluster import DBSCAN, HDBSCAN
 
-from . import lib, masking, __version__
+from . import lib, masking
+
+#: scikit-learn's HDBSCAN fails with a TypeError for cluster_eps > 0 on
+#: some data with NumPy 2.4 and later, which no longer converts a
+#: one-element array to a number (scikit-learn issue 33219, unfixed in
+#: scikit-learn 1.9.1). The one-click installers ship NumPy 2.3.
+_HDBSCAN_EPSILON_BUG = np.lib.NumpyVersion(np.__version__) >= "2.4.0"
+_HDBSCAN_EPSILON_ISSUE = (
+    "https://github.com/scikit-learn/scikit-learn/issues/33219"
+)
+
+__all__ = [
+    "cluster",
+    "dbscan",
+    "hdbscan",
+    "find_cluster_centers",
+    "cluster_areas",
+    "test_subclustering",
+]
 
 
 def _frame_analysis(frame: pd.SeriesGroupBy, n_frames: int) -> int:
@@ -123,7 +140,7 @@ def _build_neighbor_graph(
     tree: KDTree,
     X: lib.FloatArray2D,
     radius: float,
-    progress: Callable[[int], None] | None = None,
+    progress: lib.Progress,
 ) -> tuple[lib.IntArray1D, lib.IntArray1D]:
     """Build a compact (CSR-like) neighbor graph for all points in X.
 
@@ -148,9 +165,9 @@ def _build_neighbor_graph(
         Array of points of shape (n_points, n_dim).
     radius : float
         Clustering radius.
-    progress : callable or None, optional
-        Called with the cumulative number of points processed after
-        each batch. If None, no progress is reported.
+    progress : lib.Progress
+        Normalized progress tracker, set to the cumulative number of
+        points processed after each batch.
 
     Returns
     -------
@@ -184,8 +201,7 @@ def _build_neighbor_graph(
                     count=total,
                 )
             )
-        if progress is not None:
-            progress(end)
+        progress.set_value(end)
 
     indptr = np.zeros(n_points + 1, dtype=np.int64)
     np.cumsum(counts, out=indptr[1:])
@@ -200,8 +216,8 @@ def _cluster(
     X: lib.FloatArray2D,
     radius: float,
     min_locs: int,
-    frame: pd.Series | None = None,
-    progress: Callable[[int], None] | None = None,
+    frame: pd.Series | None,
+    progress: lib.Progress,
 ) -> lib.IntArray1D:
     """Cluster points given by X with a given clustering radius and
     minimum number of localizations within that radius using KDTree.
@@ -232,13 +248,13 @@ def _cluster(
         Clustering radius.
     min_locs : int
         Minimum number of localizations in a cluster.
-    frame : pd.Series or None, optional
+    frame : pd.Series or None
         Frame number of each localization. If None, no frame analysis
         is performed.
-    progress : callable or None, optional
-        Called with the cumulative number of localizations processed
-        while building the neighbor graph (the main, O(n) step). If
-        None, no progress is reported.
+    progress : lib.Progress
+        Normalized progress tracker (see ``lib.normalize_progress``);
+        reports "Clustering" over the localizations while building the
+        neighbor graph (the main, O(n) step).
 
     Returns
     -------
@@ -250,14 +266,17 @@ def _cluster(
 
     # build kdtree and a compact, batched neighbor graph (bounded memory)
     tree = KDTree(X)
+    lib.start_phase(progress, "Clustering", n_points, unit="loc")
+    progress.set_value(0)
     indptr, indices = _build_neighbor_graph(tree, X, radius, progress)
+    progress.set_value(n_points)
 
     # number of neighbors of each point (point is its own neighbor)
     counts = np.diff(indptr).astype(np.int32)
 
     # find local maxima, i.e., points with the most neighbors within
     # their neighborhood. ``reduceat`` computes, per point, the maximum
-    # neighbor count over that point's neighborhood in one vectorised
+    # neighbor count over that point's neighborhood in one vectorized
     # pass (no Python loop over all points).
     if n_points:
         neighbor_max = np.maximum.reduceat(counts[indices], indptr[:-1])
@@ -302,7 +321,7 @@ def cluster_2D(
     radius: float,
     min_locs: int,
     fa: bool,
-    progress: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> lib.IntArray1D:
     """Prepare 2D input to be used by ``_cluster``.
 
@@ -316,10 +335,11 @@ def cluster_2D(
         Minimum number of localizations in a cluster.
     fa : bool
         True, if basic frame analysis is to be performed.
-    progress : callable or None, optional
-        Called with the cumulative number of localizations processed
-        while building the neighbor graph. If None, no progress is
-        reported.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Clustering" over the
+        localizations. Default is None.
 
     Returns
     -------
@@ -334,7 +354,8 @@ def cluster_2D(
     else:
         frame = locs["frame"]
 
-    labels = _cluster(X, radius, min_locs, frame, progress)
+    with lib.tracked_progress(progress, "Clustering", unit="loc") as progress:
+        labels = _cluster(X, radius, min_locs, frame, progress)
 
     return labels
 
@@ -345,7 +366,7 @@ def cluster_3D(
     radius_z: float,
     min_locs: int,
     fa: bool,
-    progress: Callable[[int], None] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> lib.IntArray1D:
     """Prepare 3D input to be used by ``_cluster``.
 
@@ -359,20 +380,18 @@ def cluster_3D(
     locs : pd.DataFrame
         Localizations to be clustered.
     radius_xy : float
-        Clustering radius in x and y directions, in the same units as
-        ``locs["x"]`` / ``locs["y"]`` (camera pixels).
+        Clustering radius in x and y directions (nm).
     radius_z : float
-        Clustering radius in z direction, in the same units as
-        ``locs["z"]`` (camera pixels after ``cluster()``'s nm-to-px
-        conversion).
+        Clustering radius in z direction (nm).
     min_locs : int
         Minimum number of localizations in a cluster.
     fa : bool
         True, if basic frame analysis is to be performed.
-    progress : callable or None, optional
-        Called with the cumulative number of localizations processed
-        while building the neighbor graph. If None, no progress is
-        reported.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Clustering" over the
+        localizations. Default is None.
 
     Returns
     -------
@@ -381,7 +400,9 @@ def cluster_3D(
         assigned).
     """
     radius = radius_xy
-    X = locs[["x", "y", "z"]].to_numpy()
+    # a copy, since z is scaled in place (pandas 3 returns read-only
+    # views of the columns)
+    X = locs[["x", "y", "z"]].to_numpy(copy=True)
     X[:, 2] *= radius_xy / radius_z
 
     if not fa:
@@ -389,56 +410,22 @@ def cluster_3D(
     else:
         frame = locs["frame"]
 
-    labels = _cluster(X, radius, min_locs, frame, progress)
+    with lib.tracked_progress(progress, "Clustering", unit="loc") as progress:
+        labels = _cluster(X, radius, min_locs, frame, progress)
 
     return labels
 
 
-def _resolve_progress(
-    progress: lib.ProgressDialog | Literal["console"] | None,
-    total: int,
-    description: str,
-    unit: str = "it",
-) -> Callable[[int], None] | None:
-    """Normalize a public ``progress`` argument into a ``set_value``
-    callback for the internal per-item loops.
-
-    Mirrors ``picasso.aim.aim``'s convention: ``None`` reports nothing,
-    ``"console"`` displays a tqdm progress bar, and a
-    ``lib.ProgressDialog`` drives a GUI progress bar.
-
-    Parameters
-    ----------
-    progress : lib.ProgressDialog or "console" or None
-        Public progress argument to normalize.
-    total : int
-        Number of steps the callback will count up to.
-    description : str
-        Description shown next to the progress bar.
-    unit : str, optional
-        tqdm unit label. Default is ``"it"``.
-
-    Returns
-    -------
-    callable
-        Called with the cumulative number of processed items.
-    """
-    progress = lib.normalize_progress(progress, description, unit=unit)
-    # set the range here so callers need not know the internal item
-    # count (e.g. number of KDTree batches or clusters)
-    progress.setMaximum(total)
-    return progress.set_value
-
-
 def cluster(
     locs: pd.DataFrame,
+    info: list[dict] | None = None,
+    *,
     radius_xy: float,
     min_locs: int,
     frame_analysis: bool,
     radius_z: float | None = None,
-    pixelsize: float | None = None,
-    progress: lib.ProgressDialog | Literal["console"] | None = None,
-) -> tuple[pd.DataFrame, dict]:
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> tuple[pd.DataFrame, list[dict]]:
     """Cluster localizations from single molecules (SMLM clusterer).
 
     The general workflow is as follows:
@@ -464,23 +451,23 @@ def cluster(
     ----------
     locs : pd.DataFrame
         Localizations to be clustered.
+    info : list of dicts or None, optional
+        Metadata of ``locs``, carried over into the returned metadata.
+        Default is None.
     radius_xy : float
-        Clustering radius in xy plane (camera pixels).
+        Clustering radius in xy plane (nm).
     min_locs : int
         Minimum number of localizations in a cluster.
     frame_analysis : bool
         If True, performs basic frame analysis.
     radius_z : float, optional
-        Clustering radius in z plane (camera pixels). Only used for
-        3D clustering.
-    pixelsize : int, optional
-        Camera pixel size in nm. Only needed for 3D clustering.
-    progress : picasso.lib.ProgressDialog or "console" or None, optional
-        Tracks progress while building the neighbor graph (the main,
-        O(n) step). If "console", a tqdm progress bar is shown in the
-        console. If a ProgressDialog, a GUI progress bar is updated. If
-        None (default), no progress is displayed. Same convention as
-        ``picasso.aim.aim``.
+        Clustering radius in z (nm). Required for 3D clustering.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Clustering" over the
+        localizations while building the neighbor graph (the main, O(n)
+        step). Default is None.
 
     Returns
     -------
@@ -488,54 +475,50 @@ def cluster(
         Clusterered localizations, with column 'group' added, which
         specifies cluster label for each localization. Noise (label -1)
         is removed.
-    info : dict
-        Dictionary containing clustering information.
+    info : list of dicts
+        Metadata of the clustered localizations: ``info`` with an entry
+        recording the clustering appended, see ``lib.append_metadata``.
     """
     locs = locs.copy()
     n_raw = len(locs)
-    progress_cb = _resolve_progress(progress, n_raw, "Clustering", unit="loc")
-    if "z" in locs.columns:  # 3D
-        if pixelsize is None or radius_z is None:
-            raise ValueError(
-                "Camera pixel size and clustering radius in z must be"
-                " specified for 3D clustering."
+    if "z" in locs.columns and radius_z is None:  # 3D
+        raise ValueError(
+            "The clustering radius in z must be specified for 3D"
+            " clustering."
+        )
+    with lib.tracked_progress(progress, "Clustering", unit="loc") as progress:
+        if "z" in locs.columns:  # 3D
+            labels = cluster_3D(
+                locs,
+                radius_xy,
+                radius_z,
+                min_locs,
+                frame_analysis,
+                progress,
             )
-        locs["z"] /= pixelsize  # convert from nm to px
-        labels = cluster_3D(
-            locs,
-            radius_xy,
-            radius_z,
-            min_locs,
-            frame_analysis,
-            progress_cb,
-        )
-    else:
-        labels = cluster_2D(
-            locs,
-            radius_xy,
-            min_locs,
-            frame_analysis,
-            progress_cb,
-        )
+        else:
+            labels = cluster_2D(
+                locs,
+                radius_xy,
+                min_locs,
+                frame_analysis,
+                progress,
+            )
     locs = extract_valid_labels(locs, labels)
-    if "z" in locs.columns:
-        locs["z"] *= pixelsize  # convert back to nm
     n_clusters = len(locs)
-    info = {
-        "Generated by": f"Picasso v{__version__} SMLM clusterer",
+    entry = {
+        **lib.step_info("SMLM clusterer"),
         "Number of clusters": len(np.unique(locs["group"])),
         "Min. cluster size": min_locs,
         "Performed basic frame analysis": frame_analysis,
         "Fraction of rejected locs (%)": 100 * (n_raw - n_clusters) / n_raw,
     }
-    unit = "nm" if pixelsize is not None else "px"
-    pixelsize = pixelsize if pixelsize is not None else 1
     if "z" in locs.columns:
-        info[f"Clustering radius xy ({unit})"] = radius_xy * pixelsize
-        info[f"Clustering radius z ({unit})"] = radius_z * pixelsize
+        entry["Clustering radius xy (nm)"] = radius_xy
+        entry["Clustering radius z (nm)"] = radius_z
     else:
-        info[f"Clustering radius ({unit})"] = radius_xy * pixelsize
-    return locs, info
+        entry["Clustering radius (nm)"] = radius_xy
+    return locs, lib.append_metadata(info, entry)
 
 
 def _dbscan(
@@ -578,12 +561,13 @@ def _dbscan(
 
 def dbscan(
     locs: pd.DataFrame,
+    info: list[dict] | None = None,
+    *,
     radius: float,
     min_samples: int,
     min_locs: int = 10,
-    pixelsize: float | None = None,
     radius_z: float | None = None,
-) -> tuple[pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Perform DBSCAN on localizations.
 
     See Ester, et al. Inkdd, 1996. (Vol. 96, No. 34, pp. 226-231).
@@ -599,20 +583,20 @@ def dbscan(
     ----------
     locs : pd.DataFrame
         Localizations to be clustered.
+    info : list of dicts or None, optional
+        Metadata of ``locs``, carried over into the returned metadata.
+        Default is None.
     radius : float
-        DBSCAN search radius in the xy plane, usually referred to as
-        "epsilon". Same units as ``locs["x"]`` / ``locs["y"]``
-        (camera pixels).
+        DBSCAN search radius in the xy plane (nm), usually referred to
+        as "epsilon".
     min_samples : int
         Number of localizations within radius to consider a given point
         a core sample.
     min_locs : int, optional
         Minimum number of localizations in a cluster. Clusters with
-        fewer localizations will be removed. Default is 0.
-    pixelsize : float, optional
-        Camera pixel size in nm. Only needed for 3D.
+        fewer localizations will be removed. Default is 10.
     radius_z : float, optional
-        DBSCAN search radius in z (camera pixels). If None (default),
+        DBSCAN search radius in z (nm). If None (default),
         the clustering is isotropic and uses ``radius`` in all
         dimensions. Only used for 3D.
 
@@ -622,19 +606,16 @@ def dbscan(
         Clusterered localizations, with column 'group' added, which
         specifies cluster label for each localization. Noise (label -1)
         is removed.
-    info : dict
-        Dictionary containing clustering information.
+    info : list of dicts
+        Metadata of the clustered localizations: ``info`` with an entry
+        recording the clustering appended, see ``lib.append_metadata``.
     """
     locs = locs.copy()
     n_raw = len(locs)
     if "z" in locs.columns:
-        if pixelsize is None:
-            raise ValueError(
-                "Camera pixel size must be specified as an integer for 3D"
-                " clustering."
-            )
-        X = locs[["x", "y", "z"]].to_numpy()
-        X[:, 2] /= pixelsize
+        # a copy, since z is scaled in place (pandas 3 returns read-only
+        # views of the columns)
+        X = locs[["x", "y", "z"]].to_numpy(dtype=np.float64, copy=True)
         if radius_z is not None:
             X[:, 2] *= radius / radius_z
     else:
@@ -642,19 +623,17 @@ def dbscan(
     labels = _dbscan(X, radius, min_samples, min_locs)
     locs = extract_valid_labels(locs, labels)
     n_clusters = len(locs)
-    unit = "nm" if pixelsize is not None else "px"
-    pixelsize_unit = pixelsize if pixelsize is not None else 1
-    info = {
-        "Generated by": f"Picasso v{__version__} DBSCAN",
+    entry = {
+        **lib.step_info("DBSCAN"),
         "Number of clusters": len(np.unique(locs["group"])),
-        f"Radius ({unit})": radius * pixelsize_unit,
+        "Radius (nm)": radius,
         "Minimum local density": min_samples,
         "Min. localizations per cluster": min_locs,
         "Fraction of rejected locs (%)": 100 * (n_raw - n_clusters) / n_raw,
     }
     if "z" in locs.columns and radius_z is not None:
-        info[f"Radius z ({unit})"] = radius_z * pixelsize_unit
-    return locs, info
+        entry["Radius z (nm)"] = radius_z
+    return locs, lib.append_metadata(info, entry)
 
 
 def _hdbscan(
@@ -685,23 +664,41 @@ def _hdbscan(
     labels : lib.IntArray1D
         Cluster labels for each point. Shape: (N,). -1 means no cluster
         assigned.
+
+    Raises
+    ------
+    RuntimeError
+        If ``cluster_eps`` > 0 runs into scikit-learn's HDBSCAN bug with
+        NumPy 2.4 and later (scikit-learn issue 33219).
     """
-    hdb = HDBSCAN(
-        min_samples=min_samples,
-        min_cluster_size=min_cluster_size,
-        cluster_selection_epsilon=cluster_eps,
-        copy=False,
-    ).fit(X)
+    try:
+        hdb = HDBSCAN(
+            min_samples=min_samples,
+            min_cluster_size=min_cluster_size,
+            cluster_selection_epsilon=cluster_eps,
+            copy=False,
+        ).fit(X)
+    except TypeError as error:
+        if cluster_eps > 0 and _HDBSCAN_EPSILON_BUG:
+            raise RuntimeError(
+                "HDBSCAN with a cluster selection epsilon above 0 fails "
+                f"with NumPy {np.__version__} because of a bug in "
+                f"scikit-learn ({_HDBSCAN_EPSILON_ISSUE}). Set the epsilon "
+                "to 0, or use NumPy older than 2.4, e.g., "
+                '"pip install numpy<2.4".'
+            ) from error
+        raise
     return hdb.labels_.astype(np.int32)
 
 
 def hdbscan(
     locs: pd.DataFrame,
+    info: list[dict] | None = None,
+    *,
     min_cluster_size: int,
     min_samples: int,
-    pixelsize: float | None = None,
     cluster_eps: float = 0.0,
-) -> tuple[pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, list[dict]]:
     """Perform HDBSCAN on localizations.
 
     See Campello, et al. PAKDD, 2013 (DOI: 10.1007/978-3-642-37456-2_14).
@@ -710,15 +707,17 @@ def hdbscan(
     ----------
     locs : pd.DataFrame
         Localizations to be clustered.
+    info : list of dicts or None, optional
+        Metadata of ``locs``, carried over into the returned metadata.
+        Default is None.
     min_cluster_size : int
         Minimum number of localizations in cluster.
     min_samples : int
         Number of localizations within radius to consider a given point
         a core sample.
-    pixelsize : float, optional
-        Camera pixel size in nm. Only needed for 3D.
     cluster_eps : float, optional
-        Distance threshold. Clusters below this value will be merged.
+        Distance threshold (nm). Clusters below this value will be
+        merged. Default is 0.
 
     Returns
     -------
@@ -726,19 +725,20 @@ def hdbscan(
         Clusterered localizations, with column 'group' added, which
         specifies cluster label for each localization. Noise (label -1)
         is removed.
-    info : dict
-        Dictionary containing clustering information.
+    info : list of dicts
+        Metadata of the clustered localizations: ``info`` with an entry
+        recording the clustering appended, see ``lib.append_metadata``.
+
+    Raises
+    ------
+    RuntimeError
+        If ``cluster_eps`` > 0 runs into scikit-learn's HDBSCAN bug with
+        NumPy 2.4 and later (scikit-learn issue 33219).
     """
     locs = locs.copy()
     n_raw = len(locs)
     if "z" in locs.columns:
-        if pixelsize is None:
-            raise ValueError(
-                "Camera pixel size (nm) must be specified as an integer for 3D"
-                " clustering."
-            )
         X = locs[["x", "y", "z"]].to_numpy()
-        X[:, 2] /= pixelsize
     else:
         X = locs[["x", "y"]].to_numpy()
     labels = _hdbscan(
@@ -746,15 +746,15 @@ def hdbscan(
     )
     locs = extract_valid_labels(locs, labels)
     n_clusters = len(locs)
-    info = {
-        "Generated by": f"Picasso v{__version__} HDBSCAN",
+    entry = {
+        **lib.step_info("HDBSCAN"),
         "Number of clusters": len(np.unique(locs["group"])),
         "Min. cluster": min_cluster_size,
         "Min. samples": min_samples,
-        "Intercluster distance": cluster_eps,
+        "Intercluster distance (nm)": cluster_eps,
         "Fraction of rejected locs (%)": 100 * (n_raw - n_clusters) / n_raw,
     }
-    return locs, info
+    return locs, lib.append_metadata(info, entry)
 
 
 def extract_valid_labels(
@@ -814,7 +814,7 @@ RESERVED_CENTER_COLUMNS = frozenset(
 def _aggregate_cluster_stats(
     locs: pd.DataFrame, has_z: bool
 ) -> tuple[pd.core.groupby.DataFrameGroupBy, dict]:
-    """One vectorised pass for per-group means, stds and sizes.
+    """One vectorized pass for per-group means, stds and sizes.
 
     Every numeric column present in ``locs`` is averaged, except the
     ones ``find_cluster_centers`` derives itself
@@ -877,7 +877,7 @@ def _count_binding_events(
     group_s = group_arr[order]
     frame_s = frame_arr[order]
     new_event = np.empty(len(frame_s), dtype=bool)
-    new_event[0] = True
+    new_event[:1] = True  # no localizations, no events
     new_event[1:] = (group_s[1:] != group_s[:-1]) | (
         (frame_s[1:] - frame_s[:-1]) > 3
     )
@@ -893,34 +893,36 @@ def _cluster_convex_hulls(
     group_s: lib.IntArray1D,
     unique_groups: lib.IntArray1D,
     has_z: bool,
-    pixelsize: float | None,
-    progress: Callable[[int], None] | None = None,
+    progress: lib.Progress,
 ) -> lib.FloatArray1D:
-    """Convex-hull area (2D) or volume (3D) per cluster.
+    """Convex-hull area (2D, nm^2) or volume (3D, nm^3) per cluster.
 
     The only per-cluster Python loop in ``find_cluster_centers``; runs
     on raw NumPy slices of a group-sorted coordinate array. For datasets
-    with many clusters this is the run-time bottleneck, so an optional
-    ``progress`` callable (called with the number of clusters processed)
-    can be passed for feedback.
+    with many clusters this is the run-time bottleneck, so the
+    normalized tracker ``progress`` reports "Calculating cluster
+    centers" over the clusters.
     """
     coord_cols = ["x", "y", "z"] if has_z else ["x", "y"]
     coords_sorted = (
         locs[coord_cols].to_numpy()[order].astype(np.float64, copy=True)
     )
-    if has_z:
-        coords_sorted[:, 2] /= pixelsize
     group_offsets = np.searchsorted(group_s, unique_groups, side="left")
     group_offsets = np.append(group_offsets, len(group_s))
-    convexhull = np.zeros(len(unique_groups), dtype=np.float64)
-    for i in range(len(unique_groups)):
+    n_clusters = len(unique_groups)
+    convexhull = np.zeros(n_clusters, dtype=np.float64)
+    lib.start_phase(
+        progress, "Calculating cluster centers", n_clusters, unit="cluster"
+    )
+    progress.set_value(0)
+    for i in range(n_clusters):
         X = coords_sorted[group_offsets[i] : group_offsets[i + 1]]
         try:
             convexhull[i] = ConvexHull(X).volume
         except QhullError:
             convexhull[i] = 0.0
-        if progress is not None:
-            progress(i + 1)
+        progress.set_value(i + 1)
+    progress.set_value(n_clusters)
     return convexhull
 
 
@@ -948,12 +950,13 @@ def _weighted_z_means(
 
 def find_cluster_centers(
     locs: pd.DataFrame,
-    pixelsize: float | None = None,
-    progress: lib.ProgressDialog | Literal["console"] | None = None,
-) -> pd.DataFrame:
+    info: list[dict] | None = None,
+    *,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> tuple[pd.DataFrame, list[dict]]:
     """Calculate cluster centers.
 
-    Aggregations are computed in vectorised pandas/NumPy passes; the
+    Aggregations are computed in vectorized pandas/NumPy passes; the
     only per-cluster Python loop is the convex hull, which operates on
     raw NumPy slices.
 
@@ -964,27 +967,30 @@ def find_cluster_centers(
         "frame", "x", "y" and "group" (and "z" for 3D). Any other
         numeric column present is averaged per cluster. Other numeric
         columns are carried over as means.
-    pixelsize : float, optional
-        Camera pixel size (used for finding volume and 3D convex hull).
-        Only required for 3D localizations.
-    progress : picasso.lib.ProgressDialog or "console" or None, optional
-        Tracks progress of the per-cluster convex-hull pass (the
-        run-time bottleneck for datasets with many clusters). If
-        "console", a tqdm progress bar is shown in the console. If a
-        ProgressDialog, a GUI progress bar is updated. If None (default),
-        no progress is displayed. Same convention as ``picasso.aim.aim``.
+    info : list of dicts or None, optional
+        Metadata of ``locs``, carried over into the returned metadata.
+        Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating cluster centers"
+        over the clusters (the per-cluster convex-hull pass, the
+        run-time bottleneck for datasets with many clusters). Default is
+        None.
 
     Returns
     -------
     centers : pd.DataFrame
-        Cluster centers saved in the format of localizations.
+        Cluster centers saved in the format of localizations: positions,
+        their standard deviations (``std_x``, ``std_y``, ``std_z``) and
+        precisions (``lpx``, ``lpy``, ``lpz``) in nm, ``area`` and 2D
+        ``convexhull`` in nm^2, ``volume`` and 3D ``convexhull`` in
+        nm^3.
+    info : list of dicts
+        Metadata of the cluster centers: ``info`` with an entry
+        recording the step appended, see ``lib.append_metadata``.
     """
     has_z = "z" in locs.columns
-    if has_z and pixelsize is None:
-        raise ValueError(
-            "Camera pixel size must be specified as an integer for 3D"
-            " cluster centers calculation."
-        )
 
     group_arr = locs["group"].to_numpy()
     frame_arr = locs["frame"].to_numpy()
@@ -994,15 +1000,12 @@ def find_cluster_centers(
     lpx = s["x_std"] / np.sqrt(s["n_locs"])
     lpy = s["y_std"] / np.sqrt(s["n_locs"])
     n_events, order, group_s = _count_binding_events(group_arr, frame_arr)
-    progress_cb = _resolve_progress(
-        progress,
-        len(s["unique_groups"]),
-        "Calculating cluster centers",
-        unit="cluster",
-    )
-    convexhull = _cluster_convex_hulls(
-        locs, order, group_s, s["unique_groups"], has_z, pixelsize, progress_cb
-    )
+    with lib.tracked_progress(
+        progress, "Calculating cluster centers", unit="cluster"
+    ) as progress:
+        convexhull = _cluster_convex_hulls(
+            locs, order, group_s, s["unique_groups"], has_z, progress
+        )
 
     columns = {
         "frame": s["frame_mean"].astype(np.float32),
@@ -1038,9 +1041,7 @@ def find_cluster_centers(
     )
     if has_z:
         volume = (
-            np.power(
-                (s["x_std"] + s["y_std"] + s["z_std"] / pixelsize) / 3 * 2, 3
-            )
+            np.power((s["x_std"] + s["y_std"] + s["z_std"]) / 3 * 2, 3)
             * 4.18879
         )  # assume radius = 2 * std_xyz
         columns["volume"] = volume.astype(np.float32)
@@ -1056,7 +1057,10 @@ def find_cluster_centers(
             gb["group_input"].first().to_numpy().astype(np.int32)
         )
 
-    return pd.DataFrame(columns)
+    entry = lib.step_info(
+        "Cluster centers", **{"Number of clusters": len(s["unique_groups"])}
+    )
+    return pd.DataFrame(columns), lib.append_metadata(info, entry)
 
 
 def _cluster_area(X: lib.FloatArray2D, lp: float) -> float:
@@ -1105,8 +1109,9 @@ def _cluster_area(X: lib.FloatArray2D, lp: float) -> float:
 
 def cluster_areas(
     locs: pd.DataFrame,
-    info: list[dict],
-    progress: Callable[[int], None] | None = None,
+    info: list[dict] | None = None,
+    *,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> pd.DataFrame:
     """Calculate cluster areas (2D) or volumes (3D).
 
@@ -1117,11 +1122,14 @@ def cluster_areas(
     ----------
     locs : pd.DataFrame
         Clustered localizations (contain group info).
-    info : list of dict
-        Localization metadata, see `picasso.io.load_locs`.
-    progress : callable or None, optional
-        Callable accepting an int (progress count). If None, progress
-        is displayed in the console. Default is None.
+    info : list of dicts or None, optional
+        Metadata of ``locs``. Not used; accepted so that the call
+        matches the other functions on localizations. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating cluster areas"
+        over the clusters. Default is None.
 
     Returns
     -------
@@ -1132,40 +1140,39 @@ def cluster_areas(
         "group" in locs.columns
     ), "Localizations must contain 'group' column."
 
-    # get pixel size from info
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-
     groups = np.unique(locs["group"])
     area_key = "Area (LP^2)" if "z" not in locs.columns else "Volume (LP^3)"
     areas = {
         "group": groups.astype(np.int32),
         area_key: np.zeros(len(groups), dtype=np.float32),
     }
-    if progress is None:
-        iterator = tqdm(range(len(groups)), desc="Calculating cluster areas")
-    else:
-        iterator = range(len(groups))
-
+    n_groups = len(groups)
     lp = np.median(locs[["lpx", "lpy"]].mean(axis=1))
-    for idx in iterator:
-        group_id = groups[idx]
-        grouplocs = locs[locs["group"] == group_id]
-        if not len(grouplocs):
-            continue
-        if "z" in grouplocs.columns:
-            X = grouplocs[["x", "y", "z"]].to_numpy()
-            X[:, 2] /= pixelsize  # convert z to pixels
-        else:
-            X = grouplocs[["x", "y"]].to_numpy()
-        areas[area_key][idx] = _cluster_area(X, lp)
-        if progress is not None:
-            progress(idx + 1)
+    with lib.tracked_progress(
+        progress, "Calculating cluster areas", unit="cluster"
+    ) as progress:
+        lib.start_phase(
+            progress, "Calculating cluster areas", n_groups, unit="cluster"
+        )
+        progress.set_value(0)
+        for idx in range(n_groups):
+            group_id = groups[idx]
+            grouplocs = locs[locs["group"] == group_id]
+            if len(grouplocs):
+                if "z" in grouplocs.columns:
+                    X = grouplocs[["x", "y", "z"]].to_numpy()
+                else:
+                    X = grouplocs[["x", "y"]].to_numpy()
+                areas[area_key][idx] = _cluster_area(X, lp)
+            progress.set_value(idx + 1)
+        progress.set_value(n_groups)
     return pd.DataFrame(areas)
 
 
 def test_subclustering(
     mols: pd.DataFrame,
-    info: list[dict],
+    info: list[dict] | None = None,
+    *,
     clustering_dist: float = 25,
     sparse_dist: float = 80,
 ) -> tuple[lib.IntArray1D, lib.IntArray1D]:
@@ -1187,8 +1194,9 @@ def test_subclustering(
     ----------
     mols : pd.DataFrame
         List of molecules, must contain n_events.
-    info : list of dict
-        Molecules metadata.
+    info : list of dicts or None, optional
+        Metadata of ``mols``. Not used; accepted so that the call
+        matches the other functions on localizations. Default is None.
     clustering_dist : float, optional
         Maximum distance between molecules (nm) to consider them as
         clustered. Default is 25.
@@ -1209,12 +1217,10 @@ def test_subclustering(
     assert sparse_dist > clustering_dist, (
         "The sparse distance must be larger than the clustering " "distance."
     )
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
 
     # get 1st nearest neighbor distances
     if "z" in mols.columns:
         coords = mols[["x", "y", "z"]].to_numpy()
-        coords[:, 2] /= pixelsize
     else:
         coords = mols[["x", "y"]].to_numpy()
     tree = KDTree(coords)
@@ -1222,8 +1228,8 @@ def test_subclustering(
     nnd1 = distances[:, 1]
 
     # split molecules into clustered and monomeric
-    close_nnd_idx = np.where(nnd1 < clustering_dist / pixelsize)[0]
-    far_nnd_idx = np.where(nnd1 >= sparse_dist / pixelsize)[0]
+    close_nnd_idx = np.where(nnd1 < clustering_dist)[0]
+    far_nnd_idx = np.where(nnd1 >= sparse_dist)[0]
     close_mols = mols.iloc[close_nnd_idx]
     far_mols = mols.iloc[far_nnd_idx]
     clustered_nevents = close_mols["n_events"].to_numpy()

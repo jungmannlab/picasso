@@ -13,7 +13,7 @@ import csv
 from . import io
 
 
-def saveInfo(filename: str, info: dict) -> None:
+def save_info(filename: str, info: dict) -> None:
     """Save information to a YAML file.
 
     Parameters
@@ -27,7 +27,7 @@ def saveInfo(filename: str, info: dict) -> None:
     io.save_info(filename, [info], default_flow_style=True)
 
 
-def convertPlateIndex(plate: list, platename: str) -> list:
+def convert_plate_index(plate: list, platename: str) -> list:
     """Convert plate index from canvas index format to a structured
     format for ordering the sequences.
 
@@ -112,7 +112,7 @@ def convertPlateIndex(plate: list, platename: str) -> list:
     return newplate
 
 
-def convertPlateIndexColor(plate: list, platename: str) -> list:
+def convert_plate_index_color(plate: list, platename: str) -> list:
     """Convert plate index from canvas index format to a structured
     format for ordering the sequences, including color information.
 
@@ -184,6 +184,7 @@ def convertPlateIndexColor(plate: list, platename: str) -> list:
             structureindex = structurerow[row] + str(structurecol[col])
             oligoname = " "
             sequence = " "
+            color = " "  # an empty well has no color
             for i in range(0, len(plate)):
                 if plate[i][0] == structureindex:
                     oligoname = plate[i][1]
@@ -202,8 +203,8 @@ def convertPlateIndexColor(plate: list, platename: str) -> list:
     return newplate
 
 
-def readPlate(filename: str) -> list:
-    """Read a plate file and returns its content as a list of lists.
+def read_plate(filename: str) -> list:
+    """Read a plate file and return its content as a list of lists.
 
     Parameters
     ----------
@@ -215,27 +216,28 @@ def readPlate(filename: str) -> list:
     data : list
         A list of lists containing the data from the file.
     """
-    File = open(filename)
-    Reader = csv.reader(File)
-    data = list(Reader)
+    with open(filename, newline="") as file:
+        data = list(csv.reader(file))
     return data
 
 
-def savePlate(filename: str, data: list) -> None:
+def save_plate(filename: str, data: list | dict) -> None:
     """Save the plate data to a CSV file.
 
     Parameters
     ----------
     filename : str
         The name of the file to save the data to.
-    data : list
-        A list of lists containing the plate data to save.
+    data : list or dict
+        The plates to save, one after the other: a list of plates or a
+        dict of plates by number (0, 1, ...). Each plate is a list of
+        rows.
     """
+    plates = data.values() if isinstance(data, dict) else data
     with open(filename, "w", newline="") as csvfile:
-        Writer = csv.writer(
+        writer = csv.writer(
             csvfile, delimiter=",", quotechar="|", quoting=csv.QUOTE_MINIMAL
         )
-        for j in range(0, len(data)):
-            exportdata = data[j]
-            for i in range(0, len(exportdata)):
-                Writer.writerow(exportdata[i])
+        for plate in plates:
+            for row in plate:
+                writer.writerow(row)

@@ -53,20 +53,19 @@ Please refer to `Ma et al., Science Advances, 2024 <https://doi.org/10.1126/scia
    :icon: code
    :class-container: api-example
 
-   The distances are in camera pixels, so divide the dialog's nm values by
-   the pixel size. ``roi_r`` is ``Max. drift in segment``.
+   The distances are in nm, as in the dialog (defaults: ``intersect_d``
+   20 nm, ``roi_r`` 60 nm). ``roi_r`` is ``Max. drift in segment``.
 
    .. code-block:: python
 
-      from picasso import aim, io, lib
+      from picasso import aim, io
 
       locs, info = io.load_locs("movie_locs.hdf5")
-      pixelsize = lib.get_from_metadata(info, "Pixelsize")
       locs, info, drift = aim.aim(
           locs, info,
           segmentation=100,              # frames
-          intersect_d=20 / pixelsize,
-          roi_r=60 / pixelsize,
+          intersect_d=20.0,              # nm
+          roi_r=60.0,                    # nm
           progress="console",
       )
       io.save_locs("movie_locs_aim.hdf5", locs, info)
@@ -117,9 +116,11 @@ the picks are interpolated linearly. For an example, see Fig. 4 of
       from picasso import io, postprocess
 
       locs, info = io.load_locs("movie_locs_aim.hdf5")
-      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=radius)
+      picked = postprocess.picked_locs(
+          locs, info, picks=picks, pick_shape="Circle", pick_size=diameter
+      )
       drift = postprocess.undrift_from_picked(picked, info)    # columns x, y (and z)
-      locs = postprocess.apply_drift(locs, info, drift=drift)
+      locs, info = postprocess.apply_drift(locs, info, drift=drift)
 
       # or, with automatically picked fiducials
       locs, info, drift = postprocess.undrift_from_fiducials(locs, info)
@@ -150,11 +151,11 @@ tend to diverge. RCC can only correct x and y coordinates (not 3D).
    :icon: code
    :class-container: api-example
 
-   Note that the drift is returned first.
-
    .. code-block:: python
 
-      drift, locs = postprocess.undrift(locs, info, segmentation=1000, display=False)
+      locs, info, drift = postprocess.undrift(
+          locs, info, segmentation=1000, display=False
+      )
 
 
 .. _render-drift-tools:
@@ -179,18 +180,39 @@ commands:
    The .txt drift file is automatically saved after each round of drift
    correction. After consecutive rounds, cumulative drift is saved.
 
+.. _render-drift-file:
+
+The drift file is a plain text file with one row per frame and the columns
+``x y`` (2D) or ``x y z`` (3D) in nm, separated by spaces, after two comment
+lines: the format marker and the column names. For example:
+
+.. code-block:: text
+
+   # picasso_format 1.0
+   # columns: x y z (nm per frame)
+   0.000000000000000000e+00 0.000000000000000000e+00 0.000000000000000000e+00
+   1.213400000000000034e+00 -4.512000000000000455e-01 2.120000000000000107e+00
+   ...
+
+Drift files written before Picasso 1.0 have no header and hold ``x`` and
+``y`` in camera pixels (``z`` in nm); they are converted when they are
+loaded (with the camera pixel size of the channel's metadata) or once and
+for all with
+``picasso convert-units``, see :ref:`files-legacy`.
+
 .. dropdown:: Python
    :icon: code
    :class-container: api-example
 
    Drift files are read and written with ``io.load_drift`` and
-   ``io.save_drift``; applying the negative drift undoes a correction.
+   ``io.save_drift`` (``pixelsize`` is needed only for files written before
+   Picasso 1.0); applying the negative drift undoes a correction.
 
    .. code-block:: python
 
       from picasso import io, postprocess
 
-      drift = io.load_drift("movie_locs_drift.txt")
-      locs = postprocess.apply_drift(locs, info, drift=drift)     # apply
-      locs = postprocess.apply_drift(locs, info, drift=-drift)    # undo
-      fig = postprocess.plot_drift(drift, pixelsize)              # show
+      drift = io.load_drift("movie_locs_drift.txt")                     # nm
+      locs, info = postprocess.apply_drift(locs, info, drift=drift)   # apply
+      locs, info = postprocess.apply_drift(locs, info, drift=-drift)  # undo
+      fig = postprocess.plot_drift(drift)                             # show

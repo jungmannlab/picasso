@@ -17,26 +17,23 @@ from __future__ import annotations
 import contextlib
 import math
 import os
+import re
 import sys
 import time
 import traceback
 from collections.abc import Callable
-from typing import Any, TypeAlias
+from typing import Any
 
 import yaml
 import matplotlib.pyplot as plt
-from PyQt6 import QtCore, QtWidgets, QtGui, sip
-from playsound3 import playsound
 
-from picasso import diagnostics, docs_url, io
+from PyQt6 import QtCore, QtWidgets, QtGui, sip
+
+from picasso import diagnostics, docs_url, io, notifications
 from picasso.lib import (
     _dialogs,
-    SOUND_NOTIFICATION_DURATION,
     REQUIRED_COLUMNS,
-    MockProgress,
     OperationCanceled,
-    TqdmProgress,
-    get_sound_notification_path,
     is_path_available,
 )
 
@@ -70,15 +67,28 @@ class Dialog(QtWidgets.QDialog):
 
 
 class UserSettingsDialog(Dialog):
-    """Dialog for inspecting and editing the user settings YAML file."""
+    """Dialog for inspecting and editing the user settings YAML file.
+
+    ``saved`` is emitted after the edited settings were written, so
+    that windows can apply settings that take effect immediately.
+    """
 
     #: Reference listing every settings key, its default and what it
     #: does, grouped by section - see docs/others.rst.
     DOCS_URL = docs_url("others.html#user-settings-file")
 
+    saved = QtCore.pyqtSignal()
+
     def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("User Settings")
+        self.setWindowIcon(
+            QtGui.QIcon(
+                os.path.join(
+                    os.path.dirname(__file__), "gui", "icons", "picasso.ico"
+                )
+            )
+        )
         self.setModal(False)
         self.resize(600, 500)
 
@@ -136,6 +146,7 @@ class UserSettingsDialog(Dialog):
         self._current_match = -1
 
         self.editor = QtWidgets.QPlainTextEdit()
+        self.editor.setAccessibleName("User settings")
         # fixed width for the YAML indentation, in the size of the
         # application's font
         font = QtGui.QFontDatabase.systemFont(
@@ -377,6 +388,7 @@ class UserSettingsDialog(Dialog):
             return
         io.save_user_settings(parsed)
         self.editor.document().setModified(False)
+        self.saved.emit()
         QtWidgets.QMessageBox.information(
             self, "Saved", "User settings saved successfully."
         )
@@ -406,6 +418,62 @@ def notify_settings_load_error(parent=None) -> bool:
     QtWidgets.QMessageBox.warning(parent, "Settings could not be read", text)
     io.dismiss_settings_load_error()
     return True
+
+
+_config_load_error_notified = False
+
+
+def notify_config_load_error(parent=None) -> bool:
+    """Tell the user, once per process, when the camera configuration
+    could not be read (see ``picasso.load_config``), so no camera is
+    configured. Returns whether a message was shown."""
+    global _config_load_error_notified
+    import picasso
+
+    if picasso.CONFIG_LOAD_ERROR is None or _config_load_error_notified:
+        return False
+    _config_load_error_notified = True
+    QtWidgets.QMessageBox.warning(
+        parent,
+        "Camera configuration could not be read",
+        f"{picasso.CONFIG_LOAD_ERROR}\n\nFix the file and restart Picasso, "
+        "see "
+        f"{picasso.docs_url('localize/camera.html#localize-camera-config')}",
+    )
+    return True
+
+
+def contrast_slider_setting(section: str, default: bool) -> bool:
+    """Whether a module shows the contrast slider below its image.
+
+    Reads ``contrast_slider`` from the module's section of the user
+    settings; a missing key is written with ``default`` (as the other
+    settings are, so that it is visible in the file), unless the file
+    on disk could not be read.
+
+    Parameters
+    ----------
+    section : str
+        The module's section of the settings, e.g., ``"Render"``.
+    default : bool
+        Used if the key is missing or not a boolean.
+
+    Returns
+    -------
+    show : bool
+        True if the slider is shown.
+    """
+    settings = io.load_user_settings()
+    module_settings = settings[section]
+    if not isinstance(module_settings, dict):
+        return default
+    value = module_settings.get("contrast_slider")
+    if isinstance(value, bool):
+        return value
+    if value is None and not io.settings_file_is_broken():
+        module_settings["contrast_slider"] = default
+        io.save_user_settings(settings)
+    return default
 
 
 class MetadataDialog(Dialog):
@@ -565,6 +633,11 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         )
         self.description_base = description  # without time estimate
         self.initalized = None
+        # functions report several phases to one dialog: Qt's auto-reset
+        # would hide it whenever a phase reaches its maximum; the caller
+        # closes it when the function returns
+        self.setAutoReset(False)
+        self.setAutoClose(False)
 
     def init(self):
         """Arm the dialog: register it, make it modal and start the clock.
@@ -580,8 +653,6 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         self.initalized = True
         self.count_started = False
         self.finished = False
-        # sound notification
-        self.sound_notification_path = get_sound_notification_path()
 
     def set_value(self, value):
         """Advance the bar, arming the dialog and the time estimate as needed.
@@ -594,8 +665,8 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         if not self.initalized:
             self.init()
         self.setValue(value)
-        if self.count_started:
-            # estimate time left
+        if self.count_started and self.maximum() > 0:
+            # estimate time left (none for a busy indicator)
             elapsed = time.time() - self.t0_est
             remaining = int(
                 (self.maximum() - value) * elapsed / (value + 1e-6)
@@ -618,6 +689,7 @@ class ProgressDialog(QtWidgets.QProgressDialog):
         # sound notification
         if (
             self._sound_on_maximum
+            and self.maximum() > 0  # not a busy indicator
             and value >= self.maximum()
             and self.finished is False
         ):
@@ -661,13 +733,16 @@ class ProgressDialog(QtWidgets.QProgressDialog):
             self.finished = True
             self.play_sound_notification()
 
-    def zero_progress(self, description=None):
+    def zero_progress(self, description=None, *args, **kwargs):
         """Set progress dialog to zero and change the title if given.
 
         Parameters
         ----------
         description : str, optional
             Label of the new phase. None keeps the current one.
+        *args, **kwargs
+            Accepted and ignored (e.g. the console bar's ``unit``), for
+            ``lib.Progress`` compatibility.
         """
         if description:
             self.setLabelText(description)
@@ -676,43 +751,17 @@ class ProgressDialog(QtWidgets.QProgressDialog):
             # restart the time-estimate baseline so the next non-zero
             # set_value re-arms the timer for the new phase
             self.count_started = False
+        # a function reporting phases may start another one once this one
+        # reaches its maximum, so the finish sound waits for close()
+        self._sound_on_maximum = False
         self.set_value(0)
 
     def play_sound_notification(self):
-        """Play a sound notification if a sound file is specified and
-        at least a minute has passed since the dialog was opened.
-
-        A missing or broken audio backend (which happens in the one-click
-        builds) is logged, not raised: closing a dialog must always
-        succeed, especially while an error is being reported.
+        """Play the selected notification sound if the dialog has been
+        open long enough, see :func:`picasso.notifications.notify_finished`.
         """
-        if self.sound_notification_path is not None:
-            if time.time() - self.t0 > SOUND_NOTIFICATION_DURATION:
-                try:
-                    playsound(self.sound_notification_path, block=False)
-                except Exception:  # noqa: BLE001 - notification only
-                    diagnostics.log_message(
-                        "Could not play the sound notification"
-                        f" {self.sound_notification_path}:\n"
-                        f"{traceback.format_exc()}"
-                    )
-
-    def get_iterator(self, start=None, end=None):
-        """Get an iterator that spans the dialog's remaining progress.
-
-        Parameters
-        ----------
-        start, end : int, optional
-            First and one-past-last value. None uses the dialog's current
-            value and maximum.
-
-        Returns
-        -------
-        iterator : range
-        """
-        start = self.value() if start is None else start
-        end = self.maximum() if end is None else end
-        return range(start, end)
+        if self.initalized:
+            notifications.notify_finished(time.time() - self.t0)
 
 
 class StatusDialog(Dialog):
@@ -738,7 +787,6 @@ class StatusDialog(Dialog):
         bar.setTextVisible(False)
         bar.setMinimumWidth(250)
         vbox.addWidget(bar)
-        self.sound_notification_path = get_sound_notification_path()
         self.t0 = time.time()
         self.show()
         self.raise_()
@@ -764,16 +812,7 @@ class StatusDialog(Dialog):
         """
         if self in _dialogs:  # closed twice
             _dialogs.remove(self)
-        if self.sound_notification_path is not None:
-            if time.time() - self.t0 > SOUND_NOTIFICATION_DURATION:
-                try:
-                    playsound(self.sound_notification_path, block=False)
-                except Exception:  # noqa: BLE001 - notification only
-                    diagnostics.log_message(
-                        "Could not play the sound notification"
-                        f" {self.sound_notification_path}:\n"
-                        f"{traceback.format_exc()}"
-                    )
+        notifications.notify_finished(time.time() - self.t0)
 
 
 class TaskProgressDialog(ProgressDialog):
@@ -884,10 +923,8 @@ class TaskProgressDialog(ProgressDialog):
 class TaskProgress(QtCore.QObject):
     """Progress tracker handed to the function run by :func:`run_task`.
 
-    Implements the ``ProgressDialog`` interface (see
-    ``lib.normalize_progress``), so analysis functions that take a
-    progress dialog, or a progress callback such as ``progress.set_value``,
-    run unchanged on the worker thread. Updates reach the dialog on the
+    Implements the ``lib.Progress`` interface, so analysis functions that
+    take a ``progress`` argument run unchanged on the worker thread. Updates reach the dialog on the
     GUI thread through queued signals, at most every ``INTERVAL`` seconds.
 
     Once the user canceled the task, the next ``set_value`` (or
@@ -1021,70 +1058,6 @@ class TaskProgress(QtCore.QObject):
         self._value = 0
         self._last_emit = time.monotonic()
         self.phase_changed.emit(self.description_base)
-
-    def phase(self, description: str, maximum: int) -> None:
-        """Start a new phase with its own label and maximum.
-
-        Parameters
-        ----------
-        description : str
-            Label of the new phase.
-        maximum : int
-            Maximum of the new phase; 0 shows a busy indicator.
-
-        Raises
-        ------
-        OperationCanceled
-            If the user canceled the task.
-        """
-        self.setMaximum(maximum)
-        self.zero_progress(description)
-
-    def callback(self, description: str, maximum: int) -> Callable:
-        """A progress callback that starts its own phase when first
-        called, for functions that report several steps through
-        separate callbacks.
-
-        Parameters
-        ----------
-        description : str
-            Label of the phase.
-        maximum : int
-            Maximum of the phase.
-
-        Returns
-        -------
-        callback : callable
-            Takes the cumulative progress of the phase, like
-            :meth:`set_value`.
-        """
-        started = False
-
-        def callback(value, *args, **kwargs):
-            nonlocal started
-            if not started:
-                started = True
-                self.phase(description, maximum)
-            self.set_value(value)
-
-        return callback
-
-    def get_iterator(self, start=None, end=None):
-        """Get an iterator that spans the remaining progress.
-
-        Parameters
-        ----------
-        start, end : int, optional
-            First and one-past-last value. None uses the current value
-            and maximum.
-
-        Returns
-        -------
-        iterator : range
-        """
-        start = self._value if start is None else start
-        end = self._maximum if end is None else end
-        return range(start, end)
 
     def init(self, *args, **kwargs) -> None:
         """Do nothing; the dialog is armed by the task."""
@@ -1221,6 +1194,12 @@ def _acquire_input_blocker() -> None:
         app = QtCore.QCoreApplication.instance()
         app.aboutToQuit.connect(_stop_running_tasks)
     _input_blocker.acquire()
+
+
+def gui_busy() -> bool:
+    """Whether a task (``run_task``) or a status step
+    (``run_with_status``) is running, i.e., user input is blocked."""
+    return _input_blocker is not None and _input_blocker._count > 0
 
 
 class Task(QtCore.QObject):
@@ -1486,10 +1465,6 @@ def run_with_status(
     return thread.result
 
 
-# type alias for the progress dialogs
-ProgressType: TypeAlias = ProgressDialog | MockProgress | TqdmProgress
-
-
 class CollapsibleHeader(QtWidgets.QAbstractButton):
     """Clickable header of a ``CollapsibleGroupBox``.
 
@@ -1508,6 +1483,13 @@ class CollapsibleHeader(QtWidgets.QAbstractButton):
         collapsed. Default "".
     parent : QWidget or None, optional
         Parent widget. Default None.
+
+    Attributes
+    ----------
+    checkbox : QCheckBox or None
+        Shown between the chevron and the title for a checkable
+        ``CollapsibleGroupBox``, see ``set_checkbox``. Clicking it does
+        not expand or collapse the contents.
     """
 
     #: Duration of the chevron's turn in ms.
@@ -1525,6 +1507,7 @@ class CollapsibleHeader(QtWidgets.QAbstractButton):
         self.setText(title)
         self.setAccessibleName(title)
         self._summary = summary
+        self.checkbox = None
         # fraction of the turn, 0 when collapsed and 1 when expanded
         self._progress = 0.0
         self._animation = QtCore.QVariantAnimation(self)
@@ -1566,6 +1549,43 @@ class CollapsibleHeader(QtWidgets.QAbstractButton):
         else:
             self._set_progress(end)
 
+    def set_checkbox(self, checkbox: QtWidgets.QCheckBox) -> None:
+        """Show a checkbox between the chevron and the title.
+
+        Parameters
+        ----------
+        checkbox : QCheckBox
+            The checkbox, without text; it is reparented to the header.
+        """
+        self.checkbox = checkbox
+        checkbox.setParent(self)
+        checkbox.setAccessibleName(self.text())
+        checkbox.show()
+        self._place_checkbox()
+        self.updateGeometry()
+        self.update()
+
+    def _place_checkbox(self) -> None:
+        if self.checkbox is None:
+            return
+        size = self.checkbox.sizeHint()
+        self.checkbox.setGeometry(
+            1 + 2 * self._PADDING + 2 * self._CHEVRON,
+            (self.height() - size.height()) // 2,
+            size.width(),
+            size.height(),
+        )
+
+    def _checkbox_width(self) -> int:
+        """Width taken by the checkbox, including the gap to the title."""
+        if self.checkbox is None:
+            return 0
+        return self.checkbox.sizeHint().width() + self._PADDING // 2
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._place_checkbox()
+
     def _set_progress(self, value: float) -> None:
         self._progress = float(value)
         self.update()
@@ -1580,6 +1600,7 @@ class CollapsibleHeader(QtWidgets.QAbstractButton):
         width = (
             3 * self._PADDING
             + 2 * self._CHEVRON
+            + self._checkbox_width()
             + metrics.horizontalAdvance(self.text())
         )
         return QtCore.QSize(width, max(metrics.height() + 12, 28))
@@ -1678,6 +1699,7 @@ class CollapsibleHeader(QtWidgets.QAbstractButton):
 
         # title
         text_left = rect.left() + 2 * self._PADDING + 2 * c
+        text_left += self._checkbox_width()
         text_rect = QtCore.QRectF(
             text_left, rect.top(), rect.right() - text_left, rect.height()
         )
@@ -1721,6 +1743,13 @@ class CollapsibleGroupBox(QtWidgets.QGroupBox):
     Lay out the contents on ``content``, e.g.,
     ``QtWidgets.QGridLayout(box.content)``.
 
+    Like a QGroupBox, the box can be checkable (``setCheckable``): a
+    checkbox in the header then turns what the section controls on or
+    off, and the contents are grayed out while it is unchecked.
+    ``isChecked``, ``setChecked`` and ``toggled`` work as for a
+    QGroupBox. The box keeps the width of its contents while collapsed,
+    so that a dialog does not change its width when a section opens.
+
     Parameters
     ----------
     title : str
@@ -1742,9 +1771,13 @@ class CollapsibleGroupBox(QtWidgets.QGroupBox):
         hidden.
     toggle_button : CollapsibleHeader
         The header.
+    toggled : pyqtSignal
+        Emitted with the new state when a checkable box is checked or
+        unchecked (replaces QGroupBox's signal of the same name).
     """
 
     expandedChanged = QtCore.pyqtSignal(bool)
+    toggled = QtCore.pyqtSignal(bool)
 
     def __init__(
         self,
@@ -1769,6 +1802,16 @@ class CollapsibleGroupBox(QtWidgets.QGroupBox):
         self.setExpanded(expanded)
         self.toggle_button.set_expanded(expanded, animate=False)
 
+    def title(self) -> str:
+        """Title shown in the header."""
+        return self.toggle_button.text()
+
+    def setTitle(self, title: str) -> None:
+        """Change the title shown in the header."""
+        self.toggle_button.setText(title)
+        self.toggle_button.setAccessibleName(title)
+        self.toggle_button.updateGeometry()
+
     def isExpanded(self) -> bool:
         """Whether the contents are shown."""
         return self._expanded
@@ -1782,6 +1825,210 @@ class CollapsibleGroupBox(QtWidgets.QGroupBox):
         self.toggle_button.set_expanded(expanded)
         self.content.setVisible(expanded)
         self.expandedChanged.emit(expanded)
+
+    def isCheckable(self) -> bool:
+        """Whether the header has a checkbox."""
+        return self.toggle_button.checkbox is not None
+
+    def setCheckable(self, checkable: bool) -> None:
+        """Add a checkbox to the header, checked at first; a checkable
+        box cannot be made uncheckable again.
+
+        Parameters
+        ----------
+        checkable : bool
+            Whether the header has a checkbox.
+        """
+        if not checkable or self.isCheckable():
+            return
+        checkbox = QtWidgets.QCheckBox()
+        checkbox.setChecked(True)
+        checkbox.setToolTip(f"Tick to turn the {self.title()} on.")
+        checkbox.toggled.connect(self._on_checkbox_toggled)
+        self.toggle_button.set_checkbox(checkbox)
+
+    def isChecked(self) -> bool:
+        """Whether the header's checkbox is ticked; False if the box is
+        not checkable, as for a QGroupBox."""
+        checkbox = self.toggle_button.checkbox
+        return checkbox is not None and checkbox.isChecked()
+
+    def setChecked(self, checked: bool) -> None:
+        """Tick or untick the header's checkbox; ignored if the box is
+        not checkable."""
+        checkbox = self.toggle_button.checkbox
+        if checkbox is not None:
+            checkbox.setChecked(bool(checked))
+
+    def _on_checkbox_toggled(self, checked: bool) -> None:
+        self.content.setEnabled(checked)
+        self.toggled.emit(checked)
+
+    def _with_content_width(
+        self, hint: QtCore.QSize, content_hint: QtCore.QSize
+    ) -> QtCore.QSize:
+        if not self._expanded:
+            # the layout's margins and the frame's
+            margins = self.layout().contentsMargins()
+            frame = self.contentsMargins()
+            hint.setWidth(
+                max(
+                    hint.width(),
+                    content_hint.width()
+                    + margins.left()
+                    + margins.right()
+                    + frame.left()
+                    + frame.right(),
+                )
+            )
+        return hint
+
+    def sizeHint(self) -> QtCore.QSize:
+        return self._with_content_width(
+            super().sizeHint(), self.content.sizeHint()
+        )
+
+    def minimumSizeHint(self) -> QtCore.QSize:
+        return self._with_content_width(
+            super().minimumSizeHint(), self.content.minimumSizeHint()
+        )
+
+
+#: Key of the user settings sections (``Render``, ``Localize``, ...)
+#: that records which sections of each dialog are expanded, see
+#: ``remember_expanded_sections``.
+EXPANDED_SECTIONS_KEY = "Expanded sections"
+
+
+def remember_expanded_sections(
+    dialog: QtWidgets.QWidget,
+    module: str,
+    name: str,
+) -> None:
+    """Restore which ``CollapsibleGroupBox`` sections of a dialog are
+    expanded from the user settings and save every change there, so
+    that users keep the layout they set up across sessions.
+
+    The states are kept under
+    ``settings[module]["Expanded sections"][name]``, keyed by the
+    section titles. Sections missing there are written with their
+    current (default) state, unless the settings file could not be
+    read. Call this once all sections are built and before the dialog
+    is sized to its contents.
+
+    Parameters
+    ----------
+    dialog : QWidget
+        Dialog whose ``CollapsibleGroupBox`` children are remembered,
+        nested ones included.
+    module : str
+        Section of the settings file, e.g., "Render".
+    name : str
+        Name of the dialog in the settings file, e.g.,
+        "Display Settings".
+    """
+    settings = io.load_user_settings()
+    states = _expanded_section_states(settings, module, name)
+    missing = False
+    for box in dialog.findChildren(CollapsibleGroupBox):
+        title = box.title()
+        stored = states.get(title)
+        if isinstance(stored, bool):
+            box.setExpanded(stored)
+        else:
+            states[title] = box.isExpanded()
+            missing = True
+        box.expandedChanged.connect(
+            lambda expanded, title=title: _save_expanded_section(
+                module, name, title, expanded
+            )
+        )
+    if missing and not io.settings_file_is_broken():
+        io.save_user_settings(settings)
+
+
+def _expanded_section_states(settings: dict, module: str, name: str) -> dict:
+    """The expanded states of the sections of one dialog in
+    ``settings``, created (empty) where missing or not a mapping."""
+    node = settings
+    for key in (module, EXPANDED_SECTIONS_KEY, name):
+        if not isinstance(node.get(key), dict):
+            node[key] = {}
+        node = node[key]
+    return node
+
+
+def _save_expanded_section(
+    module: str, name: str, title: str, expanded: bool
+) -> None:
+    """Write whether one section of a dialog is expanded to the user
+    settings, see ``remember_expanded_sections``."""
+    if io.settings_file_is_broken():
+        return
+    settings = io.load_user_settings()
+    _expanded_section_states(settings, module, name)[title] = expanded
+    io.save_user_settings(settings)
+
+
+def resize_with_sections(
+    dialog: QtWidgets.QWidget, scroll_area: QtWidgets.QScrollArea
+) -> None:
+    """Grow or shrink a dialog whose contents scroll when one of its
+    ``CollapsibleGroupBox`` sections is expanded or collapsed.
+
+    The dialog changes its height by that of the section's contents,
+    so that it keeps any room the user gave it: an expanded section
+    is shown in full up to the height of the screen, and a collapsed
+    one leaves no empty space behind. A dialog the user made too short
+    for its contents keeps its height when a section collapses, unless
+    the remaining contents fit into less.
+
+    Parameters
+    ----------
+    dialog : QWidget
+        Dialog to resize.
+    scroll_area : QScrollArea
+        Holds the dialog's contents, including the sections.
+    """
+
+    def on_expanded_changed(box: CollapsibleGroupBox, expanded: bool):
+        if not dialog.isVisible():
+            return
+        # the layouts settle in the event loop (until then, the height
+        # of contents just shown can be out of date); resize afterwards
+        QtCore.QTimer.singleShot(
+            0, lambda: _resize_by(dialog, scroll_area, box, expanded)
+        )
+
+    for box in dialog.findChildren(CollapsibleGroupBox):
+        box.expandedChanged.connect(
+            lambda expanded, box=box: on_expanded_changed(box, expanded)
+        )
+
+
+def _resize_by(
+    dialog: QtWidgets.QWidget,
+    scroll_area: QtWidgets.QScrollArea,
+    box: CollapsibleGroupBox,
+    expanded: bool,
+) -> None:
+    """Resize ``dialog`` after ``box`` was expanded or collapsed, see
+    ``resize_with_sections``."""
+    if sip.isdeleted(dialog) or not dialog.isVisible():
+        return
+    delta = box.content.sizeHint().height() + box.layout().spacing()
+    height = dialog.height()
+    if expanded:
+        screen = dialog.screen()
+        cap = 1000 if screen is None else screen.size().height() - 200
+        target = min(height + delta, max(cap, height))
+    else:
+        # height at which the remaining contents fit without scrolling
+        frame = height - scroll_area.viewport().height()
+        needed = scroll_area.widget().sizeHint().height() + frame
+        target = max(height - delta, min(height, needed))
+    if target != height:
+        dialog.resize(dialog.width(), max(target, 1))
 
 
 class ScrollableGroupBox(QtWidgets.QGroupBox):
@@ -1875,6 +2122,148 @@ class LogDoubleSpinBox(QtWidgets.QDoubleSpinBox):
                 self.setValue(self.value() * (self._factor**steps))
         elif steps < 0:
             self.setValue(self.value() / (self._factor ** abs(steps)))
+
+
+class WrappingLabel(QtWidgets.QLabel):
+    """Word-wrapped QLabel for file names, which tend to be long and to
+    use ``_``, ``-`` and ``.`` instead of spaces.
+
+    The text may break after these characters, too, and a stretch
+    without any of them that is wider than the label is split where it
+    reaches the edge. A layout inside a scroll area or a fixed-size window does not always give a wrapped
+    label the height its lines need, so the label sets its minimum
+    height for its current width itself.
+
+    Parameters
+    ----------
+    text : str, optional
+        Text to be displayed. Default is an empty string.
+    parent : QWidget, optional
+        Parent widget. Default is None.
+    max_chars : int, optional
+        Wrap after about this many characters (of the font's average
+        width), even if the layout leaves more room. As lines break
+        at spaces and after ``_``, ``-`` and ``.`` where possible, they
+        may be shorter. Default is None, i.e., the label's width is set by the
+        layout alone.
+    """
+
+    def __init__(
+        self,
+        text: str = "",
+        parent: QtWidgets.QWidget | None = None,
+        max_chars: int | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.max_chars = max_chars
+        self.setWordWrap(True)
+        self._fit_max_width()
+        self.setText(text)
+
+    def setText(self, text: str) -> None:
+        """Set the text, allowing breaks after ``_``, ``-`` and ``.``
+        and inside stretches wider than the label (a zero-width space
+        is inserted, which is not displayed).
+
+        Parameters
+        ----------
+        text : str
+            Text to be displayed.
+        """
+        self._text = text
+        self._update_display_text()
+
+    def text(self) -> str:
+        """The text as set, without the inserted zero-width spaces."""
+        return self._text
+
+    def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
+        """Rewrap the text and refit the height at the new width."""
+        super().resizeEvent(event)
+        self._update_display_text()
+
+    def _update_display_text(self) -> None:
+        """Insert a zero-width space after each ``_``, ``-``, ``.`` and
+        whitespace, and inside each stretch between them that does not
+        fit into the label's width, which QLabel's word wrap would
+        otherwise clip."""
+        width = self.contentsRect().width()
+        metrics = self.fontMetrics()
+        pieces = []
+        for piece in re.split(r"(?<=[_\-.\s])", self._text):
+            while width > 0 and metrics.horizontalAdvance(piece) > width:
+                # longest head that fits, at least one character
+                n = 1
+                while (
+                    n < len(piece)
+                    and metrics.horizontalAdvance(piece[: n + 1]) <= width
+                ):
+                    n += 1
+                pieces.append(piece[:n])
+                piece = piece[n:]
+            pieces.append(piece)
+        text = "\u200b".join(p for p in pieces if p)
+        if text != super().text():
+            super().setText(text)
+        self._fit_height()
+
+    def sizeHint(self) -> QtCore.QSize:
+        """Ask for the width of the unwrapped text, up to ``max_chars``
+        characters, rather than QLabel's narrow default for wrapped
+        text, so that a label aligned within its layout cell is not
+        wrapped more than needed."""
+        hint = super().sizeHint()
+        if self.max_chars is None:
+            return hint
+        margins = self.contentsMargins()
+        text_width = max(
+            (
+                self.fontMetrics().horizontalAdvance(line)
+                for line in self._text.splitlines()
+            ),
+            default=0,
+        )
+        width = min(
+            text_width + margins.left() + margins.right(),
+            self.maximumWidth(),
+        )
+        return QtCore.QSize(width, self.heightForWidth(width))
+
+    def minimumSizeHint(self) -> QtCore.QSize:
+        """Allow shrinking to about ten characters: QLabel's minimum is
+        its longest unbreakable stretch, which would keep the label at
+        the width the stretches were split for (see
+        ``_update_display_text``)."""
+        margins = self.contentsMargins()
+        width = min(
+            10 * self.fontMetrics().averageCharWidth()
+            + margins.left()
+            + margins.right(),
+            self.maximumWidth(),
+        )
+        return QtCore.QSize(width, super().minimumSizeHint().height())
+
+    def changeEvent(self, event: QtCore.QEvent) -> None:
+        """Refit the maximum width when the font changes, e.g., with
+        the theme."""
+        super().changeEvent(event)
+        if event.type() == QtCore.QEvent.Type.FontChange:
+            self._fit_max_width()
+
+    def _fit_max_width(self) -> None:
+        """Cap the width at ``max_chars`` characters, if set."""
+        if self.max_chars is not None:
+            char_width = self.fontMetrics().averageCharWidth()
+            margins = self.contentsMargins()
+            self.setMaximumWidth(
+                self.max_chars * char_width + margins.left() + margins.right()
+            )
+
+    def _fit_height(self) -> None:
+        """Set the minimum height to that of the wrapped lines."""
+        height = self.heightForWidth(self.width())
+        if height > 0 and height != self.minimumHeight():
+            self.setMinimumHeight(height)
 
 
 class RangeSlider(QtWidgets.QWidget):
@@ -2317,7 +2706,109 @@ class RangeSlider(QtWidgets.QWidget):
         return f"{value:,.4g}"
 
 
-class DensityContrastSlider(RangeSlider):
+class SpinBoxRangeSlider(RangeSlider):
+    """Two-handle slider bound to a pair of spin boxes.
+
+    The spin boxes stay the single source of truth: the slider writes
+    into them (so their usual signals fire) and is moved back onto their
+    values by ``sync``. The track runs from zero to ``upper()``, raised
+    to the spin box values if needed so that a set value is never cut
+    off.
+
+    Attributes
+    ----------
+    minimum_box, maximum_box : QDoubleSpinBox
+        The spin boxes holding the low and the high value.
+    """
+
+    def __init__(
+        self,
+        minimum_box: QtWidgets.QDoubleSpinBox,
+        maximum_box: QtWidgets.QDoubleSpinBox,
+        upper: Callable[[], float] | None = None,
+        log_scale: bool = False,
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        """Bind the slider to the minimum and maximum spin boxes.
+
+        Parameters
+        ----------
+        minimum_box, maximum_box : QDoubleSpinBox
+            The spin boxes the slider is bound to.
+        upper : callable, optional
+            Returns the top of the track (before it is raised to the
+            spin box values). Called on every ``sync``. Default is None,
+            which sizes the track from the spin box values alone.
+        log_scale : bool, optional
+            If True, the track is logarithmic, see ``setLogScale``.
+            Default is False.
+        parent : QWidget, optional
+            The parent widget. Default is None.
+        """
+        super().__init__(parent)
+        self.minimum_box = minimum_box
+        self.maximum_box = maximum_box
+        self._upper = upper
+        # guards the two-way binding: while the slider writes into the
+        # spin boxes, their signals must not move the slider back
+        self._updating = False
+        self.setLogScale(log_scale)
+        # the spin boxes quantize the values, so the handles must not be
+        # able to collapse onto each other
+        self.setMinimumGap(10 ** -maximum_box.decimals())
+        self.setMaximumHeight(15)
+        self.valuesChanged.connect(self._on_values_changed)
+        minimum_box.valueChanged.connect(self.sync)
+        maximum_box.valueChanged.connect(self.sync)
+        self.sync()
+
+    def sync(self, *args) -> None:
+        """Re-derive the track and move the handles onto the spin box
+        values, without emitting ``valuesChanged``.
+
+        Parameters
+        ----------
+        *args
+            Ignored; lets the method be connected to value signals.
+        """
+        if self._updating:  # the slider itself is driving the change
+            return
+        low = self.minimum_box.value()
+        high = self.maximum_box.value()
+        # never cut off a value the user (or autoscaling) has set
+        upper = self._upper() if self._upper is not None else 0.0
+        upper = max(upper, low, high)
+        if upper <= 0:
+            upper = 1.0
+        self.blockSignals(True)
+        try:
+            self.setRange(0.0, upper)
+            self.setValues(low, high)
+        finally:
+            self.blockSignals(False)
+        self.update()
+
+    def _on_values_changed(self, low: float, high: float) -> None:
+        """Write a dragged handle into its spin box.
+
+        Parameters
+        ----------
+        low, high : float
+            The new handle positions.
+        """
+        self._updating = True
+        try:
+            # only the handle that actually moved, so that a drag
+            # triggers a single update
+            if low != self.minimum_box.value():
+                self.minimum_box.setValue(low)
+            if high != self.maximum_box.value():
+                self.maximum_box.setValue(high)
+        finally:
+            self._updating = False
+
+
+class DensityContrastSlider(SpinBoxRangeSlider):
     """Log-scale two-handle slider bound to a pair of density spin boxes.
 
     Used by the Display Settings dialogs of Picasso: Render and of the
@@ -2358,53 +2849,21 @@ class DensityContrastSlider(RangeSlider):
         parent : QWidget, optional
             The parent widget. Default is None.
         """
-        super().__init__(parent)
-        self.minimum_box = minimum_box
-        self.maximum_box = maximum_box
         self._image = image
-        # guards the two-way binding: while the slider writes into the
-        # spin boxes, their signals must not move the slider back
-        self._updating = False
         # the last image the track was sized from, and its maximum, so
         # that dragging does not scan the image on every mouse move
         self._last_image = None
         self._last_upper = 0.0
-        self.setLogScale(True)
+        # see release_image
+        self._keep_upper = False
+        super().__init__(
+            minimum_box,
+            maximum_box,
+            upper=self._image_maximum,
+            log_scale=True,
+            parent=parent,
+        )
         self.setValueLabels("Min. density", "Max. density")
-        # the spin boxes quantize the values, so the handles must not be
-        # able to collapse onto each other
-        self.setMinimumGap(10 ** -maximum_box.decimals())
-        self.setMaximumHeight(15)
-        self.valuesChanged.connect(self._on_values_changed)
-        minimum_box.valueChanged.connect(self.sync)
-        maximum_box.valueChanged.connect(self.sync)
-        self.sync()
-
-    def sync(self, *args) -> None:
-        """Re-derive the track from the rendered image and move the
-        handles onto the spin box values, without emitting
-        ``valuesChanged``.
-
-        Parameters
-        ----------
-        *args
-            Ignored; lets the method be connected to value signals.
-        """
-        if self._updating:  # the slider itself is driving the change
-            return
-        low = self.minimum_box.value()
-        high = self.maximum_box.value()
-        # never cut off a value the user (or autoscaling) has set
-        upper = max(self._image_maximum(), low, high)
-        if upper <= 0:
-            upper = 1.0
-        self.blockSignals(True)
-        try:
-            self.setRange(0.0, upper)
-            self.setValues(low, high)
-        finally:
-            self.blockSignals(False)
-        self.update()
 
     def _image_maximum(self) -> float:
         """The brightest pixel of the rendered image, or 0 if there is
@@ -2413,30 +2872,19 @@ class DensityContrastSlider(RangeSlider):
             return 0.0
         image = self._image()
         if image is None or not getattr(image, "size", 0):
-            return 0.0
+            return self._last_upper if self._keep_upper else 0.0
         if image is not self._last_image:
             self._last_image = image
             self._last_upper = float(image.max())
+            self._keep_upper = False
         return self._last_upper
 
-    def _on_values_changed(self, low: float, high: float) -> None:
-        """Write a dragged handle into its spin box, which re-renders.
-
-        Parameters
-        ----------
-        low, high : float
-            The new handle positions.
-        """
-        self._updating = True
-        try:
-            # only the handle that actually moved, so that a drag
-            # triggers a single re-render
-            if low != self.minimum_box.value():
-                self.minimum_box.setValue(low)
-            if high != self.maximum_box.value():
-                self.maximum_box.setValue(high)
-        finally:
-            self._updating = False
+    def release_image(self) -> None:
+        """Let go of the last image, so that its memory can be freed
+        once its owner drops it too (see ``picasso.gui.idle``). Its
+        maximum still sizes the track until the next image."""
+        self._last_image = None
+        self._keep_upper = True
 
 
 class GenericPlotWindow(QtWidgets.QTabWidget):
@@ -2686,6 +3134,146 @@ class TripleClick:
         )
 
 
+class ZoomRectangle(QtCore.QObject):
+    """The zoom-in rectangle dragged over a view with the left mouse
+    button, shared by Render's main and 3D windows.
+
+    The rectangle can be dragged from its start in any direction.
+    Pressing another mouse button (e.g., the right one) or Esc while
+    dragging cancels it; the releases of the buttons involved are then
+    swallowed (see ``swallows_release``) so they do not act as clicks
+    of the active tool, e.g., add a pick.
+
+    A view calls ``press`` first in its ``mousePressEvent``,
+    ``swallows_release`` first in its ``mouseReleaseEvent``, ``start``,
+    ``move`` and ``finish`` to drag the rectangle and ``drop`` to end
+    one whose release was lost.
+
+    Parameters
+    ----------
+    parent : QtWidgets.QWidget
+        The view the rectangle is drawn over.
+
+    Attributes
+    ----------
+    band : QtWidgets.QRubberBand
+        The rectangle's outline, shown while dragging.
+    """
+
+    #: a smaller rectangle (display pixels, either side) comes from a
+    #: stray click rather than a drag and zooms nowhere
+    MIN_SIZE = 5
+
+    def __init__(self, parent: QtWidgets.QWidget) -> None:
+        super().__init__(parent)
+        self.band = QtWidgets.QRubberBand(
+            QtWidgets.QRubberBand.Shape.Rectangle, parent
+        )
+        self.band.setStyleSheet("selection-background-color: white")
+        self._origin = QtCore.QPoint()
+        # buttons whose next release belongs to a canceled rectangle
+        self._swallowed = set()
+
+    @property
+    def active(self) -> bool:
+        """True while the rectangle is being dragged."""
+        return self.band.isVisible()
+
+    def start(self, pos: QtCore.QPoint) -> None:
+        """Begin dragging the rectangle at ``pos`` (widget pixels);
+        nothing happens if one is being dragged already."""
+        if self.active:
+            return
+        self._origin = QtCore.QPoint(pos)
+        self.band.setGeometry(QtCore.QRect(self._origin, QtCore.QSize()))
+        self.band.show()
+        app = QtWidgets.QApplication.instance()
+        if app is not None:  # Esc cancels, whichever widget has focus
+            app.installEventFilter(self)
+
+    def move(self, pos: QtCore.QPoint) -> None:
+        """Stretch the rectangle from its start to ``pos``."""
+        self.band.setGeometry(self._rect(pos))
+
+    def finish(self, pos: QtCore.QPoint) -> QtCore.QRect | None:
+        """End the drag at ``pos`` and return the rectangle (widget
+        pixels; its corners ``topLeft`` and ``bottomRight`` are the
+        start and the end of the drag), or None if it is smaller than
+        ``MIN_SIZE``."""
+        rect = self._rect(pos)
+        self._hide()
+        width = rect.right() - rect.left()
+        height = rect.bottom() - rect.top()
+        if width < self.MIN_SIZE or height < self.MIN_SIZE:
+            return None
+        return rect
+
+    def drop(self) -> None:
+        """End the drag without zooming, e.g., if its release was
+        lost."""
+        self._hide()
+
+    def press(self, button: QtCore.Qt.MouseButton) -> bool:
+        """Handle a mouse press; return True if it canceled the
+        rectangle (any button but the left one, while dragging), in
+        which case the view ignores the press otherwise."""
+        # a new press of a button means its swallowed release was lost
+        self._swallowed.discard(button)
+        if self.active and button != QtCore.Qt.MouseButton.LeftButton:
+            self._cancel(button)
+            return True
+        return False
+
+    def swallows_release(self, button: QtCore.Qt.MouseButton) -> bool:
+        """Return True if the release of ``button`` belongs to a
+        canceled rectangle; the view then ignores it."""
+        if button in self._swallowed:
+            self._swallowed.discard(button)
+            return True
+        return False
+
+    def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        """Cancel the rectangle on Esc; while dragging, Esc triggers no
+        shortcut (e.g., closing a dialog)."""
+        Type = QtCore.QEvent.Type
+        if (
+            event.type() in (Type.KeyPress, Type.ShortcutOverride)
+            and event.key() == QtCore.Qt.Key.Key_Escape
+            and self.active
+        ):
+            if event.type() == Type.ShortcutOverride:
+                event.accept()  # deliver Esc as a key press, below
+                return False
+            self._cancel()
+            return True
+        return False
+
+    def _cancel(self, button: QtCore.Qt.MouseButton | None = None) -> None:
+        """Hide the rectangle and swallow the releases of the left
+        button and, if given, ``button``."""
+        self._hide()
+        self._swallowed.add(QtCore.Qt.MouseButton.LeftButton)
+        if button is not None:
+            self._swallowed.add(button)
+
+    def _hide(self) -> None:
+        self.band.hide()
+        app = QtWidgets.QApplication.instance()
+        if app is not None:
+            app.removeEventFilter(self)
+
+    def _rect(self, pos: QtCore.QPoint) -> QtCore.QRect:
+        """The rectangle spanned by the start and ``pos``, whichever
+        way it was dragged."""
+        # not QRect.normalized, which shifts a reversed rectangle by a
+        # pixel
+        x0, y0, x1, y1 = self._origin.x(), self._origin.y(), pos.x(), pos.y()
+        return QtCore.QRect(
+            QtCore.QPoint(min(x0, x1), min(y0, y1)),
+            QtCore.QPoint(max(x0, x1), max(y0, y1)),
+        )
+
+
 def confirm_restore_defaults(
     parent: QtWidgets.QWidget | None = None,
     what: str = "all settings in this dialog",
@@ -2862,6 +3450,138 @@ def adjust_widget_size(
     widget.resize(intended_width, intended_height)
 
 
+def _confirm_overwrite(parent: QtWidgets.QWidget | None, path: str) -> bool:
+    """Ask whether to overwrite the existing file or folder ``path``."""
+    box = QtWidgets.QMessageBox(parent)
+    box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
+    box.setWindowTitle("File or folder already exists")
+    box.setText(
+        f"The path '{path}' already exists.\nDo you wish to overwrite it?"
+    )
+    box.setStandardButtons(
+        QtWidgets.QMessageBox.StandardButton.Yes
+        | QtWidgets.QMessageBox.StandardButton.No
+    )
+    return box.exec() == QtWidgets.QMessageBox.StandardButton.Yes
+
+
+#: What ``picasso.io``'s loaders raise for a file that cannot be opened:
+#: a missing file or metadata (``io.NoMetadataFileError``), a missing
+#: dataset (KeyError) and a file of the wrong kind or format
+#: (``io.FileFormatError`` and other ValueErrors), see
+#: ``show_load_error``.
+FILE_LOAD_ERRORS = (OSError, KeyError, ValueError)
+
+
+def show_load_error(
+    parent: QtWidgets.QWidget | None, path: str, error: BaseException
+) -> None:
+    """Tell the user why a file could not be opened.
+
+    The I/O functions of ``picasso.io`` raise errors whose messages say
+    what is wrong and show no dialogs themselves; a window catches
+    ``FILE_LOAD_ERRORS`` around a loader and passes the error here.
+
+    Parameters
+    ----------
+    parent : QWidget or None
+        The window the message box belongs to.
+    path : str
+        The file that could not be opened.
+    error : BaseException
+        The error raised by the loader.
+    """
+    # a KeyError's str() quotes its message
+    if isinstance(error, KeyError) and error.args:
+        reason = str(error.args[0])
+    else:
+        reason = str(error)
+    QtWidgets.QMessageBox.critical(
+        parent,
+        "Could not open the file",
+        f"{os.path.basename(path)} could not be opened:\n\n{reason}",
+    )
+
+
+def ask_pixelsize(
+    parent: QtWidgets.QWidget | None, path: str, default: float = 130.0
+) -> float | None:
+    """Ask for the camera pixel size that converts a file written before
+    Picasso 1.0 (lengths in camera pixels) to nm.
+
+    Parameters
+    ----------
+    parent : QWidget or None
+        The window the dialog belongs to.
+    path : str
+        The file, named in the dialog.
+    default : float, optional
+        The pixel size (nm) the dialog starts with. Default is 130.
+
+    Returns
+    -------
+    pixelsize : float or None
+        The camera pixel size in nm, or None if the dialog was canceled.
+    """
+    value, ok = QtWidgets.QInputDialog.getDouble(
+        parent,
+        "Camera pixel size",
+        f"{os.path.basename(path)} was written before Picasso 1.0, with "
+        "lengths in camera pixels, and does not record the camera pixel "
+        "size.\nEnter the camera pixel size (nm) to convert it to nm:",
+        default,
+        0.01,
+        1e6,
+        2,
+    )
+    return float(value) if ok else None
+
+
+def load_or_ask_pixelsize(
+    parent: QtWidgets.QWidget | None,
+    loader: Callable,
+    path: str,
+    *args,
+    **kwargs,
+):
+    """Load a file, asking for the camera pixel size when the file was
+    written before Picasso 1.0 and does not record it.
+
+    Parameters
+    ----------
+    parent : QWidget or None
+        The window the pixel size dialog belongs to.
+    loader : callable
+        A loader of ``picasso.io`` taking ``(path, ..., pixelsize=None)``
+        and raising ``io.MissingPixelsizeError`` without the pixel size,
+        e.g., ``io.load_locs``, ``io.load_picks`` or ``io.load_drift``.
+    path : str
+        The file to load.
+    *args, **kwargs
+        Passed on to ``loader``.
+
+    Returns
+    -------
+    result
+        What ``loader`` returns, or None if the pixel size dialog was
+        canceled.
+
+    Raises
+    ------
+    FILE_LOAD_ERRORS
+        As ``loader`` does for any other problem (see
+        ``show_load_error``).
+    """
+    try:
+        return loader(path, *args, **kwargs)
+    except io.MissingPixelsizeError:
+        pixelsize = ask_pixelsize(parent, path)
+        if pixelsize is None:
+            return None
+        kwargs["pixelsize"] = pixelsize
+        return loader(path, *args, **kwargs)
+
+
 def get_save_filename_ext_dialog(
     parent: QtWidgets.QWidget,
     caption: str = "",
@@ -2907,13 +3627,81 @@ def get_save_filename_ext_dialog(
     # check for the existence of files with other extensions and ask the
     # user if they want to overwrite them
     if selected_path and check_ext:
-        paths_available = is_path_available(
-            selected_path, check_ext=check_ext, parent=parent
-        )
-        if not all(paths_available):
-            return "", ""
+        extensions = [check_ext] if isinstance(check_ext, str) else check_ext
+        available = is_path_available(selected_path, check_ext=extensions)
+        base = os.path.splitext(selected_path)[0]
+        for extension, free in zip(extensions, available):
+            if not free and not _confirm_overwrite(parent, base + extension):
+                return "", ""
     # if the user selected a .yml file, change the extension to .yaml
     # for consistency
     if selected_path.endswith(".yml"):
         selected_path = selected_path[:-4] + ".yaml"
     return selected_path, selected_filter
+
+
+def add_sound_notifications_menu(menu: QtWidgets.QMenu) -> QtWidgets.QMenu:
+    """Add the ``Sound notifications`` submenu to a menu.
+
+    The submenu lists "None" and the sound files in the notification
+    sounds directory, with the selected one checked; choosing one saves
+    it (see :mod:`picasso.notifications`) and plays it as a preview.
+    The entries are updated each time the submenu opens, so sounds
+    added to the folder, or a choice made in another window, show up
+    without a restart. Entries are never deleted (a toolbar may hold
+    them); a sound removed from the folder is disabled instead.
+
+    Parameters
+    ----------
+    menu : QtWidgets.QMenu
+        The menu (usually ``File``) to add the submenu to.
+
+    Returns
+    -------
+    sounds_menu : QtWidgets.QMenu
+        The added submenu.
+    """
+    # imported here: picasso.gui.theme imports picasso.lib
+    from picasso.gui import theme
+
+    sounds_menu = menu.addMenu("Sound notifications")
+    sounds_menu.setIcon(theme.icon("sound"))
+    group = QtGui.QActionGroup(sounds_menu)
+    actions = {}  # file name (None for no sound) -> action
+
+    def select(action: QtGui.QAction) -> None:
+        filename = action.data()
+        notifications.select_sound(filename)
+        notifications.play(filename)
+
+    def update() -> None:
+        available = notifications.available_sounds()
+        for filename in [None] + available:
+            if filename in actions:
+                continue
+            if filename is None:
+                name = "None"
+            else:
+                name = os.path.splitext(filename)[0].replace("_", " ")
+            action = QtGui.QAction(name, sounds_menu, checkable=True)
+            action.setData(filename)
+            group.addAction(action)
+            sounds_menu.insertAction(separator, action)
+            actions[filename] = action
+        selected = notifications.selected_sound()
+        for filename, action in actions.items():
+            action.setEnabled(filename is None or filename in available)
+            action.setChecked(filename == selected)
+
+    separator = sounds_menu.addSeparator()
+    open_action = sounds_menu.addAction("Open notification sounds folder...")
+    open_action.setIcon(theme.icon("open"))
+    open_action.triggered.connect(
+        lambda: QtGui.QDesktopServices.openUrl(
+            QtCore.QUrl.fromLocalFile(notifications.sounds_directory())
+        )
+    )
+    group.triggered.connect(select)
+    sounds_menu.aboutToShow.connect(update)
+    update()
+    return sounds_menu

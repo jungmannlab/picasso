@@ -23,6 +23,7 @@ import pytest
 from matplotlib.colors import to_hex
 from matplotlib.figure import Figure
 from matplotlib.patches import StepPatch
+from PyQt6 import sip
 
 from picasso import io, lib
 from picasso.gui import filter as gui_filter
@@ -40,8 +41,9 @@ def fresh_hub(monkeypatch):
     monkeypatch.setattr(plot_style, "_hub", None)
     monkeypatch.setattr(plot_style, "_dialog", None)
     yield
-    if plot_style._dialog is not None:
-        plot_style._dialog.close()
+    dialog = plot_style._dialog
+    if dialog is not None and not sip.isdeleted(dialog):
+        dialog.close()
 
 
 @pytest.fixture

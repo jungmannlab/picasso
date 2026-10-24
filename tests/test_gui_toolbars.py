@@ -154,14 +154,14 @@ def _locs(n: int = 200) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "frame": rng.integers(0, 100, n).astype(np.uint32),
-            "x": rng.uniform(0, 32, n).astype(np.float32),
-            "y": rng.uniform(0, 32, n).astype(np.float32),
+            "x": rng.uniform(0, 32 * 130.0, n).astype(np.float32),
+            "y": rng.uniform(0, 32 * 130.0, n).astype(np.float32),
             "photons": np.full(n, 1000, np.float32),
-            "sx": np.ones(n, np.float32),
-            "sy": np.ones(n, np.float32),
+            "sx": np.full(n, 130.0, np.float32),
+            "sy": np.full(n, 130.0, np.float32),
             "bg": np.full(n, 10, np.float32),
-            "lpx": np.full(n, 0.1, np.float32),
-            "lpy": np.full(n, 0.1, np.float32),
+            "lpx": np.full(n, 13.0, np.float32),
+            "lpy": np.full(n, 13.0, np.float32),
         }
     )
 
@@ -263,6 +263,7 @@ def test_filter_toolbar(qt_offscreen):
             "2D histogram",
             "Subclustering",
             "Filter",
+            "Expression",
             "From metadata",
             "Plot settings",
         ]
@@ -391,6 +392,32 @@ def test_3d_window_icons_and_navigation_shortcuts(qt_offscreen):
         assert nav["Left"].isEnabled()
         rot.hide()
         assert not nav["Left"].isEnabled()
+    finally:
+        rot.view_rot.stop_render_worker()
+        window.view.stop_render_worker()
+        window.close()
+
+
+def test_3d_window_toolbar(qt_offscreen):
+    """The 3D window has its own toolbar; the Rotate tool, active when
+    the window opens, shows checked."""
+    window = gui_render.Window(plugins_loaded=True)
+    rot = window.window_rot
+    try:
+        toolbar = rot.toolbar
+        assert toolbar.objectName() == "Render 3D toolbar"
+        buttons = {
+            action.iconText(): action
+            for action in toolbar.actions()
+            if not action.isSeparator()
+        }
+        assert {"Save", "Rotate", "Measure", "XY", "XZ", "YZ"} <= set(buttons)
+        assert all(not a.icon().isNull() for a in buttons.values())
+        assert buttons["Rotate"].isChecked()
+        assert rot.view_rot._mode == "Rotate"
+        buttons["Measure"].trigger()
+        assert rot.view_rot._mode == "Measure"
+        assert not buttons["Rotate"].isChecked()
     finally:
         rot.view_rot.stop_render_worker()
         window.view.stop_render_worker()

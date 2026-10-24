@@ -4,8 +4,8 @@ Provides:
 - ``synthetic_spot_factory``: callable that builds a single Gaussian spot
   with known ground-truth parameters (with or without Poisson noise).
 - ``synthetic_spots``: a batch of Gaussian spots with their ground truth,
-  used by gausslq / gaussmle tests to assert numerical correctness rather
-  than just shapes.
+  used by the Gaussian fitting tests to assert numerical correctness
+  rather than just shapes.
 - ``locs_data`` / ``locs`` / ``info`` / ``movie_data`` / ``movie`` /
   ``movie_info``: shared loaders for the bundled test data, so individual
   test files don't reload the same files.
@@ -18,20 +18,46 @@ Provides:
 
 from __future__ import annotations
 
+import atexit
 import os
+import shutil
 import sys
+import tempfile
 
-import numpy as np
-import pandas as pd
-import pytest
+# The suite runs in a home folder of its own, so that nothing reaches the
+# developer's ~/.picasso (settings, camera config, plugins, database): reading
+# a setting saves its default, and the in-process patches of
+# ``isolated_user_settings`` below do not reach subprocesses or the spawned
+# workers of a multiprocessing pool, which inherit the environment instead.
+# Set before Picasso is imported, which reads the camera config.
+_TEST_HOME = tempfile.mkdtemp(prefix="picasso-test-home-")
+atexit.register(shutil.rmtree, _TEST_HOME, ignore_errors=True)
+os.environ["HOME"] = os.environ["USERPROFILE"] = _TEST_HOME
 
-from picasso import io, transforms
+# The tests name their data relative to the repository root
+# ("./tests/data/..."), so run from there whichever folder pytest was started
+# in (``cd tests && pytest`` would otherwise find none of it).
+os.chdir(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import numpy as np  # noqa: E402
+import pandas as pd  # noqa: E402
+import pytest  # noqa: E402
+
+from picasso import io, transforms  # noqa: E402
 
 # Qt must be told to run without a display before the first QApplication is
 # built, and the environment is read once at that point - hence a module-level
 # default rather than a fixture. ``setdefault`` keeps an explicit
 # ``QT_QPA_PLATFORM=xcb pytest`` (to watch the widgets) working.
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+# On Windows the offscreen platform finds no fonts of its own and draws every
+# character as an empty box of the same width, which throws off any test that
+# measures or paints text; point it at the system fonts.
+if sys.platform == "win32":
+    os.environ.setdefault(
+        "QT_QPA_FONTDIR",
+        os.path.join(os.environ.get("WINDIR", r"C:\Windows"), "Fonts"),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +134,104 @@ def _no_unhandled_exceptions():
 
 
 # ---------------------------------------------------------------------------
+# Modal dialogs
+# ---------------------------------------------------------------------------
+
+# A modal dialog waits for a click, and under the offscreen platform nothing
+# ever clicks: a ``QMessageBox.warning`` on a path the test did not expect (a
+# fit that failed, say) blocked the run forever, with no output and at 0 % CPU
+# - not even pytest-timeout's default signal method gets through, as the wait
+# is in Qt's C++ event loop. Every blocking entry point therefore returns
+# at once, as if the user had canceled, and the test that reached one fails
+# naming the dialog. A test that expects a dialog stubs it with
+# ``monkeypatch`` as before, which replaces the guard for that test only.
+_blocked_dialogs: list[str] = []
+
+
+def _install_dialog_guard() -> None:
+    """Make every modal dialog of Qt return at once and be recorded."""
+    try:
+        from PyQt6 import QtCore, QtGui, QtWidgets
+    except ImportError:  # pragma: no cover - Qt is optional here
+        return
+
+    def blocked(what, result):
+        _blocked_dialogs.append(what)
+        _write_crash_log(f"\n=== modal dialog not stubbed: {what}\n")
+        return result
+
+    def guard_static(cls, name, result):
+        def guard(*args, **kwargs):
+            texts = tuple(a for a in args if isinstance(a, str))
+            return blocked(f"{cls.__name__}.{name}{texts!r}", result())
+
+        setattr(cls, name, staticmethod(guard))
+
+    def guard_exec(self, *args, **kwargs):
+        what = f"{type(self).__name__}.exec()"
+        if isinstance(self, QtWidgets.QWidget):
+            what += f" {self.windowTitle()!r}"
+        if isinstance(self, QtWidgets.QMessageBox):
+            what += f": {self.text()!r}"
+        # QDialog.DialogCode.Rejected; None for a QMenu (no action chosen)
+        return blocked(what, None if isinstance(self, QtWidgets.QMenu) else 0)
+
+    no_button = QtWidgets.QMessageBox.StandardButton.NoButton
+    for name in ("warning", "critical", "information", "question"):
+        guard_static(QtWidgets.QMessageBox, name, lambda: no_button)
+    for name in ("about", "aboutQt"):
+        guard_static(QtWidgets.QMessageBox, name, lambda: None)
+    for name in ("getOpenFileName", "getSaveFileName"):
+        guard_static(QtWidgets.QFileDialog, name, lambda: ("", ""))
+    guard_static(QtWidgets.QFileDialog, "getOpenFileNames", lambda: ([], ""))
+    guard_static(QtWidgets.QFileDialog, "getExistingDirectory", lambda: "")
+    for name in ("getOpenFileUrl", "getSaveFileUrl"):
+        guard_static(QtWidgets.QFileDialog, name, lambda: (QtCore.QUrl(), ""))
+    for name, value in (
+        ("getInt", 0),
+        ("getDouble", 0.0),
+        ("getText", ""),
+        ("getMultiLineText", ""),
+        ("getItem", ""),
+    ):
+        guard_static(
+            QtWidgets.QInputDialog, name, lambda value=value: (value, False)
+        )
+    guard_static(QtWidgets.QColorDialog, "getColor", QtGui.QColor)
+    guard_static(
+        QtWidgets.QFontDialog, "getFont", lambda: (QtGui.QFont(), False)
+    )
+    # ``exec`` of every dialog class Qt ships (QMessageBox and QFileDialog
+    # define their own), and so of Picasso's dialogs, which inherit it
+    for cls in vars(QtWidgets).values():
+        if (
+            isinstance(cls, type)
+            and issubclass(cls, (QtWidgets.QDialog, QtWidgets.QMenu))
+            and "exec" in vars(cls)
+        ):
+            cls.exec = guard_exec
+
+
+_install_dialog_guard()
+
+
+@pytest.fixture(autouse=True)
+def _no_modal_dialogs():
+    """Fail a test that opened a modal dialog it did not stub."""
+    del _blocked_dialogs[:]
+    yield
+    if _blocked_dialogs:
+        report = "\n".join(_blocked_dialogs)
+        del _blocked_dialogs[:]
+        pytest.fail(
+            "a modal dialog was opened that the test did not stub; offscreen, "
+            "nothing would ever close it (stub it with monkeypatch if it is "
+            f"expected):\n{report}",
+            pytrace=False,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Qt
 # ---------------------------------------------------------------------------
 
@@ -164,11 +288,43 @@ def qt_offscreen(qapp):
     """
     before = set(qapp.topLevelWidgets())
     yield qapp
+    from picasso.gui import toolbars
+
     for widget in qapp.topLevelWidgets():
         if widget not in before:
             widget.close()
+            toolbars.clear_toolbars(widget)
             widget.deleteLater()
     qapp.processEvents()
+    _delete_now()
+
+
+def _delete_now() -> None:
+    """Delete the widgets scheduled with ``deleteLater`` now.
+
+    ``processEvents`` does not delete them; left alone, they are deleted
+    by the next event loop that runs, e.g., the nested one of a status
+    dialog in a later test, while that test's own widgets receive events
+    - which crashed the interpreter (in ``QToolBar::event``) when the
+    whole suite ran in one process."""
+    from PyQt6 import QtCore
+
+    QtCore.QCoreApplication.sendPostedEvents(
+        None, QtCore.QEvent.Type.DeferredDelete.value
+    )
+
+
+@pytest.fixture(autouse=True)
+def delete_scheduled_widgets():
+    """``_delete_now`` after every test that started Qt, also for the
+    windows that fixtures other than ``qt_offscreen`` built."""
+    yield
+    if "PyQt6.QtWidgets" not in sys.modules:
+        return
+    from PyQt6 import QtWidgets
+
+    if QtWidgets.QApplication.instance() is not None:
+        _delete_now()
 
 
 @pytest.fixture
@@ -195,6 +351,9 @@ def restore_theme(qapp):
         qapp.styleHints().colorSchemeChanged.disconnect(
             theme._on_color_scheme_changed
         )
+        for watcher in qapp.findChildren(theme._ContrastWatcher):
+            qapp.removeEventFilter(watcher)
+            watcher.deleteLater()
     theme._state.clear()
     theme._state.update(state)
     qapp.setStyleSheet(stylesheet)
@@ -307,9 +466,7 @@ def _make_gaussian_spot(
     """Build a noiseless 2D Gaussian spot on a (box, box) grid.
 
     The center of the box is at index ``box // 2`` so ``x0 = y0 = 0``
-    places the spot exactly in the middle pixel — matching the convention
-    used by ``picasso.gausslq.fit_spot`` (which returns offsets from the
-    box center).
+    places the spot exactly in the middle pixel.
     """
     half = box // 2
     grid = np.arange(-half, half + 1, dtype=np.float64)
@@ -469,8 +626,9 @@ def make_rotated_gaussian_spot(
 ) -> np.ndarray:
     """Point-sampled rotated elliptical Gaussian spot.
 
-    Matches the model both ``gausslq._compute_model_rotated`` (CPU) and
-    Gpufit's ``GAUSS_2D_ROTATED`` (GPU) optimize::
+    Matches the rotated model of ``picasso.fitting.gaussfit`` (CPU) and
+    Gpufit's ``GAUSS_2D_ROTATED`` (GPU), with the photon count in place of
+    their peak height::
 
         mu = photons / (2 pi sx sy) * exp(-0.5 (u^2/sx^2 + w^2/sy^2)) + bg
         u = dx cos(a) - dy sin(a),  w = dx sin(a) + dy cos(a)
@@ -537,7 +695,7 @@ def synthetic_spots_rotated():
 
 # ---------------------------------------------------------------------------
 # Convenience: identifications + spots extracted from the bundled movie
-# (used by both test_localize and test_gausslq / test_gaussmle).
+# (used by test_localize and the Gaussian fitting tests).
 # ---------------------------------------------------------------------------
 
 
@@ -550,8 +708,10 @@ MIN_NG = 5000
 PIXELSIZE = 130  # camera pixel size, nm
 
 # Astigmatism 3D calibration shared by test_postprocess / test_zfit /
-# test_localize. Tests that mutate it should pass ``dict(CALIB_3D)``.
-CALIB_3D = {
+# test_localize, spot widths in nm (the Picasso 1.0 format; the
+# coefficients were recorded in camera pixels of 130 nm). Tests that
+# mutate it should pass ``dict(CALIB_3D)``.
+_CALIB_3D_PX = {
     "X Coefficients": [
         -1.6680708772714857e-18,
         2.4038209829154137e-15,
@@ -570,9 +730,14 @@ CALIB_3D = {
         -0.001646865504353452,
         1.2257249554338714,
     ],
+}
+CALIB_3D = {
+    "X Coefficients": [c * PIXELSIZE for c in _CALIB_3D_PX["X Coefficients"]],
+    "Y Coefficients": [c * PIXELSIZE for c in _CALIB_3D_PX["Y Coefficients"]],
     "Step size in nm": 5.0,
     "Number of frames": 201,
     "Magnification factor": 0.79,
+    "picasso_format": "1.0",
 }
 
 
@@ -581,7 +746,10 @@ def real_identifications(movie):
     """Identifications from the bundled .raw — shared across test files."""
     from picasso import localize
 
-    return localize.identify(movie, MIN_NG, BOX)[0]
+    parameters = localize.IdentificationParameters(
+        method=localize.NetGradient(MIN_NG), box=BOX
+    )
+    return localize.identify(movie, parameters=parameters)[0]
 
 
 @pytest.fixture(scope="session")
@@ -589,7 +757,9 @@ def real_spots(movie, real_identifications):
     """Extracted spots from the bundled .raw — shared across test files."""
     from picasso import localize
 
-    return localize.get_spots(movie, real_identifications, BOX, CAMERA_INFO)
+    return localize.get_spots(
+        movie, real_identifications, box=BOX, camera_info=CAMERA_INFO
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -630,7 +800,6 @@ class _MemmapPicassoMovie(io.AbstractPicassoMovie):
     def camera_parameters(self, config):
         return {
             "gain": [1],
-            "qe": [1],
             "wavelength": [0],
             "cam_index": 0,
             "camera": "None",
@@ -751,13 +920,31 @@ def isolated_user_settings(tmp_path, monkeypatch):
     """Every test reads and writes its own, initially absent, settings
     file: the GUIs persist defaults on start and save on close, and the
     developer's ``~/.picasso/settings.yaml`` must never be touched by
-    the suite. Tests that need a specific file patch the same name."""
+    the suite. Tests that need a specific file patch the same name.
+    Neither does the developer's camera configuration report an error
+    (a broken one would stop every Localize window at a message box)."""
+    import picasso
     from picasso import io
 
     monkeypatch.setattr(
         io, "_user_settings_filename", lambda: str(tmp_path / "settings.yaml")
     )
     monkeypatch.setattr(io, "_settings_load_error", None)
+    monkeypatch.setattr(io, "_settings_load_error_dismissed", False)
+    monkeypatch.setattr(picasso, "CONFIG_LOAD_ERROR", None)
+
+
+@pytest.fixture(autouse=True)
+def no_update_check(request, monkeypatch):
+    """No test asks GitHub for the latest release: the command line and
+    the GUIs check for updates when they start, and with the fresh
+    settings file of every test a check is due. ``tests/test_updater.py``
+    tests the checks themselves."""
+    if request.node.fspath.basename == "test_updater.py":
+        return
+    from picasso import updater
+
+    monkeypatch.setattr(updater, "update_check_due", lambda: False)
 
 
 @pytest.fixture(autouse=True)

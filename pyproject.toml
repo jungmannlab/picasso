@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=45,<81", "wheel"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -34,49 +34,46 @@ dependencies = [
     "h5py>=3.15.1,<4",
     "numba>=0.62.1,<1",
     "scipy>=1.15.3,<2",
-    "pandas>=2.3.3,<3",
+    "pandas>=2.3.3,<4",
     "tables>=3.10.1,<4",
     "pyyaml>=6.0.3,<7",
-    "scikit-learn>=1.5.0,<1.8",  # HDBSCAN with cluster_selection_epsilon > 0
+    "scikit-learn>=1.5.0,<2",
     "tqdm>=4.67.1,<5",
-    "streamlit>=1.50.0,<2",
     "nd2>=0.10.4,<1",
-    "sqlalchemy>=2.0.44,<3",
-    "plotly-express>=0.4.1,<1",
-    "watchdog>=6.0.0,<7",
+    "dask>=2024.8.0",  # calendar versions, no major release to stop at
+    "statsmodels>=0.14.3,<1",  # NumPy 2 (0.14.2 fails on Apple Silicon)
+    "requests>=2.31.0,<3",
     "psutil>=7.1.1,<8",
     "playsound3>=3.2.8,<4",
     "imageio>=2.37.0,<3",
     "imageio-ffmpeg>=0.6.0,<1",
-    "tifffile>=2024.7.24,<2027",
+    "tifffile>=2024.7.24",
+    "wgpu>=0.32,<0.33",
     "PyImarisWriter==0.7.0; sys_platform=='win32'",
-    "hdf5plugin; sys_platform=='win32'"
+    "hdf5plugin"
 ]
 
 [project.optional-dependencies]
-# GPU rendering in Render (WebGPU via wgpu: Metal, Direct3D 12 or
-# Vulkan; any vendor). Pinned to a minor version: the shader and API
-# surface are validated against it.
-wgpu = [
-    "wgpu>=0.32,<0.33"
-]
-# All GPU features: CUDA fitting and tools (numba-cuda) for the given
-# CUDA toolkit, plus GPU rendering (wgpu).
+# CUDA fitting and tools (numba-cuda) for the given CUDA toolkit. GPU
+# rendering (wgpu) is part of the core dependencies.
 cuda11 = [
-    "numba-cuda[cu11]",
-    "picassosr[wgpu]"
+    "numba-cuda[cu11]"
 ]
 cuda12 = [
-    "numba-cuda[cu12]",
-    "picassosr[wgpu]"
+    "numba-cuda[cu12]"
 ]
 cuda13 = [
-    "numba-cuda[cu13]",
-    "picassosr[wgpu]"
+    "numba-cuda[cu13]"
 ]
 # Alias for the most common CUDA toolkit (12.x).
 gpu = [
     "picassosr[cuda12]"
+]
+# Picasso Server (picasso server), the browser app that watches folders
+# and keeps a history of the localized files
+server = [
+    "streamlit>=1.50.0,<2",
+    "plotly>=5.12.0,<7",  # 5.12: NumPy 2 (no np.bool8)
 ]
 dev = [
     "build",
@@ -101,11 +98,11 @@ formats = [
 # Not for general use: the installer / installer_cuda extras exist only to
 # build the one-click installers, where every version is pinned exactly so
 # the frozen bundles stay reproducible and stable. Regular users should
-# install picassosr (optionally with [gpu] / [formats]) instead.
+# install picassosr (optionally with [gpu] / [formats] / [server]) instead.
 # 'installer' uses python 3.14, see, e.g., create_installer_windows.bat
 installer = [
     "PyQt6==6.11.0",
-    "numpy==2.4.4",
+    "numpy==2.3.5",  # 2.4 breaks HDBSCAN, see picasso/clusterer.py
     "matplotlib==3.10.8",
     "h5py==3.16.0",
     "numba==0.65.0",
@@ -117,9 +114,10 @@ installer = [
     "tqdm==4.67.3",
     "streamlit==1.56.0",
     "nd2==0.11.3",
-    "sqlalchemy==2.0.49",
-    "plotly-express==0.4.1",
-    "watchdog==6.0.0",
+    "dask==2026.3.0",
+    "statsmodels==0.14.6",
+    "requests==2.33.1",
+    "plotly==6.7.0",
     "psutil==7.2.2",
     "playsound3==3.3.1",
     "imageio==2.37.3",
@@ -131,7 +129,7 @@ installer = [
     "wgpu==0.32.0",
     "pyinstaller==6.19.0",
     "PyImarisWriter==0.7.0; sys_platform=='win32'",
-    "hdf5plugin==6.0.0; sys_platform=='win32'"
+    "hdf5plugin==6.0.0"
 ]
 # CUDA build: identical to the CPU installer plus the CUDA runtime
 # (GPU rendering via wgpu is in both; this one adds CUDA fitting).
@@ -177,6 +175,27 @@ markers = [
     "slow: long-running tests (multiprocessing, Bayesian fits, compare_models)",
     "gui: tests that build Qt widgets (applied automatically to anything using the qapp / qt_offscreen fixtures); deselect with -m \"not gui\"",
     "gpu_backend: tests that exercise the real GPU render backend selection (every other test renders on the CPU reference, whatever the machine has)",
+]
+# a test still running after 10 minutes is stuck: print where every thread
+# is (the test keeps running; the slowest take about 2.5 minutes)
+faulthandler_timeout = 600
+
+# pytest --cov (pytest-cov) measures which code of Picasso the tests run
+[tool.coverage.run]
+source = ["picasso"]
+
+[tool.coverage.report]
+# least covered first
+sort = "Cover"
+skip_empty = true
+# the CUDA fitting modules run only on an NVIDIA GPU, which CI does not have
+omit = ["picasso/fitting/*_cuda.py"]
+# Numba compiles these functions to machine code, which coverage cannot
+# trace, so they would count as missed even when the tests run them; a
+# decorator excluded excludes the whole function
+exclude_also = [
+    "@(numba\\.)?n?jit\\b",
+    "@cuda\\.jit\\b",
 ]
 
 [tool.black]

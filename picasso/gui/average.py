@@ -12,13 +12,14 @@ from __future__ import annotations
 
 import os.path
 import sys
+import time
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-from .. import io, lib, average, render, __version__, docs_url
+from .. import io, lib, average, notifications, render, __version__, docs_url
 from .app import run_gui
 from . import theme
 from . import toolbars
@@ -49,6 +50,55 @@ class PoolWorker(QtCore.QThread):
         self.pool = average.AveragePool(self.locs)
 
 
+class _IterationProgress(lib.MockProgress):
+    """Progress tracker of ``average.average`` (see ``lib.Progress``),
+    forwarding it as the worker's ``progressMade`` signal.
+
+    The averaging starts one phase per iteration, over the groups, so
+    the phases started so far are the number of the running iteration.
+
+    Parameters
+    ----------
+    worker : Worker
+        The worker whose signal is emitted (from its own thread).
+    """
+
+    def __init__(self, worker: Worker) -> None:
+        super().__init__()
+        self._worker = worker
+        self.iteration = 0
+
+    def zero_progress(self, description=None, *args, **kwargs) -> None:
+        """Start the next iteration.
+
+        Parameters
+        ----------
+        description : str, optional
+            Label of the phase.
+        *args, **kwargs
+            Accepted and ignored.
+        """
+        super().zero_progress(description)
+        self.iteration += 1
+
+    def set_value(self, value, *args, **kwargs) -> None:
+        """Report the groups aligned so far in the running iteration.
+
+        Parameters
+        ----------
+        value : int
+            Groups aligned so far, out of :meth:`maximum`.
+        *args, **kwargs
+            Accepted and ignored.
+        """
+        self._worker.progressMade.emit(
+            self.iteration,
+            self._worker.iterations,
+            int(value),
+            self._maximum,
+        )
+
+
 class Worker(QtCore.QThread):
     """Worker thread for processing image alignment.
 
@@ -69,7 +119,11 @@ class Worker(QtCore.QThread):
         started and shut down by the averaging function itself.
     """
 
-    progressMade = QtCore.pyqtSignal(int, int, pd.DataFrame, bool, int, int)
+    # running iteration, number of iterations, groups aligned in it,
+    # number of groups
+    progressMade = QtCore.pyqtSignal(int, int, int, int)
+    # iterations finished, number of iterations, localizations after them
+    iterationFinished = QtCore.pyqtSignal(int, int, pd.DataFrame)
     aborted = QtCore.pyqtSignal()
 
     def __init__(
@@ -88,27 +142,19 @@ class Worker(QtCore.QThread):
         self.pool = pool
         self.was_aborted = False
 
-    def on_progress(
-        self,
-        it: int,
-        total_it: int,
-        locs_current: pd.DataFrame,
-        group: int,
-        n_groups: int,
-    ) -> None:
-        """Callback for progress updates from the averaging process.
+    def on_iteration(self, it: int, locs_current: pd.DataFrame) -> None:
+        """Hand the result of a finished iteration to the window.
 
         Parameters
         ----------
-        it, total_it : int
-            Iteration just finished and the total number of iterations.
+        it : int
+            Iterations finished so far.
         locs_current : pd.DataFrame
-            The localizations as they stand after this iteration.
-        group, n_groups : int
-            Group just finished and the total number of groups.
+            The localizations as they stand after this iteration; the
+            averaging keeps working on them, so they are copied.
         """
         self.locs = locs_current.copy()
-        self.progressMade.emit(it, total_it, self.locs, True, group, n_groups)
+        self.iterationFinished.emit(it, self.iterations, self.locs)
 
     def run(self) -> None:
         """Run averaging across a number of iterations."""
@@ -117,7 +163,8 @@ class Worker(QtCore.QThread):
             self.info,
             display_pixel_size=self.display_px_size,
             iterations=self.iterations,
-            progress_callback=self.on_progress,
+            progress=_IterationProgress(self),
+            iteration_callback=self.on_iteration,
             abort_callback=self.isInterruptionRequested,
             pool=self.pool,
         )
@@ -125,7 +172,7 @@ class Worker(QtCore.QThread):
             self.was_aborted = True
             self.aborted.emit()
         else:
-            self.locs = result
+            self.locs, self.info = result
 
 
 class ParametersDialog(lib.Dialog):
@@ -136,13 +183,9 @@ class ParametersDialog(lib.Dialog):
     Attributes
     ----------
     disp_px_size : QtWidgets.QDoubleSpinBox
-        Spin box for setting the display pixel size in nm. Determines
-        oversampling, see below.
+        Spin box for setting the display pixel size in nm.
     iterations : QtWidgets.QSpinBox
         Spin box for setting the number of averaging iterations.
-    oversampling : float
-        Number of display pixels per camera pixel, calculated from the
-        display pixel size and the camera pixel size from metadata.
     window : QtWidgets.QMainWindow
         Main window instance.
     """
@@ -150,7 +193,6 @@ class ParametersDialog(lib.Dialog):
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
-        self.oversampling = 10.0  # just some value when starting the module
         self.setWindowTitle("Parameters")
         self.setModal(False)
         grid = QtWidgets.QGridLayout(self)
@@ -178,14 +220,9 @@ class ParametersDialog(lib.Dialog):
         grid.addWidget(self.iterations, 1, 1)
 
     def on_disp_px_size_changed(self) -> None:
-        """Update oversampling (number of display pixels per camera
-        pixel) when display pixel size is changed."""
+        """Redraw the image when the display pixel size is changed."""
         if not hasattr(self.window.view, "locs"):  # no file loaded yet
             return
-        camera_px = lib.get_from_metadata(
-            self.window.view.info, "Pixelsize", raise_error=True
-        )
-        self.oversampling = camera_px / self.disp_px_size.value()
         self.window.view.update_image()
 
 
@@ -196,9 +233,6 @@ class View(QtWidgets.QLabel):
 
     Attributes
     ----------
-    avg_history : list of dicts
-        Stores the used display pixel size and iterations across
-        multiple rounds of averaging.
     _pixmap : QtGui.QPixmap
         Pixmap for displaying the averaged image.
     running : bool
@@ -225,7 +259,6 @@ class View(QtWidgets.QLabel):
         self.thread = None
         self.pool = None
         self.pool_thread = None
-        self.avg_history = []
 
     def average(self):
         """Start the averaging in a worker thread, reading the parameters
@@ -250,9 +283,11 @@ class View(QtWidgets.QLabel):
                 self.wait_for_pool(),
             )
             self.thread.progressMade.connect(self.on_progress)
+            self.thread.iterationFinished.connect(self.on_iteration)
             self.thread.aborted.connect(self.on_aborted)
             self.thread.finished.connect(self.on_finished)
             self.window.abort_action.setEnabled(True)
+            self.t0 = time.time()
             self.thread.start()
 
     def abort(self) -> None:
@@ -295,13 +330,10 @@ class View(QtWidgets.QLabel):
             self.window.statusBar().showMessage("Aborted.")
         else:
             if self.thread is not None:
-                self.avg_history.append(
-                    {
-                        "disp_px_size": self.thread.display_px_size,
-                        "it": self.thread.iterations,
-                    }
-                )
+                # the metadata of the average, with an entry per run
+                self.info = self.thread.info
             self.window.statusBar().showMessage("Done!")
+            notifications.notify_finished(time.time() - self.t0)
         self.running = False
         self.window.abort_action.setEnabled(False)
         if self.pool is not None and self.pool.closed:
@@ -318,30 +350,34 @@ class View(QtWidgets.QLabel):
         self,
         it: int,
         total_it: int,
-        locs: pd.DataFrame,
-        update_image: bool,
         group: int,
         n_groups: int,
     ) -> None:
+        """Show the progress of the running averaging iteration.
+
+        Parameters
+        ----------
+        it, total_it : int
+            Running iteration and the total number of iterations.
+        group, n_groups : int
+            Groups aligned so far in this iteration and their total.
+        """
+        self.window.statusBar().showMessage(
+            f"Iteration {it}/{total_it} — group {group}/{n_groups}"
+        )
+
+    def on_iteration(self, it: int, total_it: int, locs: pd.DataFrame) -> None:
         """Show the intermediate result of one averaging iteration.
 
         Parameters
         ----------
         it, total_it : int
-            Iteration just finished and the total number of iterations.
+            Iterations finished and the total number of iterations.
         locs : pd.DataFrame
             The localizations as they stand after this iteration.
-        update_image : bool
-            Whether to redraw the rendered average.
-        group, n_groups : int
-            Group just finished and the total number of groups.
         """
         self.locs = locs.copy()
-        if update_image:
-            self.update_image()
-        self.window.statusBar().showMessage(
-            f"Iteration {it}/{total_it} — group {group}/{n_groups}"
-        )
+        self.update_image()
 
     def open(self, path: str) -> None:
         """Load a localization file and preset the pool process.
@@ -351,9 +387,20 @@ class View(QtWidgets.QLabel):
         path : str
             Path to the localization file.
         """
+        if self.running:
+            # the running averaging uses the pool of the current file,
+            # which opening another one would shut down
+            QtWidgets.QMessageBox.information(
+                self.window,
+                "Average",
+                "Averaging is running. Abort it before opening another"
+                " file.",
+            )
+            return
         try:
-            locs, info = io.load_locs(path, qt_parent=self)
-        except io.NoMetadataFileError:
+            locs, info = io.load_locs(path)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
             return
         if "group" not in locs.columns:
             # not kept: averaging needs the groups
@@ -363,14 +410,21 @@ class View(QtWidgets.QLabel):
             )
             QtWidgets.QMessageBox.warning(self, "Warning", message)
             return
+        group_index = average.build_group_index(locs)
+        locs = average.com_align(locs, group_index)
+        # half the side length of the rendered square (nm)
+        r = 2 * np.sqrt((locs["x"] ** 2 + locs["y"] ** 2).mean())
+        if not r > 0:
+            # not kept either: nothing to render or align
+            message = (
+                "The localizations of each group coincide, so the"
+                " particles have no extent to average."
+            )
+            QtWidgets.QMessageBox.warning(self, "Warning", message)
+            return
         self.path = path
         self.locs, self.info = locs, info
-        self.avg_history = []
-        group_index = average.build_group_index(self.locs)
-        self.locs = average.com_align(self.locs, group_index)
-        self.r = 2 * np.sqrt(
-            (self.locs["x"] ** 2 + self.locs["y"] ** 2).mean()
-        )
+        self.r = r
         self.window.parameters_dialog.on_disp_px_size_changed()
         self.update_image()
         self.start_pool()
@@ -431,21 +485,8 @@ class View(QtWidgets.QLabel):
         path : str
             Path to save localizations.
         """
-        display_pixel_size = self.window.parameters_dialog.disp_px_size.value()
-        iterations = self.window.parameters_dialog.iterations.value()
-        params = {"disp_px_size": display_pixel_size, "it": iterations}
-        out_locs, info = average.prepare_locs_for_save(
-            self.locs, self.info, params
-        )
-        if self.avg_history:
-            info[-1]["Rounds"] = [
-                {
-                    "Display pixel size (nm)": r["disp_px_size"],
-                    "Iterations": r["it"],
-                }
-                for r in self.avg_history
-            ]
-        io.save_locs(path, out_locs, info)
+        out_locs = average.center_in_field_of_view(self.locs, self.info)
+        io.save_locs(path, out_locs, self.info)
         self.window.statusBar().showMessage(f"File saved to {path}.")
 
     def set_image(self, image: lib.FloatArray2D) -> None:
@@ -500,10 +541,11 @@ class View(QtWidgets.QLabel):
             Ignored; accepted so the method can be wired directly to Qt
             signals that pass a value.
         """
-        oversampling = self.window.parameters_dialog.oversampling
+        # rendered pixels per nm
+        oversampling = 1 / self.window.parameters_dialog.disp_px_size.value()
         t_min = -self.r
         t_max = self.r
-        N_avg, image_avg = render.render_hist_numba(
+        N_avg, image_avg = render.render_hist(
             self.locs["x"].to_numpy(),
             self.locs["y"].to_numpy(),
             oversampling,
@@ -561,6 +603,7 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        lib.add_sound_notifications_menu(file_menu)
         help_action = file_menu.addAction("Help")
         help_action.setIcon(theme.icon("help"))
         help_action.triggered.connect(

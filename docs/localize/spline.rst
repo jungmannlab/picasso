@@ -136,13 +136,13 @@ A calibration is built from a **bead z-stack**: image a sample of sparse, bright
 
       .. code-block:: python
 
-         from picasso import io, spline
+         from picasso import io, localize, spline
 
          movie, info = io.load_movie("beads_zstack.tif")
          camera_info = {"Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Pixelsize": 130}
          calibration = spline.calibrate_spline(
-             movie, info, camera_info,
-             box=13, minimum_ng=5000,
+             movie, info, camera_info=camera_info,
+             box=13, identification_method=localize.NetGradient(5000),
              d=10,                               # z step in nm
              z_binning=5,
              model="spline-3d",
@@ -231,7 +231,9 @@ A 3D calibration adds the recovered ``z`` (and ``lpz``). The accompanying ``_loc
       locs, info = localize.localize(
           movie,
           camera_info=camera_info,
-          identification_parameters={"Box Size": 13, "Min. Net Gradient": 5000},
+          identification_parameters=localize.IdentificationParameters(
+              method=localize.NetGradient(5000), box=13
+          ),
           movie_info=info,
           fitting_method="spline-mle",      # "spline", "spline-mle-gpu", "spline-gpu"
           spline_calibration=spline_calibration,
@@ -308,7 +310,7 @@ Multichannel spline fitting can benefit from re-aligning the channels on the dat
 After identifying the channels, run ``Calibration`` > ``Re-align channels (current signal)`` to re-estimate the transforms from the blinking data itself. **This is strongly recommended whenever the bead stack and the measurement were not acquired directly one after another** (e.g. calibration from a previous day or session).
 
 - Because the correction is derived by pairing the shared single-molecule signal frame by frame, a dialog first asks for the frame window to use and how many frames are evenly sampled from it.
-- The result is reported per channel as the number of paired signals and the residual RMS (in camera pixels).
+- The result is reported per channel as the number of paired signals and the residual RMS (in camera pixels, since the correction is fitted on the raw images).
 - We recommend using bright spots for the re-alignment: select a higher min. net gradient, or a higher wavelet threshold.
 
 .. important::

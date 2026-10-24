@@ -1,0 +1,54 @@
+# How to cite Picasso. GitHub shows it as "Cite this repository". Only
+# release 1.0.0 is deposited on Zenodo.
+#
+# When the Picasso 1.0 paper is published:
+# 1. Make it the preferred-citation below and move the Nature Protocols
+#    paper to the references.
+# 2. Update the other places that name the paper: the "Citing Picasso"
+#    section and the introduction of readme.rst (then run
+#    release/sync_installer_readmes.py for the installer read-me files),
+#    the citation card and the introduction of docs/index.rst, the DOI
+#    badge of readme.rst and "Publications" in pyproject.toml.
+#    tests/test_citation.py lists the places that still lack the
+#    preferred-citation's DOI.
+cff-version: 1.2.0
+message: >-
+  If you use Picasso in your research, please cite the publication below.
+  Many features are based on further publications, see
+  https://picassosr.readthedocs.io/en/latest/getting-started/citing.html.
+type: software
+title: Picasso
+abstract: >-
+  A collection of tools for painting super-resolution images, covering
+  single-molecule localization microscopy (SMLM) analysis from raw movies
+  to localization, rendering and quantification.
+authors:
+  - family-names: Kowalewski
+    given-names: Rafal
+  - family-names: Schnitzbauer
+    given-names: Joerg
+  - family-names: Strauss
+    given-names: Maximilian T.
+  - name: Jungmann Lab, Max Planck Institute of Biochemistry
+repository-code: https://github.com/jungmannlab/picasso
+url: https://picassosr.readthedocs.io/en/latest/
+license: MIT
+keywords:
+  - super-resolution microscopy
+  - single-molecule localization microscopy
+  - DNA-PAINT
+preferred-citation:
+  type: article
+  title: Super-resolution microscopy with DNA-PAINT
+  authors:
+    - family-names: Schnitzbauer
+      given-names: Joerg
+    - family-names: Strauss
+      given-names: Maximilian T.
+  journal: Nature Protocols
+  volume: 12
+  issue: 6
+  start: 1198
+  end: 1228
+  year: 2017
+  doi: 10.1038/nprot.2017.024

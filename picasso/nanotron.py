@@ -4,6 +4,13 @@ picasso.nanotron
 
 Deep learning library for classification of picked localizations.
 
+A model's metadata (the .yaml next to the .sav file) records the pick
+diameter in nm ("Pick Diameter (nm)") and the rendered pixel size in nm
+("Display pixel size (nm)"), plus the format marker ``picasso_format``.
+Models trained before Picasso 1.0 recorded "Pick Diameter" in camera
+pixels and "Oversampling" (rendered pixels per camera pixel); see
+``picasso.legacy.nanotron_model_to_nm``.
+
 :authors: Alexander Auer, Maximilian Strauss
 :copyright: Copyright (c) 2020-2026 Jungmann Lab, MPI of Biochemistry
 """
@@ -16,6 +23,8 @@ from scipy import ndimage
 from sklearn.neural_network import MLPClassifier
 
 from . import render, lib
+
+__all__ = ["predict_structure", "roi_to_img", "prepare_img"]
 
 
 def prepare_img(
@@ -74,8 +83,9 @@ def rotate_img(img: lib.FloatArray2D, angle: float) -> lib.FloatArray2D:
 def roi_to_img(
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     pick: int,
-    radius: float,
+    pick_diameter: float,
     disp_px_size: float,
     picks: tuple[float, float] | None = None,
 ) -> lib.FloatArray2D:
@@ -90,30 +100,42 @@ def roi_to_img(
         Localization metadata.
     pick : int
         The group number of the localizations to be picked.
-    radius : float
-        Radius around the mean position of the localizations to define
-        the ROI.
+    pick_diameter : float
+        Pick diameter (nm): the localizations within half of it around
+        ``picks`` are picked, and the rendered image, centered on their
+        mean position, has this side length.
     disp_px_size : float
         Display pixel size used for rendering images (nm).
     picks : tuple[float, float] | None, optional
-        Specific coordinates (x, y) to isolate localizations from, by
-        default None. If None, uses the mean position of the localizations
-        in the specified group.
+        Specific coordinates (x, y) in nm to isolate localizations from,
+        by default None. If None, uses the mean position of the
+        localizations in the specified group.
 
     Returns
     -------
     pick_img : lib.FloatArray2D
-        Image of the picked localizations.
+        Image of the picked localizations, ``pick_diameter /
+        disp_px_size`` pixels on a side.
+
+    Raises
+    ------
+    ValueError
+        If the pick holds no localizations.
     """
+    radius = pick_diameter / 2
     # Isolate locs from pick
-    pick_locs = []
     if picks is None:
         pick_locs = locs[locs["group"] == pick]
+        where = f"group {pick}"
     else:
         x, y = picks
-        pick_locs = lib.locs_at(x, y, locs, radius)
-        pick_locs.sort_values(by="frame", kind="quicksort", inplace=True)
-    # dirty method to avoid floating point errors with render
+        pick_locs = lib.locs_at(x, y, locs, radius).sort_values(
+            by="frame", kind="quicksort"
+        )
+        where = f"the pick of diameter {pick_diameter} nm at ({x}, {y})"
+    if not len(pick_locs):
+        raise ValueError(f"No localizations in {where}.")
+    # dirty method to avoid floating point errors with render (nm)
     radius -= 0.001
 
     x_mean = np.mean(pick_locs["x"])
@@ -127,16 +149,13 @@ def roi_to_img(
     viewport = (y_min, x_min), (y_max, x_max)
 
     # Render locs with Picasso render function
-    try:
-        len_x, pick_img = render.render(
-            pick_locs,
-            info,
-            disp_px_size=disp_px_size,
-            viewport=viewport,
-            blur_method="smooth",
-        )
-    except Exception:
-        pass
+    _, pick_img = render.render(
+        pick_locs,
+        info,
+        disp_px_size=disp_px_size,
+        viewport=viewport,
+        blur_method="smooth",
+    )
     return pick_img
 
 
@@ -144,7 +163,7 @@ def prepare_data(
     locs: pd.DataFrame,
     info: list[dict],
     label: int,
-    pick_radius: float,
+    pick_diameter: float,
     disp_px_size: float,
     alpha: float = 10,
     bg: float = 1,
@@ -161,9 +180,9 @@ def prepare_data(
         Localization metadata. Must contain the camera pixel size.
     label : int
         Label for the data, typically the group number.
-    pick_radius : float
-        Radius around the mean position of the localizations to define
-        the ROI.
+    pick_diameter : float
+        Pick diameter (nm), the side length of the rendered images, see
+        ``roi_to_img``.
     disp_px_size : float
         Display pixel size used for rendering images (nm).
     alpha : float, optional
@@ -184,10 +203,15 @@ def prepare_data(
     data = []
     labels = []
 
-    for pick in tqdm(range(locs["group"].max()), desc="Prepare " + str(label)):
+    groups = np.unique(locs["group"])
+    for pick in tqdm(groups, desc="Prepare " + str(label)):
 
         pick_img = roi_to_img(
-            locs, info, pick, radius=pick_radius, disp_px_size=disp_px_size
+            locs,
+            info,
+            pick=pick,
+            pick_diameter=pick_diameter,
+            disp_px_size=disp_px_size,
         )
 
         if export is True and pick < 10:
@@ -219,8 +243,9 @@ def predict_structure(
     mlp: MLPClassifier,
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     pick: int,
-    pick_radius: float,
+    pick_diameter: float,
     disp_px_size: float,
     picks: tuple[float, float] | None = None,
 ) -> tuple[int, lib.FloatArray1D]:
@@ -237,12 +262,12 @@ def predict_structure(
         Localization metadata. Must contain the camera pixel size.
     pick : int
         Index of the localizations to predict.
-    pick_radius : float
-        Radius around the localizations to consider.
+    pick_diameter : float
+        Pick diameter (nm), see ``roi_to_img``.
     disp_px_size : float
         Display pixel size used for rendering images (nm).
     picks : tuple[float, float] | None, optional
-        Coordinates of the region of interest (ROI) to predict.
+        Coordinates (nm) of the region of interest (ROI) to predict.
 
     Returns
     -------
@@ -255,7 +280,7 @@ def predict_structure(
         locs,
         info,
         pick=pick,
-        radius=pick_radius,
+        pick_diameter=pick_diameter,
         disp_px_size=disp_px_size,
         picks=picks,
     )

@@ -30,11 +30,11 @@ def _locs(z_range: float, seed: int = 0) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "frame": rng.integers(0, 1000, size=N_LOCS).astype(np.int32),
-            "x": rng.uniform(0.0, WIDTH, size=N_LOCS),
-            "y": rng.uniform(0.0, HEIGHT, size=N_LOCS),
+            "x": rng.uniform(0.0, WIDTH, size=N_LOCS) * PIXELSIZE,
+            "y": rng.uniform(0.0, HEIGHT, size=N_LOCS) * PIXELSIZE,
             "z": np.linspace(-z_range / 2, z_range / 2, N_LOCS),
-            "lpx": np.full(N_LOCS, 0.1),
-            "lpy": np.full(N_LOCS, 0.1),
+            "lpx": np.full(N_LOCS, 13.0),
+            "lpy": np.full(N_LOCS, 13.0),
             "photons": np.full(N_LOCS, 1000.0),
         }
     )
@@ -55,7 +55,10 @@ def _window(tmp_path, z_range: float) -> gui_render.Window:
     window = gui_render.Window(plugins_loaded=True)
     path = str(tmp_path / "locs.hdf5")
     window.view.add(path, _locs(z_range), _info(), render_=False)
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [
+        (0.0, 0.0),
+        (HEIGHT * PIXELSIZE, WIDTH * PIXELSIZE),
+    ]
     window.view.resize(256, 256)
     return window
 

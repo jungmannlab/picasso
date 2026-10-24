@@ -23,10 +23,17 @@ Files
 
 Shortcut: :kbd:`Ctrl+F`
 
-Opens the **Datasets** dialog, which lists every loaded channel and lets you
-control its title, visibility, color (or colormap), and relative intensity. A
-small horizontal gradient next to each channel previews what that channel will
-look like at intensity 0 → intensity 1.
+Opens the **Datasets** dialog, which lists every loaded channel in a table and
+lets you control its title, visibility, color (or colormap), and contrast. The
+number on the left of each row is the channel index (1 is the first loaded
+channel). A small horizontal gradient next to each channel previews what that
+channel will look like at intensity 0 → intensity 1.
+
+To **reorder the channels**, drag a channel's index up or down, or right click
+the index and choose ``Move to top``, ``Move up``, ``Move down`` or ``Move to
+bottom``. The channel keeps its title, color, contrast and visibility, and
+everything that refers to channels by their index follows, e.g., the legend,
+the channel lists in the other dialogs and the 3D window.
 
 **Left click** on a channel's checkbox ticks/unticks it, i.e., shows or hides
 that channel. **Right click** on a checkbox displays that channel only - it is
@@ -50,10 +57,77 @@ Channels are blended additively in the final image and clipped to 1.0, so
 overlapping high-intensity regions saturate toward the sum of the channel
 colors.
 
+.. _render-channel-contrast:
+
+The *Contrast (% of global)* column balances the channels against each other.
+Each channel has a lower and an upper contrast limit, set with the two spin
+boxes or dragged on the slider between them. The limits are given in percent
+of the global contrast window, i.e., of ``Min. density`` and ``Max. density``
+in :ref:`Display settings <render-colormap-setting>`: 0% is the minimum and
+100% the maximum density. For example, with a global contrast of 0 to 10
+localizations per display pixel:
+
+- 0–100% (the default) uses the global contrast, 0 to 10;
+- 0–40% brightens the channel, which saturates at 4 already;
+- 0–200% dims the channel, which saturates only at 20;
+- 10–100% hides the channel's faintest pixels, those below 1.
+
+The global contrast stays in charge: changing ``Min. density`` or ``Max.
+density`` moves every channel's window along, so the balance between the
+channels is kept. ``Reset contrast`` sets all channels back to 0–100%. The 3D
+window (see :ref:`render-3d`) applies the same percentages to its own minimum and
+maximum density. Linked windows can share the per-channel contrast, see
+:ref:`render-link-settings`. The per-channel contrast is saved in the
+``.yaml`` file written with exported images and restored when such a file is
+dropped onto Render.
+
 The ``Automatic coloring`` checkbox overrides per-channel selections with
-HSV-spaced colors for as long as it's ticked. ``Save colors`` /
+HSV-spaced colors for as long as it's ticked; meanwhile, the color dropdowns
+and color pickers are grayed out. ``Save colors`` /
 ``Load colors`` write / read a one-identifier-per-line ``.txt`` file — any
-name from the three dropdown sections (or a hex code) is valid.
+name from the three dropdown sections (or a hex code) is valid. The colors
+are given to the channels in order; extra names in the file are ignored, and
+channels beyond the names in the file keep their colors.
+
+.. _render-default-colors:
+
+Newly loaded channels are colored in the order of the *default colors*:
+``red``, ``cyan``, ``green``, ``yellow``, and so on, unless you change it.
+Click ``Default colors`` > ``Save current colors as default`` to use the
+colors of the loaded channels, in their order, for the next channels you load
+(also after restarting Picasso); the remaining built-in colors follow. For
+example, with three channels colored ``blue``, ``yellow`` and ``magenta``, the
+next files you load are blue, yellow, magenta, red, cyan, green, and so on.
+``Default colors`` > ``Restore built-in default colors`` goes back to the
+original order. The default colors are saved as ``Channel colors`` in the
+user settings (see :ref:`user-settings-file`), where you can also edit them.
+
+Tick ``Colorblind-safe colors`` to color the channels in an order that people
+with red-green color blindness (protanopia and deuteranopia) can tell apart:
+``magenta``, ``green``, ``cyan``, ``blue``, followed by the remaining built-in
+colors. Unticking it recolors the loaded channels with the default
+colors. Up to four channels stay distinguishable; beyond that, no set of
+colors does, so show fewer channels at a time where colors matter. Clicking
+``Default colors`` > ``Save current colors as default`` or ``Restore built-in
+default colors`` unticks the checkbox so that the new default colors take
+effect; the loaded channels keep their colors.
+
+``Background color`` sets the color of pixels without localizations in
+multichannel images (black by default). ``Invert colors / white background``
+gives multichannel images a white background and inverts the colormap of a
+single channel.
+
+The color, contrast and automatic coloring apply only when several
+channels are loaded. With a single channel they are grayed out, and a note at
+the bottom of the dialog says how the channel is rendered instead:
+
+- Without a ``group`` column and without rendering by property, it is drawn
+  with the colormap from :ref:`Display settings <render-colormap-setting>`,
+  so the background color does not apply either.
+- With a ``group`` column, the groups are colored automatically, all with
+  the same intensity.
+- When rendering by property (see :ref:`render-coloring`), the localizations
+  are colored with the property colormap.
 
 .. _render-custom-colormaps:
 
@@ -92,10 +166,10 @@ Placement
 ~~~~~~~~~
 
 The dialog shows the size of the image and the size of the camera chip given
-by the localizations' metadata (``Width`` and ``Height``), states whether they
-match, and reports the resulting size of one image pixel in camera pixels and
-nm. The image is placed on the camera chip using one of the following
-scalings:
+by the localizations' metadata (``Width`` and ``Height`` camera pixels of
+``Pixelsize`` nm each), states whether they match, and reports the resulting
+size of one image pixel in nm. The image is placed on the camera chip using
+one of the following scalings:
 
 * **Fit to camera (keep aspect ratio)** (default) - the largest uniform
   scaling at which the whole image fits on the chip; the image is centered.
@@ -107,13 +181,18 @@ scalings:
 * **Image pixel size** - each image pixel is scaled to the given pixel size
   (nm); the top left corners of the image and the chip coincide.
 
-In every mode, the image can additionally be shifted by a given number of
-camera pixels in x and y, e.g., to correct a known offset between the cameras.
+In every mode, the image can additionally be shifted by a given distance
+(``Shift x/y (nm)``), e.g., to correct a known offset between the cameras.
 
 The placement follows the localization coordinates: a localization at
 ``x = 0`` lies at the center of the first camera pixel, so the chip spans from
--0.5 to ``Width`` - 0.5 camera pixels. An image acquired on the same camera
+-0.5 to ``Width`` - 0.5 camera pixels, i.e., from -0.5 × ``Pixelsize`` to
+(``Width`` - 0.5) × ``Pixelsize`` nm. An image acquired on the same camera
 region thus registers with the localizations to the sub-pixel level.
+
+The ``.yaml`` file written with exported images records the placement as
+``Overlay shift (x, y; nm)`` and ``Overlay extent (X, Y, Width, Height;
+nm)``.
 
 .. _render-overlay-display:
 
@@ -141,6 +220,51 @@ blending with the localizations is chosen:
 A grayscale image is shown in the chosen color between the minimum and maximum
 intensity (by default, the image's full range; *Reset contrast* restores it).
 RGB images are shown with their own colors.
+
+.. _render-color-vision-preview:
+
+Color vision preview
+--------------------
+
+Shows the image as people with color blindness see it, to check that the
+channels of a figure stay apart for them:
+
+*Deuteranopia (red-green)*
+   No green-sensitive cones; the most common form.
+*Protanopia (red-green)*
+   No red-sensitive cones; reds also look darker.
+*Tritanopia (blue-yellow)*
+   No blue-sensitive cones; rare.
+
+*Normal vision* turns the preview off. The whole window is simulated,
+including the legend, picks and other overlays, and a label at the top shows
+that the preview is on. The 3D window (see :ref:`render-3d`) follows the same
+setting, which can be changed from its ``View`` menu, too. The preview is not
+saved: saved and exported images keep their colors, and Render starts with
+normal vision.
+
+The simulation shows the complete forms of these deficiencies (Machado,
+Oliveira & Fernandes, *IEEE Trans. Vis. Comput. Graph.* 2009), so it marks the
+colors that the most affected viewers confuse; people with the milder forms
+see more of the difference. Grays are unchanged. To color the multichannel data
+so they stay apart, see ``Colorblind-safe colors`` under :ref:`Default colors <render-default-colors>`.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``render.simulate_color_vision`` simulates an RGB image, e.g., a saved
+   figure; ``render.COLOR_VISION_DEFICIENCIES`` lists the deficiencies.
+
+   .. code-block:: python
+
+      import imageio.v2 as imageio
+      from picasso import render
+
+      image = imageio.imread("figure.png")[..., :3]  # drop alpha, if any
+      for deficiency in render.COLOR_VISION_DEFICIENCIES:
+          simulated = render.simulate_color_vision(image, deficiency)
+          imageio.imwrite(f"figure_{deficiency}.png", simulated)
 
 .. _render-fit-image:
 
@@ -241,11 +365,13 @@ Chooses which attributes the linked windows share:
 
 - the localizations of shared channels (switching this off gives each window
   its own copy of them),
-- pan, zoom, and a crosshair marking the cursor position of the window the
-  mouse is in,
+- pan, zoom (the nm per screen pixel), and a crosshair marking the cursor
+  position of the window the mouse is in,
 - the active tool,
-- render settings, contrast, colormap, render by property, scale bar,
-  minimap, background and legend, camera pixel size,
+- render settings, contrast, per-channel contrast (see
+  :ref:`Per-channel contrast <render-channel-contrast>`; a channel takes the contrast of the channel
+  of the same file in the other windows), colormap, render by property, scale
+  bar, grid, minimap, background and legend,
 - pick shape and size, and the picks themselves,
 - slicing (the slice position is matched in nm).
 

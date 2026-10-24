@@ -10,6 +10,13 @@ maximum-likelihood estimators, and its Gaussian and
 cubic-spline PSF models - written in Python and compiled by Numba, for the CPU
 (``numba.jit``) and for CUDA GPUs (``numba.cuda.jit``).
 
+These modules are what :func:`picasso.localize.fit` runs. They are
+documented for reference, but are not part of the public API and may change
+in any release, except :mod:`precision` (see the stability policy in the
+documentation). To fit a movie, use :func:`picasso.localize.fit`; to fit
+spots you cut out yourself, :func:`picasso.localize.fit_spots_gauss` or
+:func:`picasso.localize.fit_spots_spline`.
+
 :mod:`splinefit`
     CPU cubic-spline PSF fitting: the LM driver, the four spline models and
     both estimators. The reference implementation the CUDA kernels are

@@ -15,13 +15,19 @@ import numpy as np
 import pytest
 
 from picasso import clusterer, g5m, zfit
-from tests.conftest import CALIB_3D
+from tests.conftest import CALIB_3D, PIXELSIZE
+from tests.test_postprocess_progress import RecordingProgress, assert_phases
 
 # ---------------------------------------------------------------------------
 # Golden values, captured from the published models before the rotated
-# covariance type was added. These pin the exact float32 output of
-# ``g5m.g5m`` at its defaults; any deviation means a supposedly additive
-# change perturbed the published code path.
+# covariance type was added, with the localizations in camera pixels. They
+# pin the output of ``g5m.g5m`` at its defaults: since Picasso 1.0 the
+# coordinates are in nm, so x and y are compared scaled by the pixel
+# size; the fitted widths were in nm already, z and the p-values do not
+# depend on the unit (the widths and p-values up to the numerics of the
+# EM iterations, which rescaling shifts by a few percent). Any larger
+# deviation means a supposedly additive change perturbed the published
+# code path.
 # ---------------------------------------------------------------------------
 
 GOLDEN_2D = {
@@ -173,7 +179,7 @@ GOLDEN_3D = {
 @pytest.fixture
 def dbscan_locs(locs):
     """2D clustered localizations, no ``angle`` column."""
-    out = clusterer.dbscan(locs, radius=2 / 130, min_samples=2)[0]
+    out = clusterer.dbscan(locs, radius=2.0, min_samples=2)[0]
     assert len(out) > 0
     assert "angle" not in out.columns
     return out
@@ -374,9 +380,9 @@ CALIB_ASTIG_RATIO = 2.0
 
 
 def _rotated_cluster(
-    angle_deg, sigma_u_nm=14.0, sigma_v_nm=7.0, n=400, pixelsize=130.0, seed=0
+    angle_deg, sigma_u_nm=14.0, sigma_v_nm=7.0, n=400, seed=0
 ):
-    """One simulated molecule whose xy cloud is elongated at
+    """One simulated molecule (nm) whose xy cloud is elongated at
     ``angle_deg``, in the convention of the ``angle`` column written by
     ``picasso.localize`` (degrees, wrapped to [-90, 90)).
 
@@ -386,8 +392,8 @@ def _rotated_cluster(
 
     rng = np.random.default_rng(seed)
     theta = np.deg2rad(angle_deg)
-    su = sigma_u_nm / pixelsize
-    sv = sigma_v_nm / pixelsize
+    su = sigma_u_nm
+    sv = sigma_v_nm
 
     du = rng.normal(0.0, su, size=n)
     dv = rng.normal(0.0, sv, size=n)
@@ -395,7 +401,7 @@ def _rotated_cluster(
     dx = du * np.cos(theta) - dv * np.sin(theta)
     dy = du * np.sin(theta) + dv * np.cos(theta)
 
-    lp = 8.0 / pixelsize
+    lp = 8.0  # nm
     return pd.DataFrame(
         {
             # frames spread across the movie and split into many binding
@@ -403,12 +409,12 @@ def _rotated_cluster(
             "frame": np.sort(
                 rng.choice(np.arange(2000), size=n, replace=False)
             ).astype(np.float32),
-            "x": 25.0 + dx,
-            "y": 15.0 + dy,
+            "x": 25.0 * PIXELSIZE + dx,
+            "y": 15.0 * PIXELSIZE + dy,
             "z": rng.normal(0.0, 20.0, size=n),
             "lpx": np.full(n, lp),
             "lpy": np.full(n, lp),
-            "lpz": np.full(n, 3.0 * lp * pixelsize),
+            "lpz": np.full(n, 3.0 * lp),
             "angle": np.full(n, float(angle_deg)),
             "photons": np.full(n, 1000.0),
             "group": np.zeros(n, dtype=np.int32),
@@ -433,7 +439,7 @@ class TestRotatedAngleConvention:
             covariance_type="rotated",
             calibration=CALIB_ASTIG,
             sigma_bounds=(0.3, 3.0),
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert len(mols) == 1
@@ -453,7 +459,7 @@ class TestRotatedAngleConvention:
             covariance_type="rotated",
             calibration=CALIB_ASTIG,
             sigma_bounds=(0.3, 3.0),
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert len(mols) == 1
@@ -470,36 +476,36 @@ class TestAutoSelection:
 
     def test_auto_selects_rotated_for_3d_astigmatism_with_angle(self, info):
         locs = _rotated_cluster(30.0)
-        _, _, out_info = g5m.g5m(
+        _, out_info, _ = g5m.g5m(
             locs,
             info,
             min_locs=20,
             calibration=CALIB_ASTIG,
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert out_info[-1]["Covariance type"] == "rotated"
 
     def test_auto_keeps_diagonal_without_angle(self, dbscan_locs_3d, info):
-        _, _, out_info = g5m.g5m(
+        _, out_info, _ = g5m.g5m(
             dbscan_locs_3d,
             info,
             min_locs=5,
             calibration=CALIB_3D,
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert out_info[-1]["Covariance type"] == "diagonal"
 
     def test_auto_keeps_diagonal_for_spline_even_with_angle(self, info):
         locs = _rotated_cluster(30.0)
-        _, _, out_info = g5m.g5m(
+        _, out_info, _ = g5m.g5m(
             locs,
             info,
             min_locs=20,
             mode="spline",
             calibration=None,
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert out_info[-1]["Covariance type"] == "diagonal"
@@ -511,21 +517,21 @@ class TestAutoSelection:
         # rotated G5M model is 3D only
         locs = dbscan_locs.copy()
         locs["angle"] = 30.0
-        _, _, out_info = g5m.g5m(
-            locs, info, min_locs=5, asynch=False, postprocess=False
+        _, out_info, _ = g5m.g5m(
+            locs, info, min_locs=5, parallel=False, postprocess=False
         )
         assert out_info[-1]["Covariance type"] == "spherical"
 
     def test_diagonal_forces_old_model_on_angle_carrying_data(self, info):
         """The explicit escape hatch for reproducing earlier results."""
         locs = _rotated_cluster(30.0)
-        mols, _, out_info = g5m.g5m(
+        mols, out_info, _ = g5m.g5m(
             locs,
             info,
             min_locs=20,
             covariance_type="diagonal",
             calibration=CALIB_ASTIG,
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert out_info[-1]["Covariance type"] == "diagonal"
@@ -543,7 +549,7 @@ class TestErrorPaths:
                 covariance_type="rotated",
                 mode="spline",
                 calibration=None,
-                asynch=False,
+                parallel=False,
             )
 
     def test_rotated_rejects_missing_angle_column(self, dbscan_locs_3d, info):
@@ -554,7 +560,7 @@ class TestErrorPaths:
                 min_locs=5,
                 covariance_type="rotated",
                 calibration=CALIB_3D,
-                asynch=False,
+                parallel=False,
             )
 
     def test_rotated_rejects_2d_data(self, dbscan_locs, info):
@@ -564,7 +570,7 @@ class TestErrorPaths:
                 info,
                 min_locs=5,
                 covariance_type="rotated",
-                asynch=False,
+                parallel=False,
             )
 
     def test_spherical_rejects_3d_data(self, dbscan_locs_3d, info):
@@ -575,7 +581,7 @@ class TestErrorPaths:
                 min_locs=5,
                 covariance_type="spherical",
                 calibration=CALIB_3D,
-                asynch=False,
+                parallel=False,
             )
 
     def test_unknown_covariance_type(self, dbscan_locs, info):
@@ -585,7 +591,7 @@ class TestErrorPaths:
                 info,
                 min_locs=5,
                 covariance_type="garbage",
-                asynch=False,
+                parallel=False,
             )
 
 
@@ -602,7 +608,7 @@ class TestOutputContract:
             covariance_type="rotated",
             calibration=CALIB_ASTIG,
             sigma_bounds=(0.3, 3.0),
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         for col in [
@@ -639,17 +645,17 @@ class TestOutputContract:
         from picasso import lib
 
         locs = _rotated_cluster(30.0)
-        mols, _, out_info = g5m.g5m(
+        mols, out_info, _ = g5m.g5m(
             locs,
             info,
             min_locs=20,
             covariance_type="rotated",
             calibration=CALIB_ASTIG,
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         path = tmp_path / "relsigma.png"
-        lib.plot_rel_sigma_check(mols, out_info, str(path))
+        lib.plot_rel_sigma_check(mols, out_info, path=str(path))
         assert path.exists() and path.stat().st_size > 0
 
     def test_no_nan_and_survives_save_round_trip(self, info, tmp_path):
@@ -659,13 +665,13 @@ class TestOutputContract:
         from picasso import io
 
         locs = _rotated_cluster(30.0)
-        mols, _, out_info = g5m.g5m(
+        mols, out_info, _ = g5m.g5m(
             locs,
             info,
             min_locs=20,
             covariance_type="rotated",
             calibration=CALIB_ASTIG,
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         n_before = len(mols)
@@ -703,13 +709,13 @@ class TestOutputContract:
             }
         ]
         locs = _rotated_cluster(30.0)
-        mols, _, out_info = g5m.g5m(
+        mols, out_info, _ = g5m.g5m(
             locs,
             info,
             min_locs=20,
             covariance_type="rotated",
             calibration=CALIB_ASTIG,
-            asynch=False,
+            parallel=False,
             postprocess=True,
         )
         path = tmp_path / "mols.hdf5"
@@ -764,9 +770,59 @@ class TestCLIWiring:
             "covariance_type",
             "postprocess",
             "max_locs",
-            "asynch",
+            "parallel",
             "group_column",
         ]
+
+    def test_calibration_before_1_0_takes_the_pixel_size_of_the_locs(
+        self, tmp_path, monkeypatch
+    ):
+        """``picasso g5m -c`` converts a 3D calibration written before
+        Picasso 1.0 (spot widths in camera pixels, no format marker) with
+        the pixel size of the localizations."""
+        import pandas as pd
+        import yaml
+
+        from picasso import io
+        from picasso.__main__ import _g5m
+
+        old = {k: v for k, v in CALIB_3D.items() if k != "picasso_format"}
+        for key in ("X Coefficients", "Y Coefficients"):
+            old[key] = [c / PIXELSIZE for c in CALIB_3D[key]]
+        calibration = tmp_path / "astig_3d_calib.yaml"
+        calibration.write_text(yaml.safe_dump(old))
+        n = 20
+        locs = pd.DataFrame(
+            {
+                "frame": np.arange(n, dtype=np.uint32),
+                "x": np.full(n, 1000, dtype=np.float32),
+                "y": np.full(n, 1000, dtype=np.float32),
+                "lpx": np.full(n, 5, dtype=np.float32),
+                "lpy": np.full(n, 5, dtype=np.float32),
+                "z": np.zeros(n, dtype=np.float32),
+                "group": np.zeros(n, dtype=np.int32),
+            }
+        )
+        info = [{"Width": 32, "Height": 32, "Frames": n, "Pixelsize": 130}]
+        path = str(tmp_path / "clustered_locs.hdf5")
+        io.save_locs(path, locs, info)
+
+        class Stop(Exception):
+            pass
+
+        passed = {}
+
+        def record(locs, info, **kwargs):
+            passed.update(kwargs)
+            raise Stop
+
+        monkeypatch.setattr(g5m, "g5m", record)
+        with pytest.raises(Stop):
+            _g5m(path, calibration=str(calibration))
+        for key in ("X Coefficients", "Y Coefficients"):
+            np.testing.assert_allclose(
+                passed["calibration"][key], CALIB_3D[key]
+            )
 
     def test_parser_accepts_covariance_type(self, capsys):
         import sys
@@ -934,7 +990,7 @@ class TestBootstrap:
             bootstrap_check=True,
             mode="spline",
             calibration=None,
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert len(mols) > 0
@@ -944,11 +1000,9 @@ class TestBootstrap:
             assert (mols[col] > 0).all()
 
     @staticmethod
-    def _fit_rotated(locs, pixelsize=130.0):
+    def _fit_rotated(locs):
         X = locs[["x", "y", "z"]].to_numpy().astype(float)
-        X[:, 2] /= pixelsize
         lp = locs[["lpx", "lpy", "lpz"]].to_numpy().astype(float)
-        lp[:, 2] /= pixelsize
         angles = np.deg2rad(locs["angle"].to_numpy())
         fit = g5m.G5M_3D(
             n_components=1,
@@ -995,7 +1049,7 @@ class TestBootstrap:
         assert np.isfinite(sem).all() and (sem > 0).all()
 
     def test_bootstrap_end_to_end_for_rotated(self, info):
-        mols, _, out_info = g5m.g5m(
+        mols, out_info, _ = g5m.g5m(
             _rotated_cluster(30.0),
             info,
             min_locs=20,
@@ -1003,7 +1057,7 @@ class TestBootstrap:
             covariance_type="rotated",
             calibration=CALIB_ASTIG,
             sigma_bounds=(0.3, 3.0),
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert out_info[-1]["Covariance type"] == "rotated"
@@ -1019,13 +1073,19 @@ class TestPublishedModelsUnchanged:
 
     def test_2d_spherical_golden(self, dbscan_locs, info):
         mols, _, _ = g5m.g5m(
-            dbscan_locs, info, min_locs=5, asynch=False, postprocess=False
+            dbscan_locs, info, min_locs=5, parallel=False, postprocess=False
         )
         assert len(mols) == GOLDEN_2D["n"]
-        for col in ["x", "y", "fitted_sigma", "p_val"]:
-            np.testing.assert_array_equal(
+        for col, scale, rtol in [
+            ("x", PIXELSIZE, 1e-6),
+            ("y", PIXELSIZE, 1e-6),
+            ("fitted_sigma", 1.0, 2e-2),
+            ("p_val", 1.0, 0.1),
+        ]:
+            np.testing.assert_allclose(
                 mols[col].to_numpy(),
-                np.array(GOLDEN_2D[col], dtype=np.float32),
+                np.array(GOLDEN_2D[col], dtype=np.float32) * scale,
+                rtol=rtol,
                 err_msg=f"published 2D spherical model moved in '{col}'",
             )
 
@@ -1035,22 +1095,23 @@ class TestPublishedModelsUnchanged:
             info,
             min_locs=5,
             calibration=CALIB_3D,
-            asynch=False,
+            parallel=False,
             postprocess=False,
         )
         assert len(mols) == GOLDEN_3D["n"]
-        for col in [
-            "x",
-            "y",
-            "z",
-            "fitted_sigma_x",
-            "fitted_sigma_y",
-            "fitted_sigma_z",
-            "p_val",
+        for col, scale, rtol in [
+            ("x", PIXELSIZE, 1e-6),
+            ("y", PIXELSIZE, 1e-6),
+            ("z", 1.0, 1e-6),
+            ("fitted_sigma_x", 1.0, 2e-2),
+            ("fitted_sigma_y", 1.0, 2e-2),
+            ("fitted_sigma_z", 1.0, 2e-2),
+            ("p_val", 1.0, 0.1),
         ]:
-            np.testing.assert_array_equal(
+            np.testing.assert_allclose(
                 mols[col].to_numpy(),
-                np.array(GOLDEN_3D[col], dtype=np.float32),
+                np.array(GOLDEN_3D[col], dtype=np.float32) * scale,
+                rtol=rtol,
                 err_msg=f"published 3D diagonal model moved in '{col}'",
             )
 
@@ -1063,23 +1124,25 @@ class TestPublishedModelsUnchanged:
 class TestG5M:
     def test_g5m_2d_with_bootstrap(self, dbscan_locs, info):
         mols, _, _ = g5m.g5m(
-            dbscan_locs, info, min_locs=5, bootstrap_check=True, asynch=False
+            dbscan_locs, info, min_locs=5, bootstrap_check=True, parallel=False
         )
         assert "p_val" in mols.columns
         # p-values must be in [0, 1]
         assert (mols["p_val"] >= 0).all() and (mols["p_val"] <= 1).all()
 
     def test_g5m_2d_global_loc_prec(self, dbscan_locs, info):
-        mols, _, _ = g5m.g5m(
+        mols, out_info, _ = g5m.g5m(
             dbscan_locs,
             info,
             min_locs=5,
             bootstrap_check=False,
             loc_prec_handle="abs",
-            sigma_bounds=(1 / 130, 3 / 130),
+            sigma_bounds=(1.0, 3.0),  # nm
         )
         assert "p_val" in mols.columns
         assert len(mols) > 0
+        assert out_info[-1]["Sigma bounds (nm)"] == [1.0, 3.0]
+        assert out_info[-1]["Sigma bounds method"] == "Abs"
 
 
 class TestG5M3D:
@@ -1090,7 +1153,7 @@ class TestG5M3D:
             min_locs=5,
             bootstrap_check=True,
             calibration=CALIB_3D,
-            asynch=False,
+            parallel=False,
         )
         assert len(mols) > 0
         assert "p_val" in mols.columns
@@ -1104,7 +1167,7 @@ class TestG5M3D:
             bootstrap_check=False,
             calibration=CALIB_3D,
             loc_prec_handle="abs",
-            sigma_bounds=(1 / 130, 3 / 130),
+            sigma_bounds=(1.0, 3.0),  # nm
         )
         assert len(mols) > 0
         assert "p_val" in mols.columns
@@ -1112,14 +1175,14 @@ class TestG5M3D:
     def test_g5m_3d_spline_no_calibration(self, dbscan_locs_3d, info):
         # spline mode uses the plain diagonal 3D model and reads lpz
         # directly from the locs, so no calibration is required
-        mols, _, out_info = g5m.g5m(
+        mols, out_info, _ = g5m.g5m(
             dbscan_locs_3d,
             info,
             min_locs=5,
             bootstrap_check=False,
             mode="spline",
             calibration=None,
-            asynch=False,
+            parallel=False,
         )
         assert len(mols) > 0
         assert "z" in mols.columns
@@ -1138,7 +1201,7 @@ class TestG5M3D:
                 min_locs=5,
                 mode="spline",
                 calibration=None,
-                asynch=False,
+                parallel=False,
             )
 
     def test_g5m_3d_astigmatism_requires_calibration(
@@ -1151,7 +1214,7 @@ class TestG5M3D:
                 min_locs=5,
                 mode="astigmatism",
                 calibration=None,
-                asynch=False,
+                parallel=False,
             )
 
 
@@ -1161,52 +1224,39 @@ class TestG5M3D:
 # ---------------------------------------------------------------------
 
 
-class _RecordingProgress:
-    """Duck-typed progress tracker recording the calls it receives."""
-
-    def __init__(self):
-        self.values = []
-        self.maxima = []
-        self.closed = False
-
-    def set_value(self, value):
-        self.values.append(value)
-
-    def setMaximum(self, maximum, *args, **kwargs):
-        self.maxima.append(maximum)
-
-    def maximum(self):
-        return self.maxima[-1] if self.maxima else 0
-
-    def zero_progress(self, description=None, *args, **kwargs):
-        pass
-
-    def close(self, *args, **kwargs):
-        self.closed = True
-
-
 class TestG5MProgress:
-    @pytest.mark.parametrize("callback_parent", [None, "console"])
-    def test_progress_modes(self, dbscan_locs, info, callback_parent):
+    def test_none_reports_nothing(self, capsys, dbscan_locs, info):
+        """The default is None (it used to be "console")."""
+        mols, _, _ = g5m.g5m(dbscan_locs, info, min_locs=5, parallel=False)
+        assert len(mols) > 0
+        captured = capsys.readouterr()
+        assert captured.out == captured.err == ""
+
+    def test_console(self, capsys, dbscan_locs, info):
         mols, _, _ = g5m.g5m(
-            dbscan_locs,
-            info,
-            min_locs=5,
-            asynch=False,
-            callback_parent=callback_parent,
+            dbscan_locs, info, min_locs=5, parallel=False, progress="console"
         )
         assert len(mols) > 0
+        assert "Running G5M" in capsys.readouterr().err
 
-    def test_reports_progress_to_duck_typed_tracker(self, dbscan_locs, info):
-        tracker = _RecordingProgress()
+    def test_reports_progress_to_tracker(self, dbscan_locs, info):
+        tracker = RecordingProgress()
         g5m.g5m(
-            dbscan_locs,
-            info,
-            min_locs=5,
-            asynch=False,
-            callback_parent=tracker,
+            dbscan_locs, info, min_locs=5, parallel=False, progress=tracker
         )
-        assert tracker.values, "no progress was reported"
-        assert tracker.closed, "progress tracker was not closed"
-        # the final update fills the bar
-        assert tracker.values[-1] == max(tracker.values)
+        assert_phases(tracker, ["Running G5M"])
+        # one step per cluster, counted as they finish
+        n_groups = dbscan_locs["group"].nunique()
+        assert tracker.phases[0].maximum == n_groups
+        assert tracker.phases[0].values[:2] == [0, 1]
+
+    def test_parent_widget_is_rejected(self, dbscan_locs, info):
+        """A Qt parent no longer builds a dialog in the core module."""
+        with pytest.raises(TypeError):
+            g5m.g5m(
+                dbscan_locs,
+                info,
+                min_locs=5,
+                parallel=False,
+                progress=object(),
+            )

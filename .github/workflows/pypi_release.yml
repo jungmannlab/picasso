@@ -1,63 +1,189 @@
+# Build, test and publish the picassosr package.
+#
+# Publishing a GitHub release builds the wheel and the sdist from the
+# release tag, installs the wheel on Linux, macOS and Windows, runs
+# release/smoke_test.py and only then publishes on PyPI. Finally, the
+# published version is installed from PyPI and tested again.
+#
+# Running the workflow by hand (Actions > Publish on PyPI > Run workflow)
+# builds and tests the same way and publishes on TestPyPI, e.g., to try a
+# release candidate, or on PyPI if chosen.
+#
+# Publishing uses PyPI's trusted publishing, so no API token is stored:
+# the picassosr projects on pypi.org and test.pypi.org name this repository,
+# this workflow file (pypi_release.yml) and the environment ("pypi" or
+# "testpypi") as their trusted publisher.
+
+name: Publish on PyPI
+
 on:
-  push:
-    branches: [ main ]
+  release:
+    types: [published]
   workflow_dispatch:
+    inputs:
+      index:
+        description: Package index to publish on
+        type: choice
+        options: [testpypi, pypi]
+        default: testpypi
 
-
-name: Publish on PyPi
+permissions:
+  contents: read
 
 jobs:
-  Create_PyPi_Release:
+  build:
+    name: Build the distributions
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v2
-      - uses: conda-incubator/setup-miniconda@v3
+      - uses: actions/checkout@v7
         with:
-          auto-update-conda: true
-          python-version: ${{ matrix.python-version }}
-      - name: Conda info
-        shell: bash -l {0}
-        run: conda info
-      - name: Prepare distribution
-        shell: bash -l {0}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Build the wheel and the sdist
         run: |
-          cd release/pypi
-          . ./prepare_pypi_wheel.sh
-      - name: Publish distribution to Test PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
-          repository-url: https://test.pypi.org/legacy/
-      - name: Test PyPI test release
-        shell: bash -l {0}
+          python -m pip install --upgrade build twine
+          python -m build
+          python -m twine check --strict dist/*
+      - name: Check the version
+        id: version
+        env:
+          TAG: ${{ github.event.release.tag_name }}
         run: |
-          cd release/pypi
-          . ./install_test_pypi_wheel.sh
-      - name: Publish distribution to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
+          python - <<'EOF'
+          import glob
+          import os
+
+          from packaging.version import Version
+
+          wheel = os.path.basename(glob.glob("dist/*.whl")[0])
+          version = wheel.split("-")[1]
+          tag = os.environ["TAG"]
+          if tag and Version(tag.removeprefix("v")) != Version(version):
+              raise SystemExit(
+                  f"::error::The release tag {tag} does not match the "
+                  f"package version {version} (picasso/version.py)."
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={version}\n")
+          EOF
+      - uses: actions/upload-artifact@v7
         with:
-          password: ${{ secrets.PYPI_API_TOKEN }}
-  Test_PyPi_Release:
-    name: Test_PyPi_version_on_${{ matrix.os }}
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  smoke-test:
+    name: Test the wheel (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    needs: build
     runs-on: ${{ matrix.os }}
-    needs: Create_PyPi_Release
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, macOS-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.14"]
+    env:
+      QT_QPA_PLATFORM: offscreen
     steps:
-      - uses: actions/checkout@v2
-      - uses: conda-incubator/setup-miniconda@v3
+      - uses: actions/checkout@v7  # for release/smoke_test.py
         with:
-          auto-update-conda: true
-          miniconda-version: "latest"
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
           python-version: ${{ matrix.python-version }}
-          architecture: ${{ runner.arch == 'ARM64' && 'arm64' || 'x64' }}
-      - name: Conda info
-        shell: bash -l {0}
-        run: conda info
-      - name: Test pip installation from PyPi
-        shell: bash -l {0}
+      - name: Install Qt system libraries
+        if: runner.os == 'Linux'
         run: |
-          cd release/pypi
-          . ./install_pypi_wheel.sh
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxcb-xkb1 libxkbcommon0
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - name: Install the wheel
+        shell: bash
+        run: python -m pip install dist/*.whl
+      - name: Smoke test
+        shell: bash
+        # outside the checkout, so that the installed package is tested
+        working-directory: ${{ runner.temp }}
+        run: python "${{ github.workspace }}/release/smoke_test.py"
+
+  publish-testpypi:
+    name: Publish on TestPyPI
+    needs: smoke-test
+    if: github.event_name == 'workflow_dispatch' && inputs.index == 'testpypi'
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/picassosr
+    permissions:
+      id-token: write  # trusted publishing
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          # a version cannot be uploaded twice; trying a build again
+          # should not fail on that
+          skip-existing: true
+
+  publish-pypi:
+    name: Publish on PyPI
+    needs: smoke-test
+    if: github.event_name == 'release' || inputs.index == 'pypi'
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/picassosr
+    permissions:
+      id-token: write  # trusted publishing
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  check-pypi:
+    name: Install from PyPI (${{ matrix.os }})
+    needs: [build, publish-pypi]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    env:
+      QT_QPA_PLATFORM: offscreen
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7  # for release/smoke_test.py
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+      - name: Install Qt system libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libgl1 libxkbcommon-x11-0 libdbus-1-3 libxcb-cursor0 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0 libxcb-render-util0 libxcb-shape0 libxcb-sync1 libxcb-xfixes0 libxcb-xkb1 libxkbcommon0
+      - name: Install the published version
+        shell: bash
+        run: |
+          # PyPI can take a few minutes to list a new version
+          for attempt in 1 2 3 4 5 6 7 8 9 10; do
+            python -m pip install --no-cache-dir "picassosr==$VERSION" && break
+            sleep 60
+          done
+          python -m pip show picassosr
+      - name: Smoke test
+        shell: bash
+        working-directory: ${{ runner.temp }}
+        run: python "${{ github.workspace }}/release/smoke_test.py"

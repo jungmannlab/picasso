@@ -23,6 +23,7 @@ import pandas as pd
 import pytest
 
 from picasso.gui import render as gui_render
+from picasso.gui import render_spt
 
 WIDTH = HEIGHT = 256.0
 
@@ -78,6 +79,7 @@ class _ViewStub:
         self.render_index = [None]
         self._move_channels = ()  # no channel dragged by the Move tool
         self.window = _WindowStub()
+        self.spt = render_spt.SPTController(self)  # caches track segments
 
 
 def _brute_force(locs: pd.DataFrame, viewport) -> pd.DataFrame:
@@ -177,6 +179,7 @@ _EXEMPT = {
     ("View", "__init__"),  # creates the empty lists
     ("View", "add"),  # appends a fresh entry to every cache
     ("DatasetDialog", "_close_one_channel"),  # drops the entry everywhere
+    ("View", "reorder_channels"),  # permutes the entries together
     # takes a linked window's channel together with its (valid) index
     ("View", "adopt_shared_channels"),
     ("View", "detach_channel"),  # a row-for-row copy: indices stay valid

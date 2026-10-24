@@ -27,14 +27,18 @@ nanoTRON Train
 Train a MLP model for nanopattern prediction using nanoTRON.
 
 1. In ``Picasso: nanoTRON``, select ``Tools`` > ``Train Model`` to open the training user interface.
-2. Set the number of different classes of the model via ``Number of Classes`` and press ``Generate Data Set``.
+2. Set the number of different classes of the model (at least two) via ``Number of Classes`` and press ``Generate Data Set``.
 3. Load all the training files via the various buttons ``Load File``. Grayed out buttons indicate that the data set slot is loaded.
 4. Name every data set (class) with a unique name.
 5. Set up the image parameters in the box ``Image Parameter``:
 
-   - Set the oversampling factor via ``Oversampling``. This factor determines
-     the sub-pixel resolution of the training images. We recommend a lower
-     resolution than the data would provide, for better generalization.
+   - Set the size of the rendered pixels via ``Display pixel size (nm)``.
+     It determines the resolution of the training images. We recommend a
+     coarser pixel than the data would allow, for better generalization. The
+     model ``.yaml`` records it as ``Display pixel size (nm)`` and the pick
+     size as ``Pick Diameter (nm)`` (models trained before Picasso 1.0
+     recorded ``Oversampling`` and ``Pick Diameter`` in camera pixels; they
+     are converted when loaded, see :ref:`files-legacy`).
    - Augment the training data sets via the check button
      ``Expand Training Set``. Here every data set point is rotated eleven
      times.
@@ -77,11 +81,11 @@ Train a MLP model for nanopattern prediction using nanoTRON.
       X, y = [], []
       for label, path in enumerate(["class0_picked.hdf5", "class1_picked.hdf5"]):
           locs, info = io.load_locs(path)
-          pixelsize = lib.get_from_metadata(info, "Pixelsize")
-          pick_radius = lib.get_from_metadata(info, "Pick Diameter (nm)") / pixelsize / 2
+          pick_diameter = lib.get_from_metadata(info, "Pick Diameter (nm)")   # nm
           for group in locs["group"].unique():
               img = nanotron.roi_to_img(
-                  locs, info, pick=int(group), radius=pick_radius, disp_px_size=disp_px_size
+                  locs, info, pick=int(group), pick_diameter=pick_diameter,
+                  disp_px_size=disp_px_size,
               )
               X.append(nanotron.prepare_img(img, img_shape=img.shape[0], alpha=10, bg=1))
               y.append(label)
@@ -96,9 +100,21 @@ nanoTRON Predict
 ----------------
 Use a trained nanoTRON model to classify nanopatterns on new data.
 
+.. warning::
+
+   A nanoTRON model (``.sav``) is a scikit-learn model saved with ``joblib``,
+   which uses Python's ``pickle``. Loading a model runs code stored in the
+   file, and that code can do anything Picasso itself can do: read and write
+   your files, use the network, start other programs. Only load models whose
+   authors you trust, e.g., the default model that comes with Picasso and
+   models you trained yourself. The ``.yaml`` file next to a model is read
+   safely.
+
 1. Load the model via ``Tools`` > ``Train Model``. The different classes should now be listed on the right side.
 2. Drag and drop the Picasso localization table file (HDF5) that should be used for prediction into the large gray box. If the file was loaded correctly, the box displays the image.
-3. Start the classification via the button ``Predict``.
+3. Start the classification via the button ``Predict``. If the model ``.yaml``
+   does not record the pick diameter or the display pixel size the model was
+   trained with, nanoTRON asks for them.
 4. Choose the classes that should be exported in the box ``Export Structures``. By default, each class is exported.
 5. Set the export parameters in the box ``Export``:
 
@@ -130,6 +146,6 @@ Use a trained nanoTRON model to classify nanopatterns on new data.
       for group in locs["group"].unique():
           pred, proba = nanotron.predict_structure(
               mlp, locs, info, pick=int(group),
-              pick_radius=pick_radius, disp_px_size=disp_px_size,
+              pick_diameter=pick_diameter, disp_px_size=disp_px_size,
           )
           print(group, pred[0], proba.max())

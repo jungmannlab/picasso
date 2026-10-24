@@ -6,7 +6,7 @@ import datetime
 import warnings
 
 DEFAULT_PLOTS = [
-    "nena_px",
+    "nena_nm",
     "photons_mean",
     "frame_std",
     "n_locs",
@@ -15,6 +15,9 @@ DEFAULT_PLOTS = [
     "drift_x",
     "drift_y",
 ]
+
+#: Units of the plotted fields (lengths are in nm since Picasso 1.0).
+FIELD_UNITS = {"nena_nm": "nm", "drift_x": "nm", "drift_y": "nm"}
 
 
 @st.cache_data
@@ -85,12 +88,50 @@ def parse_input(input_: str):
         to_exclude.append(input_[last_idx:])
 
     to_add = [_ for _ in to_add if len(_) > 0]
+    to_exclude = [_ for _ in to_exclude if len(_) > 0]
 
     return to_add, to_exclude
 
 
+def filter_entries(
+    df: pd.DataFrame,
+    min_date: datetime.date,
+    max_date: datetime.date,
+    tags: str = "",
+) -> pd.DataFrame:
+    """Keep the database entries acquired between two dates whose
+    filename matches a tag filter.
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        Database entries, with the columns ``file_created`` and
+        ``filename``.
+    min_date, max_date : datetime.date
+        First and last day of acquisition, both included.
+    tags : str, optional
+        Tag filter, see ``parse_input``; spaces are ignored. Default is
+        "", no filter.
+
+    Returns
+    -------
+    df : pd.DataFrame
+        The matching rows.
+    """
+    start = datetime.datetime.combine(min_date, datetime.time.min)
+    # up to the end of the last day
+    end = datetime.datetime.combine(
+        max_date + datetime.timedelta(days=1), datetime.time.min
+    )
+    tags = tags.replace(" ", "")
+    if tags:
+        df = filter_by_tags(df, *parse_input(tags))
+    return df[(df["file_created"] >= start) & (df["file_created"] < end)]
+
+
 def filter_db(df_: pd.DataFrame):
-    """Draw the filter controls and apply them to a dataframe.
+    """Draw the filter controls and apply them to a dataframe, see
+    ``filter_entries``.
 
     Parameters
     ----------
@@ -103,35 +144,21 @@ def filter_db(df_: pd.DataFrame):
         The rows inside the chosen acquisition-date range whose filename
         matches the tag filter.
     """
-
-    df = df_.copy()
     st.write("## Filter")
     c1, c2, c3 = st.columns((1, 1, 2))
 
     min_date = c1.date_input(
-        "Minimum acquisition date",
-        df["file_created"].min() - datetime.timedelta(days=1),
+        "Minimum acquisition date", df_["file_created"].min().date()
     )
-    min_date = datetime.datetime.combine(
-        min_date, datetime.datetime.min.time()
-    )
-
     max_date = c2.date_input(
-        "Maximum acquisition date",
-        df["file_created"].max() + datetime.timedelta(days=1),
+        "Maximum acquisition date", df_["file_created"].max().date()
     )
-    max_date = datetime.datetime.combine(
-        max_date, datetime.datetime.min.time()
-    )
-
-    input = c3.text_input(
+    tags = c3.text_input(
         "Filter for tag in filename (use & and | to add and exclude)"
-    )
+    ).replace(" ", "")
 
-    input = input.replace(" ", "")
-
-    if input != "":
-        to_add, to_exclude = parse_input(input)
+    if tags != "":
+        to_add, to_exclude = parse_input(tags)
         if (len(to_add) > 0) & (len(to_exclude) > 0):
             st.text(
                 f"Filtering for filenames containing {to_add} but "
@@ -144,11 +171,7 @@ def filter_db(df_: pd.DataFrame):
         elif (len(to_exclude)) > 0:
             st.text(f"Filtering for filenames not containing {to_exclude}.")
 
-        df = filter_by_tags(df, to_add, to_exclude)
-
-    df = df[
-        (df["file_created"] >= min_date) & (df["file_created"] <= max_date)
-    ]
+    df = filter_entries(df_, min_date, max_date, tags)
 
     st.text(f"From {len(df_):,} Database entries, {len(df):,} are remaining.")
 
@@ -163,7 +186,8 @@ def filter_by_tags(df: pd.DataFrame, to_add: list, to_exclude: list):
     df : pd.DataFrame
         Input dataframe, with a ``filename`` column.
     to_add : list
-        Keywords that should be in the filename.
+        Keywords of which the filename must contain at least one; no
+        keywords keep every entry.
     to_exclude : list
         Keywords that should not be in the filename.
 
@@ -172,23 +196,14 @@ def filter_by_tags(df: pd.DataFrame, to_add: list, to_exclude: list):
     df : pd.DataFrame
         The matching rows.
     """
-
-    add = df["filename"].apply(
-        lambda x: True if any(i in x for i in to_add) else False
-    )
-
-    if len(to_exclude) > 0:
-        exclude = df["filename"].apply(
-            lambda x: False if any(i in x for i in to_exclude) else True
+    keep = pd.Series(True, index=df.index)
+    if to_add:
+        keep &= df["filename"].apply(lambda x: any(i in x for i in to_add))
+    if to_exclude:
+        keep &= ~df["filename"].apply(
+            lambda x: any(i in x for i in to_exclude)
         )
-    else:
-        exclude = [True for _ in range(len(df))]
-
-    exclude = df["filename"].apply(
-        lambda x: False if any(i in x for i in to_exclude) else True
-    )
-
-    return df[add & exclude]
+    return df[keep]
 
 
 def check_group(filename: str, groups: tuple):
@@ -208,7 +223,7 @@ def check_group(filename: str, groups: tuple):
     """
     found = "None"
     for g in groups:
-        if g in filename:
+        if g and g in filename:
             found = g
 
     return found
@@ -233,7 +248,7 @@ def history():
 
         fields = c1.multiselect("Fields to plot", options, DEFAULT_PLOTS)
         groups = c2.text_input(
-            "Enter tags to group (seperate by comma and no space)."
+            "Enter tags to group (separate by comma and no space)."
             "\nGroups will be color-coded in scatter and box plots."
         )
         groups_ = groups.split(",")
@@ -288,6 +303,11 @@ def history():
 
                     for field in fields:
                         median_ = df[field].median()
+                        unit = (
+                            f" ({FIELD_UNITS[field]})"
+                            if field in FIELD_UNITS
+                            else ""
+                        )
 
                         if plotmode == "Scatter":
                             fig = px.scatter(
@@ -297,7 +317,7 @@ def history():
                                 color="group",
                                 hover_name="filename_hdf",
                                 hover_data=["file_created"],
-                                title=f"{field} - median {median_:.2f}",
+                                title=f"{field} - median {median_:.2f}{unit}",
                                 trendline=trendline,
                                 height=400,
                             )
@@ -318,7 +338,7 @@ def history():
                                 color="group",
                                 hover_name="filename_hdf",
                                 hover_data=["file_created"],
-                                title=f"{field} - median {median_:.2f}",
+                                title=f"{field} - median {median_:.2f}{unit}",
                                 height=400,
                             )
 

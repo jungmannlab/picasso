@@ -14,25 +14,28 @@ from __future__ import annotations
 import os
 import sys
 import copy
+import logging
+import threading
 import time
+import warnings
 import os.path
 from math import ceil
 from collections import Counter
 from functools import partial
-from typing import Callable
+from typing import Callable, Literal
 from PIL import Image
 
-import yaml
 import matplotlib
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets, sip
 
 # must come after the PyQt6 import so that matplotlib's qt_compat
 # selects the PyQt6 binding (picasso core no longer imports PyQt6)
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
+from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
 from scipy.ndimage import gaussian_filter
 from sklearn.metrics.pairwise import euclidean_distances
@@ -44,12 +47,14 @@ from .. import (
     g5m,
     imageprocess,
     io,
+    legacy,
     lib,
     lib_qt,
     masking,
     postprocess,
     render,
     spatial_index,
+    stitch,
     __version__,
     docs_url,
 )
@@ -63,7 +68,11 @@ from .render_worker import (  # noqa: F401
     global_precisions_for,
     subsample_request,
 )
+from . import idle
 from . import render_link
+from . import render_spt
+from .convert_units import ConvertUnitsDialog
+from .grid_settings import GridGroupBox
 from .overlay_style import OverlayStyleWidget
 from .rotation import RotationWindow, source_key
 from .app import run_gui
@@ -71,7 +80,10 @@ from . import theme
 from . import toolbars
 
 # Optional modules with external/hardware dependencies live in ext
-from ..ext.bitplane import IMSWRITER  # PyImarisWrite works on Windows only
+from ..ext.bitplane import (  # PyImarisWrite works on Windows only
+    IMSWRITER,
+    image_extents,
+)
 
 if IMSWRITER:
     from ..ext.bitplane import numpy_to_imaris
@@ -83,12 +95,82 @@ if sys.platform == "darwin":  # plots do not work on mac os
     matplotlib.use("Qt5Agg")
 matplotlib.rcParams.update({"axes.titlesize": "large"})
 
+_log = logging.getLogger(__name__)
 
-DEFAULT_OVERSAMPLING = 1.0  # number of display pixels per camera pixel
+DEFAULT_DISP_PX_SIZE = 130.0  # initial display (render) pixel size, nm
+#: margin around the picked localizations shown in the Test Clusterer
+#: window, as a fraction of their extent
+TEST_CLUSTERER_MARGIN = 0.05
+#: first line of the FOV .txt files saved by ``ChangeFOV`` (nm); files
+#: without it were written before Picasso 1.0, in camera pixels
+FOV_FILE_HEADER = f"picasso_format {io.FORMAT_VERSION} (nm)"
+#: keys of the .yaml saved with exported images (see
+#: ``Window.export_current_info``); the legacy FOV key holds camera
+#: pixels in files without ``picasso_format``. The zoom is the nm
+#: covered by one screen pixel; files written before Picasso 1.0 store
+#: it as screen pixels per camera pixel (``LEGACY_ZOOM_KEY``)
+FOV_KEY = "FOV (X, Y, Width, Height; nm)"
+LEGACY_FOV_KEY = "FOV (X, Y, Width, Height)"
+ZOOM_KEY = "Zoom (nm per screen pixel)"
+LEGACY_ZOOM_KEY = "Zoom"
 INITIAL_REL_MAXIMUM = 0.5
 ZOOM = 9 / 7
 WHEEL_ZOOM = 1.2  # zoom factor per mouse wheel notch
 N_GROUP_COLORS = render.N_GROUP_COLORS  # 8
+# per-channel contrast (Files dialog), in percent of the global contrast
+# window: the largest allowed value and the top of the slider track
+CHANNEL_CONTRAST_MAX = 1000.0
+CHANNEL_CONTRAST_TRACK = 200.0
+# key of the per-channel contrast in the .yaml saved with exported images
+CHANNEL_CONTRAST_KEY = "Channel contrast (% of global)"
+# columns of the channel table in the Files dialog: (header, tooltip)
+DATASET_COLUMNS = [
+    ("File", "Names of the loaded datasets."),
+    ("Title", "Change the displayed name of each dataset."),
+    ("Color", "Select the color for each dataset."),
+    ("", "Gradient preview and color picker of each dataset."),
+    (
+        "Contrast (% of global)",
+        "Contrast of each dataset relative to the minimum and\n"
+        "maximum density set in Display settings (Ctrl+D): 0% is\n"
+        "the minimum and 100% the maximum density. Lower the\n"
+        "maximum to brighten a dataset, raise it to dim it.\n"
+        "The 3D window applies the same values to its own\n"
+        "minimum and maximum density.",
+    ),
+    ("", "Close each dataset."),
+]
+DATASET_COLUMN_CONTRAST = 4
+# width (pixels) of the per-channel gradient preview in the Files dialog
+CHANNEL_PREVIEW_WIDTH = 48
+# the per-channel color combobox of the Files dialog fits the solid
+# color names of up to this many characters and hexadecimal codes;
+# longer names (e.g., "forestgreen_gradient") show in full in the popup
+CHANNEL_COLOR_CHARS = 9
+# key (in the Render section of the user settings) of the colors given
+# to newly loaded channels, in order
+CHANNEL_COLORS_KEY = "Channel colors"
+# key (in the Render section of the user settings) of whether newly
+# loaded channels get the colorblind-safe colors instead
+COLORBLIND_SAFE_KEY = "Colorblind-safe colors"
+# colormap of z in the scatter plots of picks (Select picks), on black;
+# perceptually uniform and readable with color blindness, and unlike
+# viridis, its low end stays visible on black
+Z_SCATTER_CMAP = "plasma"
+# the View > Color vision preview options: deficiency (a key of
+# render.COLOR_VISION_DEFICIENCIES, None for normal vision) and label
+COLOR_VISION_OPTIONS = (
+    (None, "Normal vision"),
+    ("deuteranopia", "Deuteranopia (red-green)"),
+    ("protanopia", "Protanopia (red-green)"),
+    ("tritanopia", "Tritanopia (blue-yellow)"),
+)
+# key (in the Render section of the user settings) of whether Align
+# channels keeps the localizations outside the overlap of the channels
+KEEP_NON_OVERLAPPING_KEY = "Keep non-overlapping after alignment"
+# key (in the Render section of the user settings) of whether File >
+# Remove all localizations asks for confirmation first
+CONFIRM_REMOVE_LOCS_KEY = "Confirm removing all localizations"
 POLYGON_POINTER_SIZE = 16  # must be even
 # shortest drag (display pixels, in x and y) that still yields a box
 # pick, so that a stray click does not create one of zero area
@@ -136,6 +218,12 @@ PROPERTY_UNITS = {"z": "nm", "lpz": "nm"}
 COLORBAR_SUFFIX = "_colorbar"
 
 
+def _show_text_start(combobox: QtWidgets.QComboBox, *args) -> None:
+    """Scroll an editable combobox narrower than its text to the start
+    of the text (the line edit otherwise shows the end)."""
+    combobox.lineEdit().setCursorPosition(0)
+
+
 def _gradient_pixmap(
     lut: lib.FloatArray2D, width: int = 80, height: int = 14
 ) -> QtGui.QPixmap:
@@ -154,6 +242,71 @@ def _gradient_pixmap(
         QtGui.QImage.Format.Format_RGBA8888,
     )
     return QtGui.QPixmap.fromImage(image.copy())
+
+
+def _render_bool_setting(key: str, default: bool) -> bool:
+    """Read a boolean from the ``Render`` section of the user settings.
+
+    A missing key is written with ``default``, so that it is visible in
+    the file, unless the file on disk could not be read. Values that
+    are not booleans are left in the file and ``default`` is returned.
+
+    Parameters
+    ----------
+    key : str
+        Key in the ``Render`` section.
+    default : bool
+        Value used when the key is missing or invalid.
+
+    Returns
+    -------
+    value : bool
+        The stored value, or ``default``.
+    """
+    settings = io.load_user_settings()
+    render_settings = settings["Render"]
+    if not isinstance(render_settings, dict):
+        return default
+    value = render_settings.get(key)
+    if isinstance(value, bool):
+        return value
+    if value is None and not io.settings_file_is_broken():
+        render_settings[key] = default
+        io.save_user_settings(settings)
+    return default
+
+
+def keep_non_overlapping_setting() -> bool:
+    """Whether Align channels keeps the localizations that lie outside
+    the region where all aligned channels overlap.
+
+    Reads ``Keep non-overlapping after alignment`` from the ``Render``
+    section of the user settings; a missing key is written with the
+    default (True, all localizations are kept), so that it is visible
+    in the file, unless the file on disk could not be read.
+
+    Returns
+    -------
+    keep : bool
+        True if all localizations are kept after alignment.
+    """
+    return _render_bool_setting(KEEP_NON_OVERLAPPING_KEY, True)
+
+
+def confirm_remove_locs_setting() -> bool:
+    """Whether File > Remove all localizations asks for confirmation.
+
+    Reads ``Confirm removing all localizations`` from the ``Render``
+    section of the user settings; a missing key is written with the
+    default (False, remove right away), so that it is visible in the
+    file, unless the file on disk could not be read.
+
+    Returns
+    -------
+    confirm : bool
+        True if the user is asked before all localizations are removed.
+    """
+    return _render_bool_setting(CONFIRM_REMOVE_LOCS_KEY, False)
 
 
 def check_pick(f: Callable) -> Callable:
@@ -345,15 +498,15 @@ class ApplyDialog(lib.Dialog):
     --------
     The examples below are to be input in self.cmd (Expression):
 
-    ``x += 10``
-        Move x coordinate 10 units to the right (camera pixels).
-    ``y -= 3``
-        Move y coordinate 3 units upwards (camera pixels).
+    ``x += 100``
+        Move x coordinate 100 nm to the right.
+    ``y -= 30``
+        Move y coordinate 30 nm upwards.
     ``flip x z``
         Exchange x- and z-axes.
-    ``spiral 2 3``
-        Plot each localization over time in a spiral with radius 2
-        pixels and 3 turns.
+    ``spiral 200 3``
+        Plot each localization over time in a spiral with radius 200
+        nm and 3 turns.
     ``uspiral``
         Undo the last spiral action.
     """
@@ -393,13 +546,12 @@ class ApplyDialog(lib.Dialog):
         exp_label = QtWidgets.QLabel("Expression:")
         exp_label.setToolTip(
             "Enter the expression here.\n"
-            "For example, 'x += 10' to move x coordinates of the\n"
-            "localizations in the selected channel 10 camera pixels to the"
-            " right.\n"
+            "For example, 'x += 100' to move x coordinates of the\n"
+            "localizations in the selected channel 100 nm to the right.\n"
             "Additionally, the following commands are supported:\n"
             "- 'flip x z' to exchange x- and z-axes.\n"
             "- 'spiral R N' to plot each localization over time in a spiral\n"
-            "  with radius R pixels and N turns.\n"
+            "  with radius R nm and N turns.\n"
             "- 'uspiral' to undo the last spiral action."
         )
         layout.addWidget(exp_label, 2, 1)
@@ -445,7 +597,7 @@ class ApplyDialog(lib.Dialog):
 
 class DatasetDialog(lib.Dialog):
     """Show legend, show white background, tick and untick, change title
-    of, set color, set relative intensity and close each channel.
+    of, set color, set contrast and close each channel.
 
     ...
 
@@ -461,6 +613,11 @@ class DatasetDialog(lib.Dialog):
         List with QPushButtons for ticking/unticking each channel.
     closebuttons : list
         List of QPushButtons to close each channel
+    colorblind_safe : QCheckBox
+        Tick to color the channels with ``colorblind_safe_colors``
+        instead of the default colors.
+    colorblind_safe_colors : list
+        The 14 default colors ordered for colorblind viewers.
     colordisp_all : list
         List of QLabels showing the color selected for each channel.
     colorpickers : list
@@ -471,16 +628,31 @@ class DatasetDialog(lib.Dialog):
     colorselection : list
         List of QComboBoxes specifying the color displayed for each
         channel.
+    contrast_high : list
+        List of QDoubleSpinBoxes with the upper contrast limit of each
+        channel, in percent of the global contrast window (Display
+        settings).
+    contrast_low : list
+        List of QDoubleSpinBoxes with the lower contrast limit of each
+        channel, in percent of the global contrast window.
+    contrast_sliders : list
+        List of SpinBoxRangeSliders bound to ``contrast_low`` and
+        ``contrast_high``.
+    contrast_widgets : list
+        List of QWidgets holding the contrast spin boxes and slider of
+        each channel.
     default_colors : list
         List of strings specifying the default 14 colors.
-    intensitysettings : list
-        List of QDoubleSpinBoxes specifying relative intensity of each
-        channel.
     legend : QCheckBox
         Used to show/hide legend.
+    reset_contrast_button : QPushButton
+        Resets the contrast of all channels to the global contrast.
     rgb : list
         List of lists of 3 elements specifying the corresponding colors
         as RGB channels.
+    table : QTableWidget
+        Table with one row per channel; the row header shows the
+        channel index.
     title : list
         List of QPushButtons to change the title of each channel.
     warning : bool
@@ -495,6 +667,9 @@ class DatasetDialog(lib.Dialog):
 
     DOCS_URL = docs_url("render/menu-view.html#render-files")
 
+    # emitted when the per-channel contrast changes (linked windows)
+    channel_contrast_changed = QtCore.pyqtSignal()
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
@@ -507,7 +682,10 @@ class DatasetDialog(lib.Dialog):
         self.colordisp_all = []
         self.colorpickers = []
         self.colorpreviews = []
-        self.intensitysettings = []
+        self.contrast_low = []
+        self.contrast_high = []
+        self.contrast_sliders = []
+        self.contrast_widgets = []
         self._next_channel_id = 0
         # Per-channel resolved LUTs (each shape (256, 3) float32) and
         # caches for the built-in and user-defined cmap LUTs.
@@ -565,7 +743,23 @@ class DatasetDialog(lib.Dialog):
             "Automatically assign colors to each channel (using hsv colormap)?"
         )
         self.auto_colors.stateChanged.connect(self.update_colors)
+        self.auto_colors.stateChanged.connect(self._update_color_selection)
         layout.addWidget(self.auto_colors, 3, 0)
+        self.colorblind_safe = QtWidgets.QCheckBox("Colorblind-safe colors")
+        self.colorblind_safe.setToolTip(
+            "Color the channels in an order that people with red-green\n"
+            "color blindness can tell apart (magenta, green, cyan, blue,\n"
+            "...)? Recolors the loaded channels and applies to the\n"
+            "channels loaded next. Beyond four channels, some colors\n"
+            "look alike to colorblind viewers."
+        )
+        render_settings = io.load_user_settings()["Render"]
+        self.colorblind_safe.setChecked(
+            isinstance(render_settings, dict)
+            and render_settings.get(COLORBLIND_SAFE_KEY) is True
+        )
+        self.colorblind_safe.toggled.connect(self.set_colorblind_safe)
+        layout.addWidget(self.colorblind_safe, 0, 1)
 
         # add buttons to save/load colors - right side
         save_button = QtWidgets.QPushButton("Save colors")
@@ -587,52 +781,105 @@ class DatasetDialog(lib.Dialog):
         )
         layout.addWidget(edit_cmaps_button, 2, 2)
         edit_cmaps_button.clicked.connect(self.open_custom_cmap_editor)
-        layout.addWidget(
-            lib.HelpButton(self.DOCS_URL),
-            3,
-            2,
-            alignment=QtCore.Qt.AlignmentFlag.AlignRight,
+        default_colors_button = QtWidgets.QPushButton("Default colors")
+        default_colors_button.setToolTip(
+            "The colors given to newly loaded channels, in order\n"
+            "(saved in the user settings)."
         )
+        default_colors_menu = QtWidgets.QMenu(default_colors_button)
+        default_colors_menu.addAction(
+            "Save current colors as default", self.save_default_colors
+        )
+        default_colors_menu.addAction(
+            "Restore built-in default colors", self.restore_default_colors
+        )
+        default_colors_button.setMenu(default_colors_menu)
+        help_layout = QtWidgets.QHBoxLayout()
+        help_layout.addWidget(default_colors_button)
+        help_layout.addStretch()
+        help_layout.addWidget(lib.HelpButton(self.DOCS_URL))
+        layout.addLayout(help_layout, 3, 2)
 
-        # add scrollable area which will display all channels, below
-        # the non-scrollable elements
-        self._scroll = QtWidgets.QScrollArea(self)
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setHorizontalScrollBarPolicy(
+        # add the table listing all channels, one row per channel, below
+        # the non-scrollable elements; the row header shows the channel
+        # index
+        self.table = QtWidgets.QTableWidget(0, len(DATASET_COLUMNS), self)
+        self.table.setHorizontalScrollBarPolicy(
             QtCore.Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         )
-        self.container = QtWidgets.QWidget()
-        self._scroll.setWidget(self.container)
-        self.scroll_area = QtWidgets.QGridLayout(self.container)
-        self.scroll_area.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
-        layout.addWidget(self._scroll, 4, 0, 1, 3)
-
-        self.checks = []
-        self.title = []
-        self.closebuttons = []
-        self.colorselection = []
-        self.colordisp_all = []
-        self.colorpickers = []
-        self.colorpreviews = []
-        self.intensitysettings = []
-        files_label = QtWidgets.QLabel("Files")
-        files_label.setToolTip("Names of the loaded datasets.")
-        self.scroll_area.addWidget(files_label, 0, 0)
-        title_label = QtWidgets.QLabel("Change title")
-        title_label.setToolTip("Change the displayed name of each dataset.")
-        self.scroll_area.addWidget(title_label, 0, 1)
-        color_label = QtWidgets.QLabel("Color")
-        color_label.setToolTip("Select the color for each dataset.")
-        self.scroll_area.addWidget(color_label, 0, 2)
-        self.scroll_area.addWidget(QtWidgets.QLabel(""), 0, 3)
-        intensity_label = QtWidgets.QLabel("Rel. Intensity")
-        intensity_label.setToolTip(
-            "Set the relative intensity for each dataset."
+        self.table.setEditTriggers(
+            QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers
         )
-        self.scroll_area.addWidget(intensity_label, 0, 4)
-        close_label = QtWidgets.QLabel("Close")
-        close_label.setToolTip("Close the datasets.")
-        self.scroll_area.addWidget(close_label, 0, 5)
+        self.table.setSelectionMode(
+            QtWidgets.QAbstractItemView.SelectionMode.NoSelection
+        )
+        self.table.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.table.setAlternatingRowColors(True)
+        self.table.setShowGrid(False)
+        self.table.setWordWrap(False)
+        for column, (name, tooltip) in enumerate(DATASET_COLUMNS):
+            item = QtWidgets.QTableWidgetItem(name)
+            item.setToolTip(tooltip)
+            self.table.setHorizontalHeaderItem(column, item)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.ResizeToContents
+        )
+        header.setSectionResizeMode(
+            DATASET_COLUMN_CONTRAST, QtWidgets.QHeaderView.ResizeMode.Stretch
+        )
+        header.setDefaultAlignment(
+            QtCore.Qt.AlignmentFlag.AlignLeft
+            | QtCore.Qt.AlignmentFlag.AlignVCenter
+        )
+        header.setHighlightSections(False)
+        row_header = self.table.verticalHeader()
+        row_header.setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.ResizeToContents
+        )
+        row_header.setDefaultAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+        row_header.setMinimumWidth(24)
+        row_header.setHighlightSections(False)
+        row_header.setToolTip(
+            "Channel index (1 is the first loaded dataset).\n"
+            "Drag an index to reorder the datasets, or right click\n"
+            "it to move its dataset up or down."
+        )
+        # dragging a section reorders the channels (see
+        # _on_row_header_moved)
+        row_header.setSectionsMovable(True)
+        row_header.sectionMoved.connect(self._on_row_header_moved)
+        row_header.setContextMenuPolicy(
+            QtCore.Qt.ContextMenuPolicy.CustomContextMenu
+        )
+        row_header.customContextMenuRequested.connect(
+            self._show_row_header_menu
+        )
+        layout.addWidget(self.table, 4, 0, 1, 3)
+
+        # explains the grayed-out widgets when a single channel is
+        # loaded (see set_single_channel_mode)
+        self._single_channel_mode = None
+        self.single_channel_note = QtWidgets.QLabel()
+        self.single_channel_note.setWordWrap(True)
+        self.single_channel_note.setVisible(False)
+        layout.addWidget(self.single_channel_note, 5, 0, 1, 3)
+
+        self.reset_contrast_button = QtWidgets.QPushButton("Reset contrast")
+        self.reset_contrast_button.setToolTip(
+            "Reset the contrast of all datasets to 0-100%,\n"
+            "i.e., to the global contrast."
+        )
+        self.reset_contrast_button.setFocusPolicy(
+            QtCore.Qt.FocusPolicy.NoFocus
+        )
+        self.reset_contrast_button.clicked.connect(self.reset_channel_contrast)
+        layout.addWidget(
+            self.reset_contrast_button,
+            3,
+            1,
+            alignment=QtCore.Qt.AlignmentFlag.AlignLeft,
+        )
 
         self.default_colors = [
             "red",
@@ -649,6 +896,28 @@ class DatasetDialog(lib.Dialog):
             "sage",
             "jade",
             "azure",
+        ]
+        # the default colors ordered so that the first ones stay apart
+        # for protanopes and deuteranopes (simulated after Machado et
+        # al., IEEE TVCG 2009): magenta/green is the usual colorblind-
+        # safe pair, and blue tells the fourth channel from the others
+        # better than yellow does; the rest follow greedily by the
+        # largest smallest color difference to the colors before them
+        self.colorblind_safe_colors = [
+            "magenta",
+            "green",
+            "cyan",
+            "blue",
+            "carmine",
+            "jade",
+            "red",
+            "orange",
+            "amethyst",
+            "sage",
+            "yellow",
+            "purple",
+            "azure",
+            "forestgreen",
         ]
         self.rgb = [
             [1, 0, 0],
@@ -701,10 +970,14 @@ class DatasetDialog(lib.Dialog):
         # change when channels are closed and the rows shift up
         channel_id = str(self._next_channel_id)
         self._next_channel_id += 1
-        t = QtWidgets.QPushButton("#")
+        t = QtWidgets.QPushButton()
+        t.setIcon(theme.icon("rename"))
+        theme.set_button_compact(t)
         t.setToolTip("Change the displayed name of this dataset.")
         t.setObjectName(channel_id)
-        p = QtWidgets.QPushButton("x")
+        p = QtWidgets.QPushButton()
+        p.setIcon(theme.icon("delete"))
+        theme.set_button_compact(p)
         p.setToolTip("Close this dataset.")
         p.setObjectName(channel_id)
 
@@ -739,8 +1012,16 @@ class DatasetDialog(lib.Dialog):
         colordrop.setEditable(True)
         colordrop.lineEdit().setMaxLength(40)
         self._populate_color_combo(colordrop)
-        index = np.min([len(self.checks) - 1, len(self.rgb) - 1])
-        colordrop.setCurrentText(self.default_colors[index])
+        colordrop.setFixedWidth(self._color_combo_width(colordrop))
+        default_color = self.default_channel_color(len(self.checks) - 1)
+        colordrop.setCurrentText(default_color)
+        _show_text_start(colordrop)
+        colordrop.currentIndexChanged.connect(
+            partial(_show_text_start, colordrop)
+        )
+        colordrop.lineEdit().editingFinished.connect(
+            partial(_show_text_start, colordrop)
+        )
         colordrop.activated.connect(self.update_colors)
         self.colorselection.append(colordrop)
         self.colorselection[-1].currentIndexChanged.connect(
@@ -752,12 +1033,7 @@ class DatasetDialog(lib.Dialog):
             colors = lib.get_colors(len(self.checks) + 1)
             initial_lut = render.solid_to_lut(colors[-1])
         else:
-            try:
-                initial_lut = self.resolve_color_identifier(
-                    self.default_colors[index]
-                )
-            except ValueError:
-                initial_lut = render.solid_to_lut(self.rgb[index])
+            initial_lut = self.resolve_color_identifier(default_color)
         self._channel_luts.append(initial_lut)
 
         # create the gradient preview widget
@@ -765,20 +1041,22 @@ class DatasetDialog(lib.Dialog):
         colordisp.setToolTip(
             "Gradient preview: intensity 0 (left) → intensity 1 (right)."
         )
-        colordisp.setFixedSize(80, 14)
+        colordisp.setFixedSize(CHANNEL_PREVIEW_WIDTH, 14)
         colordisp.setFrameShape(QtWidgets.QFrame.Shape.Box)
-        colordisp.setPixmap(_gradient_pixmap(initial_lut))
+        colordisp.setPixmap(
+            _gradient_pixmap(initial_lut, width=CHANNEL_PREVIEW_WIDTH)
+        )
         self.colordisp_all.append(colordisp)
 
         # create the color picker button (writes a hex code into the
         # combobox above), shown next to the gradient preview
         picker = QtWidgets.QPushButton("...")
+        theme.set_button_compact(picker)
+        picker.setAutoDefault(False)
         picker.setToolTip(
             "Pick a solid color for this dataset from a color dialog.\n"
             "The chosen color is entered as a hexadecimal code."
         )
-        picker.setAutoDefault(False)
-        picker.setFixedWidth(28)
         picker.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         picker.setObjectName(channel_id)
         picker.clicked.connect(
@@ -794,47 +1072,278 @@ class DatasetDialog(lib.Dialog):
         preview_layout.addWidget(picker)
         self.colorpreviews.append(preview_widget)
 
-        # create the relative intensity widget
-        intensity = QtWidgets.QDoubleSpinBox(self)
-        intensity.setToolTip("Set the relative intensity for this dataset.")
-        intensity.setKeyboardTracking(False)
-        intensity.setDecimals(2)
-        intensity.setValue(1.00)
-        self.intensitysettings.append(intensity)
-        self.intensitysettings[-1].valueChanged.connect(self.update_viewport)
+        # create the contrast widgets: lower and upper limit in percent
+        # of the global contrast window, and a slider bound to them
+        contrast_low = QtWidgets.QDoubleSpinBox()
+        contrast_low.setToolTip(
+            "Lower contrast limit of this dataset, in percent of the\n"
+            "global contrast window (0% is the minimum density in\n"
+            "Display settings)."
+        )
+        contrast_high = QtWidgets.QDoubleSpinBox()
+        contrast_high.setToolTip(
+            "Upper contrast limit of this dataset, in percent of the\n"
+            "global contrast window (100% is the maximum density in\n"
+            "Display settings). Lower it to brighten the dataset,\n"
+            "raise it to dim it."
+        )
+        for box in (contrast_low, contrast_high):
+            box.setKeyboardTracking(False)
+            box.setDecimals(1)
+            box.setSuffix(" %")
+            box.setRange(0.0, CHANNEL_CONTRAST_MAX)
+            self._fit_contrast_box_width(box)
+        contrast_high.setValue(100.0)
+        self._apply_contrast_bounds(contrast_low, contrast_high)
+        contrast_slider = lib.SpinBoxRangeSlider(
+            contrast_low,
+            contrast_high,
+            upper=lambda: CHANNEL_CONTRAST_TRACK,
+        )
+        contrast_slider.setValueLabels(
+            "Min. (% of global)", "Max. (% of global)"
+        )
+        contrast_slider.setMinimumWidth(120)
+        for box in (contrast_low, contrast_high):
+            box.valueChanged.connect(
+                partial(
+                    self._apply_contrast_bounds, contrast_low, contrast_high
+                )
+            )
+            box.valueChanged.connect(self.update_channel_contrast)
+        contrast_widget = QtWidgets.QWidget()
+        contrast_layout = QtWidgets.QHBoxLayout(contrast_widget)
+        contrast_layout.setContentsMargins(0, 0, 0, 0)
+        contrast_layout.addWidget(contrast_low)
+        contrast_layout.addWidget(contrast_slider)
+        contrast_layout.addWidget(contrast_high)
+        self.contrast_low.append(contrast_low)
+        self.contrast_high.append(contrast_high)
+        self.contrast_sliders.append(contrast_slider)
+        self.contrast_widgets.append(contrast_widget)
 
-        # add all the widgets to the Dataset Dialog (row 0 holds the
-        # column headers, so channel i lives in row i + 1)
-        currentline = len(self.checks)
-        self.scroll_area.addWidget(c, currentline, 0)
-        self.scroll_area.addWidget(t, currentline, 1)
-        self.scroll_area.addWidget(colordrop, currentline, 2)
-        self.scroll_area.addWidget(preview_widget, currentline, 3)
-        self.scroll_area.addWidget(intensity, currentline, 4)
-        self.scroll_area.addWidget(p, currentline, 5)
+        # add all the widgets to a new row of the channel table
+        row = self.table.rowCount()
+        self.table.insertRow(row)
+        self._set_table_row(row)
+        self._update_color_selection()
 
         self._fit_scroll_width()
 
-    def _relayout_channels(self) -> None:
-        """Re-add all channel widgets to the scroll area so that the
-        rows are contiguous after a channel has been closed."""
+    def _set_table_row(self, i: int) -> None:
+        """Put the widgets of channel ``i`` into row ``i`` of the
+        channel table, each wrapped with a small margin so that the
+        rows do not touch. Replaces the cells of the row, if any (the
+        table deletes them, but not the widgets moved out of them)."""
+        widgets = [
+            self.checks[i],
+            self.title[i],
+            self.colorselection[i],
+            self.colorpreviews[i],
+            self.contrast_widgets[i],
+            self.closebuttons[i],
+        ]
+        for column, widget in enumerate(widgets):
+            cell = QtWidgets.QWidget()
+            cell_layout = QtWidgets.QHBoxLayout(cell)
+            cell_layout.setContentsMargins(4, 2, 4, 2)
+            cell_layout.addWidget(widget)
+            self.table.setCellWidget(i, column, cell)
+
+    def _on_row_header_moved(
+        self, logical: int, old_visual: int, new_visual: int
+    ) -> None:
+        """Reorder the channels after a row was dragged by its index.
+
+        The header only moves the row on screen; it is moved back and
+        the channels are reordered instead, so that the rows and the
+        channel indices always agree."""
+        header = self.table.verticalHeader()
+        header.blockSignals(True)
+        header.moveSection(new_visual, old_visual)
+        header.blockSignals(False)
+        self.move_channel(old_visual, new_visual)
+
+    def _show_row_header_menu(self, position: QtCore.QPoint) -> None:
+        """Right click menu of the channel index: move the channel up,
+        down, to the top or to the bottom."""
+        header = self.table.verticalHeader()
+        i = header.logicalIndexAt(position)
+        n_channels = len(self.checks)
+        if i < 0 or n_channels < 2:
+            return
+        menu = QtWidgets.QMenu(self)
+        for text, j in (
+            ("Move to top", 0),
+            ("Move up", i - 1),
+            ("Move down", i + 1),
+            ("Move to bottom", n_channels - 1),
+        ):
+            action = menu.addAction(text, partial(self.move_channel, i, j))
+            action.setEnabled(0 <= j < n_channels and j != i)
+        menu.exec(header.viewport().mapToGlobal(position))
+
+    def move_channel(self, i: int, j: int) -> None:
+        """Move channel ``i`` to index ``j``; the channels in between
+        move by one.
+
+        Parameters
+        ----------
+        i : int
+            Index of the channel to be moved.
+        j : int
+            Its new index.
+        """
+        order = list(range(len(self.checks)))
+        order.insert(j, order.pop(i))
+        self.reorder_channels(order)
+
+    def reorder_channels(self, order: list[int]) -> None:
+        """Reorder the loaded channels: the rows of the channel table
+        and everything in Render that refers to the channels by their
+        index (see ``View.reorder_channels``).
+
+        Parameters
+        ----------
+        order : list of ints
+            The channel indices in the new order, i.e., the channel at
+            index ``order[k]`` moves to index ``k``.
+        """
+        order = [int(i) for i in order]
+        if sorted(order) != list(range(len(self.checks))):
+            raise ValueError(
+                f"{order} is not a reordering of the {len(self.checks)} "
+                "loaded channels."
+            )
+        if order == sorted(order):
+            return
+        view = self.window.view
+        if view._move_channels:
+            return  # the Move tool is dragging channels
+        resi_dialogs = [
+            dialog
+            for dialog in self.window.dialogs
+            if isinstance(dialog, RESIDialog) and dialog.isVisible()
+        ]
+        if resi_dialogs:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Reorder channels",
+                "Close the RESI dialog before reordering the channels.",
+            )
+            return
+        for items in (
+            self.checks,
+            self.title,
+            self.closebuttons,
+            self.colorselection,
+            self.colordisp_all,
+            self.colorpickers,
+            self.colorpreviews,
+            self.contrast_low,
+            self.contrast_high,
+            self.contrast_sliders,
+            self.contrast_widgets,
+            self._channel_luts,
+        ):
+            items[:] = [items[old] for old in order]
         for i in range(len(self.checks)):
-            row = i + 1
-            self.scroll_area.addWidget(self.checks[i], row, 0)
-            self.scroll_area.addWidget(self.title[i], row, 1)
-            self.scroll_area.addWidget(self.colorselection[i], row, 2)
-            self.scroll_area.addWidget(self.colorpreviews[i], row, 3)
-            self.scroll_area.addWidget(self.intensitysettings[i], row, 4)
-            self.scroll_area.addWidget(self.closebuttons[i], row, 5)
+            self._set_table_row(i)
+        view.reorder_channels(order)
+        # automatic coloring colors the channels by their index
+        if self.auto_colors.isChecked():
+            for i in range(len(self.checks)):
+                self.set_color(i)
+        self.window.setWindowTitle(
+            f"Picasso v{__version__}: Render. File: "
+            f"{os.path.basename(view.locs_paths[-1])}"
+        )
+        self.channel_contrast_changed.emit()
+        self.update_viewport()
+        self.update_rotation_window()
+
+    def set_single_channel_mode(self, mode: str | None) -> None:
+        """Gray out the widgets that the rendering of a single loaded
+        channel ignores and show a note saying why; enable them again
+        when several channels are loaded.
+
+        A single channel never uses the per-channel color, contrast or
+        automatic coloring. Without groups or rendering
+        by property it is drawn with the Display settings colormap, so
+        the background color is ignored as well.
+
+        Parameters
+        ----------
+        mode : {"colormap", "group", "property"} or None
+            How the single channel is rendered: with the colormap,
+            split by its ``group`` column or by a property. None if
+            several channels are loaded.
+        """
+        if mode == self._single_channel_mode:
+            return
+        self._single_channel_mode = mode
+        unused = " Color, contrast and automatic coloring "
+        notes = {
+            "colormap": (
+                "A single channel is rendered with the colormap from "
+                "Display settings (Ctrl+D)." + unused + "and the "
+                "background color apply only to several channels; "
+                "'Invert colors' inverts the colormap."
+            ),
+            "group": (
+                "The groups of this channel are colored automatically, "
+                "all with the same intensity." + unused + "apply only "
+                "to several channels."
+            ),
+            "property": (
+                "Rendering by property colors the localizations with the "
+                "property colormap from Display settings (Ctrl+D)."
+                + unused
+                + "apply only to several channels."
+            ),
+        }
+        multichannel = mode is None
+        for widget in [
+            self.auto_colors,
+            *self.colorpreviews,
+            *self.contrast_widgets,
+            self.reset_contrast_button,
+        ]:
+            widget.setEnabled(multichannel)
+        self._update_color_selection()
+        for widget in [self.background_button, self.background_swatch]:
+            widget.setEnabled(mode != "colormap")
+        self.single_channel_note.setText(notes.get(mode, ""))
+        self.single_channel_note.setVisible(not multichannel)
+
+    def _update_color_selection(self) -> None:
+        """Gray out the color selection of the channels (combobox and
+        color picker) while automatic coloring overrides it or a single
+        channel is loaded."""
+        manual = (
+            self._single_channel_mode is None
+            and not self.auto_colors.isChecked()
+        )
+        for widget in [*self.colorselection, *self.colorpickers]:
+            widget.setEnabled(manual)
 
     def _fit_scroll_width(self) -> None:
-        """Ensure the dialog is wide enough that the scroll area's
-        contents fit horizontally without a scrollbar. Only ever grows
-        the minimum width; never shrinks the dialog."""
-        self.container.adjustSize()
-        needed = self.container.sizeHint().width()
-        frame = 2 * self._scroll.frameWidth()
-        self._scroll.setMinimumWidth(needed + frame)
+        """Ensure the dialog is wide enough that the channel table fits
+        horizontally without a scrollbar. Only ever grows the minimum
+        width; never shrinks the dialog."""
+        table = self.table
+        header = table.horizontalHeader()
+        needed = table.verticalHeader().sizeHint().width()
+        for column in range(table.columnCount()):
+            needed += max(
+                table.sizeHintForColumn(column),
+                header.sectionSizeHint(column),
+            )
+        needed += 2 * table.frameWidth()
+        needed += table.style().pixelMetric(
+            QtWidgets.QStyle.PixelMetric.PM_ScrollBarExtent
+        )
+        table.setMinimumWidth(max(table.minimumWidth(), needed))
 
     def update_colors(self) -> None:
         """Change colors in self.colordisp_all and updates the scene in
@@ -856,11 +1365,12 @@ class DatasetDialog(lib.Dialog):
                 )
                 if ok:
                     if new_title == "Reset" or new_title == "reset":
+                        # the original title, see ``add_entry``
                         path = self.window.view.locs_paths[i]
                         if len(path) > 40:
                             path = os.path.basename(path)
-                            new_title, ext = os.path.splitext(path)
-                        self.checks[i].setText(new_title)
+                            path, ext = os.path.splitext(path)
+                        self.checks[i].setText(path)
                     else:
                         self.checks[i].setText(new_title)
                     self.update_viewport()
@@ -870,20 +1380,9 @@ class DatasetDialog(lib.Dialog):
     def _remove_channel_widgets(self, i: int) -> None:
         """Remove and delete the Dataset Dialog widgets of channel
         ``i``, and drop them from the per-channel widget lists."""
-        # they must be reparented and scheduled for deletion,
-        # otherwise they stay visible in the scroll area and overlap
-        # the rows that move up
-        for widget in (
-            self.checks[i],
-            self.title[i],
-            self.colorselection[i],
-            self.colorpreviews[i],
-            self.intensitysettings[i],
-            self.closebuttons[i],
-        ):
-            self.scroll_area.removeWidget(widget)
-            widget.setParent(None)
-            widget.deleteLater()
+        # the table deletes the cell widgets of the removed row and
+        # moves the rows below up
+        self.table.removeRow(i)
 
         del self.checks[i]
         del self.title[i]
@@ -891,19 +1390,16 @@ class DatasetDialog(lib.Dialog):
         del self.colordisp_all[i]
         del self.colorpickers[i]
         del self.colorpreviews[i]
-        del self.intensitysettings[i]
+        del self.contrast_low[i]
+        del self.contrast_high[i]
+        del self.contrast_sliders[i]
+        del self.contrast_widgets[i]
         del self.closebuttons[i]
         del self._channel_luts[i]
 
     def _update_after_channel_deleted(self, i: int) -> None:
         """Update the state that depends on the remaining channels
         once channel ``i``'s View-side attributes have been deleted."""
-        try:
-            self.window.slicer_dialog.zcoord[i]
-        except Exception:
-            pass
-        self.window.slicer_dialog.zcoord.pop(i)
-
         # hide the 3D-only actions if no remaining channel has z data
         if not any("z" in locs.columns for locs in self.window.view.locs):
             for action in self.window.actions_3d:
@@ -918,12 +1414,10 @@ class DatasetDialog(lib.Dialog):
     def _delete_channel_drift_data(self, i: int) -> None:
         """Delete the drift-correction data of channel ``i``, if
         any was provided."""
-        try:
-            del self._drift[i]
-            del self._driftfiles[i]
-            del self.currentdrift[i]
-        except Exception:
-            pass
+        view = self.window.view
+        for items in (view._drift, view._driftfiles, view.currentdrift):
+            if i < len(items):
+                del items[i]
 
     def _update_render_by_property_dialog(self) -> None:
         """Enable render-by-property only when a single channel is
@@ -931,13 +1425,13 @@ class DatasetDialog(lib.Dialog):
         disp_sett_dlg = self.window.display_settings_dlg
         disp_sett_dlg.render_check.setChecked(False)
         if len(self.checks) == 1:
-            disp_sett_dlg.render_groupbox.setEnabled(True)
+            disp_sett_dlg.render_groupbox.content.setEnabled(True)
             disp_sett_dlg.parameter.clear()
             disp_sett_dlg.parameter.addItems(
                 self.window.view.locs[0].columns.to_list()
             )
         else:
-            disp_sett_dlg.render_groupbox.setEnabled(False)
+            disp_sett_dlg.render_groupbox.content.setEnabled(False)
 
     def _close_one_channel(self, i: int, render_=True) -> None:
         """Close the channel with the given index and delete all
@@ -973,10 +1467,6 @@ class DatasetDialog(lib.Dialog):
         self.window.test_clusterer_dialog.channels.removeItem(i)
         self.window.tools_settings_dialog.remove_move_channel(i)
         self.window.view.clear_move_undo()
-
-        # move the remaining channels up so that there is no empty row
-        self._relayout_channels()
-        self._fit_scroll_width()
 
     def close_file(self, i: int | str, render=True) -> None:
         """Close a given channel (defined by its index of name) and
@@ -1040,6 +1530,139 @@ class DatasetDialog(lib.Dialog):
                     return  # nothing to reload from
                 view_rot.load_locs(update_window=True)
             view_rot.update_scene()
+
+    @staticmethod
+    def _fit_contrast_box_width(box: QtWidgets.QDoubleSpinBox) -> None:
+        """Fix the width of a contrast spin box to its widest value.
+
+        The size hint follows the range, which
+        ``_apply_contrast_bounds`` narrows on every change, so the box
+        would change its width while the slider is dragged. Qt's hint
+        also reserves room for an extra space; the fixed width fits
+        the widest value exactly, plus the frame and the arrows.
+
+        Parameters
+        ----------
+        box : QDoubleSpinBox
+            The spin box, with its full range set.
+        """
+        option = QtWidgets.QStyleOptionSpinBox()
+        box.initStyleOption(option)
+        option.rect = QtCore.QRect(QtCore.QPoint(0, 0), box.sizeHint())
+        edit_field = box.style().subControlRect(
+            QtWidgets.QStyle.ComplexControl.CC_SpinBox,
+            option,
+            QtWidgets.QStyle.SubControl.SC_SpinBoxEditField,
+            box,
+        )
+        overhead = option.rect.width() - edit_field.width()
+        text = box.textFromValue(box.maximum()) + box.suffix()
+        text_width = box.fontMetrics().horizontalAdvance(text)
+        box.setFixedWidth(overhead + text_width + 4)  # 4: cursor, margin
+
+    @staticmethod
+    def _apply_contrast_bounds(
+        low_box: QtWidgets.QDoubleSpinBox,
+        high_box: QtWidgets.QDoubleSpinBox,
+        *args,
+    ) -> None:
+        """Keep a channel's lower contrast limit below its upper one by
+        bounding each spin box with the other's value.
+
+        Parameters
+        ----------
+        low_box, high_box : QDoubleSpinBox
+            The lower and upper contrast limit of the channel.
+        *args
+            Ignored; lets the method be connected to value signals.
+        """
+        step = 10 ** -high_box.decimals()
+        low_box.setMaximum(high_box.value() - step)
+        high_box.setMinimum(low_box.value() + step)
+
+    def update_channel_contrast(self) -> None:
+        """Re-color the main and the 3D window with the new per-channel
+        contrast. Only the compositing changes, so the cached renders
+        are reused."""
+        self.channel_contrast_changed.emit()
+        if not self.auto_display.isChecked():
+            return
+        if self.window.view.viewport:
+            self.window.view.update_scene(use_cache=True)
+        window_rot = getattr(self.window, "window_rot", None)
+        if window_rot is None or not window_rot.isVisible():
+            return
+        view_rot = window_rot.view_rot
+        if (
+            view_rot.locs
+            and getattr(view_rot, "viewport", None)
+            # with a different number of channels the 3D window has to
+            # reload first, see update_rotation_window
+            and len(view_rot.locs) == len(self.window.view.locs)
+        ):
+            view_rot.update_scene(use_cache=True)
+
+    def set_channel_contrast(
+        self, i: int, low: float, high: float, update: bool = True
+    ) -> None:
+        """Set the contrast of channel ``i``.
+
+        Parameters
+        ----------
+        i : int
+            Index of the channel.
+        low, high : float
+            Lower and upper contrast limit in percent of the global
+            contrast window, ``0 <= low < high``.
+        update : bool, optional
+            If True, the main and the 3D window are re-colored. Default
+            is True.
+        """
+        low_box = self.contrast_low[i]
+        high_box = self.contrast_high[i]
+        low = min(max(float(low), 0.0), CHANNEL_CONTRAST_MAX)
+        high = min(max(float(high), 0.0), CHANNEL_CONTRAST_MAX)
+        if not low < high:
+            return
+        for box in (low_box, high_box):
+            box.blockSignals(True)
+        try:
+            low_box.setRange(0.0, CHANNEL_CONTRAST_MAX)
+            high_box.setRange(0.0, CHANNEL_CONTRAST_MAX)
+            low_box.setValue(low)
+            high_box.setValue(high)
+            self._apply_contrast_bounds(low_box, high_box)
+        finally:
+            for box in (low_box, high_box):
+                box.blockSignals(False)
+        self.contrast_sliders[i].sync()
+        if update:
+            self.update_channel_contrast()
+
+    def export_channel_contrast(self) -> dict:
+        """The contrast of every channel, ticked or not, as saved in the
+        .yaml file with exported images (see ``View.load_screenshot``).
+
+        Returns
+        -------
+        info : dict
+            Maps ``CHANNEL_CONTRAST_KEY`` to the ``[low, high]``
+            contrast limits of each channel in percent of the global
+            contrast window.
+        """
+        return {
+            CHANNEL_CONTRAST_KEY: [
+                [low.value(), high.value()]
+                for low, high in zip(self.contrast_low, self.contrast_high)
+            ]
+        }
+
+    def reset_channel_contrast(self) -> None:
+        """Reset the contrast of all channels to the global contrast
+        (0-100%)."""
+        for i in range(len(self.contrast_low)):
+            self.set_channel_contrast(i, 0.0, 100.0, update=False)
+        self.update_channel_contrast()
 
     def select_background_color(self) -> None:
         """Open a color picker to choose the multichannel background
@@ -1124,7 +1747,9 @@ class DatasetDialog(lib.Dialog):
                 # read_colors will raise the user-facing warning.
                 lut = self._channel_luts[n]
         self._channel_luts[n] = lut
-        self.colordisp_all[n].setPixmap(_gradient_pixmap(lut))
+        self.colordisp_all[n].setPixmap(
+            _gradient_pixmap(lut, width=CHANNEL_PREVIEW_WIDTH)
+        )
 
     def resolve_color_identifier(self, name: str) -> lib.FloatArray2D:
         """Resolve a free-text identifier from a channel combobox into
@@ -1156,6 +1781,30 @@ class DatasetDialog(lib.Dialog):
             return cached
         raise ValueError(f"Unknown color identifier: '{name}'")
 
+    def _color_combo_width(self, combobox: QtWidgets.QComboBox) -> int:
+        """Width of a per-channel color combobox that fits the solid
+        color names of up to ``CHANNEL_COLOR_CHARS`` characters and
+        hexadecimal codes, including the frame and the arrow."""
+        texts = [
+            name
+            for name in self.default_colors
+            if len(name) <= CHANNEL_COLOR_CHARS
+        ] + ["#FF5733"]
+        metrics = combobox.fontMetrics()
+        contents = QtCore.QSize(
+            max(metrics.horizontalAdvance(text) for text in texts),
+            metrics.height(),
+        )
+        option = QtWidgets.QStyleOptionComboBox()
+        combobox.initStyleOption(option)
+        size = combobox.style().sizeFromContents(
+            QtWidgets.QStyle.ContentsType.CT_ComboBox,
+            option,
+            contents,
+            combobox,
+        )
+        return size.width()
+
     def _populate_color_combo(self, combobox: QtWidgets.QComboBox) -> None:
         """Fill a per-channel combobox with solid colors, curated
         matplotlib colormaps, and any user-defined custom colormaps."""
@@ -1184,6 +1833,13 @@ class DatasetDialog(lib.Dialog):
             for c in sorted(user_cmaps.keys()):
                 add_item(c)
         combobox.setModel(model)
+        # the combobox is narrower than the longest names, so widen the
+        # popup list to show them in full
+        view = combobox.view()
+        view.setMinimumWidth(
+            view.sizeHintForColumn(0)
+            + view.verticalScrollBar().sizeHint().width()
+        )
 
     def refresh_color_lists(self) -> None:
         """Rebuild every channel combobox to reflect changes in the
@@ -1204,9 +1860,9 @@ class DatasetDialog(lib.Dialog):
                 self.resolve_color_identifier(previous)
                 combo.setCurrentText(previous)
             except ValueError:
-                fallback_idx = min(i, len(self.default_colors) - 1)
-                combo.setCurrentText(self.default_colors[fallback_idx])
+                combo.setCurrentText(self.default_channel_color(i))
             combo.blockSignals(False)
+            _show_text_start(combo)
             self.set_color(i)
 
     def open_custom_cmap_editor(self) -> None:
@@ -1228,8 +1884,117 @@ class DatasetDialog(lib.Dialog):
         """8-bit variant of :meth:`legend_color` (each component 0–255)."""
         return tuple(int(round(v * 255)) for v in self.legend_color(n))
 
+    def default_channel_colors(self) -> list[str]:
+        """The colors given to newly loaded channels, in order.
+
+        ``colorblind_safe_colors`` while ``colorblind_safe`` is ticked.
+        Otherwise read from ``CHANNEL_COLORS_KEY`` in the Render
+        section of the user settings, followed by the built-in default
+        colors that it does not name; entries that are not valid colors
+        are skipped. A missing key is written with the built-in default
+        colors (so that it is visible in the file), unless the file on
+        disk could not be read.
+
+        Returns
+        -------
+        colors : list of str
+            Color identifiers (names, hexadecimal codes or colormaps).
+        """
+        if self.colorblind_safe.isChecked():
+            return list(self.colorblind_safe_colors)
+        settings = io.load_user_settings()
+        render_settings = settings["Render"]
+        stored = None
+        if isinstance(render_settings, dict):
+            stored = render_settings.get(CHANNEL_COLORS_KEY)
+            if stored is None and not io.settings_file_is_broken():
+                render_settings[CHANNEL_COLORS_KEY] = list(self.default_colors)
+                io.save_user_settings(settings)
+        colors = []
+        if isinstance(stored, list):
+            for color in stored:
+                try:
+                    self.resolve_color_identifier(str(color))
+                except ValueError:
+                    continue
+                colors.append(str(color))
+        colors += [c for c in self.default_colors if c not in colors]
+        return colors
+
+    def default_channel_color(self, i: int) -> str:
+        """The color given to the ``i``-th loaded channel (0-based);
+        channels beyond the list of default colors get the last one."""
+        colors = self.default_channel_colors()
+        return colors[min(i, len(colors) - 1)]
+
+    def save_default_colors(self) -> None:
+        """Save the colors of the loaded channels as the colors given
+        to newly loaded channels, followed by the built-in default
+        colors that they do not use."""
+        colors = []
+        for i, combo in enumerate(self.colorselection):
+            color = combo.currentText()
+            try:
+                self.resolve_color_identifier(color)
+            except ValueError:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Default colors",
+                    f"The color '{color}' of channel {i + 1} is not valid.",
+                )
+                return
+            colors.append(color)
+        if not colors:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Default colors",
+                "Load channels and set their colors first.",
+            )
+            return
+        colors += [c for c in self.default_colors if c not in colors]
+        self._write_default_colors(colors)
+
+    def restore_default_colors(self) -> None:
+        """Give newly loaded channels the built-in default colors."""
+        self._write_default_colors(list(self.default_colors))
+
+    def _write_default_colors(self, colors: list[str]) -> None:
+        """Write the colors given to newly loaded channels to the user
+        settings and untick ``colorblind_safe`` (which would otherwise
+        replace them), leaving the loaded channels as they are."""
+        settings = io.load_user_settings()
+        if not isinstance(settings["Render"], dict):
+            settings["Render"] = {}
+        settings["Render"][CHANNEL_COLORS_KEY] = colors
+        settings["Render"][COLORBLIND_SAFE_KEY] = False
+        io.save_user_settings(settings)
+        self.colorblind_safe.blockSignals(True)
+        self.colorblind_safe.setChecked(False)
+        self.colorblind_safe.blockSignals(False)
+
+    def set_colorblind_safe(self, checked: bool) -> None:
+        """Save whether the channels get the colorblind-safe colors and
+        recolor the loaded channels with the colors that newly loaded
+        channels get (unticking ``auto_colors``, which would hide
+        them)."""
+        settings = io.load_user_settings()
+        if not isinstance(settings["Render"], dict):
+            settings["Render"] = {}
+        settings["Render"][COLORBLIND_SAFE_KEY] = checked
+        io.save_user_settings(settings)
+        for i, combo in enumerate(self.colorselection):
+            combo.blockSignals(True)
+            combo.setCurrentText(self.default_channel_color(i))
+            combo.blockSignals(False)
+            _show_text_start(combo)
+        if self.auto_colors.isChecked():
+            # its stateChanged handlers update the colors
+            self.auto_colors.setChecked(False)
+        else:
+            self.update_colors()
+
     def save_colors(self) -> None:
-        """Save the list of colors as a .yaml file."""
+        """Save the list of colors as a .txt file."""
         colornames = [_.currentText() for _ in self.colorselection]
         out_path = (
             os.path.splitext(self.window.view.locs_paths[0])[0] + "_colors.txt"
@@ -1256,11 +2021,9 @@ class DatasetDialog(lib.Dialog):
                 colors = file.readlines()
                 colornames = [color.rstrip() for color in colors]
 
-            # check that the number of channels is smaller than
-            # or equal to the number of color names in the .txt
-            if len(self.checks) > len(colornames):
-                raise ValueError("Txt file contains too few names")
-
+            # the names are given to the channels in order; extra names
+            # are ignored and extra channels keep their colors
+            colornames = [name for name in colornames if name]
             # check that all the names resolve through the same lookup
             # used by the renderer (default colors, hex codes, curated
             # matplotlib cmaps, or known user-defined custom cmaps).
@@ -1272,9 +2035,9 @@ class DatasetDialog(lib.Dialog):
                         f"'{color}' at position {i+1} is invalid."
                     ) from e
 
-            # add the names to the 'Color' column (self.colorseletion)
-            for i, color_ in enumerate(self.colorselection):
-                color_.setCurrentText(colornames[i])
+            # add the names to the 'Color' column (self.colorselection)
+            for color_, name in zip(self.colorselection, colornames):
+                color_.setCurrentText(name)
             self.update_colors()
 
     def sizeHint(self) -> QtCore.QSize:
@@ -1493,7 +2256,7 @@ class CustomColormapDialog(lib.Dialog):
     def _on_rename(self) -> None:
         if self._current_name is None:
             return
-        name = self._prompt_new_name(default=self._current_name)
+        name = self._prompt_new_name(default=self._current_name, renaming=True)
         if not name or name == self._current_name:
             return
         self._stops[name] = self._stops.pop(self._current_name)
@@ -1527,11 +2290,13 @@ class CustomColormapDialog(lib.Dialog):
             self.stops_table.setRowCount(0)
             self.preview_label.clear()
 
-    def _prompt_new_name(self, default: str = "") -> str | None:
-        # ensure default is unique
+    def _prompt_new_name(
+        self, default: str = "", renaming: bool = False
+    ) -> str | None:
+        # ensure default is unique; a renamed colormap may keep its name
         candidate = default
         i = 1
-        while candidate in self._stops:
+        while candidate in self._stops and not renaming:
             i += 1
             candidate = f"{default}_{i}"
         while True:
@@ -1544,13 +2309,13 @@ class CustomColormapDialog(lib.Dialog):
             if not ok:
                 return None
             name = name.strip()
-            error = self._validate_name(name)
+            error = self._validate_name(name, renaming)
             if error is None:
                 return name
             QtWidgets.QMessageBox.warning(self, "Invalid name", error)
             candidate = name
 
-    def _validate_name(self, name: str) -> str | None:
+    def _validate_name(self, name: str, renaming: bool = False) -> str | None:
         if not name:
             return "Name must not be empty."
         dlg = self.window.dataset_dialog
@@ -1558,7 +2323,11 @@ class CustomColormapDialog(lib.Dialog):
             return f"'{name}' collides with a built-in solid color."
         if name in dlg.builtin_cmap_stops:
             return f"'{name}' collides with a built-in colormap."
-        if name in self._stops and name != self._current_name:
+        # only a rename may keep the name of the current colormap; a
+        # new one would overwrite it
+        if name in self._stops and not (
+            renaming and name == self._current_name
+        ):
             return f"A custom colormap named '{name}' already exists."
         return None
 
@@ -1735,6 +2504,9 @@ class PlotDialog(lib.Dialog):
 
     def __init__(self, window: QtWidgets.QtWidget | None) -> None:
         super().__init__(window)
+        # closed without a button (Escape, the close button): stop, as
+        # with Cancel, instead of rejecting the pick
+        self.result = 2
         self.window = window
         self.setWindowTitle("Structure")
         layout_grid = QtWidgets.QGridLayout(self)
@@ -1812,10 +2584,15 @@ class PlotDialog(lib.Dialog):
                 locs["z"].mean() - 3 * locs["z"].std()
             )
             ax.scatter(
-                locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2
+                locs["x"],
+                locs["y"],
+                locs["z"],
+                c=colors,
+                cmap=Z_SCATTER_CMAP,
+                s=2,
             )
-            ax.set_xlabel("X [Px]")
-            ax.set_ylabel("Y [Px]")
+            ax.set_xlabel("X [nm]")
+            ax.set_ylabel("Y [nm]")
             ax.set_zlabel("Z [nm]")
             ax.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
@@ -1837,7 +2614,9 @@ class PlotDialog(lib.Dialog):
             colors = color_sys
             for ll in range(len(all_picked_locs)):
                 locs = all_picked_locs[ll][current]
-                ax.scatter(locs["x"], locs["y"], locs["z"], c=colors[ll], s=2)
+                ax.scatter(
+                    locs["x"], locs["y"], locs["z"], color=colors[ll], s=2
+                )
 
             ax.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
@@ -1852,8 +2631,8 @@ class PlotDialog(lib.Dialog):
                 np.mean(locs["z"]) + 3 * np.std(locs["z"]),
             )
 
-            ax.set_xlabel("X [Px]")
-            ax.set_ylabel("Y [Px]")
+            ax.set_xlabel("X [nm]")
+            ax.set_ylabel("Y [nm]")
             ax.set_zlabel("Z [nm]")
 
             plt.gca().patch.set_facecolor("black")
@@ -1862,6 +2641,8 @@ class PlotDialog(lib.Dialog):
             ax.zaxis.pane.set_facecolor((0, 0, 0, 1.0))
 
         dialog.exec()
+        # pyplot keeps every figure it made until it is closed
+        plt.close(dialog.figure)
         return dialog.result
 
 
@@ -1873,6 +2654,9 @@ class PlotDialogIso(lib.Dialog):
 
     def __init__(self, window: QtWidgets.QWidget | None) -> None:
         super().__init__(window)
+        # closed without a button (Escape, the close button): stop, as
+        # with Cancel, instead of rejecting the pick
+        self.result = 2
         self.window = window
         self.setWindowTitle("Structure")
         layout_grid = QtWidgets.QGridLayout(self)
@@ -1955,10 +2739,15 @@ class PlotDialogIso(lib.Dialog):
             )
 
             ax.scatter(
-                locs["x"], locs["y"], locs["z"], c=colors, cmap="jet", s=2
+                locs["x"],
+                locs["y"],
+                locs["z"],
+                c=colors,
+                cmap=Z_SCATTER_CMAP,
+                s=2,
             )
-            ax.set_xlabel("X [Px]")
-            ax.set_ylabel("Y [Px]")
+            ax.set_xlabel("X [nm]")
+            ax.set_ylabel("Y [nm]")
             ax.set_zlabel("Z [nm]")
             ax.set_xlim(
                 np.mean(locs["x"]) - 3 * np.std(locs["x"]),
@@ -1979,9 +2768,11 @@ class PlotDialogIso(lib.Dialog):
             ax.zaxis.pane.set_facecolor((0, 0, 0, 1.0))
 
             # AXES 2
-            ax2.scatter(locs["x"], locs["y"], c=colors, cmap="jet", s=2)
-            ax2.set_xlabel("X [Px]")
-            ax2.set_ylabel("Y [Px]")
+            ax2.scatter(
+                locs["x"], locs["y"], c=colors, cmap=Z_SCATTER_CMAP, s=2
+            )
+            ax2.set_xlabel("X [nm]")
+            ax2.set_ylabel("Y [nm]")
             ax2.set_xlim(
                 locs["x"].mean() - 3 * locs["x"].std(),
                 locs["x"].mean() + 3 * locs["x"].std(),
@@ -1994,8 +2785,10 @@ class PlotDialogIso(lib.Dialog):
             ax2.set_facecolor("black")
 
             # AXES 3
-            ax3.scatter(locs["x"], locs["z"], c=colors, cmap="jet", s=2)
-            ax3.set_xlabel("X [Px]")
+            ax3.scatter(
+                locs["x"], locs["z"], c=colors, cmap=Z_SCATTER_CMAP, s=2
+            )
+            ax3.set_xlabel("X [nm]")
             ax3.set_ylabel("Z [nm]")
             ax3.set_xlim(
                 locs["x"].mean() - 3 * locs["x"].std(),
@@ -2009,8 +2802,10 @@ class PlotDialogIso(lib.Dialog):
             ax3.set_facecolor("black")
 
             # AXES 4
-            ax4.scatter(locs["y"], locs["z"], c=colors, cmap="jet", s=2)
-            ax4.set_xlabel("Y [Px]")
+            ax4.scatter(
+                locs["y"], locs["z"], c=colors, cmap=Z_SCATTER_CMAP, s=2
+            )
+            ax4.set_xlabel("Y [nm]")
             ax4.set_ylabel("Z [nm]")
             ax4.set_xlim(
                 np.mean(locs["y"]) - 3 * np.std(locs["y"]),
@@ -2027,10 +2822,12 @@ class PlotDialogIso(lib.Dialog):
             colors = color_sys
             for ll in range(len(all_picked_locs)):
                 locs = all_picked_locs[ll][current]
-                ax.scatter(locs["x"], locs["y"], locs["z"], c=colors[ll], s=2)
-                ax2.scatter(locs["x"], locs["y"], c=colors[ll], s=2)
-                ax3.scatter(locs["x"], locs["z"], c=colors[ll], s=2)
-                ax4.scatter(locs["y"], locs["z"], c=colors[ll], s=2)
+                ax.scatter(
+                    locs["x"], locs["y"], locs["z"], color=colors[ll], s=2
+                )
+                ax2.scatter(locs["x"], locs["y"], color=colors[ll], s=2)
+                ax3.scatter(locs["x"], locs["z"], color=colors[ll], s=2)
+                ax4.scatter(locs["y"], locs["z"], color=colors[ll], s=2)
 
             ax.set_xlim(
                 locs["x"].mean() - 3 * locs["x"].std(),
@@ -2045,8 +2842,8 @@ class PlotDialogIso(lib.Dialog):
                 locs["z"].mean() + 3 * locs["z"].std(),
             )
 
-            ax.set_xlabel("X [Px]")
-            ax.set_ylabel("Y [Px]")
+            ax.set_xlabel("X [nm]")
+            ax.set_ylabel("Y [nm]")
             ax.set_zlabel("Z [nm]")
 
             ax.xaxis.pane.set_facecolor((0, 0, 0, 1.0))
@@ -2054,8 +2851,8 @@ class PlotDialogIso(lib.Dialog):
             ax.zaxis.pane.set_facecolor((0, 0, 0, 1.0))
 
             # AXES 2
-            ax2.set_xlabel("X [Px]")
-            ax2.set_ylabel("Y [Px]")
+            ax2.set_xlabel("X [nm]")
+            ax2.set_ylabel("Y [nm]")
             ax2.set_xlim(
                 locs["x"].mean() - 3 * locs["x"].std(),
                 locs["x"].mean() + 3 * locs["x"].std(),
@@ -2068,7 +2865,7 @@ class PlotDialogIso(lib.Dialog):
             ax2.set_facecolor("black")
 
             # AXES 3
-            ax3.set_xlabel("X [Px]")
+            ax3.set_xlabel("X [nm]")
             ax3.set_ylabel("Z [nm]")
             ax3.set_xlim(
                 locs["x"].mean() - 3 * locs["x"].std(),
@@ -2082,7 +2879,7 @@ class PlotDialogIso(lib.Dialog):
             ax3.set_facecolor("black")
 
             # AXES 4
-            ax4.set_xlabel("Y [Px]")
+            ax4.set_xlabel("Y [nm]")
             ax4.set_ylabel("Z [nm]")
             ax4.set_xlim(
                 locs["y"].mean() - 3 * locs["y"].std(),
@@ -2096,6 +2893,8 @@ class PlotDialogIso(lib.Dialog):
             ax4.set_facecolor("black")
 
         dialog.exec()
+        # pyplot keeps every figure it made until it is closed
+        plt.close(dialog.figure)
         return dialog.result
 
 
@@ -2104,6 +2903,9 @@ class ClsDlg3D(lib.Dialog):
 
     def __init__(self, window: QtWidgets.QWidget | None) -> None:
         super().__init__(window)
+        # closed without a button (Escape, the close button): stop, as
+        # with Cancel, instead of rejecting the pick
+        self.result = 2
         self.window = window
         self.setWindowTitle("Structure")
         self.showMaximized()
@@ -2208,10 +3010,9 @@ class ClsDlg3D(lib.Dialog):
         current: int,
         length: int,
         n_clusters: int,
-        pixelsize: float,
     ) -> tuple[int, int, pd.DataFrame, list[pd.DataFrame]]:
         """Cluster the picked locs of the given pick with k-means in
-        3D."""
+        3D (x, y and z in nm)."""
         dialog = ClsDlg3D(None)
 
         dialog.start_clusters = n_clusters
@@ -2231,10 +3032,7 @@ class ClsDlg3D(lib.Dialog):
         locs = all_picked_locs[current]
 
         est = KMeans(n_clusters=n_clusters, n_init="auto")
-        scaled_locs = locs.copy()
-        scaled_locs["x_scaled"] = locs["x"] * pixelsize
-        scaled_locs["y_scaled"] = locs["y"] * pixelsize
-        est.fit(scaled_locs[["x_scaled", "y_scaled", "z"]])
+        est.fit(locs[["x", "y", "z"]])
         labels = est.labels_
         counts = list(Counter(labels).items())
 
@@ -2257,9 +3055,9 @@ class ClsDlg3D(lib.Dialog):
             dialog.add_clusters(element, x_mean, y_mean, z_mean)
             ax2.text(x_mean, y_mean, z_mean, element[1], fontsize=12)
 
-        ax1.set_xlabel("X [Px]")
-        ax1.set_ylabel("Y [Px]")
-        ax1.set_zlabel("Z [Px]")
+        ax1.set_xlabel("X [nm]")
+        ax1.set_ylabel("Y [nm]")
+        ax1.set_zlabel("Z [nm]")
 
         ax2.set_xlabel("X [nm]")
         ax2.set_ylabel("Y [nm]")
@@ -2271,6 +3069,8 @@ class ClsDlg3D(lib.Dialog):
         plt.gca().patch.set_facecolor("black")
 
         dialog.exec()
+        # pyplot keeps every figure it made until it is closed
+        plt.close(dialog.figure)
 
         checks = [not _.isChecked() for _ in dialog.checks]
         checks = np.asarray(np.where(checks)) + 1
@@ -2280,10 +3080,10 @@ class ClsDlg3D(lib.Dialog):
         labels = [0 if x in checks else x for x in labels]
         labels = np.asarray(labels)
 
-        l_locs = scaled_locs.copy()
+        l_locs = locs.copy()
         l_locs["cluster"] = labels
         l_locs_new_group = l_locs.copy()
-        power = np.round(n_clusters / 10) + 1
+        power = int(np.round(n_clusters / 10)) + 1
         l_locs_new_group["group"] = (
             l_locs_new_group["group"] * 10**power + l_locs_new_group["cluster"]
         )
@@ -2309,6 +3109,9 @@ class ClsDlg2D(lib.Dialog):
 
     def __init__(self, window: QtWidgets.QWidget | None) -> None:
         super().__init__(window)
+        # closed without a button (Escape, the close button): stop, as
+        # with Cancel, instead of rejecting the pick
+        self.result = 2
         self.window = window
         self.setWindowTitle("Structure")
         self.layout_grid = QtWidgets.QGridLayout(self)
@@ -2431,10 +3234,7 @@ class ClsDlg2D(lib.Dialog):
         locs = all_picked_locs[current]
 
         est = KMeans(n_clusters=n_clusters, n_init="auto")
-        scaled_locs = locs.copy()
-        scaled_locs["x_scaled"] = locs["x"]
-        scaled_locs["y_scaled"] = locs["y"]
-        est.fit(scaled_locs[["x_scaled", "y_scaled"]])
+        est.fit(locs[["x", "y"]])
         labels = est.labels_
         counts = list(Counter(labels).items())
 
@@ -2452,13 +3252,15 @@ class ClsDlg2D(lib.Dialog):
             dialog.add_clusters(element, x_mean, y_mean)
             ax2.text(x_mean, y_mean, element[1], fontsize=12)
 
-        ax1.set_xlabel("X [Px]")
-        ax1.set_ylabel("Y [Px]")
+        ax1.set_xlabel("X [nm]")
+        ax1.set_ylabel("Y [nm]")
 
         ax2.set_xlabel("X [nm]")
         ax2.set_ylabel("Y [nm]")
 
         dialog.exec()
+        # pyplot keeps every figure it made until it is closed
+        plt.close(dialog.figure)
 
         checks = [not _.isChecked() for _ in dialog.checks]
         checks = np.asarray(np.where(checks)) + 1
@@ -2468,10 +3270,10 @@ class ClsDlg2D(lib.Dialog):
         labels = [0 if x in checks else x for x in labels]
         labels = np.asarray(labels)
 
-        l_locs = scaled_locs.copy()
+        l_locs = locs.copy()
         l_locs["cluster"] = labels
         l_locs_new_group = l_locs.copy()
-        power = np.round(n_clusters / 10) + 1
+        power = int(np.round(n_clusters / 10)) + 1
         l_locs_new_group["group"] = (
             l_locs_new_group["group"] * 10**power + l_locs_new_group["cluster"]
         )
@@ -2720,10 +3522,10 @@ class ExportKwargsDialog(lib.Dialog):
     min_blur_width : QtWidgets.QDoubleSpinBox
         Minimum blur width in nm.
     width, height : QtWidgets.QDoubleSpinBox
-        Width and height of the exported image in camera pixels.
+        Width and height of the exported field of view in nm.
     x, y : QtWidgets.QDoubleSpinBox
-        X and Y coordinates of the top left corner of the exported image
-        in camera pixels.
+        X and Y coordinates of the top left corner of the exported field
+        of view in nm.
     """
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
@@ -2736,29 +3538,29 @@ class ExportKwargsDialog(lib.Dialog):
         disp_settings = window.display_settings_dlg
 
         self.x = QtWidgets.QDoubleSpinBox()
-        self.x.setRange(-1e6, 1e6)
-        self.x.setDecimals(5)
-        self.x.setSingleStep(0.1)
+        self.x.setRange(-1e7, 1e7)
+        self.x.setDecimals(2)
+        self.x.setSingleStep(100)
         self.x.setValue(viewport[0][1])
-        layout.addRow("X, top left corner (cam. pixels)", self.x)
+        layout.addRow("X, top left corner (nm)", self.x)
         self.y = QtWidgets.QDoubleSpinBox()
-        self.y.setRange(-1e6, 1e6)
-        self.y.setDecimals(5)
-        self.y.setSingleStep(0.1)
+        self.y.setRange(-1e7, 1e7)
+        self.y.setDecimals(2)
+        self.y.setSingleStep(100)
         self.y.setValue(viewport[0][0])
-        layout.addRow("Y, top left corner (cam. pixels)", self.y)
+        layout.addRow("Y, top left corner (nm)", self.y)
         self.width = QtWidgets.QDoubleSpinBox()
-        self.width.setRange(0.01, 1e6)
-        self.width.setDecimals(5)
-        self.width.setSingleStep(0.1)
+        self.width.setRange(1, 1e7)
+        self.width.setDecimals(2)
+        self.width.setSingleStep(100)
         self.width.setValue(viewport[1][1] - viewport[0][1])
-        layout.addRow("Width (cam. pixels)", self.width)
+        layout.addRow("Width (nm)", self.width)
         self.height = QtWidgets.QDoubleSpinBox()
-        self.height.setRange(0.01, 1e6)
-        self.height.setDecimals(5)
-        self.height.setSingleStep(0.1)
+        self.height.setRange(1, 1e7)
+        self.height.setDecimals(2)
+        self.height.setSingleStep(100)
         self.height.setValue(viewport[1][0] - viewport[0][0])
-        layout.addRow("Height (cam. pixels)", self.height)
+        layout.addRow("Height (nm)", self.height)
         self.disp_px_size = QtWidgets.QDoubleSpinBox()
         self.disp_px_size.setRange(0.1, 1e6)
         self.disp_px_size.setSingleStep(1.0)
@@ -2889,8 +3691,8 @@ class HdbscanDialog(lib.Dialog):
         self.cluster_eps = QtWidgets.QDoubleSpinBox()
         self.cluster_eps.setRange(0, 1e6)
         self.cluster_eps.setValue(0.0)
-        self.cluster_eps.setDecimals(3)
-        self.cluster_eps.setSingleStep(0.001)
+        self.cluster_eps.setDecimals(1)
+        self.cluster_eps.setSingleStep(0.1)
         grid.addWidget(self.cluster_eps, 2, 1)
         vbox.addLayout(grid)
         hbox = QtWidgets.QHBoxLayout()
@@ -3175,7 +3977,7 @@ def _build_render_index_in_task(
 ):
     """Build the spatial index of ``locs`` inside a cancelable task.
     Returns None if it cannot be built (picking then indexes itself)."""
-    progress.phase("Indexing localizations", 0)
+    lib.start_phase(progress, "Indexing localizations", 0)
     try:
         index = spatial_index.build_render_index(locs, info)
     except Exception:  # noqa: BLE001 - picking indexes itself
@@ -3193,6 +3995,31 @@ def locs_are_spline(infos: list[dict]) -> bool:
         if lib.get_from_metadata(infos, key) is not None:
             return True
     return False
+
+
+def _camera_size(info: list[dict], axis: int) -> float:
+    """Width (``axis`` 0) or height (1) of the camera image of a channel
+    in camera pixels: the size ``lib.fit_canvas`` stored once the canvas
+    differed from it, else ``Width`` or ``Height`` (e.g., of a split-FOV
+    region, recorded after the movie's)."""
+    size = lib.get_from_metadata(info, lib.CAMERA_SIZE_KEYS[axis])
+    if size is None:
+        size = lib.get_from_metadata(info, ("Width", "Height")[axis])
+    return size
+
+
+def z_calibration_path(infos: list[dict]) -> str | None:
+    """Return the path of the 3D calibration that the localizations
+    described by ``infos`` were fitted with: the ``Calibration path`` of
+    their z fit (see ``zfit.zfit``) or the ``Z Calibration Path`` that the
+    command line (and Picasso: Localize before 1.0) record. None if
+    neither is known."""
+    for entry in reversed(infos):
+        if isinstance(entry, dict) and entry.get("Step") == "Fit 3D":
+            path = entry.get("Calibration path")
+            if path and path != "N/A":
+                return path
+    return lib.get_from_metadata(infos, "Z Calibration Path")
 
 
 class G5MDialog(lib.Dialog):
@@ -3401,16 +4228,14 @@ class G5MDialog(lib.Dialog):
         """Get the parameters for G5M."""
         dialog = G5MDialog(parent, channel)
         result = dialog.exec()
-        px = dialog.window.view.pixelsize
+        if result != QtWidgets.QDialog.DialogCode.Accepted:
+            # canceled, possibly before any 3D calibration was loaded
+            return None, False
         if dialog.loc_prec_handling.currentIndex() == 0:  # local sigma
             loc_prec_handle = "local"
-            sigma_bounds = (dialog.min_sigma.value(), dialog.max_sigma.value())
-        else:  # custom bounds
+        else:  # custom bounds (nm)
             loc_prec_handle = "abs"
-            sigma_bounds = (
-                dialog.min_sigma.value() / px,
-                dialog.max_sigma.value() / px,
-            )
+        sigma_bounds = (dialog.min_sigma.value(), dialog.max_sigma.value())
         params = {
             "min_locs": dialog.min_locs.value(),
             "group_column": dialog.group_column.currentText(),
@@ -3424,7 +4249,6 @@ class G5MDialog(lib.Dialog):
         if dialog.flag_3D:
             mode = "spline" if dialog.spline_mode else "astigmatism"
             params["mode"] = mode
-            params["pixelsize"] = px
             if mode == "astigmatism":
                 params["calibration"] = dialog.calibration
                 if "Magnification factor" not in dialog.calibration.keys():
@@ -3472,12 +4296,22 @@ class G5MDialog(lib.Dialog):
         )
         if not path:
             return
-        self.load_calibration_(path)
+        try:
+            self.load_calibration_(path)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
 
     def load_calibration_(self, path: str) -> None:
         """Load calibration from the given path."""
-        # picasso.io.load_info takes in .hdf5 path
-        calib = io.load_calibration(path)
+        ch = self.channel if self.channel != len(self.window.view.locs) else 0
+        # a calibration from before Picasso 1.0 (spot widths in camera
+        # pixels) is converted with the camera pixel size
+        calib = io.load_calibration(
+            path,
+            pixelsize=lib.get_from_metadata(
+                self.window.view.infos[ch], "Pixelsize"
+            ),
+        )
 
         if "X Coefficients" not in calib.keys():
             message = (
@@ -3496,7 +4330,7 @@ class G5MDialog(lib.Dialog):
         opened."""
         ch = self.channel if self.channel != len(self.window.view.locs) else 0
         infos = self.window.view.infos[ch]
-        calib_path = lib.get_from_metadata(infos, "Z Calibration Path")
+        calib_path = z_calibration_path(infos)
         if calib_path is not None:
             try:
                 self.load_calibration_(calib_path)
@@ -3827,9 +4661,6 @@ class TestClustererDialog(lib.Dialog):
         centers : pd.DataFrame
             The cluster centers.
         """
-        # for converting z coordinates
-        pixelsize = self.window.view.pixelsize
-        params["pixelsize"] = pixelsize
         clusterer_name = self.clusterer_name.currentText()
         if clusterer_name == "DBSCAN":
             locs, _ = clusterer.dbscan(locs, **params)
@@ -3839,41 +4670,25 @@ class TestClustererDialog(lib.Dialog):
             locs, _ = clusterer.cluster(locs, **params)
         elif clusterer_name == "G5M":
             locs, _ = clusterer.dbscan(locs, **params["DBSCAN"])
-            # in g5m, the info parameter is only for getting the pixel
-            # size
-            centers, locs, _ = g5m.g5m(
-                locs, [{"Pixelsize": pixelsize}], **params["G5M"]
-            )
-            centers["z"] /= pixelsize
+            info = self.window.view.infos[self.channels.currentIndex()]
+            centers, _, locs = g5m.g5m(locs, info, **params["G5M"])
 
         if len(locs):
             self.view.group_color = render.get_group_color(locs)
 
-        # scale z axis if applicable
-        if "z" in locs.columns:
-            locs.z /= pixelsize
-
         # calculate cluster centers
         if clusterer_name != "G5M":  # G5M found centers already
-            centers = clusterer.find_cluster_centers(
-                locs,
-                self.window.view.pixelsize,
-            )
+            centers, _ = clusterer.find_cluster_centers(locs)
         return locs, centers
 
     def get_cluster_params(self) -> dict:
         """Extract clustering parameters for a given clustering method
         into a dictionary."""
         params = {}
-        pixelsize = self.window.view.pixelsize
         clusterer_name = self.clusterer_name.currentText()
         if clusterer_name == "DBSCAN":
-            params["radius"] = (
-                self.test_dbscan_params.radius.value() / pixelsize
-            )
-            params["radius_z"] = (
-                self.test_dbscan_params.radius_z.value() / pixelsize
-            )
+            params["radius"] = self.test_dbscan_params.radius.value()
+            params["radius_z"] = self.test_dbscan_params.radius_z.value()
             params["min_samples"] = self.test_dbscan_params.min_samples.value()
             params["min_locs"] = self.test_dbscan_params.min_locs.value()
         elif clusterer_name == "HDBSCAN":
@@ -3887,23 +4702,18 @@ class TestClustererDialog(lib.Dialog):
                 self.test_hdbscan_params.cluster_eps.value()
             )
         elif clusterer_name == "SMLM":
-            params["radius_xy"] = (
-                self.test_smlm_params.radius_xy.value() / pixelsize
-            )
-            params["radius_z"] = (
-                self.test_smlm_params.radius_z.value() / pixelsize
-            )
+            params["radius_xy"] = self.test_smlm_params.radius_xy.value()
+            params["radius_z"] = self.test_smlm_params.radius_z.value()
             params["min_locs"] = self.test_smlm_params.min_locs.value()
             params["frame_analysis"] = self.test_smlm_params.fa.isChecked()
         elif clusterer_name == "G5M":
             params["DBSCAN"] = {}
-            params["DBSCAN"]["radius"] = (
-                self.test_g5m_params.dbscan_radius.value() / pixelsize
-            )
+            params["DBSCAN"][
+                "radius"
+            ] = self.test_g5m_params.dbscan_radius.value()
             params["DBSCAN"][
                 "min_samples"
             ] = self.test_g5m_params.dbscan_min_samples.value()
-            params["DBSCAN"]["pixelsize"] = pixelsize
             params["G5M"] = {}
             params["G5M"]["min_locs"] = self.test_g5m_params.min_locs.value()
             handle = self.test_g5m_params.loc_prec_handling.currentText()
@@ -3924,8 +4734,7 @@ class TestClustererDialog(lib.Dialog):
             else:  # astigmatism
                 params["G5M"]["mode"] = "astigmatism"
                 params["G5M"]["calibration"] = self.test_g5m_params.calibration
-            params["G5M"]["asynch"] = False
-            params["G5M"]["callback_parent"] = None
+            params["G5M"]["parallel"] = False
 
         return params
 
@@ -4025,16 +4834,16 @@ class TestClustererDialog(lib.Dialog):
         ``View.run_jobs``."""
         params = self.get_cluster_params()
         locs = self.window.view.locs[channel]
-        pixelsize = self.window.view.pixelsize
+        info = self.window.view.infos[channel]
         save_centers = self.display_centers.isChecked()
         if self.clusterer_name.currentText() == "DBSCAN":
             return self.window.view._dbscan_job(
                 channel=channel,
                 path=path,
-                radius=params["radius"] * pixelsize,
+                radius=params["radius"],
                 min_density=params["min_samples"],
                 min_locs=params["min_locs"],
-                radius_z=params["radius_z"] * pixelsize,
+                radius_z=params["radius_z"],
                 save_centers=save_centers,
             )
         elif self.clusterer_name.currentText() == "HDBSCAN":
@@ -4050,24 +4859,25 @@ class TestClustererDialog(lib.Dialog):
             return self.window.view._smlm_clusterer_job(
                 channel=channel,
                 path=path,
-                radius_xy=params["radius_xy"] * pixelsize,
-                radius_z=params["radius_z"] * pixelsize,
+                radius_xy=params["radius_xy"],
+                radius_z=params["radius_z"],
                 min_locs=params["min_locs"],
                 frame_analysis=params["frame_analysis"],
                 save_centers=save_centers,
             )
         elif self.clusterer_name.currentText() == "G5M":
-            params["DBSCAN"]["radius"] *= pixelsize
-            params["G5M"]["asynch"] = True
+            params["G5M"]["parallel"] = True
 
             def job(progress: lib.TaskProgress) -> None:
-                progress.phase("Applying DBSCAN...", 0)
-                clustered, _ = clusterer.dbscan(locs, **params["DBSCAN"])
-                centers, clustered_locs, new_info = g5m.g5m(
+                lib.start_phase(progress, "Applying DBSCAN...", 0)
+                clustered, clustered_info = clusterer.dbscan(
+                    locs, info, **params["DBSCAN"]
+                )
+                centers, new_info, clustered_locs = g5m.g5m(
                     clustered,
-                    [{"Pixelsize": pixelsize}],
+                    clustered_info,
                     **params["G5M"],
-                    callback_parent=progress,
+                    progress=progress,
                 )
                 progress.check_canceled()
                 # save clustered locs and centers
@@ -4186,8 +4996,8 @@ class TestHDBSCANParams(QtWidgets.QWidget):
         self.cluster_eps = QtWidgets.QDoubleSpinBox()
         self.cluster_eps.setRange(0, 1e6)
         self.cluster_eps.setValue(0.0)
-        self.cluster_eps.setDecimals(3)
-        self.cluster_eps.setSingleStep(0.001)
+        self.cluster_eps.setDecimals(1)
+        self.cluster_eps.setSingleStep(0.1)
         grid.addWidget(self.cluster_eps, 2, 1)
         grid.setRowStretch(3, 1)
 
@@ -4384,13 +5194,10 @@ class TestG5MParams(QtWidgets.QWidget):
         )
         if not path:
             return
-        calib = io.load_calibration(path)
-        if "X Coefficients" not in calib.keys():
-            message = (
-                "Please load a 3D calibration .yaml file produced by"
-                " Picasso: Localize."
-            )
-            QtWidgets.QMessageBox.information(self, "Warning", message)
+        try:
+            calib = io.load_calibration(path)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
             return
         self.calibration = calib
 
@@ -4488,6 +5295,8 @@ class TestClustererView(QtWidgets.QLabel):
 
     def update_scene(self) -> None:
         """Render localizations."""
+        if self.locs is None:  # nothing tested yet
+            return
         if not len(self.locs):
             self._raw_image = None
             self.setText("No clusters found with the current settings.")
@@ -4503,9 +5312,7 @@ class TestClustererView(QtWidgets.QLabel):
         blur_method = (
             "smooth" if self.dialog.one_pixel_blur.isChecked() else "convolve"
         )
-        disp_px_size = (
-            self.dialog.window.view.pixelsize / self.get_optimal_oversampling()
-        )
+        disp_px_size = 1 / self.get_optimal_oversampling()
         colors = lib.get_colors(len(locs))
         info = [self.view.infos[self.dialog.channels.currentIndex()]] * len(
             locs
@@ -4592,8 +5399,6 @@ class TestClustererView(QtWidgets.QLabel):
         ):  # two channels, all locs and clustered locs
             channel = self.dialog.channel
             all_locs = self.dialog.window.view.picked_locs(channel)[0]
-            if "z" in all_locs.columns:
-                all_locs.z /= self.dialog.window.view.pixelsize
             locs = [
                 all_locs,
                 self.locs,
@@ -4612,8 +5417,6 @@ class TestClustererView(QtWidgets.QLabel):
         ):  # three channels, all locs, clustered locs and cluster centers
             channel = self.dialog.channel
             all_locs = self.dialog.window.view.picked_locs(channel)[0]
-            if "z" in all_locs.columns:
-                all_locs.z /= self.dialog.window.view.pixelsize
             locs = [
                 all_locs,
                 self.locs,
@@ -4627,21 +5430,24 @@ class TestClustererView(QtWidgets.QLabel):
         return locs
 
     def get_optimal_oversampling(self) -> float:
+        """Screen pixels per nm at which the viewport fills the view."""
         height, width = render.viewport_size(self.viewport)
         return (self._size / min(height, width)) / 1.05
 
     def get_full_fov(self) -> list[tuple[float, float]] | None:
         """Get viewport that contains all localizations as defined
-        by the pick."""
+        by the pick, with a margin of 5% of their extent."""
         if not len(self.locs):
             return
         # all picked locs
         locs = self.view.picked_locs(self.dialog.channel)[0]
-        x_min = locs["x"].min() - 1
-        x_max = locs["x"].max() + 1
-        y_min = locs["y"].min() - 1
-        y_max = locs["y"].max() + 1
-        return ([y_min, x_min], [y_max, x_max])
+        x_min, x_max = locs["x"].min(), locs["x"].max()
+        y_min, y_max = locs["y"].min(), locs["y"].max()
+        margin = TEST_CLUSTERER_MARGIN * max(x_max - x_min, y_max - y_min)
+        return (
+            [y_min - margin, x_min - margin],
+            [y_max + margin, x_max + margin],
+        )
 
 
 class DriftPlotWindow(lib.GenericPlotWindow):
@@ -4654,11 +5460,10 @@ class DriftPlotWindow(lib.GenericPlotWindow):
     def plot(self, drift: pd.DataFrame) -> None:
         """Plot drift in 2D or 3D depending on the columns of the input
         DataFrame."""
-        pixelsize = self.parent.pixelsize
 
         def draw() -> None:
             with self.plot_context():
-                postprocess.plot_drift(drift, pixelsize, self.figure)
+                postprocess.plot_drift(drift, self.figure)
 
         draw()
         self.redraw = draw
@@ -4673,15 +5478,13 @@ class ChangeFOV(lib.Dialog):
     Attributes
     ----------
     h_box : QDoubleSpinBox
-        Contains the height of the viewport (camera pixels).
+        Contains the height of the viewport (nm).
     w_box : QDoubleSpinBox
-        Contains the width of the viewport (camera pixels).
+        Contains the width of the viewport (nm).
     x_box : QDoubleSpinBox
-        Contains the minimum x coordinate (camera pixels) to be
-        displayed.
+        Contains the minimum x coordinate (nm) to be displayed.
     y_box : QDoubleSpinBox
-        Contains the minimum y coordinate (camera pixels) to be
-        displayed.
+        Contains the minimum y coordinate (nm) to be displayed.
     """
 
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
@@ -4691,44 +5494,44 @@ class ChangeFOV(lib.Dialog):
         self.setModal(False)
         self.layout = QtWidgets.QGridLayout()
         self.setLayout(self.layout)
-        xlabel = QtWidgets.QLabel("X:")
-        xlabel.setToolTip(
-            "X coordinate of the top-left corner (camera pixels)."
-        )
+        xlabel = QtWidgets.QLabel("X (nm):")
+        xlabel.setToolTip("X coordinate of the top-left corner (nm).")
         self.layout.addWidget(xlabel, 0, 0)
         self.x_box = QtWidgets.QDoubleSpinBox()
         self.x_box.setKeyboardTracking(False)
-        self.x_box.setRange(-100, 1e6)
+        self.x_box.setRange(-1e8, 1e8)
+        self.x_box.setSingleStep(100)
         self.layout.addWidget(self.x_box, 0, 1)
-        ylabel = QtWidgets.QLabel("Y:")
-        ylabel.setToolTip(
-            "Y coordinate of the top-left corner (camera pixels)."
-        )
+        ylabel = QtWidgets.QLabel("Y (nm):")
+        ylabel.setToolTip("Y coordinate of the top-left corner (nm).")
         self.layout.addWidget(ylabel, 1, 0)
         self.y_box = QtWidgets.QDoubleSpinBox()
         self.y_box.setKeyboardTracking(False)
-        self.y_box.setRange(-100, 1e6)
+        self.y_box.setRange(-1e8, 1e8)
+        self.y_box.setSingleStep(100)
         self.layout.addWidget(self.y_box, 1, 1)
-        w_label = QtWidgets.QLabel("Width:")
-        w_label.setToolTip("Width of the FOV (camera pixels).")
+        w_label = QtWidgets.QLabel("Width (nm):")
+        w_label.setToolTip("Width of the FOV (nm).")
         self.layout.addWidget(w_label, 2, 0)
         self.w_box = QtWidgets.QDoubleSpinBox()
         self.w_box.setKeyboardTracking(False)
-        self.w_box.setRange(0, 1e3)
+        self.w_box.setRange(0, 1e8)
+        self.w_box.setSingleStep(100)
         self.layout.addWidget(self.w_box, 2, 1)
-        h_label = QtWidgets.QLabel("Height:")
-        h_label.setToolTip("Height of the FOV (camera pixels).")
+        h_label = QtWidgets.QLabel("Height (nm):")
+        h_label.setToolTip("Height of the FOV (nm).")
         self.layout.addWidget(h_label, 3, 0)
         self.h_box = QtWidgets.QDoubleSpinBox()
         self.h_box.setKeyboardTracking(False)
-        self.h_box.setRange(0, 1e3)
+        self.h_box.setRange(0, 1e8)
+        self.h_box.setSingleStep(100)
         self.layout.addWidget(self.h_box, 3, 1)
         self.apply = QtWidgets.QPushButton("Apply")
         self.apply.setToolTip("Apply new FOV.")
         self.layout.addWidget(self.apply, 4, 0)
         self.apply.clicked.connect(self.update_scene)
         self.savefov = QtWidgets.QPushButton("Save FOV")
-        self.savefov.setToolTip("Save current FOV as a .txt file.")
+        self.savefov.setToolTip("Save current FOV as a .txt file (nm).")
         self.layout.addWidget(self.savefov, 5, 0)
         self.savefov.clicked.connect(self.save_fov)
         self.loadfov = QtWidgets.QPushButton("Load FOV")
@@ -4760,16 +5563,20 @@ class ChangeFOV(lib.Dialog):
                 self.h_box.value(),
             ]
         )
-        np.savetxt(path, fov)
+        save_fov_file(path, fov)
 
     def load_fov(self) -> None:
-        """Load a FOV from a .txt file."""
+        """Load a FOV from a .txt file (nm; see ``View.read_fov_file``
+        for files written before Picasso 1.0)."""
         path, ext = QtWidgets.QFileDialog.getOpenFileName(
             self, "Load FOV from", filter="*.txt"
         )
         if not path:
             return
-        [x, y, w, h] = np.loadtxt(path)
+        fov = self.window.view.read_fov_file(path)
+        if fov is None:  # canceled
+            return
+        [x, y, w, h] = fov
         self.x_box.setValue(x)
         self.y_box.setValue(y)
         self.w_box.setValue(w)
@@ -4790,8 +5597,45 @@ class ChangeFOV(lib.Dialog):
         # ratio as the requested FOV
         self.window.resize_view_to_fov(w, h)
         self.window.view.update_scene(viewport=viewport)
-        self.window.info_dialog.xy_label.setText(f"{x_min:.2f} / {y_min:.2f}")
-        self.window.info_dialog.wh_label.setText(f"{w:.2f} / {h:.2f}")
+        self.window.info_dialog.xy_label.setText(
+            f"{x_min:.1f} / {y_min:.1f} nm"
+        )
+        self.window.info_dialog.wh_label.setText(f"{w:.1f} / {h:.1f} nm")
+
+
+def save_fov_file(path: str, fov: FloatArray1D) -> None:
+    """Save a field of view ``(x, y, width, height)`` in nm as a .txt
+    file with the ``FOV_FILE_HEADER`` comment line."""
+    np.savetxt(path, np.asarray(fov, dtype=float), header=FOV_FILE_HEADER)
+
+
+def load_fov_file(path: str, pixelsize: float | None = None) -> FloatArray1D:
+    """Load a field of view ``(x, y, width, height)`` in nm from a .txt
+    file. Files without the ``FOV_FILE_HEADER`` comment line were
+    written before Picasso 1.0, in camera pixels, and are converted
+    with ``pixelsize`` (nm); ``io.MissingPixelsizeError`` if it is not
+    given for such a file. ``io.FileFormatError`` for a newer major
+    format version (see ``io.check_format_version``)."""
+    with open(path) as f:
+        first = f.readline()
+    fov = np.loadtxt(path, dtype=float)
+    if fov.shape != (4,):
+        raise ValueError(f"{path} does not hold a field of view.")
+    header = first.lstrip("# ").split()
+    if header and header[0] == io.FORMAT_VERSION_ATTR:
+        io.check_format_version(
+            header[1] if len(header) > 1 else "",
+            path,
+            kind="field of view file",
+        )
+    else:
+        if pixelsize is None:
+            raise io.MissingPixelsizeError(
+                f"{path} was written before Picasso 1.0, with the field of "
+                "view in camera pixels. Pass pixelsize (nm) to convert it."
+            )
+        fov = fov * pixelsize
+    return fov
 
 
 class InfoDialog(lib.Dialog):
@@ -4807,13 +5651,17 @@ class InfoDialog(lib.Dialog):
     change_fov : ChangeFOV(QDialog)
         Dialog for changing field of view.
     height_label : QLabel
-        Contains the height of the window (camera pixels).
+        Contains the height of the window (screen pixels).
     dark_mean : QLabel
         Shows the mean dark time (frames) in all picks.
     dark_std : QLabel
         Shows the std dark time (frames) in all picks.
     fit_precision : QLabel
-        Shows median fit precision of the first channel (camera pixels).
+        Shows median localization precision (nm) of the channel chosen
+        in self.fit_precision_channel.
+    fit_precision_channel : QComboBox
+        Chooses the channel for self.fit_precision; hidden with a
+        single channel.
     frc_plot_window : FRCPlotWindow(QDialog)
         Window displaying the FRC curve.
     frc_result : dict
@@ -4824,8 +5672,7 @@ class InfoDialog(lib.Dialog):
     locs_label : QLabel
         Shows the number of locs in the current FOV.
     lp : float
-        NeNA localization precision (camera pixels). None, if not
-        calculated yet.
+        NeNA localization precision (nm). None, if not calculated yet.
     max_dark_time : QSpinBox
         Contains the maximum gap between localizations (frames) to be
         considered as belonging to the same group of linked locs.
@@ -4865,13 +5712,13 @@ class InfoDialog(lib.Dialog):
     units_per_pick : QSpinBox
         Contains the number of binding sites per pick.
     wh_label : QLabel
-        Displays the width and height of FOV (camera pixels).
+        Displays the width and height of FOV (nm).
     window : Window(QMainWindow)
         Main window instance.
     width_label : QLabel
-        Contains the width of the window (camera pixels).
+        Contains the width of the window (screen pixels).
     xy_label : QLabel
-        Shows the minimum y and x coordinates in FOV (camera pixels).
+        Shows the minimum x and y coordinates in FOV (nm).
     """
 
     GPU_DOCS_URL = docs_url("render/performance.html#render-gpu-rendering")
@@ -4899,33 +5746,30 @@ class InfoDialog(lib.Dialog):
         main_layout.addWidget(self.scroll_area)
 
         # Display
-        display_groupbox = QtWidgets.QGroupBox("Display")
+        display_groupbox = lib.CollapsibleGroupBox("Display")
         vbox.addWidget(display_groupbox)
-        display_grid = QtWidgets.QGridLayout(display_groupbox)
+        display_grid = QtWidgets.QGridLayout(display_groupbox.content)
         width_label = QtWidgets.QLabel("Image width:")
-        width_label.setToolTip("Width of the current FOV (display pixels).")
+        width_label.setToolTip("Width of the view on screen (pixels).")
         display_grid.addWidget(width_label, 0, 0)
         self.width_label = QtWidgets.QLabel()
         display_grid.addWidget(self.width_label, 0, 1)
         height_label = QtWidgets.QLabel("Image height:")
-        height_label.setToolTip("Height of the current FOV (display pixels).")
+        height_label.setToolTip("Height of the view on screen (pixels).")
         display_grid.addWidget(height_label, 1, 0)
         self.height_label = QtWidgets.QLabel()
         display_grid.addWidget(self.height_label, 1, 1)
 
         view_xy_label = QtWidgets.QLabel("View X / Y:")
         view_xy_label.setToolTip(
-            "XY coordinates of the current FOV's top-left corner "
-            "(display pixels)."
+            "X and Y coordinates of the current FOV's top-left corner (nm)."
         )
         display_grid.addWidget(view_xy_label, 2, 0)
         self.xy_label = QtWidgets.QLabel()
         display_grid.addWidget(self.xy_label, 2, 1)
 
         view_wh_label = QtWidgets.QLabel("View width / height:")
-        view_wh_label.setToolTip(
-            "Width and height of the current FOV (display pixels)."
-        )
+        view_wh_label.setToolTip("Width and height of the current FOV (nm).")
         display_grid.addWidget(view_wh_label, 3, 0)
         self.wh_label = QtWidgets.QLabel()
         display_grid.addWidget(self.wh_label, 3, 1)
@@ -4984,38 +5828,50 @@ class InfoDialog(lib.Dialog):
         self.load_fov_button.clicked.connect(self.change_fov.load_fov)
 
         # Precision
-        precision_groupbox = QtWidgets.QGroupBox("Precision")
+        precision_groupbox = lib.CollapsibleGroupBox("Precision")
         vbox.addWidget(precision_groupbox)
-        self.precision_grid = QtWidgets.QGridLayout(precision_groupbox)
+        self.precision_grid = QtWidgets.QGridLayout(precision_groupbox.content)
         med_lp_label = QtWidgets.QLabel("Median localization precision:")
         med_lp_label.setToolTip(
-            "Median localization precision of the first channel."
+            "Median localization precision (mean of the medians of lpx\n"
+            "and lpy) of the channel selected below."
         )
         self.precision_grid.addWidget(med_lp_label, 0, 0)
         self.fit_precision = QtWidgets.QLabel("-")
         self.precision_grid.addWidget(self.fit_precision, 0, 1)
+        # the channel selector is shown only with several channels
+        self.fit_precision_channel = QtWidgets.QComboBox()
+        self.fit_precision_channel.setToolTip(
+            "Channel whose median localization precision is shown."
+        )
+        self.fit_precision_channel.currentIndexChanged.connect(
+            self.update_fit_precision
+        )
+        self.fit_precision_channel.setVisible(False)
+        self.precision_grid.addWidget(self.fit_precision_channel, 1, 0, 1, 2)
+        self._fit_precision_cache = {}
         nena_label = QtWidgets.QLabel("NeNA precision:")
         nena_label.setToolTip(
             "Experimental estimate of the average localization precision.\n"
             "See Endesfelder et al. Histochemistry and cell biology, 2014."
         )
-        self.precision_grid.addWidget(nena_label, 1, 0)
+        self.precision_grid.addWidget(nena_label, 2, 0)
         self.nena_label = QtWidgets.QLabel("-")
-        self.precision_grid.addWidget(self.nena_label, 1, 1)
+        self.precision_grid.addWidget(self.nena_label, 2, 1)
         self.nena_button = QtWidgets.QPushButton("Calculate NeNA")
         self.nena_button.setToolTip("Click to calculate NeNA precision.")
         # clicked passes its checked state, which is not an on_done
         self.nena_button.clicked.connect(lambda: self.calculate_nena_lp())
-        self.precision_grid.addWidget(self.nena_button, 2, 0)
+        self.precision_grid.addWidget(self.nena_button, 3, 0)
         show_nena_plot_button = QtWidgets.QPushButton("Show NeNA plot")
         show_nena_plot_button.setToolTip("Display NeNA fit.")
         show_nena_plot_button.clicked.connect(self.show_nena_plot)
-        self.precision_grid.addWidget(show_nena_plot_button, 2, 1)
+        self.precision_grid.addWidget(show_nena_plot_button, 3, 1)
 
         # FRC
-        frc_groupbox = QtWidgets.QGroupBox("FRC (uses current FOV)")
+        frc_groupbox = lib.CollapsibleGroupBox("FRC (uses current FOV)")
         vbox.addWidget(frc_groupbox)
-        self.frc_grid = QtWidgets.QGridLayout(frc_groupbox)
+        self.frc_grid = QtWidgets.QGridLayout(frc_groupbox.content)
         frc_label = QtWidgets.QLabel("FRC resolution (nm):")
         frc_label.setToolTip(
             "Experimental resolution estimate using Fourier Ring "
@@ -5101,9 +5957,9 @@ class InfoDialog(lib.Dialog):
         rois_grid.addWidget(review_frc_rois_button, 4, 1)
 
         # FOV
-        fov_groupbox = QtWidgets.QGroupBox("Field of view")
+        fov_groupbox = lib.CollapsibleGroupBox("Field of view")
         vbox.addWidget(fov_groupbox)
-        fov_grid = QtWidgets.QGridLayout(fov_groupbox)
+        fov_grid = QtWidgets.QGridLayout(fov_groupbox.content)
         nlocs_label = QtWidgets.QLabel("No. of localizations in FOV:")
         nlocs_label.setToolTip(
             "Number of localizations currently displayed\n"
@@ -5114,9 +5970,9 @@ class InfoDialog(lib.Dialog):
         fov_grid.addWidget(self.locs_label, 0, 1)
 
         # Picks
-        picks_groupbox = QtWidgets.QGroupBox("Picks, kinetics and qPAINT")
+        picks_groupbox = lib.CollapsibleGroupBox("Picks, kinetics and qPAINT")
         vbox.addWidget(picks_groupbox)
-        self.picks_grid = QtWidgets.QGridLayout(picks_groupbox)
+        self.picks_grid = QtWidgets.QGridLayout(picks_groupbox.content)
         npicks_label = QtWidgets.QLabel("Number of picks:")
         npicks_label.setToolTip("Number of picks loaded.")
         self.picks_grid.addWidget(npicks_label, 0, 0)
@@ -5266,6 +6122,11 @@ class InfoDialog(lib.Dialog):
         self.picks_grid.addWidget(
             pick_hists, self.picks_grid.rowCount(), 0, 1, 3
         )
+        # collapsed sections stay at the top
+        vbox.addStretch(1)
+
+        lib.remember_expanded_sections(self, "Render", "Info")
+        lib.resize_with_sections(self, self.scroll_area)
 
         # adjust the size of the dialog to fit its contents
         hint = self.container.sizeHint()
@@ -5320,7 +6181,7 @@ class InfoDialog(lib.Dialog):
 
             # calculate frc
             self.frc_result = postprocess.frc(
-                locs, info, self.window.view.viewport
+                locs, info, viewport=self.window.view.viewport
             )
             if path:  # save images
                 base, ext = os.path.splitext(path)
@@ -5355,7 +6216,8 @@ class InfoDialog(lib.Dialog):
         locs = self.window.view.locs[channel]
         info = self.window.view.infos[channel]
         # ROIs are placed across all localizations, not only the FOV
-        viewport = ((0, 0), (info[0]["Height"], info[0]["Width"]))
+        fov_width, fov_height = lib.field_of_view(info)
+        viewport = ((0, 0), (fov_height, fov_width))
         n_rois = self.frc_n_rois.value()
         # close the previous review window, so that it is not mistaken
         # for the new results while they are computed
@@ -5369,11 +6231,11 @@ class InfoDialog(lib.Dialog):
             return postprocess.frc_rois(
                 locs,
                 info,
-                viewport,
+                viewport=viewport,
                 n_rois=n_rois,
                 roi_size=roi_size,
                 min_locs=min_locs,
-                callback=progress.set_value,
+                progress=progress,
             )
 
         def failed(error: Exception) -> None:
@@ -5389,7 +6251,6 @@ class InfoDialog(lib.Dialog):
             lambda result: self._show_frc_rois_result(
                 locs, info, viewport, n_rois, result
             ),
-            maximum=n_rois,
             on_failed=failed,
         )
 
@@ -5412,10 +6273,7 @@ class InfoDialog(lib.Dialog):
                 " localizations per ROI.",
             )
             return
-        pixelsize = lib.get_from_metadata(info, "Pixelsize")
-        self.frc_rois_window = FRCRoisWindow(
-            self, locs, viewport, pixelsize, result
-        )
+        self.frc_rois_window = FRCRoisWindow(self, locs, viewport, result)
         self.frc_rois_window.show()
         # after showing the window, so the note refers to what is shown
         if n_found < n_rois:
@@ -5435,6 +6293,57 @@ class InfoDialog(lib.Dialog):
             self.frc_rois_window.show()
             self.frc_rois_window.raise_()
 
+    def update_fit_precision(self) -> None:
+        """Sync the channel selector with the loaded channels and show
+        the median localization precision of the selected channel.
+
+        Medians are cached per localizations object, so redraws do not
+        recompute them.
+        """
+        view = self.window.view
+        checks = self.window.dataset_dialog.checks
+        names = [
+            checks[i].text() if i < len(checks) else os.path.basename(path)
+            for i, path in enumerate(view.locs_paths)
+        ]
+        combo = self.fit_precision_channel
+        current_names = [combo.itemText(i) for i in range(combo.count())]
+        if names != current_names:
+            # keep the selected channel across reordering and closing
+            current = combo.currentText()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItems(names)
+            if current in names:
+                combo.setCurrentIndex(names.index(current))
+            combo.blockSignals(False)
+        combo.setVisible(len(names) > 1)
+
+        if view.has_spilled_locs:
+            return  # moved to disk while idle: unchanged since shown
+        channel = combo.currentIndex()
+        if channel < 0 or channel >= len(view.locs):
+            self.fit_precision.setText("-")
+            return
+        locs = view.locs[channel]
+        key = (id(locs), len(locs))
+        # drop entries of channels that are gone or were replaced
+        alive = {(id(locs_), len(locs_)) for locs_ in view.locs}
+        self._fit_precision_cache = {
+            k: v for k, v in self._fit_precision_cache.items() if k in alive
+        }
+        if key not in self._fit_precision_cache:
+            if len(locs) and {"lpx", "lpy"} <= set(locs.columns):
+                lp = np.mean([np.median(locs["lpx"]), np.median(locs["lpy"])])
+            else:
+                lp = np.nan
+            self._fit_precision_cache[key] = lp
+        lp = self._fit_precision_cache[key]
+        if np.isfinite(lp):
+            self.fit_precision.setText(f"{lp:.2f} nm")
+        else:
+            self.fit_precision.setText("-")
+
     def calculate_nena_lp(
         self, on_done: Callable[[], None] | None = None
     ) -> None:
@@ -5451,20 +6360,18 @@ class InfoDialog(lib.Dialog):
             return
         locs = self.window.view.locs[channel]
         info = self.window.view.infos[channel]
-        pixelsize = self.window.view.pixelsize
 
         def compute(progress: lib.TaskProgress) -> tuple:
-            return postprocess.nena(locs, info, progress.set_value)
+            return postprocess.nena(locs, info, progress=progress)
 
         def apply(result: tuple) -> None:
-            self.nena_result, self.lp = result
-            self.lp *= pixelsize
+            self.nena_result, self.lp = result  # nm
             self.nena_label.setText(f"{self.lp:.3} nm")
 
             # save NeNA to metadata; a repeated calculation with no other
             # step in between replaces the previous entry
             nena_info = {
-                "Generated by": f"Picasso v{__version__} Render : NeNA",
+                **lib.step_info("Render : NeNA"),
                 "NeNA (nm)": float(self.lp),
             }
             if info and "NeNA (nm)" in info[-1]:
@@ -5474,9 +6381,7 @@ class InfoDialog(lib.Dialog):
             if on_done is not None:
                 on_done()
 
-        lib.run_task(
-            compute, "Calculating NeNA precision", self, apply, maximum=100
-        )
+        lib.run_task(compute, "Calculating NeNA precision", self, apply)
 
     def calibrate_influx(self) -> None:
         """Calculate influx rate (1/frames)."""
@@ -5495,6 +6400,8 @@ class InfoDialog(lib.Dialog):
         """Show FRC plot window."""
         if not self.frc_result:
             self.calculate_frc_resolution()
+            if not self.frc_result:  # canceled
+                return
         self.frc_window = FRCPlotWindow(self)
         self.frc_window.plot(self.frc_result)
         self.frc_window.show()
@@ -5590,13 +6497,11 @@ class FRCRoisWindow(QtWidgets.QWidget):
         info_dialog: InfoDialog,
         locs: pd.DataFrame,
         viewport: tuple[tuple[float, float], tuple[float, float]],
-        pixelsize: float,
         result: dict,
     ) -> None:
         super().__init__()
         self.info_dialog = info_dialog
         self.result = result
-        self.pixelsize = pixelsize
         self.setWindowTitle("FRC in ROIs")
         this_directory = os.path.dirname(os.path.realpath(__file__))
         icon_path = os.path.join(this_directory, "icons", "render.ico")
@@ -5626,7 +6531,7 @@ class FRCRoisWindow(QtWidgets.QWidget):
         self.table.setEditTriggers(
             QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers
         )
-        to_um = pixelsize / 1000
+        to_um = 1e-3  # nm to um
         for row, (((y0, x0), (y1, x1)), n, res) in enumerate(
             zip(result["rois"], result["n_locs"], resolutions)
         ):
@@ -5733,7 +6638,7 @@ class FRCRoisWindow(QtWidgets.QWidget):
                 f"median {np.median(resolutions):.2f} nm, "
                 f"{len(resolutions)} of {n_total} ROIs used, "
                 "NeNA "
-                f"{self.result['lp'] * self.pixelsize:.2f} nm"
+                f"{self.result['lp']:.2f} nm"
             )
         self.info_dialog.frc_rois_resolution.setText(text)
 
@@ -5748,7 +6653,7 @@ class FRCRoisWindow(QtWidgets.QWidget):
             interpolation="nearest",
         )
         selected = self.selected_row()
-        to_um = self.pixelsize / 1000
+        to_um = 1e-3  # nm to um
         for k, ((y0, x0), (y1, x1)) in enumerate(self.result["rois"]):
             if k == selected:
                 color, width = "red", 2.0
@@ -5803,8 +6708,8 @@ class FRCRoisWindow(QtWidgets.QWidget):
             return
         if self.canvas.toolbar is not None and self.canvas.toolbar.mode:
             return  # zooming or panning
-        to_px = 1000 / self.pixelsize
-        x, y = event.xdata * to_px, event.ydata * to_px
+        to_nm = 1000  # um to nm
+        x, y = event.xdata * to_nm, event.ydata * to_nm
         for k, ((y0, x0), (y1, x1)) in enumerate(self.result["rois"]):
             if x0 <= x < x1 and y0 <= y < y1:
                 self.table.selectRow(k)
@@ -5817,7 +6722,7 @@ class FRCRoisWindow(QtWidgets.QWidget):
         )
         if not path:
             return
-        to_um = self.pixelsize / 1000
+        to_um = 1e-3  # nm to um
         rois = np.array(self.result["rois"])  # (n, 2, 2): (min, max) x (y, x)
         pd.DataFrame(
             {
@@ -6000,6 +6905,11 @@ class MaskSettingsDialog(lib.Dialog):
         Container for all widgets in the scroll area.
     disp_px_size : QSpinBox
         Contains the display pixel size in nm.
+    index_infos : list
+        Metadata of ``index_locs``, as ``masking.mask_locs`` returned
+        it.
+    index_infos_out : list
+        Metadata of ``index_locs_out``.
     index_locs : list
         Localizations that were masked; may contain a single or all
         channels.
@@ -6026,8 +6936,6 @@ class MaskSettingsDialog(lib.Dialog):
     paths : list
         Contains paths to all localizations loaded when starting the
         dialog.
-    pixelsize : float
-        Camera pixel size (nm).
     plots : list of QLabel
         Used for displaying the 4 plots (histogram, blurred, mask,
         masked).
@@ -6055,7 +6963,9 @@ class MaskSettingsDialog(lib.Dialog):
         self.setModal(False)
         self.channel = 0
         self.index_locs = []
+        self.index_infos = []
         self.index_locs_out = []
+        self.index_infos_out = []
 
         self.scroll_area = QtWidgets.QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -6074,8 +6984,9 @@ class MaskSettingsDialog(lib.Dialog):
         disp_label = QtWidgets.QLabel("Display pixel size (nm):")
         disp_label.setToolTip("Mask pixel size in nm.")
         settings_grid.addWidget(disp_label, 0, 0)
-        self.disp_px_size = QtWidgets.QSpinBox()
-        self.disp_px_size.setRange(10, 99999)
+        self.disp_px_size = QtWidgets.QDoubleSpinBox()
+        self.disp_px_size.setRange(1, 99999)
+        self.disp_px_size.setDecimals(1)
         self.disp_px_size.setValue(300)
         self.disp_px_size.setSingleStep(10)
         self.disp_px_size.setKeyboardTracking(False)
@@ -6214,21 +7125,26 @@ class MaskSettingsDialog(lib.Dialog):
         self.cached_oversampling = 0
         self.cached_blur = 0
         self.cached_thresh = 0
-        self.pixelsize = 130
+
+    @property
+    def locs(self) -> list[pd.DataFrame]:
+        """The localizations of the main window's channels (always the
+        current ones, also after they were moved to disk while idle)."""
+        return self.window.view.locs
 
     def init_dialog(self) -> None:
         """Initialize dialog when called from the main window. Load
         localizations and metadata, updates plots."""
-        self.locs = self.window.view.locs
         self.paths = self.window.view.locs_paths
         self.infos = self.window.view.infos
-        self.pixelsize = self.window.view.pixelsize
         # which channel to plot
-        self.channel = self.window.view.get_channel("Mask image")
+        channel = self.window.view.get_channel("Mask image")
+        if channel is None:  # canceled
+            return
+        self.channel = channel
         self.cmap = self.window.display_settings_dlg.colormap.currentText()
-        info = self.infos[self.channel][0]
-        self.x_max = lib.get_from_metadata(info, "Width", raise_error=True)
-        self.y_max = lib.get_from_metadata(info, "Height", raise_error=True)
+        # the field of view of the channel, in nm
+        self.x_max, self.y_max = lib.field_of_view(self.infos[self.channel])
         self.update_plots()
 
         # adjust the size of the dialog to fit its contents
@@ -6242,7 +7158,7 @@ class MaskSettingsDialog(lib.Dialog):
         viewport = ((0, 0), (self.y_max, self.x_max))
         _, H = render.render(
             locs,
-            {"Pixelsize": self.pixelsize},
+            self.infos[self.channel],
             disp_px_size=self.disp_px_size.value(),
             viewport=viewport,
             blur_method=None,
@@ -6376,23 +7292,34 @@ class MaskSettingsDialog(lib.Dialog):
     def mask_locs(self) -> None:
         """Mask localizations from a single or all channels."""
         self.index_locs = []  # locs in the mask
+        self.index_infos = []  # and their metadata
         self.index_locs_out = []  # locs outside the mask
+        self.index_infos_out = []
         if self.save_all.isChecked():  # all channels
-            for locs in self.locs:
-                self._mask_locs(locs)
+            for channel in range(len(self.locs)):
+                self._mask_locs(channel)
         else:  # only the current channel
-            locs = self.locs[self.channel]
-            self._mask_locs(locs)
+            self._mask_locs(self.channel)
 
-    def _mask_locs(self, locs: pd.DataFrame) -> None:
-        """Mask localizations given a mask."""
-        locs_in, locs_out = masking.mask_locs(
-            locs,
-            self.infos[self.channel],
-            self.mask,
+    def _mask_locs(self, channel: int) -> None:
+        """Mask localizations of a channel given a mask."""
+        locs_in, info_in, locs_out, info_out = masking.mask_locs(
+            self.locs[channel],
+            self.infos[channel],
+            mask=self.mask,
+            # the mask spans the channel it was made from
+            field_of_view=(self.x_max, self.y_max),
+            mask_info={
+                "Display pixel size (nm)": self.disp_px_size.value(),
+                "Blur (nm)": self.mask_blur.value(),
+                "Threshold": self.mask_thresh.value(),
+                "Threshold method": self.thresh_method.currentText(),
+            },
         )
         self.index_locs.append(locs_in)  # locs in the mask
+        self.index_infos.append(info_in)
         self.index_locs_out.append(locs_out)  # locs outside the mask
+        self.index_infos_out.append(info_out)
 
         # update masked locs plot if the current channel is masked
         if (
@@ -6401,7 +7328,7 @@ class MaskSettingsDialog(lib.Dialog):
         ) or not self.save_all.isChecked():
             _, self.H_new = render.render(
                 self.index_locs[-1],
-                {"Pixelsize": self.pixelsize},
+                self.infos[self.channel],
                 disp_px_size=self.disp_px_size.value(),
                 viewport=((0, 0), (self.y_max, self.x_max)),
                 blur_method=None,
@@ -6478,51 +7405,25 @@ class MaskSettingsDialog(lib.Dialog):
                     check_ext=".yaml",
                 )
                 if path_out:
-                    self._save_locs(self.channel, path_in, path_out)
+                    # only this channel may have been masked
+                    index = 0 if len(self.index_locs) == 1 else self.channel
+                    self._save_locs(self.channel, path_in, path_out, index)
 
-    def _save_locs(self, channel: int, path_in: str, path_out: str) -> None:
-        """Save masked localizations for a single channel."""
-        info = self.get_info(channel, locs_in=True)
-        io.save_locs(path_in, self.index_locs[channel], info)
-        info = self.get_info(channel, locs_in=False)
-        io.save_locs(path_out, self.index_locs_out[channel], info)
-
-    def get_info(self, channel: int, locs_in: bool = True) -> list[dict]:
-        """Returns metadata for masked localizations.
-
-        Parameters
-        ----------
-        channel : int
-            Channel of localizations to be saved.
-        locs_in : bool, optional
-            True if localizations inside the mask are to be saved.
-            Default is True.
-
-        Returns
-        -------
-        info : list of dicts
-            Metadata for masked localizations.
-        """
-        mask_in = "Mask in" if locs_in else "Mask out"
-        mask_pixelsize = self.disp_px_size.value()
-        area_in = float(np.sum(self.mask)) * (mask_pixelsize * 1e-3) ** 2
-        picked_area = lib.get_from_metadata(self.infos[channel], "Area (um^2)")
-        if picked_area is not None:
-            area_total = picked_area
-        else:
-            area_total = float(self.mask.size * (mask_pixelsize * 1e-3) ** 2)
-        area = area_in if locs_in else area_total - area_in
-        info = self.infos[channel] + [
-            {
-                "Generated by": f"Picasso v{__version__} Render : {mask_in}",
-                "Display pixel size (nm)": mask_pixelsize,
-                "Blur (nm)": self.mask_blur.value(),
-                "Threshold": self.mask_thresh.value(),
-                "Threshold method": self.thresh_method.currentText(),
-                "Area (um^2)": area,
-            }
-        ]
-        return info
+    def _save_locs(
+        self,
+        channel: int,
+        path_in: str,
+        path_out: str,
+        index: int | None = None,
+    ) -> None:
+        """Save masked localizations for a single channel. ``index`` is
+        the position of the channel in the masked localizations;
+        ``channel`` if None, i.e., when all channels were masked."""
+        index = channel if index is None else index
+        io.save_locs(path_in, self.index_locs[index], self.index_infos[index])
+        io.save_locs(
+            path_out, self.index_locs_out[index], self.index_infos_out[index]
+        )
 
     def show_hist(self) -> None:
         """Show histogram of values of the blurred image."""
@@ -6876,9 +7777,9 @@ class ToolsSettingsDialog(lib.Dialog):
         main_layout.addWidget(self.scroll_area)
         self._fitted = False  # sized to the contents on the first show
 
-        self.pick_groupbox = QtWidgets.QGroupBox("Pick")
+        self.pick_groupbox = lib.CollapsibleGroupBox("Pick")
         self.vbox.addWidget(self.pick_groupbox)
-        pick_grid = QtWidgets.QGridLayout(self.pick_groupbox)
+        pick_grid = QtWidgets.QGridLayout(self.pick_groupbox.content)
 
         first_row = QtWidgets.QHBoxLayout()
         pick_grid.addLayout(first_row, 0, 0, 1, 2)
@@ -6970,9 +7871,9 @@ class ToolsSettingsDialog(lib.Dialog):
         pick_grid.addWidget(self.point_picks, 4, 0)
 
         # Move tool - drags the localizations of one or all channels
-        self.move_groupbox = QtWidgets.QGroupBox("Move")
+        self.move_groupbox = lib.CollapsibleGroupBox("Move")
         self.vbox.addWidget(self.move_groupbox)
-        move_grid = QtWidgets.QGridLayout(self.move_groupbox)
+        move_grid = QtWidgets.QGridLayout(self.move_groupbox.content)
         move_label = QtWidgets.QLabel("Channels:")
         move_label.setToolTip(
             "Channels whose localizations are dragged with the Move tool."
@@ -6980,8 +7881,14 @@ class ToolsSettingsDialog(lib.Dialog):
         move_grid.addWidget(move_label, 0, 0)
         # whether each loaded channel is dragged, see move_channels
         self._move_selection = []
-        self.move_channels_label = QtWidgets.QLabel()
-        move_grid.addWidget(self.move_channels_label, 0, 1)
+        self.move_channels_label = lib.WrappingLabel(max_chars=30)
+        move_grid.addWidget(
+            self.move_channels_label,
+            0,
+            1,
+            alignment=QtCore.Qt.AlignmentFlag.AlignLeft,
+        )
+        move_grid.setColumnStretch(1, 1)
         self.move_channels_button = QtWidgets.QPushButton("Select...")
         self.move_channels_button.clicked.connect(self.select_move_channels)
         move_grid.addWidget(self.move_channels_button, 0, 2)
@@ -6994,8 +7901,8 @@ class ToolsSettingsDialog(lib.Dialog):
             "so that none is removed when saving, and it is never\n"
             "smaller than the camera image. Dragging beyond the top or\n"
             "left edge translates all channels, picks and measured\n"
-            "points by whole camera pixels; the translation is saved in\n"
-            "the metadata."
+            "points by a whole number of camera pixels (in nm); the\n"
+            "translation is saved in the metadata."
         )
         self._update_move_channels_label()
         self.move_undo_button = QtWidgets.QPushButton("Undo last move")
@@ -7070,12 +7977,18 @@ class ToolsSettingsDialog(lib.Dialog):
             index = self.appearance_tabs.addTab(page, name)
             self.appearance_tabs.setTabToolTip(index, tooltip)
 
-        # a collapsed section stays at the top
+        # collapsed sections stay at the top
         self.vbox.addStretch()
+        lib.remember_expanded_sections(self, "Render", "Tools Settings")
         # resize once the layout has taken the change into account
-        self.appearance_groupbox.expandedChanged.connect(
-            lambda _: QtCore.QTimer.singleShot(0, self.fit_to_contents)
-        )
+        for groupbox in (
+            self.pick_groupbox,
+            self.move_groupbox,
+            self.appearance_groupbox,
+        ):
+            groupbox.expandedChanged.connect(
+                lambda _: QtCore.QTimer.singleShot(0, self.fit_to_contents)
+            )
 
     def showEvent(self, event: QtGui.QShowEvent) -> None:
         super().showEvent(event)
@@ -7084,9 +7997,9 @@ class ToolsSettingsDialog(lib.Dialog):
             self.fit_to_contents()
 
     def fit_to_contents(self, *args) -> None:
-        """Resize the dialog to its contents after the appearance section
-        is expanded or collapsed, at most to 85% of the screen height;
-        beyond that, the contents scroll."""
+        """Resize the dialog to its contents after a section is expanded
+        or collapsed, at most to 85% of the screen height; beyond that,
+        the contents scroll."""
         container = self.scroll_area.widget()
         container.adjustSize()
         hint = container.sizeHint()
@@ -7154,9 +8067,10 @@ class ToolsSettingsDialog(lib.Dialog):
 
     def _update_move_channels_label(self) -> None:
         """Summarize the Move tool's selection next to its button, with
-        the full list in the tooltip."""
+        the full paths of the selected channels in the tooltip."""
         channels = self.move_channels()
-        names = [os.path.basename(p) for p in self.window.view.locs_paths]
+        paths = self.window.view.locs_paths
+        names = [os.path.basename(p) for p in paths]
         n_channels = len(self._move_selection)
         if not n_channels:
             text = "No channels loaded"
@@ -7168,7 +8082,7 @@ class ToolsSettingsDialog(lib.Dialog):
             text = f"{len(channels)} of {n_channels} channels"
         self.move_channels_label.setText(text)
         self.move_channels_label.setToolTip(
-            "\n".join(names[i] for i in channels if i < len(names))
+            "\n".join(paths[i] for i in channels if i < len(paths))
         )
 
     def update_move_undo(self) -> None:
@@ -7262,6 +8176,1136 @@ class ToolsSettingsDialog(lib.Dialog):
         self.window.view.update_scene(use_cache=True)
 
 
+class CBCDialog(lib.Dialog):
+    """Choose the channels and parameters for coordinate-based
+    colocalization (CBC, Malkusch, et al. Histochem Cell Biol, 2012.
+    DOI: 10.1007/s00418-011-0880-5).
+
+    The CBC is not symmetric, so the channel whose localizations are
+    scored and the partner channel are chosen separately, or all pairs
+    of channels are computed in both directions.
+
+    ...
+
+    Attributes
+    ----------
+    all_pairs : QCheckBox
+        If checked, every channel is scored against every other
+        channel.
+    names : list of QLineEdits
+        Short name of each channel, used for the CBC column names
+        (``cbc_<name>``).
+    partner : QComboBox
+        Channel that the localizations are scored against.
+    r_max : QDoubleSpinBox
+        Maximum radius in nm.
+    scored : QComboBox
+        Channel whose localizations get the CBC values.
+    steps : QSpinBox
+        Number of radii up to the maximum radius.
+    remove_undefined : QCheckBox
+        If checked, localizations without neighbors within the maximum
+        radius are removed.
+    undefined : QDoubleSpinBox
+        CBC given to localizations without neighbors within the maximum
+        radius, between -1 and 1.
+    use_z : QCheckBox
+        If checked, the CBC is computed in 3D. Only enabled if all
+        channels involved contain z.
+    """
+
+    DOCS_URL = docs_url("render/analysis.html#render-cbc")
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Coordinate-based colocalization (CBC)")
+        view = window.view
+        self._has_z = ["z" in locs_.columns for locs_ in view.locs]
+        titles = [check.text() for check in window.dataset_dialog.checks]
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
+
+        # short channel names for the column names
+        names_box = QtWidgets.QGroupBox("Channel names")
+        names_box.setToolTip(
+            "Short name of each channel. The CBC values against a\n"
+            "channel are saved in the column cbc_<name>."
+        )
+        names_grid = QtWidgets.QGridLayout(names_box)
+        self.names = []
+        for i, (title, path) in enumerate(zip(titles, view.locs_paths)):
+            label = QtWidgets.QLabel(title)
+            label.setToolTip(path)
+            names_grid.addWidget(label, i, 0)
+            name = QtWidgets.QLineEdit(view._cbc_names.get(path, ""))
+            if not name.text():
+                name.setText(os.path.splitext(os.path.basename(title))[0])
+            names_grid.addWidget(name, i, 1)
+            self.names.append(name)
+        grid.addWidget(names_box, 1, 0, 1, 2)
+
+        scored_label = QtWidgets.QLabel("Scored channel:")
+        scored_label.setToolTip(
+            "Channel whose localizations get the CBC values."
+        )
+        grid.addWidget(scored_label, 2, 0)
+        self.scored = QtWidgets.QComboBox()
+        self.scored.addItems(titles)
+        grid.addWidget(self.scored, 2, 1)
+        partner_label = QtWidgets.QLabel("Partner channel:")
+        partner_label.setToolTip(
+            "Channel that the localizations are scored against.\n"
+            "The CBC is not symmetric: swapping the channels gives\n"
+            "different values."
+        )
+        grid.addWidget(partner_label, 3, 0)
+        self.partner = QtWidgets.QComboBox()
+        self.partner.addItems(titles)
+        self.partner.setCurrentIndex(1)
+        grid.addWidget(self.partner, 3, 1)
+
+        self.all_pairs = QtWidgets.QCheckBox(
+            "All pairs of channels (both directions)"
+        )
+        self.all_pairs.setToolTip(
+            "Score every channel against every other channel, i.e.,\n"
+            "both directions of each pair. Each channel is saved with\n"
+            "one CBC column per partner."
+        )
+        grid.addWidget(self.all_pairs, 4, 0, 1, 2)
+
+        r_label = QtWidgets.QLabel("Max. radius (nm):")
+        r_label.setToolTip(
+            "Largest radius of the neighbor counts compared and the\n"
+            "length scale of the nearest neighbor weighting."
+        )
+        grid.addWidget(r_label, 5, 0)
+        self.r_max = QtWidgets.QDoubleSpinBox()
+        self.r_max.setRange(0.1, 1e6)
+        self.r_max.setDecimals(1)
+        self.r_max.setValue(200.0)
+        self.r_max.setSingleStep(10)
+        grid.addWidget(self.r_max, 5, 1)
+        steps_label = QtWidgets.QLabel("Radius steps:")
+        steps_label.setToolTip("Number of radii up to the max. radius.")
+        grid.addWidget(steps_label, 6, 0)
+        self.steps = QtWidgets.QSpinBox()
+        self.steps.setRange(2, 10_000)
+        self.steps.setValue(100)
+        grid.addWidget(self.steps, 6, 1)
+        undefined_label = QtWidgets.QLabel("CBC without neighbors:")
+        undefined_label.setToolTip(
+            "CBC given to localizations without any partner\n"
+            "localization, or without another localization of their\n"
+            "own channel, within the max. radius, where the CBC is\n"
+            "not defined."
+        )
+        grid.addWidget(undefined_label, 7, 0)
+        self.undefined = QtWidgets.QDoubleSpinBox()
+        self.undefined.setRange(-1.0, 1.0)
+        self.undefined.setDecimals(2)
+        self.undefined.setValue(0.0)
+        self.undefined.setSingleStep(0.1)
+        grid.addWidget(self.undefined, 7, 1)
+        self.remove_undefined = QtWidgets.QCheckBox(
+            "Remove localizations without neighbors"
+        )
+        self.remove_undefined.setToolTip(
+            "Remove the localizations where the CBC is not defined\n"
+            "(against at least one partner) instead of giving them\n"
+            "the value above."
+        )
+        self.remove_undefined.toggled.connect(
+            lambda checked: self.undefined.setEnabled(not checked)
+        )
+        grid.addWidget(self.remove_undefined, 8, 0, 1, 2)
+        self.use_z = QtWidgets.QCheckBox("3D (x, y and z)")
+        self.use_z.setToolTip(
+            "Compute the CBC in 3D. Requires z in all channels involved."
+        )
+        self.use_z.setChecked(True)
+        grid.addWidget(self.use_z, 9, 0, 1, 2)
+        vbox.addLayout(grid)
+
+        self.scored.currentIndexChanged.connect(self.update_widgets)
+        self.partner.currentIndexChanged.connect(self.update_widgets)
+        self.all_pairs.toggled.connect(self.update_widgets)
+
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        self.update_widgets()
+
+    def update_widgets(self) -> None:
+        """Enable the channel selection and 3D option according to the
+        current choice."""
+        all_pairs = self.all_pairs.isChecked()
+        self.scored.setEnabled(not all_pairs)
+        self.partner.setEnabled(not all_pairs)
+        has_z = all(self._has_z[i] for i in self.channels())
+        self.use_z.setEnabled(has_z)
+        if not has_z:
+            self.use_z.setChecked(False)
+
+    def channels(self) -> list[int]:
+        """Indices of the channels used with the current choice."""
+        if self.all_pairs.isChecked():
+            return list(range(len(self.names)))
+        return [self.scored.currentIndex(), self.partner.currentIndex()]
+
+    def accept(self) -> None:
+        if (
+            not self.all_pairs.isChecked()
+            and self.scored.currentIndex() == self.partner.currentIndex()
+        ):
+            QtWidgets.QMessageBox.information(
+                self, "CBC", "Please choose two different channels."
+            )
+            return
+        # the names that end up in columns must give distinct columns
+        if self.all_pairs.isChecked():
+            used = self.channels()
+        else:
+            used = [self.partner.currentIndex()]
+        try:
+            columns = [
+                postprocess._cbc_column(self.names[i].text()) for i in used
+            ]
+        except ValueError:
+            QtWidgets.QMessageBox.information(
+                self,
+                "CBC",
+                "Please give every channel a name containing letters or "
+                "digits.",
+            )
+            return
+        if len(set(columns)) < len(columns):
+            QtWidgets.QMessageBox.information(
+                self,
+                "CBC",
+                "Please give the channels distinct names; these give the "
+                "same column:\n" + ", ".join(sorted(columns)),
+            )
+            return
+        view = self.window.view
+        for path, name in zip(view.locs_paths, self.names):
+            view._cbc_names[path] = name.text()
+        super().accept()
+
+    @staticmethod
+    def getParams(
+        parent: QtWidgets.QMainWindow,
+    ) -> tuple[dict, bool]:
+        """Create the dialog and return the requested CBC parameters.
+        ``"pairs"`` is None for all pairs of channels, or the (scored
+        channel, partner channel) indices."""
+        dialog = CBCDialog(parent)
+        result = dialog.exec()
+        if dialog.all_pairs.isChecked():
+            pair = None
+        else:
+            pair = (
+                dialog.scored.currentIndex(),
+                dialog.partner.currentIndex(),
+            )
+        params = {
+            "pair": pair,
+            "names": [name.text() for name in dialog.names],
+            "r_max": dialog.r_max.value(),
+            "steps": dialog.steps.value(),
+            "undefined": dialog.undefined.value(),
+            "remove_undefined": dialog.remove_undefined.isChecked(),
+            "use_z": dialog.use_z.isEnabled() and dialog.use_z.isChecked(),
+        }
+        return params, result == QtWidgets.QDialog.DialogCode.Accepted
+
+
+#: Statistics of ``Postprocess > Spatial statistics``, by key: the
+#: window title, the functions of ``postprocess`` that compute, plot
+#: and tabulate them, the documentation, the suffixes of the saved files
+#: (the functions, and the summary next to them),
+#: the default maximum radius and number of steps, and whether the
+#: statistic takes several channels at once ("multichannel"; otherwise
+#: one channel or a channel and a partner)
+SPATIAL_STATISTICS = {
+    "ripley_h": {
+        "title": "Ripley's H function",
+        "compute": postprocess.ripley_h,
+        "plot": postprocess.plot_ripley_h,
+        "tables": postprocess._ripley_h_tables,
+        "docs": docs_url("render/analysis.html#render-ripley-h"),
+        "suffix": "_ripley_h",
+        "summary_suffix": "_regions",
+        "r_max": 500.0,
+        "steps": 100,
+        "multichannel": False,
+    },
+    "rdf": {
+        "title": "Radial distribution function",
+        "compute": postprocess.rdf,
+        "plot": postprocess.plot_rdf,
+        "tables": postprocess._rdf_tables,
+        "docs": docs_url("render/analysis.html#render-rdf"),
+        "suffix": "_rdf",
+        "summary_suffix": "_regions",
+        "r_max": 500.0,
+        "steps": 50,
+        "multichannel": False,
+    },
+    "nnd": {
+        "title": "Nearest neighbor distances",
+        "compute": postprocess.nnd_distributions,
+        "plot": postprocess.plot_nnd_distributions,
+        "tables": postprocess._nnd_tables,
+        "docs": docs_url("render/analysis.html#render-nnd-distributions"),
+        "suffix": "_nnd",
+        "summary_suffix": "_summary",
+        "r_max": 200.0,
+        "steps": 40,
+        "multichannel": True,
+    },
+}
+
+
+class SpatialStatisticDialog(lib.Dialog):
+    """Choose the channel, regions and parameters of a spatial
+    statistic of ``SPATIAL_STATISTICS``, e.g., Ripley's H function
+    (``postprocess.ripley_h``) or the radial distribution function
+    (``postprocess.rdf``).
+
+    ...
+
+    Attributes
+    ----------
+    channel : QComboBox
+        Channel whose localizations are analyzed.
+    channels : QListWidget
+        Checkable channels for a multichannel statistic (e.g., nearest
+        neighbor distances), which replace the channel and partner.
+    cross_null : QComboBox
+        How the envelope is simulated with a partner channel: random
+        shifts of the partner or random labels.
+    edge_correction : QCheckBox
+        If checked, Ripley's isotropic edge correction is applied.
+    partner : QComboBox
+        Second channel for the cross function, or none (data None).
+    r_max : QDoubleSpinBox
+        Maximum radius in nm.
+    region : QComboBox
+        Regions in which the function is computed: the picks (if any),
+        the current view or the whole field of view.
+    simulated_z : QComboBox
+        z of the simulated points in 3D: uniform over the z range or
+        the observed z values, shuffled.
+    simulations : QSpinBox
+        Number of simulations for the envelope.
+    steps : QSpinBox
+        Number of radii up to the maximum radius.
+    use_z : QCheckBox
+        If checked, the function is computed in 3D. Only enabled if the
+        channel (and the partner) contain z.
+    z_limits : QComboBox
+        Whether the regions extend over the z range of their
+        localizations or over ``z_min`` to ``z_max`` in 3D.
+    z_min, z_max : QDoubleSpinBox
+        z range of the regions in nm in 3D, if set manually.
+    """
+
+    #: Region choices, in the order of the combo box (picks only when
+    #: there are any)
+    REGIONS = {
+        "picks": "Picks",
+        "view": "Current view",
+        "fov": "Whole field of view",
+    }
+
+    def __init__(self, window: QtWidgets.QMainWindow, statistic: str) -> None:
+        super().__init__(window)
+        self.window = window
+        self.statistic = SPATIAL_STATISTICS[statistic]
+        self.setWindowTitle(self.statistic["title"])
+        view = window.view
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(lib.HelpButton(self.statistic["docs"]), 0, 0)
+
+        channel_label = QtWidgets.QLabel("Channel:")
+        grid.addWidget(channel_label, 1, 0)
+        self.channel = QtWidgets.QComboBox()
+        self.channel.addItems(
+            [check.text() for check in window.dataset_dialog.checks]
+        )
+        grid.addWidget(self.channel, 1, 1)
+        partner_label = QtWidgets.QLabel("Partner channel:")
+        partner_label.setToolTip(
+            "Second channel for the cross function between two\n"
+            "channels: positive H (g above 1) where the channels are\n"
+            "found together. The channels must be aligned."
+        )
+        grid.addWidget(partner_label, 2, 0)
+        self.partner = QtWidgets.QComboBox()
+        self.partner.addItem("None (one channel)", None)
+        for i, check in enumerate(window.dataset_dialog.checks):
+            self.partner.addItem(check.text(), i)
+        grid.addWidget(self.partner, 2, 1)
+        self.multichannel = self.statistic["multichannel"]
+        channels_label = QtWidgets.QLabel("Channels:")
+        channels_label.setToolTip(
+            "Channels whose nearest neighbor distances are compared;\n"
+            "every ordered pair of them is plotted."
+        )
+        grid.addWidget(channels_label, 1, 0, 2, 1)
+        self.channels_list = QtWidgets.QListWidget()
+        for check in window.dataset_dialog.checks:
+            item = QtWidgets.QListWidgetItem(check.text())
+            item.setFlags(
+                item.flags() | QtCore.Qt.ItemFlag.ItemIsUserCheckable
+            )
+            item.setCheckState(QtCore.Qt.CheckState.Checked)
+            self.channels_list.addItem(item)
+        self.channels_list.setMaximumHeight(
+            self.channels_list.sizeHintForRow(0) * min(len(view.locs_paths), 6)
+            + 2 * self.channels_list.frameWidth()
+        )
+        grid.addWidget(self.channels_list, 1, 1, 2, 1)
+        if self.multichannel:
+            hidden = [channel_label, self.channel, partner_label, self.partner]
+            if len(view.locs_paths) < 2:
+                hidden += [channels_label, self.channels_list]
+        else:
+            hidden = [channels_label, self.channels_list]
+            if len(view.locs_paths) < 2:
+                hidden += [channel_label, self.channel]
+                hidden += [partner_label, self.partner]
+        for widget in hidden:
+            widget.hide()
+
+        region_label = QtWidgets.QLabel("Regions:")
+        region_label.setToolTip(
+            "Regions of interest in which the function is computed.\n"
+            "With picks, it is computed in each pick and averaged. The\n"
+            "density is the number of localizations divided by the\n"
+            "region's area, so the regions should lie within the sample\n"
+            "(e.g., the cell): empty parts of a region appear as\n"
+            "clustering."
+        )
+        grid.addWidget(region_label, 3, 0)
+        self.region = QtWidgets.QComboBox()
+        n_picks = len(view._picks)
+        for key, text in self.REGIONS.items():
+            if key == "picks":
+                if not n_picks:
+                    continue
+                text = f"{text} ({n_picks})"
+            self.region.addItem(text, key)
+        grid.addWidget(self.region, 3, 1)
+        # random shifts work in rectangles and circles only
+        self._picks_shiftable = bool(view._picks) and all(
+            region is None
+            or region.rectangle is not None
+            or region.kind == postprocess._REGION_CIRCLE
+            for region in (
+                postprocess._pick_region(
+                    pick, view._pick_shape, view._pick_size
+                )
+                for pick in view._picks
+            )
+        )
+
+        r_label = QtWidgets.QLabel(
+            "Max. NND (nm):" if self.multichannel else "Max. radius (nm):"
+        )
+        r_label.setToolTip(
+            "Largest nearest neighbor distance in the histograms; longer\n"
+            "ones count only in the totals."
+            if self.multichannel
+            else "Largest radius. It should be well below the size of the\n"
+            "regions."
+        )
+        grid.addWidget(r_label, 4, 0)
+        self.r_max = QtWidgets.QDoubleSpinBox()
+        self.r_max.setRange(0.1, 1e6)
+        self.r_max.setDecimals(1)
+        self.r_max.setValue(self.statistic["r_max"])
+        self.r_max.setSingleStep(10)
+        grid.addWidget(self.r_max, 4, 1)
+        steps_label = QtWidgets.QLabel(
+            "Bins:" if self.multichannel else "Radius steps:"
+        )
+        steps_label.setToolTip(
+            "Number of histogram bins up to the max. NND."
+            if self.multichannel
+            else "Number of radius steps up to the max. radius (for the\n"
+            "radial distribution function, the number of rings)."
+        )
+        grid.addWidget(steps_label, 5, 0)
+        self.steps = QtWidgets.QSpinBox()
+        self.steps.setRange(2, 10_000)
+        self.steps.setValue(self.statistic["steps"])
+        grid.addWidget(self.steps, 5, 1)
+        simulations_label = QtWidgets.QLabel("Simulations:")
+        simulations_label.setToolTip(
+            "Number of simulations for the envelope. For one channel,\n"
+            "uniformly random points in the same regions, as many as\n"
+            "there are localizations (complete spatial randomness,\n"
+            "CSR); for two channels, see the envelope. A mean function\n"
+            "outside the envelope is significant at the pointwise\n"
+            "level 2 / (simulations + 1). 0 skips the simulations."
+        )
+        grid.addWidget(simulations_label, 6, 0)
+        self.simulations = QtWidgets.QSpinBox()
+        self.simulations.setRange(0, 9_999)
+        self.simulations.setValue(99)
+        grid.addWidget(self.simulations, 6, 1)
+        self.cross_null_label = QtWidgets.QLabel("Envelope:")
+        self.cross_null_label.setToolTip(
+            "How the two channels are simulated. Random shifts: the\n"
+            "partner is shifted at random, wrapping around the region\n"
+            "(rotated in circles); each channel keeps its own\n"
+            "arrangement, so the envelope shows independent channels.\n"
+            "Needs rectangular or circular regions. Random labels: the\n"
+            "channel of each localization is shuffled; the envelope\n"
+            "shows two channels with the same distribution, so a\n"
+            "channel clustered more strongly than the other also\n"
+            "falls outside of it."
+        )
+        grid.addWidget(self.cross_null_label, 7, 0)
+        self.cross_null = QtWidgets.QComboBox()
+        self.cross_null.addItem("Random shifts (independence)", "shift")
+        self.cross_null.addItem("Random labels (same distribution)", "labels")
+        grid.addWidget(self.cross_null, 7, 1)
+        self.edge_correction = QtWidgets.QCheckBox("Edge correction")
+        self.edge_correction.setToolTip(
+            "Ripley's isotropic edge correction: weight each pair by\n"
+            "the inverse of the fraction of the circle around the\n"
+            "localization that lies inside the region, since the\n"
+            "neighbors outside of it are not seen."
+        )
+        self.edge_correction.setChecked(True)
+        grid.addWidget(self.edge_correction, 8, 0, 1, 2)
+        # NNDs are compared with simulations in the same regions instead
+        self.edge_correction.setVisible(not self.multichannel)
+
+        # 3D
+        self.use_z = QtWidgets.QCheckBox("3D (x, y and z)")
+        self.use_z.setToolTip(
+            "Compute the function in 3D. Requires z. 3D samples are\n"
+            "usually thin, so keep the max. radius below about a third\n"
+            "of the z range: larger spheres mostly reach the top or\n"
+            "bottom of the region and the function gets noisy."
+        )
+        grid.addWidget(self.use_z, 9, 0, 1, 2)
+        self.z_limits_label = QtWidgets.QLabel("z range:")
+        self.z_limits_label.setToolTip(
+            "z range over which the regions extend. The volume, and\n"
+            "thus the density, depends on it."
+        )
+        grid.addWidget(self.z_limits_label, 10, 0)
+        self.z_limits = QtWidgets.QComboBox()
+        self.z_limits.addItem("Localizations in each region", "data")
+        self.z_limits.addItem("Manual", "manual")
+        grid.addWidget(self.z_limits, 10, 1)
+        self.z_min_label = QtWidgets.QLabel("z min / max (nm):")
+        grid.addWidget(self.z_min_label, 11, 0)
+        z_box = QtWidgets.QHBoxLayout()
+        self.z_min = QtWidgets.QDoubleSpinBox()
+        self.z_max = QtWidgets.QDoubleSpinBox()
+        for spin in (self.z_min, self.z_max):
+            spin.setRange(-1e5, 1e5)
+            spin.setDecimals(0)
+            spin.setSingleStep(50)
+            z_box.addWidget(spin)
+        self.z_min.setToolTip("Bottom of the regions; lower z is ignored.")
+        self.z_max.setToolTip("Top of the regions; higher z is ignored.")
+        grid.addLayout(z_box, 11, 1)
+        self.simulated_z_label = QtWidgets.QLabel("Simulated z:")
+        self.simulated_z_label.setToolTip(
+            "z of the simulated points. Uniform: complete spatial\n"
+            "randomness in 3D; an uneven z distribution of the\n"
+            "localizations (e.g., detection falling off away from\n"
+            "focus) appears as clustering. Observed: the z values of\n"
+            "the localizations, shuffled; tests for clustering beyond\n"
+            "the z distribution, but hides real clustering in z (e.g.,\n"
+            "a layer of molecules)."
+        )
+        grid.addWidget(self.simulated_z_label, 12, 0)
+        self.simulated_z = QtWidgets.QComboBox()
+        self.simulated_z.addItem("Uniform over the z range", "uniform")
+        self.simulated_z.addItem("Observed z values, shuffled", "observed")
+        grid.addWidget(self.simulated_z, 12, 1)
+        vbox.addLayout(grid)
+
+        self.channel.currentIndexChanged.connect(self.on_channel_changed)
+        self.partner.currentIndexChanged.connect(self.on_channel_changed)
+        self.channels_list.itemChanged.connect(self.on_channel_changed)
+        self.region.currentIndexChanged.connect(self.update_widgets)
+        self.use_z.toggled.connect(self.update_widgets)
+        self.z_limits.currentIndexChanged.connect(self.update_widgets)
+        self.simulations.valueChanged.connect(self.update_widgets)
+        self.on_channel_changed()
+
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+    def channels(self) -> list[int]:
+        """Indices of the checked channels (multichannel statistics) or
+        of the channel and, if chosen, the partner."""
+        if self.multichannel:
+            return [
+                i
+                for i in range(self.channels_list.count())
+                if self.channels_list.item(i).checkState()
+                == QtCore.Qt.CheckState.Checked
+            ]
+        partner = self.partner.currentData()
+        channel = self.channel.currentIndex()
+        return [channel] if partner is None else [channel, partner]
+
+    def on_channel_changed(self) -> None:
+        """Allow 3D only for channels with z and set the manual z range
+        to that of their localizations."""
+        all_locs = [self.window.view.locs[i] for i in self.channels()]
+        has_z = bool(all_locs) and all(
+            "z" in locs.columns for locs in all_locs
+        )
+        self.use_z.setEnabled(has_z)
+        if not has_z:
+            self.use_z.setChecked(False)
+        elif sum(len(locs) for locs in all_locs):
+            z = np.concatenate([locs["z"].to_numpy() for locs in all_locs])
+            self.z_min.setValue(np.floor(z.min()))
+            self.z_max.setValue(np.ceil(z.max()))
+        self.update_widgets()
+
+    def update_widgets(self) -> None:
+        """Show the 3D settings only in 3D, the manual z range only if
+        chosen, the simulated z only with simulations of one channel and
+        the envelope only with simulations of two channels; offer random
+        shifts only in regions that can be shifted."""
+        use_z = self.use_z.isChecked()
+        manual = self.z_limits.currentData() == "manual"
+        simulate = self.simulations.value() > 0
+        if self.multichannel:
+            cross = len(self.channels()) > 1
+        else:
+            cross = self.partner.currentData() is not None
+        for widget in (self.z_limits_label, self.z_limits):
+            widget.setVisible(use_z)
+        for widget in (self.z_min_label, self.z_min, self.z_max):
+            widget.setVisible(use_z and manual)
+        # within a channel, multichannel statistics simulate z, too
+        for widget in (self.simulated_z_label, self.simulated_z):
+            widget.setVisible(
+                use_z and simulate and (self.multichannel or not cross)
+            )
+        for widget in (self.cross_null_label, self.cross_null):
+            widget.setVisible(cross and simulate)
+        shiftable = (
+            self.region.currentData() != "picks" or self._picks_shiftable
+        )
+        shift_item = self.cross_null.model().item(0)
+        shift_item.setEnabled(shiftable)
+        shift_item.setToolTip(
+            ""
+            if shiftable
+            else "Random shifts need rectangular or circular picks."
+        )
+        if not shiftable:
+            self.cross_null.setCurrentIndex(1)
+        self.adjustSize()
+
+    def accept(self) -> None:
+        if self.multichannel and not self.channels():
+            QtWidgets.QMessageBox.information(
+                self,
+                self.statistic["title"],
+                "Please check at least one channel.",
+            )
+            return
+        if (
+            not self.multichannel
+            and self.partner.currentData() == self.channel.currentIndex()
+        ):
+            QtWidgets.QMessageBox.information(
+                self,
+                self.statistic["title"],
+                "Please choose a partner channel other than the channel.",
+            )
+            return
+        if (
+            self.use_z.isChecked()
+            and self.z_limits.currentData() == "manual"
+            and not self.z_min.value() < self.z_max.value()
+        ):
+            QtWidgets.QMessageBox.information(
+                self,
+                self.statistic["title"],
+                "Please choose a z min below the z max.",
+            )
+            return
+        super().accept()
+
+    @staticmethod
+    def getParams(
+        parent: QtWidgets.QMainWindow,
+        statistic: str,
+    ) -> tuple[dict, bool]:
+        """Create the dialog and return the requested parameters of the
+        spatial statistic ``statistic`` (a key of
+        ``SPATIAL_STATISTICS``). ``"region"`` is one of the keys of
+        ``REGIONS``; ``"partner"`` is the index of the partner channel
+        or None; ``"z_range"`` is None unless set manually in 3D."""
+        dialog = SpatialStatisticDialog(parent, statistic)
+        result = dialog.exec()
+        params = {
+            "channel": dialog.channel.currentIndex(),
+            "region": dialog.region.currentData(),
+            "r_max": dialog.r_max.value(),
+            "steps": dialog.steps.value(),
+            "n_simulations": dialog.simulations.value(),
+            "edge_correction": dialog.edge_correction.isChecked(),
+            "use_z": dialog.use_z.isChecked(),
+            "z_range": None,
+            "simulated_z": "uniform",
+            "partner": dialog.partner.currentData(),
+            "cross_null": dialog.cross_null.currentData(),
+            "channels": dialog.channels(),
+        }
+        if dialog.multichannel:
+            params["partner"] = None
+        if params["use_z"]:
+            if dialog.z_limits.currentData() == "manual":
+                params["z_range"] = (
+                    dialog.z_min.value(),
+                    dialog.z_max.value(),
+                )
+            if params["partner"] is None:  # within a channel
+                params["simulated_z"] = dialog.simulated_z.currentData()
+        return params, result == QtWidgets.QDialog.DialogCode.Accepted
+
+
+class SpatialStatisticPlotWindow(lib.GenericPlotWindow):
+    """Plot a spatial statistic of ``SPATIAL_STATISTICS`` and save it
+    as .csv files."""
+
+    def __init__(
+        self, result: dict, locs_path: str, title: str, statistic: str
+    ) -> None:
+        self.statistic = SPATIAL_STATISTICS[statistic]
+        super().__init__(f"{self.statistic['title']} - {title}", "render")
+        self.result = result
+        self.locs_path = locs_path
+        if self.statistic["multichannel"]:  # a grid of channel pairs
+            n_channels = len(result["names"])
+            self.resize(
+                min(400 + 300 * n_channels, 1600),
+                min(250 + 250 * n_channels, 1200),
+            )
+        self.toolbar.addSeparator()
+        save_action = self.toolbar.addAction("Save data")
+        save_action.setIcon(theme.icon("export-csv"))
+        save_action.setToolTip(
+            "Save the data and its summary (of each region, or of each\n"
+            "pair of channels) as .csv files."
+        )
+        save_action.triggered.connect(self.save_data)
+        theme.follow_toolbar_style(self.toolbar, save_action)
+
+        def draw() -> None:
+            with self.plot_context():
+                self.statistic["plot"](self.result, self.figure)
+
+        draw()
+        self.redraw = draw
+        self.canvas.draw()
+
+    def save_data(self) -> None:
+        """Ask for a path and save the data there and its summary next
+        to it (e.g., ``_regions.csv``)."""
+        path, _ = QtWidgets.QFileDialog.getSaveFileName(
+            self,
+            f"Save {self.statistic['title']}",
+            os.path.splitext(self.locs_path)[0]
+            + self.statistic["suffix"]
+            + (
+                "_cross"
+                if self.result["cross_null"]
+                and not self.statistic["multichannel"]
+                else ""
+            )
+            + ".csv",
+            filter="*.csv",
+        )
+        if path:
+            self.write_data(path)
+
+    def write_data(self, path: str) -> list[str]:
+        """Save the data to ``path`` and its summary (of each region or
+        pair of channels) next to it, ``<path stem>_regions.csv`` or
+        ``<path stem>_summary.csv``; return both paths."""
+        curves, summary = self.statistic["tables"](self.result)
+        summary_path = (
+            os.path.splitext(path)[0]
+            + self.statistic["summary_suffix"]
+            + ".csv"
+        )
+        curves.to_csv(path, index=False)
+        summary.to_csv(summary_path, index=False)
+        return [path, summary_path]
+
+
+class StitchDialog(lib.Dialog):
+    """Choose the tiles, targets and parameters for stitching the
+    loaded channels, see ``picasso.stitch``.
+
+    Each channel is one file. Files recorded at the same stage position
+    form a tile; the files of a tile are different targets, and the
+    tiles of each target are merged into one channel.
+
+    ...
+
+    Attributes
+    ----------
+    align : list of QCheckBoxes
+        Whether each channel is used to match the overlaps.
+    cut_seams : QCheckBox
+        If checked, each overlap keeps the localizations of one tile.
+    initial : QComboBox
+        Where the initial tile positions come from: the stage positions
+        in the metadata or the current positions of the channels.
+    offset_frames : QCheckBox
+        If checked, the frames of consecutive tiles are offset.
+    orientation : QComboBox
+        Orientation of the camera relative to the stage, or automatic.
+    search_radius : QDoubleSpinBox
+        Search radius in micrometers.
+    targets : list of QSpinBoxes
+        Target number of each channel.
+    tiles : list of QSpinBoxes
+        Tile number of each channel.
+    use_z : QCheckBox
+        If checked, the tiles' z offsets are corrected. Only enabled if
+        all channels contain z.
+    """
+
+    DOCS_URL = docs_url("render/menu-postprocess.html#render-stitch-tiles")
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Stitch tiles")
+        view = window.view
+        titles = [check.text() for check in window.dataset_dialog.checks]
+        n = len(titles)
+        self.stage = stitch.stage_positions(view.infos)
+        tiles = stitch.group_tiles(self.stage, n)
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        grid.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
+
+        table_box = QtWidgets.QGroupBox("Tiles")
+        table_box.setToolTip(
+            "Channels with the same tile number were recorded at the\n"
+            "same stage position (e.g., several targets) and are\n"
+            "aligned together. The tiles of each target are merged\n"
+            "into one channel."
+        )
+        table_layout = QtWidgets.QVBoxLayout(table_box)
+        self.table = QtWidgets.QTableWidget(n, 6)
+        self.table.setHorizontalHeaderLabels(
+            [
+                "Channel",
+                "Stage x (µm)",
+                "Stage y (µm)",
+                "Tile",
+                "Target",
+                "Align",
+            ]
+        )
+        self.table.verticalHeader().setVisible(False)
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(
+            0, QtWidgets.QHeaderView.ResizeMode.Stretch
+        )
+        for column in range(1, 6):
+            header.setSectionResizeMode(
+                column, QtWidgets.QHeaderView.ResizeMode.ResizeToContents
+            )
+        stage_tip = (
+            "Stage position in µm, by default from the Micro-Manager\n"
+            "metadata of the file (XPositionUm and YPositionUm). If you\n"
+            "know the positions, e.g., for data acquired with other\n"
+            "software, you can enter or correct them here; all channels\n"
+            "need one to use the stage positions.\n"
+            "Without stage positions, leave these empty and instead\n"
+            "move the tiles roughly to their places with the Move tool,\n"
+            "then stitch from the current positions."
+        )
+        headers = {
+            1: stage_tip,
+            2: stage_tip,
+            3: "Tile number; channels recorded at the same stage\n"
+            "position share it.",
+            4: "Target number; the tiles of each target are merged into\n"
+            "one channel. Each tile contains a target at most once.",
+            5: "Use the channel to match the overlaps of the tiles.",
+        }
+        for column, tip in headers.items():
+            self.table.horizontalHeaderItem(column).setToolTip(tip)
+        self.tiles = []
+        self.targets = []
+        self.align = []
+        for i, (title, path) in enumerate(zip(titles, view.locs_paths)):
+            item = QtWidgets.QTableWidgetItem(title)
+            item.setToolTip(path)
+            item.setFlags(item.flags() & ~QtCore.Qt.ItemFlag.ItemIsEditable)
+            self.table.setItem(i, 0, item)
+            for column in (1, 2):
+                value = (
+                    ""
+                    if self.stage is None
+                    else f"{self.stage[i, column - 1]:.10g}"
+                )
+                item = QtWidgets.QTableWidgetItem(value)
+                item.setToolTip(stage_tip)
+                item.setTextAlignment(
+                    QtCore.Qt.AlignmentFlag.AlignRight
+                    | QtCore.Qt.AlignmentFlag.AlignVCenter
+                )
+                self.table.setItem(i, column, item)
+            tile = QtWidgets.QSpinBox()
+            tile.setRange(1, n)
+            tile.setValue(int(tiles[i]) + 1)
+            self.table.setCellWidget(i, 3, tile)
+            self.tiles.append(tile)
+            target = QtWidgets.QSpinBox()
+            target.setRange(1, n)
+            target.setValue(int(np.sum(tiles[:i] == tiles[i])) + 1)
+            self.table.setCellWidget(i, 4, target)
+            self.targets.append(target)
+            align = QtWidgets.QCheckBox()
+            align.setChecked(True)
+            cell = QtWidgets.QWidget()
+            cell_layout = QtWidgets.QHBoxLayout(cell)
+            cell_layout.setContentsMargins(0, 0, 0, 0)
+            cell_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
+            cell_layout.addWidget(align)
+            self.table.setCellWidget(i, 5, cell)
+            self.align.append(align)
+        self.table.setMinimumWidth(560)
+        table_layout.addWidget(self.table)
+        grid.addWidget(table_box, 1, 0, 1, 3)
+
+        initial_label = QtWidgets.QLabel("Initial positions:")
+        initial_label.setToolTip(
+            "Stage positions: as in the table, by default from the\n"
+            "Micro-Manager metadata of the files (XPositionUm and\n"
+            "YPositionUm). Moves made with the Move tool are undone.\n"
+            "Current positions: where the channels are now, e.g.,\n"
+            "placed roughly with the Move tool."
+        )
+        grid.addWidget(initial_label, 2, 0)
+        self.initial = QtWidgets.QComboBox()
+        self.initial.addItems(["Stage positions", "Current positions"])
+        grid.addWidget(self.initial, 2, 1)
+        orientation_label = QtWidgets.QLabel("Stage orientation:")
+        orientation_tip = (
+            "How the stage axes run in the image, which depends on how\n"
+            "the camera is mounted: in which direction of the image a\n"
+            "tile lies whose stage X (or Y) position is larger. E.g.,\n"
+            "'stage X → left, stage Y → up': a tile at a larger stage X\n"
+            "lies to the left of its neighbor, one at a larger stage Y\n"
+            "above it.\n"
+            "Automatic tries all eight and takes the one whose overlaps\n"
+            "match best; choose one only if it fails, e.g., when tiles\n"
+            "overlap too little or contain too few localizations."
+        )
+        orientation_label.setToolTip(orientation_tip)
+        grid.addWidget(orientation_label, 3, 0)
+        self.orientation = QtWidgets.QComboBox()
+        self.orientation.addItem("Automatic", "auto")
+        for key in stitch.ORIENTATIONS:
+            self.orientation.addItem(stitch.describe_orientation(key), key)
+        self.orientation.setToolTip(orientation_tip)
+        grid.addWidget(self.orientation, 3, 1)
+        search_label = QtWidgets.QLabel("Search radius (µm):")
+        search_label.setToolTip(
+            "How far the true offset of two tiles may be from the one\n"
+            "given by the initial positions."
+        )
+        grid.addWidget(search_label, 4, 0)
+        self.search_radius = QtWidgets.QDoubleSpinBox()
+        self.search_radius.setRange(0.1, 10_000)
+        self.search_radius.setDecimals(1)
+        self.search_radius.setValue(10.0)
+        self.search_radius.setSingleStep(1.0)
+        grid.addWidget(self.search_radius, 4, 1)
+        self.use_z = QtWidgets.QCheckBox("Correct z offsets")
+        self.use_z.setToolTip(
+            "Shift each tile in z to match its neighbors in the\n"
+            "overlaps. Requires z in all channels used for the\n"
+            "alignment."
+        )
+        has_z = all("z" in locs_.columns for locs_ in view.locs)
+        self.use_z.setChecked(has_z)
+        self.use_z.setEnabled(has_z)
+        grid.addWidget(self.use_z, 2, 2)
+        self.cut_seams = QtWidgets.QCheckBox("Cut overlaps at the seams")
+        self.cut_seams.setToolTip(
+            "Keep the localizations of only one tile in each overlap\n"
+            "(the tile whose center is closest), so that no molecule\n"
+            "is counted twice. Otherwise, overlaps contain the\n"
+            "localizations of all tiles."
+        )
+        self.cut_seams.setChecked(True)
+        grid.addWidget(self.cut_seams, 3, 2)
+        self.offset_frames = QtWidgets.QCheckBox("Offset frames per tile")
+        self.offset_frames.setToolTip(
+            "Offset the frames of each tile by the frames of the tiles\n"
+            "acquired before it, so that frames stay unique."
+        )
+        self.offset_frames.setChecked(True)
+        grid.addWidget(self.offset_frames, 4, 2)
+        vbox.addLayout(grid)
+        # without stage positions, they must be entered or the tiles
+        # placed by hand before stitching, which the user must not miss
+        self.no_stage_note = QtWidgets.QLabel(
+            "<b>No stage positions found</b> (Micro-Manager metadata)."
+            " Enter them in the table or first place the tiles roughly"
+            " with the Move tool; see the help button for instructions."
+        )
+        self.no_stage_note.setWordWrap(True)
+        vbox.addWidget(self.no_stage_note)
+        # tiles moved by hand lose their moves with the stage positions,
+        # which must not come as a surprise
+        moved = any(
+            lib.get_from_metadata(info, key, 0)
+            for info in view.infos
+            for key in MANUAL_SHIFT_KEYS
+        )
+        self.moves_note = QtWidgets.QLabel(
+            "Moves made with the Move tool are undone: the stage positions"
+            " place the tiles. Choose <i>Current positions</i> to start"
+            " from the moved tiles."
+        )
+        self.moves_note.setWordWrap(True)
+        self.moves_note.setVisible(False)
+        self._moved = moved
+        vbox.addWidget(self.moves_note)
+
+        self.initial.currentIndexChanged.connect(self.update_widgets)
+        self._has_stage = None
+        self.update_stage()
+        self.table.itemChanged.connect(self.update_stage)
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        self.update_widgets()
+
+    def stage_positions(self) -> np.ndarray | None:
+        """Stage position ``(x, y)`` of each channel in µm as entered in
+        the table, or None if any is missing or not a number."""
+        positions = []
+        for row in range(self.table.rowCount()):
+            try:
+                positions.append(
+                    [float(self.table.item(row, c).text()) for c in (1, 2)]
+                )
+            except ValueError:
+                return None
+        return np.array(positions)
+
+    def update_stage(self, *args) -> None:
+        """Offer the stage positions only once every channel has one,
+        and choose them once they are complete."""
+        has_stage = self.stage_positions() is not None
+        if has_stage == self._has_stage:
+            return
+        self._has_stage = has_stage
+        self.initial.model().item(0).setEnabled(has_stage)
+        self.initial.setCurrentIndex(0 if has_stage else 1)
+        self.no_stage_note.setVisible(not has_stage)
+
+    def update_widgets(self) -> None:
+        """Enable the stage orientation only for stage positions, and
+        say that these undo the moves of the Move tool."""
+        stage = self.initial.currentIndex() == 0
+        self.orientation.setEnabled(stage)
+        self.moves_note.setVisible(stage and self._moved)
+
+    def tile_indices(self) -> np.ndarray:
+        """Tile of each channel, renumbered 0, 1, ... in the order of
+        the tile numbers."""
+        numbers = [tile.value() for tile in self.tiles]
+        unique = sorted(set(numbers))
+        return np.array([unique.index(number) for number in numbers])
+
+    def accept(self) -> None:
+        tiles = self.tile_indices()
+        if tiles.max() < 1:
+            QtWidgets.QMessageBox.information(
+                self, "Stitch tiles", "Please assign at least two tiles."
+            )
+            return
+        targets = [target.value() for target in self.targets]
+        for t in range(tiles.max() + 1):
+            labels = [targets[i] for i in np.flatnonzero(tiles == t)]
+            if len(set(labels)) < len(labels):
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Stitch tiles",
+                    "Each tile may contain each target only once; tile "
+                    f"{sorted(set(tile.value() for tile in self.tiles))[t]}"
+                    " contains a target twice.",
+                )
+                return
+        super().accept()
+
+    @staticmethod
+    def getParams(
+        parent: QtWidgets.QMainWindow,
+    ) -> tuple[dict, bool]:
+        """Create the dialog and return the requested stitching
+        parameters."""
+        dialog = StitchDialog(parent)
+        result = dialog.exec()
+        params = {
+            "tiles": dialog.tile_indices(),
+            "tile_numbers": sorted({tile.value() for tile in dialog.tiles}),
+            "targets": [target.value() for target in dialog.targets],
+            "use_for_alignment": [align.isChecked() for align in dialog.align],
+            "stage": dialog.initial.currentIndex() == 0,
+            "stage_um": dialog.stage_positions(),
+            "orientation": dialog.orientation.currentData(),
+            "search_radius_um": dialog.search_radius.value(),
+            "align_z": dialog.use_z.isEnabled() and dialog.use_z.isChecked(),
+            "cut_seams": dialog.cut_seams.isChecked(),
+            "offset_frames": dialog.offset_frames.isChecked(),
+        }
+        return params, result == QtWidgets.QDialog.DialogCode.Accepted
+
+
 class RESIDialog(lib.Dialog):
     """Choose RESI parameters.
 
@@ -7307,6 +9351,12 @@ class RESIDialog(lib.Dialog):
 
     DOCS_URL = docs_url("render/analysis.html#render-resi")
 
+    @property
+    def locs(self) -> list[pd.DataFrame]:
+        """The localizations of the main window's channels (always the
+        current ones, also after they were moved to disk while idle)."""
+        return self.window.view.locs
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__()
         self.setWindowTitle("RESI")
@@ -7316,7 +9366,6 @@ class RESIDialog(lib.Dialog):
         self.setWindowIcon(icon)
 
         self.window = window
-        self.locs = window.view.locs
         self.n_channels = len(self.locs)
         self.paths = window.view.locs_paths
         self.ndim = 2
@@ -7437,13 +9486,9 @@ class RESIDialog(lib.Dialog):
             QtWidgets.QMessageBox.information(self, "Warning", message)
             return
 
-        # Prepare data
-        # get camera pixel size
-        pixelsize = self.window.view.pixelsize
-
-        # extract clustering parameters
-        r_xy = [_.value() / pixelsize for _ in self.radius_xy]
-        r_z = [_.value() / pixelsize for _ in self.radius_z]
+        # extract clustering parameters (nm)
+        r_xy = [_.value() for _ in self.radius_xy]
+        r_z = [_.value() for _ in self.radius_z]
         min_locs = [_.value() for _ in self.min_locs]
 
         # saving: path and info for the resi file, suffices for saving
@@ -7503,7 +9548,7 @@ class RESIDialog(lib.Dialog):
                 suffix_locs=suffix_locs,
                 output_paths=paths,
                 suffix_centers=suffix_centers,
-                progress_callback=progress.set_value,
+                progress=progress,
             )
             progress.check_canceled()
             resi_info[-1]["Paths to RESI channels"] = paths
@@ -7513,7 +9558,6 @@ class RESIDialog(lib.Dialog):
             compute,
             "Performing RESI analysis...",
             self.window,
-            maximum=self.n_channels,
             title="RESI",
         )
 
@@ -7540,9 +9584,15 @@ class DisplaySettingsDialog(lib.Dialog):
         density spin boxes.
     disp_px_size : QDoubleSpinBox
         Contains the size of super-resolution pixels in nm.
+    display_width : LogDoubleSpinBox
+        Width of the region shown in the window (um); smaller values
+        zoom in. Each step zooms by the same factor as the zoom in/out
+        actions.
     dynamic_disp_px : QCheckBox
         Tick to automatically adjust to current window size when
         zooming.
+    grid_box : GridGroupBox
+        Grid fixed to the data, tick to display.
     maximum : QDoubleSpinBox
         Defines at which number of localizations per super-resolution
         pixel the maximum color of the colormap should be applied.
@@ -7559,20 +9609,16 @@ class DisplaySettingsDialog(lib.Dialog):
         Contains the minimum value of the parameter to be rendered.
     parameter : QComboBox
         Defines what property should be rendered, e.g.: z, photons.
-    pixelsize : QDoubleSpinBox
-        Contains the camera pixel size (nm).
     render_check : QCheckBox
         Tick to activate parameter rendering.
     scalebar : QSpinBox
         Contains the scale bar's length (nm).
-    scalebar_groupbox : QGroupBox
+    scalebar_groupbox : CollapsibleGroupBox
         Group with options for customizing scale bar, tick to display.
     scalebar_text : QCheckBox
         Tick to display scale bar's length (nm).
     _silent_disp_px_update : bool
         True if update display pixel size in background.
-    zoom : QDoubleSpinBox
-        Contains zoom's magnitude.
     """
 
     DOCS_URL = docs_url("render/display-settings.html#render-display-settings")
@@ -7595,28 +9641,46 @@ class DisplaySettingsDialog(lib.Dialog):
         main_layout.addWidget(self.scroll_area)
 
         # General
-        general_groupbox = QtWidgets.QGroupBox("General")
+        general_groupbox = lib.CollapsibleGroupBox("General")
         vbox.addWidget(general_groupbox)
-        general_grid = QtWidgets.QGridLayout(general_groupbox)
+        general_grid = QtWidgets.QGridLayout(general_groupbox.content)
         general_grid.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
-        zoom_label = QtWidgets.QLabel("Zoom:")
-        zoom_label.setToolTip("Zoom factor for display.")
-        general_grid.addWidget(zoom_label, 0, 1)
-        self.zoom = QtWidgets.QDoubleSpinBox()
-        self.zoom.setKeyboardTracking(False)
-        self.zoom.setRange(10 ** (-self.zoom.decimals()), 1e6)
-        self.zoom.valueChanged.connect(self.on_zoom_changed)
-        general_grid.addWidget(self.zoom, 0, 2)
+        display_width_label = QtWidgets.QLabel("Display width (\u00b5m):")
+        display_width_label.setToolTip(
+            "Width of the region shown in the window, i.e., the zoom:\n"
+            "smaller values zoom in."
+        )
+        general_grid.addWidget(display_width_label, 0, 1)
+        # step by the zoom in/out factor so that scrolling and the
+        # arrows zoom evenly at any scale
+        self.display_width = lib.LogDoubleSpinBox(factor=ZOOM)
+        self.display_width.setKeyboardTracking(False)
+        self.display_width.setDecimals(4)
+        self.display_width.setRange(1e-4, 1e7)
+        self.display_width.valueChanged.connect(self.on_display_width_changed)
+        general_grid.addWidget(self.display_width, 0, 2)
         disp_px_label = QtWidgets.QLabel("Display pixel size (nm):")
-        disp_px_label.setToolTip("Size of the pixels in the rendered image.")
+        disp_px_tooltip = (
+            "Size of the pixels in the rendered image. With 'dynamic', it\n"
+            "follows the zoom: one rendered pixel per screen pixel.\n"
+            "It cannot be smaller than one screen pixel at the current\n"
+            "zoom; smaller values are raised to that minimum. To render\n"
+            "finer pixels, zoom in first."
+        )
+        disp_px_label.setToolTip(disp_px_tooltip)
         general_grid.addWidget(disp_px_label, 1, 1)
-        self._disp_px_size = 130 / DEFAULT_OVERSAMPLING
+        self._disp_px_size = DEFAULT_DISP_PX_SIZE
         self.disp_px_size = QtWidgets.QDoubleSpinBox()
         self.disp_px_size.setRange(0.00001, 100000)
         self.disp_px_size.setSingleStep(1)
         self.disp_px_size.setDecimals(5)
         self.disp_px_size.setValue(self._disp_px_size)
         self.disp_px_size.setKeyboardTracking(False)
+        self.disp_px_size.setToolTip(disp_px_tooltip)
+        # a typed value below the minimum becomes the minimum
+        self.disp_px_size.setCorrectionMode(
+            QtWidgets.QAbstractSpinBox.CorrectionMode.CorrectToNearestValue
+        )
         self.disp_px_size.valueChanged.connect(self.on_disp_px_changed)
         general_grid.addWidget(self.disp_px_size, 1, 2)
         self.dynamic_disp_px = QtWidgets.QCheckBox("dynamic")
@@ -7628,9 +9692,9 @@ class DisplaySettingsDialog(lib.Dialog):
         self.minimap.stateChanged.connect(self.update_scene)
 
         # Contrast
-        contrast_groupbox = QtWidgets.QGroupBox("Contrast")
+        contrast_groupbox = lib.CollapsibleGroupBox("Contrast")
         vbox.addWidget(contrast_groupbox)
-        contrast_grid = QtWidgets.QGridLayout(contrast_groupbox)
+        contrast_grid = QtWidgets.QGridLayout(contrast_groupbox.content)
         minimum_label = QtWidgets.QLabel("Min. Density:")
         minimum_label.setToolTip(
             "Minimum density (localizations per super-resolution pixel)"
@@ -7677,8 +9741,8 @@ class DisplaySettingsDialog(lib.Dialog):
         self.colormap.currentIndexChanged.connect(self.on_cmap_changed)
 
         # Blur
-        blur_groupbox = QtWidgets.QGroupBox("Blur")
-        blur_grid = QtWidgets.QGridLayout(blur_groupbox)
+        blur_groupbox = lib.CollapsibleGroupBox("Render method")
+        blur_grid = QtWidgets.QGridLayout(blur_groupbox.content)
         self.blur_buttongroup = QtWidgets.QButtonGroup()
         points_button = QtWidgets.QRadioButton("None")
         points_button.setToolTip(
@@ -7875,29 +9939,13 @@ class DisplaySettingsDialog(lib.Dialog):
             triangulation_button: "triangulation",
         }
 
-        # Camera_parameters
-        camera_groupbox = QtWidgets.QGroupBox("Camera")
-        self.camera_grid = QtWidgets.QGridLayout(camera_groupbox)
-        pixelsize_label = QtWidgets.QLabel("Camera pixel size (nm):")
-        pixelsize_label.setToolTip(
-            "Effective camera pixel size in nm (after magnification)."
-        )
-        self.camera_grid.addWidget(pixelsize_label, 0, 0)
-        self.pixelsize = QtWidgets.QDoubleSpinBox()
-        self.pixelsize.setRange(1, 100000)
-        self.pixelsize.setValue(130)
-        self.pixelsize.setKeyboardTracking(False)
-        self.pixelsize.valueChanged.connect(self.update_scene)
-        self.camera_grid.addWidget(self.pixelsize, 0, 1)
-        vbox.addWidget(camera_groupbox)
-
         # Scalebar
-        self.scalebar_groupbox = QtWidgets.QGroupBox("Scale bar")
+        self.scalebar_groupbox = lib.CollapsibleGroupBox("Scale bar")
         self.scalebar_groupbox.setCheckable(True)
         self.scalebar_groupbox.setChecked(False)
         self.scalebar_groupbox.toggled.connect(self.update_scene)
         vbox.addWidget(self.scalebar_groupbox)
-        scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox)
+        scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox.content)
         scalebar_length_label = QtWidgets.QLabel("Scale bar length (nm):")
         scalebar_length_label.setToolTip("Set the length of the scale bar.")
         scalebar_grid.addWidget(scalebar_length_label, 0, 0)
@@ -7922,13 +9970,25 @@ class DisplaySettingsDialog(lib.Dialog):
         )
         scalebar_grid.addWidget(self.optimal_scalebar_check, 1, 1)
 
+        # Grid
+        self.grid_box = GridGroupBox(
+            optimal_spacing=self.window.view.optimal_grid_spacing
+        )
+        self.grid_box.changed.connect(self.update_scene)
+        vbox.addWidget(self.grid_box)
+
+        # Tracks of single-particle tracking
+        self.tracks_box = render_spt.TracksGroupBox()
+        self.tracks_box.changed.connect(self.update_scene)
+        vbox.addWidget(self.tracks_box)
+
         # Render
-        self.render_groupbox = QtWidgets.QGroupBox(
+        self.render_groupbox = lib.CollapsibleGroupBox(
             "Render properties (only single-channel data)"
         )
 
         vbox.addWidget(self.render_groupbox)
-        render_grid = QtWidgets.QGridLayout(self.render_groupbox)
+        render_grid = QtWidgets.QGridLayout(self.render_groupbox.content)
         param_label = QtWidgets.QLabel("Parameter:")
         param_label.setToolTip(
             "Color-coded property, e.g. localization precision."
@@ -8007,7 +10067,7 @@ class DisplaySettingsDialog(lib.Dialog):
         render_grid.addWidget(self.render_check, 5, 0)
 
         fw, fh, dpi = (2, 1, 150)
-        self.figure_prop = plt.figure(
+        self.figure_prop = Figure(
             figsize=(fw, fh), dpi=dpi, constrained_layout=True
         )
         self.ax_prop = self.figure_prop.add_subplot(111)
@@ -8024,7 +10084,13 @@ class DisplaySettingsDialog(lib.Dialog):
         self.canvas_prop.setMinimumSize(QtCore.QSize(fw * dpi, fh * dpi))
         render_grid.addWidget(self.canvas_prop, 6, 0, 6, 2)
 
-        self.render_groupbox.setEnabled(False)
+        # the header stays enabled, so that the section can be collapsed
+        self.render_groupbox.content.setEnabled(False)
+        # collapsed sections stay at the top
+        vbox.addStretch(1)
+
+        lib.remember_expanded_sections(self, "Render", "Display Settings")
+        lib.resize_with_sections(self, self.scroll_area)
 
         # adjust the size of the dialog to fit its contents
         hint = container.sizeHint()
@@ -8036,21 +10102,28 @@ class DisplaySettingsDialog(lib.Dialog):
             path, ext = QtWidgets.QFileDialog.getOpenFileName(
                 self, "Load custom colormap", filter="*.npy"
             )
+            error = None
             if path:
-                cmap = np.load(path)
-                if cmap.shape != (256, 4):
-                    raise ValueError(
-                        "Colormap must be of shape (256, 4)\n"
-                        f"The loaded colormap has shape {cmap.shape}"
-                    )
-                elif not np.all((cmap >= 0) & (cmap <= 1)):
-                    raise ValueError(
-                        "All elements of the colormap must be between\n"
-                        "0 and 1"
-                    )
+                try:
+                    cmap = np.load(path)
+                except (OSError, ValueError) as e:
+                    error = f"Could not load {path}:\n{e}"
                 else:
-                    self.window.view.custom_cmap = cmap
-            else:
+                    if cmap.shape != (256, 4):
+                        error = (
+                            "Colormap must be of shape (256, 4)\n"
+                            f"The loaded colormap has shape {cmap.shape}"
+                        )
+                    elif not np.all((cmap >= 0) & (cmap <= 1)):
+                        error = (
+                            "All elements of the colormap must be between\n"
+                            "0 and 1"
+                        )
+                    else:
+                        self.window.view.custom_cmap = cmap
+            if error is not None:
+                QtWidgets.QMessageBox.warning(self, "Custom colormap", error)
+            if not path or error is not None:
                 self.colormap.setCurrentText("magma")
         self.update_scene()
 
@@ -8073,9 +10146,10 @@ class DisplaySettingsDialog(lib.Dialog):
             self.dynamic_disp_px.setChecked(False)
             self.window.view.update_scene()
 
-    def on_zoom_changed(self, value: float) -> None:
-        """Zoom the image in the main window."""
-        self.window.view.set_zoom(value)
+    def on_display_width_changed(self, value: float) -> None:
+        """Zoom the image in the main window to show a region ``value``
+        um wide."""
+        self.window.view.set_display_width(1e3 * value)
 
     def _update_quadtree_snr(self, *args) -> None:
         """Show the signal-to-noise ratio the leaf capacity implies:
@@ -8132,32 +10206,49 @@ class DisplaySettingsDialog(lib.Dialog):
         self.disp_px_size.setValue(disp_px_size)
         self._silent_disp_px_update = False
 
-    def set_zoom_silently(self, zoom: float) -> None:
-        """Change the value of zoom in the background."""
-        self.zoom.blockSignals(True)
-        self.zoom.setValue(zoom)
-        self.zoom.blockSignals(False)
+    def set_min_disp_px_silently(self, min_disp_px_size: float) -> None:
+        """Set the smallest allowed display pixel size (one screen
+        pixel at the current zoom) in the background. A smaller value
+        is raised to it, rescaling the contrast like any other change.
+
+        Parameters
+        ----------
+        min_disp_px_size : float
+            Minimum display pixel size (nm).
+        """
+        self._silent_disp_px_update = True
+        self.disp_px_size.setMinimum(min_disp_px_size)
+        self._silent_disp_px_update = False
+
+    def set_display_width_silently(self, value: float) -> None:
+        """Change the display width (um) in the background."""
+        self.display_width.blockSignals(True)
+        self.display_width.setValue(value)
+        self.display_width.blockSignals(False)
 
     def silent_minimum_update(self, value: float) -> None:
         """Change the value of self.minimum in the background."""
         self.minimum.blockSignals(True)
         self.minimum.setValue(value)
         self.minimum.blockSignals(False)
-        # the spin box' signals are blocked, so the slider is moved here
-        self.contrast_slider.sync()
-
-    def silent_pixelsize_update(self, value: float) -> None:
-        """Change the value of self.pixelsize in the background."""
-        self.pixelsize.blockSignals(True)
-        self.pixelsize.setValue(value)
-        self.pixelsize.blockSignals(False)
+        # the spin box' signals are blocked, so the sliders are moved here
+        self.sync_contrast_sliders()
 
     def silent_maximum_update(self, value: float) -> None:
         """Change the value of self.maximum in the background."""
         self.maximum.blockSignals(True)
         self.maximum.setValue(value)
         self.maximum.blockSignals(False)
+        self.sync_contrast_sliders()
+
+    def sync_contrast_sliders(self) -> None:
+        """Move the contrast sliders of the dialog and of the main
+        window onto the spin box values."""
         self.contrast_slider.sync()
+        # built after this dialog, see ``Window._build_contrast_bar``
+        window_slider = getattr(self.window, "contrast_slider", None)
+        if window_slider is not None:
+            window_slider.sync()
 
     def render_scene(self, *args, **kwargs) -> None:
         """Update scene in the main window."""
@@ -8249,7 +10340,7 @@ class ImageOverlayDialog(lib.Dialog):
     show_check : QCheckBox
         Shows or hides the overlay without unloading it.
     shift_x, shift_y : QDoubleSpinBox
-        Shift of the image in camera pixels.
+        Shift of the image in nm.
     window : QMainWindow
         Instance of the main window.
     """
@@ -8321,16 +10412,16 @@ class ImageOverlayDialog(lib.Dialog):
         self.pixel_size.setValue(130)
         self.pixel_size.valueChanged.connect(self._on_geometry_changed)
         grid.addWidget(self.pixel_size, 2, 1)
-        grid.addWidget(QtWidgets.QLabel("Shift x (camera px):"), 3, 0)
+        grid.addWidget(QtWidgets.QLabel("Shift x (nm):"), 3, 0)
         self.shift_x = QtWidgets.QDoubleSpinBox()
         self.shift_y = QtWidgets.QDoubleSpinBox()
         for spin in (self.shift_x, self.shift_y):
-            spin.setRange(-1e6, 1e6)
-            spin.setDecimals(2)
-            spin.setSingleStep(0.1)
+            spin.setRange(-1e8, 1e8)
+            spin.setDecimals(1)
+            spin.setSingleStep(10)
             spin.valueChanged.connect(self._on_geometry_changed)
         grid.addWidget(self.shift_x, 3, 1)
-        grid.addWidget(QtWidgets.QLabel("Shift y (camera px):"), 4, 0)
+        grid.addWidget(QtWidgets.QLabel("Shift y (nm):"), 4, 0)
         grid.addWidget(self.shift_y, 4, 1)
         self.result_label = QtWidgets.QLabel()
         scaling_vbox.addWidget(self.result_label)
@@ -8445,9 +10536,11 @@ class ImageOverlayDialog(lib.Dialog):
         self.page.blockSignals(False)
         self.path_label.setText(os.path.basename(path))
         self.path_label.setToolTip(path)
-        self.pixel_size.blockSignals(True)
-        self.pixel_size.setValue(self.window.view.pixelsize)
-        self.pixel_size.blockSignals(False)
+        pixelsizes = self.window.view.pixelsizes
+        if pixelsizes and pixelsizes[0] is not None:  # the camera's
+            self.pixel_size.blockSignals(True)
+            self.pixel_size.setValue(pixelsizes[0])
+            self.pixel_size.blockSignals(False)
         self.show_check.blockSignals(True)
         self.show_check.setChecked(True)
         self.show_check.blockSignals(False)
@@ -8533,7 +10626,7 @@ class ImageOverlayDialog(lib.Dialog):
         self._update_labels()
 
     def _movie_size(self) -> tuple[float, float] | None:
-        """Height and width of the camera chip, None if no
+        """Height and width of the field of view (nm), None if no
         localizations are loaded."""
         if not self.window.view.infos:
             return None
@@ -8563,41 +10656,45 @@ class ImageOverlayDialog(lib.Dialog):
             self.result_label.setText("")
             return
         movie_height, movie_width = movie_size
+        infos = self.window.view.infos
+        camera_width = max(_camera_size(info, 0) for info in infos)
+        camera_height = max(_camera_size(info, 1) for info in infos)
         text += (
-            f"\nCamera (localizations' metadata): {movie_width:g} x "
-            f"{movie_height:g} px."
+            f"\nCamera (localizations' metadata): {camera_width:g} x "
+            f"{camera_height:g} px ({movie_width:g} x {movie_height:g} nm)."
         )
-        if (image_width, image_height) == (movie_width, movie_height):
+        if (image_width, image_height) == (camera_width, camera_height):
             text += "\nThe sizes match."
         else:
             text += "\nThe sizes differ; choose how to scale the image."
         self.sizes_label.setText(text)
         x, y, width, height = self.extent()
-        pixelsize = self.window.view.pixelsize
         sx = width / image_width
         sy = height / image_height
+        half_px = self.window.view.pixelsizes[0] / 2
         self.result_label.setText(
-            f"One image pixel = {sx:.4g} x {sy:.4g} camera px\n"
-            f"({sx * pixelsize:.4g} x {sy * pixelsize:.4g} nm).\n"
-            f"Top left corner at x = {x:.4g}, y = {y:.4g} camera px\n"
-            "(the chip's corner is at -0.5, -0.5)."
+            f"One image pixel = {sx:.4g} x {sy:.4g} nm.\n"
+            f"Top left corner at x = {x:.4g}, y = {y:.4g} nm\n"
+            f"(the chip's corner is at {-half_px:.4g}, {-half_px:.4g})."
         )
         self.result_label.setToolTip(
             "A localization at x = 0 lies at the center of the first "
-            "camera pixel, so the camera chip starts at -0.5."
+            "camera pixel, so the camera chip starts half a camera pixel "
+            "before 0."
         )
 
     def extent(self) -> tuple[float, float, float, float] | None:
-        """``(x, y, width, height)`` of the image in camera pixels, None
-        if no image or no localizations are loaded."""
+        """``(x, y, width, height)`` of the image in nm, None if no image
+        or no localizations are loaded."""
         movie_size = self._movie_size()
         if self.data is None or movie_size is None:
             return None
+        # the chip of the first channel, whose frame is displayed
         return render.overlay_extent(
             self.data.shape,
-            movie_size,
+            self.window.view.infos[0],
             self.scaling.currentText(),
-            scale=self.pixel_size.value() / self.window.view.pixelsize,
+            scale=self.pixel_size.value(),
             shift=(self.shift_x.value(), self.shift_y.value()),
         )
 
@@ -8678,11 +10775,11 @@ class ImageOverlayDialog(lib.Dialog):
         info["Overlay scaling"] = mode
         if mode == "Image pixel size":
             info["Overlay image pixel size (nm)"] = self.pixel_size.value()
-        info["Overlay shift (x, y; camera px)"] = [
+        info["Overlay shift (x, y; nm)"] = [
             self.shift_x.value(),
             self.shift_y.value(),
         ]
-        info["Overlay extent (X, Y, Width, Height; camera px)"] = [
+        info["Overlay extent (X, Y, Width, Height; nm)"] = [
             float(_) for _ in extent
         ]
         info["Overlay opacity (%)"] = self.opacity.value()
@@ -8773,9 +10870,8 @@ class SlicerDialog(lib.Dialog):
         self.sl.valueChanged.connect(self.on_slice_position_changed)
         slicer_grid.addWidget(self.sl, 1, 0, 1, 2)
 
-        self.figure, self.ax = plt.subplots(
-            1, figsize=(3, 3), constrained_layout=True
-        )
+        self.figure = Figure(figsize=(3, 3), constrained_layout=True)
+        self.ax = self.figure.subplots()
         self.canvas = FigureCanvas(self.figure)
         slicer_grid.addWidget(self.canvas, 2, 0, 1, 2)
 
@@ -8805,7 +10901,6 @@ class SlicerDialog(lib.Dialog):
         self.export_button.clicked.connect(self.export_stack)
         slicer_grid.addWidget(self.export_button, 6, 0)
 
-        self.zcoord = []
         # slice bounds are set in on_slice_position_changed; until then
         # slicing keeps all localizations
         self.bins = np.array([])
@@ -8814,6 +10909,15 @@ class SlicerDialog(lib.Dialog):
         self.slicermin = -np.inf
         self.slicermax = np.inf
         self.slicerposition = None
+
+    @property
+    def zcoord(self) -> list:
+        """z coordinates of each channel of the main window (an empty
+        list for a channel without z)."""
+        return [
+            locs["z"] if "z" in locs.columns else []
+            for locs in self.window.view.locs
+        ]
 
     def initialize(self) -> None:
         """Called when the dialog is open, calculate the histograms and
@@ -8889,9 +10993,11 @@ class SlicerDialog(lib.Dialog):
         self.window.view.update_scene_slicer()
 
     def _export_stack_individually(self, base: str) -> None:
+        checks = self.window.dataset_dialog.checks
+        shown = [check.isChecked() for check in checks]
         # Uncheck all
-        for checks in self.window.dataset_dialog.checks:
-            checks.setChecked(False)
+        for check in checks:
+            check.setChecked(False)
 
         for j in range(len(self.window.view.locs)):
             # load a single channel
@@ -8907,8 +11013,7 @@ class SlicerDialog(lib.Dialog):
                 self.sl.setValue(i)
                 out_path = f"{base}_Z{i:03d}_CH{j+1:03d}.tif"
                 if self.full_check.isChecked():  # full FOV
-                    movie_height, movie_width = self.window.view.movie_size()
-                    viewport = [(0, 0), (movie_height, movie_width)]
+                    viewport = self.window.view.full_fov_viewport()
                     qimage = self.window.view.render_scene(
                         cache=False, viewport=viewport
                     )
@@ -8923,8 +11028,9 @@ class SlicerDialog(lib.Dialog):
                 progress.set_value(i)
             progress.close()
             self.window.dataset_dialog.checks[j].setChecked(False)
-        for checks in self.window.dataset_dialog.checks:
-            checks.setChecked(True)
+        # show the channels that were shown before
+        for check, was_shown in zip(checks, shown):
+            check.setChecked(was_shown)
 
     def _export_stacks_together(self, base: str) -> None:
         progress = lib.ProgressDialog(
@@ -8936,8 +11042,7 @@ class SlicerDialog(lib.Dialog):
             self.sl.setValue(i)
             out_path = f"{base}_Z{i:03d}_CH001.tif"
             if self.full_check.isChecked():  # full FOV
-                movie_height, movie_width = self.window.view.movie_size()
-                viewport = [(0, 0), (movie_height, movie_width)]
+                viewport = self.window.view.full_fov_viewport()
                 qimage = self.window.view.render_scene(
                     cache=False, viewport=viewport
                 )
@@ -8960,10 +11065,17 @@ class SlicerDialog(lib.Dialog):
         )
         if path:
             base, ext = os.path.splitext(path)
-            if self.separate_check.isChecked():  # each channel individually
-                self._export_stack_individually(base)
-            else:  # all channels at once
-                self._export_stacks_together(base)
+            # the slices are exported with the text sizes they always
+            # had, not those of the windows; the cache holds slices
+            # drawn for the screen
+            self.slicer_cache = {}
+            with theme.unscaled_text():
+                if self.separate_check.isChecked():  # each channel alone
+                    self._export_stack_individually(base)
+                else:  # all channels at once
+                    self._export_stacks_together(base)
+            self.slicer_cache = {}
+            self.window.view.update_scene()
 
     def closeEvent(self, event: QtCore.QCloseEvent):
         """Unslice data."""
@@ -8976,14 +11088,50 @@ class SlicerDialog(lib.Dialog):
 
 
 class _LoadCanceledError(Exception):
-    """Raised inside the loading worker to abort the current file."""
+    """Raised inside the loading worker to abort the current file.
+
+    Not a ``RuntimeError``, which ``picasso.io`` catches while it scans
+    a file."""
+
+
+class _LoadProgress(lib.MockProgress):
+    """Progress tracker of ``LocsLoadWorker``: forwards the read progress
+    within the current file as ``(done, total)`` and doubles as the
+    mid-file cancellation point.
+
+    Parameters
+    ----------
+    worker : LocsLoadWorker
+        The worker whose ``subprogress`` signal is emitted and whose
+        cancel flag is checked.
+    """
+
+    def __init__(self, worker: "LocsLoadWorker") -> None:
+        super().__init__()
+        self.worker = worker
+
+    def set_value(self, value, *args, **kwargs) -> None:
+        """Emit ``(value, maximum)``, or abort the read if the worker
+        was canceled.
+
+        Raises
+        ------
+        _LoadCanceledError
+            If the worker was canceled.
+        """
+        if self.worker._canceled:
+            raise _LoadCanceledError
+        self.worker.subprogress.emit(int(value), int(self.maximum()))
 
 
 def _read_locs_file(
-    path: str, pixelsize: float | None = None, progress=None
+    path: str,
+    pixelsize: float | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Read localizations and metadata from a given path, either Picasso
-    (.hdf5), ThunderSTORM (.csv) or SMAP (_sml.mat) format.
+    (.hdf5), ThunderSTORM (.csv), SMAP (_sml.mat) or PyME (.h5r, .hdf)
+    format.
 
     Contains no GUI code, so it can run on a background thread, see
     ``LocsLoadWorker``.
@@ -8994,11 +11142,15 @@ def _read_locs_file(
         Path to the localization file.
     pixelsize : float or None, optional
         Camera pixel size (nm), required for the .csv and _sml.mat
-        formats, which do not store it.
-    progress : callable or None, optional
-        Called as ``progress(done, total)`` while the localizations are
-        read (.hdf5 only, which is read in blocks); raising inside it
-        aborts the read.
+        formats, which do not store it, for PyME files that do not
+        store it, and for .hdf5 files written before Picasso 1.0 (in
+        camera pixels) whose metadata has no ``Pixelsize``; see
+        ``io.load_locs``.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``, that reports the
+        localizations read (.hdf5 only, which is read in blocks, see
+        ``io.load_locs``); raising inside its ``set_value`` aborts the
+        read. Default is None.
 
     Returns
     -------
@@ -9008,15 +11160,75 @@ def _read_locs_file(
         Loaded metadata.
     """
     if path.endswith(".hdf5"):  # standard Picasso localization file
-        return io.load_locs(path, progress=progress)
+        return io.load_locs(path, pixelsize=pixelsize, progress=progress)
     elif path.endswith(".csv"):  # ThunderSTORM localization file
         return io.import_ts(path, pixelsize)
     elif path.endswith(".mat"):  # SMAP localization file
         return io.import_smap(path, pixelsize)
+    elif io.is_pyme_file(path):  # PyME localization file
+        return io.import_pyme(path, pixelsize)
     raise ValueError(
         "Unsupported file format. Please load a .hdf5 (Picasso), "
-        ".csv (ThunderSTORM) or _sml.mat (SMAP) file."
+        ".csv (ThunderSTORM), _sml.mat (SMAP) or .h5r/.hdf (PyME) file."
     )
+
+
+def _legacy_locs_without_pixelsize(path: str) -> bool:
+    """Whether ``path`` is a localization .hdf5 file written before
+    Picasso 1.0 (in camera pixels) whose metadata has no ``Pixelsize``,
+    so that converting it to nm needs the user's input (see
+    ``io.load_locs``)."""
+    if not path.endswith(".hdf5"):
+        return False
+    try:
+        if not legacy.needs_conversion(path):
+            return False
+        info = io.load_info(path)
+    except Exception:  # unreadable: reported when the file is read
+        return False
+    return lib.get_from_metadata(info, "Pixelsize") is None
+
+
+def _read_locs_channels(
+    path: str,
+    pixelsize: float | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> list[tuple[str, pd.DataFrame, list[dict]]]:
+    """Read the channel(s) stored in a localization file, see
+    ``_read_locs_file``. A PyME file holds one channel per ``probe``
+    value (see ``io.split_pyme_channels``), any other file one channel.
+
+    Returns
+    -------
+    channels : list of tuples
+        ``(path, locs, info)`` per channel; the path of a channel split
+        from a PyME file is ``<base>_probe<k><ext>``.
+    """
+    locs, info = _read_locs_file(path, pixelsize, progress=progress)
+    if io.is_pyme_file(path):
+        return io.split_pyme_channels(path, locs, info)
+    return [(path, locs, info)]
+
+
+class _ThreadLogRecords(logging.Handler):
+    """Collect the warnings logged on the current thread, e.g., those of
+    ``picasso.io`` about the localizations dropped while a file is read,
+    so the GUI can show them (see ``LocsLoadWorker``).
+
+    Records of other threads are passed on to ``logging.lastResort``
+    when no other handler would take them, as without this handler.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(logging.WARNING)
+        self.thread = threading.get_ident()
+        self.messages = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if record.thread == self.thread:
+            self.messages.append(record.getMessage())
+        elif not logging.getLogger().handlers and logging.lastResort:
+            logging.lastResort.handle(record)
 
 
 class LocsLoadWorker(QtCore.QObject):
@@ -9031,22 +11243,30 @@ class LocsLoadWorker(QtCore.QObject):
 
     The worker shows no dialogs: the camera pixel size is asked for on
     the GUI thread *before* the worker starts (see
-    ``View._prompt_pixelsize``) and errors are reported via ``failed``,
-    such that the GUI thread displays the message box.
+    ``View._prompt_pixelsize``), errors are reported via ``failed`` and
+    the warnings logged while a file is read (e.g., about localizations
+    that were dropped) via ``warned``, such that the GUI thread displays
+    the message box.
 
     Parameters
     ----------
     jobs : list of tuple
         One ``(path, pixelsize)`` tuple per file to load; ``pixelsize``
-        is None for formats that store it themselves (.hdf5).
+        is None for files that store it themselves (.hdf5 with a
+        ``Pixelsize`` in the metadata, most PyME files). A PyME file may
+        hold several channels, each emitted via ``loaded``.
     """
 
     progress = QtCore.pyqtSignal(int, str)  # index, filename
     # progress within the current file: (done, total) localizations
     subprogress = QtCore.pyqtSignal(int, int)
+    # the current file has been read and its spatial index is being
+    # built (no saved one to reuse); the build reports no progress
+    indexing = QtCore.pyqtSignal(str)  # filename
     # path, locs, info, render index
     loaded = QtCore.pyqtSignal(str, object, object, object)
     failed = QtCore.pyqtSignal(str, str)  # path, error message
+    warned = QtCore.pyqtSignal(str, str)  # path, warning message(s)
     finished = QtCore.pyqtSignal()
 
     def __init__(self, jobs: list[tuple[str, float | None]]) -> None:
@@ -9059,30 +11279,28 @@ class LocsLoadWorker(QtCore.QObject):
         localizations read, i.e. also within a file."""
         self._canceled = True
 
-    def _report(self, done: int, total: int) -> None:
-        """Report the read progress within the current file. Called
-        between the blocks of localizations read, so it doubles as the
-        mid-file cancellation point."""
-        if self._canceled:
-            raise _LoadCanceledError
-        self.subprogress.emit(done, total)
-
     def _try_load_file(self, path: str, pixelsize):
-        """Load one file's locs and info.
+        """Load one file's channel(s), see ``_read_locs_channels``.
 
         Returns
         -------
-        tuple or None
-            ``(locs, info)``, or None if a handled error was emitted
-            to ``self.failed`` and the caller should skip this file.
+        list of tuples or None
+            ``(path, locs, info)`` per channel, or None if a handled
+            error was emitted to ``self.failed`` and the caller should
+            skip this file.
 
         Raises
         ------
         _LoadCanceledError
             Propagated so the caller can stop the whole run.
         """
+        records = _ThreadLogRecords()
+        io_log = logging.getLogger(io.__name__)
+        io_log.addHandler(records)
         try:
-            return _read_locs_file(path, pixelsize, progress=self._report)
+            return _read_locs_channels(
+                path, pixelsize, progress=_LoadProgress(self)
+            )
         except _LoadCanceledError:
             raise
         except io.NoMetadataFileError:
@@ -9099,15 +11317,19 @@ class LocsLoadWorker(QtCore.QObject):
         except Exception as e:  # noqa: BLE001 - reported to the GUI
             self.failed.emit(path, str(e))
             return None
+        finally:
+            io_log.removeHandler(records)
+            if records.messages:
+                self.warned.emit(path, "\n\n".join(records.messages))
 
-    @staticmethod
-    def _load_render_index(path: str, locs, info):
+    def _load_render_index(self, path: str, locs, info):
         """Render index for ``locs``, loaded from ``path`` if it
         still describes them, else built from scratch; None on any
         failure to load or build one."""
         try:
             render_index = spatial_index.load_render_index(path, locs, info)
             if render_index is None:
+                self.indexing.emit(os.path.basename(path))
                 render_index = spatial_index.build_render_index(locs, info)
         except Exception:
             render_index = None
@@ -9125,13 +11347,15 @@ class LocsLoadWorker(QtCore.QObject):
                 break
             if result is None:
                 continue
-            locs, info = result
-            if self._canceled:
-                break
-            render_index = self._load_render_index(path, locs, info)
-            if self._canceled:
-                break
-            self.loaded.emit(path, locs, info, render_index)
+            for channel_path, locs, info in result:
+                if self._canceled:
+                    break
+                render_index = self._load_render_index(
+                    channel_path, locs, info
+                )
+                if self._canceled:
+                    break
+                self.loaded.emit(channel_path, locs, info, render_index)
         self.finished.emit()
 
 
@@ -9149,8 +11373,8 @@ INTERACTION_SUBSAMPLE_FRACTION = 0.1
 VIEWPORT_MARGIN = 0.15
 
 #: metadata keys accumulating the shift of a channel done with the
-#: Move tool (camera pixels), not including ``lib.CANVAS_OFFSET_KEYS``
-MANUAL_SHIFT_KEYS = ("Manual shift x (cam. px)", "Manual shift y (cam. px)")
+#: Move tool (nm), not including ``lib.CANVAS_OFFSET_KEYS``
+MANUAL_SHIFT_KEYS = ("Manual shift x (nm)", "Manual shift y (nm)")
 
 
 def _expand_viewport(
@@ -9163,7 +11387,7 @@ def _expand_viewport(
     return ((y_min - dy, x_min - dx), (y_max + dy, x_max + dx))
 
 
-class View(QtWidgets.QLabel):
+class View(QtWidgets.QLabel, idle.SpillableChannels):
     """Display localization datasets. Render localizations and draw
     objects on top, such as scale bar, legend, etc.
 
@@ -9197,24 +11421,22 @@ class View(QtWidgets.QLabel):
         Contains a str defining the path for each channel.
     median_lp : float
         Median theoretical lateral localization precision of the first
-        locs file (camera pixels).
+        locs file (nm).
     _mode : {'Zoom', 'Pick', 'Measure', 'Move'}
         Defines current mode (zoom, pick, measure or move), use in
         mouseEvents.
     _move_undo : list
-        Finished moves of the Move tool, ``(channels, dx, dy)`` in
-        camera pixels, most recent last.
+        Finished moves of the Move tool, ``(channels, dx, dy)`` in nm,
+        most recent last.
     n_locs : int
         Number of localizations loaded; if multichannel, the sum is
         given.
-    origin : QPoint
-        Position of the origin of the zoom-in rectangle.
     _pan : bool
         Indicates if image is currently panned.
     pan_start_x, pan_start_y : float
         x and y coordinates of panning's starting position.
     _picks : list
-        Contains the coordinates of current picks. Each pick is
+        Contains the coordinates of current picks (nm). Each pick is
         ``(x, y)`` for circles and squares, ``((x_start, y_start),
         (x_end, y_end))`` center-axis points for rectangles, a list of
         vertices for polygons, the two opposite corners
@@ -9223,13 +11445,12 @@ class View(QtWidgets.QLabel):
     _pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"}
         Current shape of picks.
     _pick_size : float or None
-        Size of picks in camera pixels; None for polygonal, box and
-        brush picks, which carry their own extent. Diameter for circular
-        picks, side length for square picks and width for rectangular
-        picks.
-    pixelsize : float
-        (Property) Camera pixel size as defined in the display
-        settings dialog.
+        Size of picks in nm; None for polygonal, box and brush picks,
+        which carry their own extent. Diameter for circular picks, side
+        length for square picks and width for rectangular picks.
+    pixelsizes : list of floats
+        (Property) Camera pixel size (nm) of each channel, from its
+        metadata (``Pixelsize``).
     _pixmap : QPixMap
         Pixmap currently displayed.
     _points : list
@@ -9263,18 +11484,19 @@ class View(QtWidgets.QLabel):
         For each loaded localization's channel, stores the z-order
         (Morton code) indices of localizations for efficient indexing
         of zoomed-in FOVs.
-    rubberband : QRubberBand
-        Draws a rectangle used in zooming in.
     _size_hint : tuple
         Used for size adjustment.
     _link_crosshair : tuple or None
-        Cursor position (camera pixels) of a linked window, drawn as a
-        crosshair; None if not shown.
+        Cursor position (nm) of a linked window, drawn as a crosshair;
+        None if not shown.
     _link_interactive : bool
         Whether the last viewport change was an interactive preview;
         passed on to linked windows.
     window : QMainWindow
         Instance of the main window.
+    zoom_rectangle : lib_qt.ZoomRectangle
+        The zoom-in rectangle dragged with the left button (Zoom tool)
+        or Shift + left button (every tool).
     x_locs : list of pd.DataFrames or None
         Contains pd.DataFrames with locs to be rendered by property; one
         per color. None when the localizations changed since the split,
@@ -9289,8 +11511,8 @@ class View(QtWidgets.QLabel):
 
     #: signals for linked windows (``picasso.gui.render_link``): the
     #: viewport changed (argument: interactive preview), picks and
-    #: overlays were redrawn, the cursor moved (camera pixels, or None
-    #: when it left the view), a redraw was requested (before it runs)
+    #: overlays were redrawn, the cursor moved (nm, or None when it
+    #: left the view), a redraw was requested (before it runs)
     viewport_changed = QtCore.pyqtSignal(bool)
     picks_drawn = QtCore.pyqtSignal()
     cursor_moved = QtCore.pyqtSignal(object)
@@ -9303,10 +11525,7 @@ class View(QtWidgets.QLabel):
             QtWidgets.QSizePolicy.Policy.Expanding,
             QtWidgets.QSizePolicy.Policy.Expanding,
         )
-        self.rubberband = QtWidgets.QRubberBand(
-            QtWidgets.QRubberBand.Shape.Rectangle, self
-        )
-        self.rubberband.setStyleSheet("selection-background-color: white")
+        self.zoom_rectangle = lib_qt.ZoomRectangle(self)
         self._triple_click = lib_qt.TripleClick()
         self.window = window
         self._pixmap = None
@@ -9320,7 +11539,7 @@ class View(QtWidgets.QLabel):
         self._rectangle_pick_ongoing = False
         self._box_pick_ongoing = False
         self._brush_stroke_ongoing = False
-        self._brush_stroke = []  # path being painted, in camera pixels
+        self._brush_stroke = []  # path being painted, in nm
         self._brush_last_pos = None  # last point added, in display px
         self._size_hint = (768, 768)
         self.n_locs = 0
@@ -9329,9 +11548,14 @@ class View(QtWidgets.QLabel):
         self._point_sets = []  # finalized measurement sets
         self._measure_following = True  # cursor followed live while True
         self._measure_cursor = None  # live cursor position in Measure mode
+        # CBC channel names typed in this session, by channel path
+        self._cbc_names: dict[str, str] = {}
+        # the last plot of each spatial statistic, kept from garbage
+        # collection
+        self.spatial_statistic_windows: dict[str, QtWidgets.QWidget] = {}
         # Move tool: the channels being dragged, the press position and
-        # the coordinates at the press (camera pixels), the current
-        # shift and the finished moves, (channels, dx, dy), for undo
+        # the coordinates at the press (nm), the current shift and the
+        # finished moves, (channels, dx, dy), for undo
         self._move_channels = ()
         self._move_start = None
         self._move_origin = None
@@ -9355,6 +11579,7 @@ class View(QtWidgets.QLabel):
         self._load_callback = None
         self._load_fit_in_view = True
         self._load_index = 0  # file currently being read
+        self._load_n_steps = 0  # range of the loading progress bar
         # asynchronous rendering (see ``RenderWorker``): completed
         # renders are matched against the newest request id, so stale
         # results from superseded requests are dropped
@@ -9392,13 +11617,20 @@ class View(QtWidgets.QLabel):
         # linked windows
         self._link_crosshair = None
         self._link_interactive = False
+        # single-particle tracking: tracking, analysis and drawn tracks
+        self.spt = render_spt.SPTController(self)
 
     def _load_drift(self, info: list[dict]) -> pd.DataFrame | None:
         drift = None
         driftpath = lib.get_from_metadata(info, "Last driftfile")
         if driftpath is not None:
             try:
-                drift = io.load_drift(driftpath)
+                # a drift file written before Picasso 1.0 (camera
+                # pixels) belongs to the camera pixel size of the file
+                drift = io.load_drift(
+                    driftpath,
+                    pixelsize=lib.get_from_metadata(info, "Pixelsize"),
+                )
             except Exception:
                 # drift already initialized before
                 pass
@@ -9406,13 +11638,15 @@ class View(QtWidgets.QLabel):
 
     def _prompt_pixelsize(self, path: str) -> float | None:
         """Ask for the camera pixel size of a file that does not store
-        it (ThunderSTORM .csv, SMAP _sml.mat, .hdf5 files saved by old
-        Picasso versions). None if canceled."""
+        it (ThunderSTORM .csv, SMAP _sml.mat, PyME files without
+        ``voxelsize``, files saved by Picasso before 1.0 in camera
+        pixels without a ``Pixelsize`` in the metadata). None if
+        canceled."""
         pixelsize, ok = QtWidgets.QInputDialog.getDouble(
             self,
             "Camera pixel size",
             f"Enter camera pixel size in nm for {os.path.basename(path)}:",
-            value=self.pixelsize,
+            value=self.default_pixelsize(),
             min=0.01,
             max=10000,
             decimals=2,
@@ -9420,16 +11654,16 @@ class View(QtWidgets.QLabel):
         return pixelsize if ok else None
 
     def _reconcile_pixelsizes(self) -> None:
-        """Make all loaded channels agree on the camera pixel size.
+        """Warn once if the loaded channels disagree on the camera pixel
+        size.
 
-        Rendering combines the channels on one grid, sampled at
-        ``Pixelsize / display pixel size`` per channel (see
-        ``render.render``), so channels that disagree on the camera
-        pixel size render at different shapes and cannot be combined -
-        usually a typo in one file's metadata. If they disagree, the
-        user is warned and picks the pixel size to use; it is written
-        to the metadata of every loaded channel in memory only, the
-        files on disk are not touched.
+        Localization coordinates are in nm, so channels of different
+        camera pixel sizes render together correctly; the pixel size only sets the
+        extent of the field of view of each channel (see
+        ``lib.field_of_view``) and the default for converting files
+        written before Picasso 1.0. A mismatch is therefore usually a
+        typo in one file's metadata, which the user is told about; the
+        data is not changed.
 
         Called once per load, after every file is in (see
         ``_on_load_finished``), and never while files are still being
@@ -9445,8 +11679,6 @@ class View(QtWidgets.QLabel):
         if len(loaded) < 2:
             return
         sizes = [s for _, s in loaded]
-        # the pixel size of the first channel, i.e. the one the render
-        # falls back to if the user does not choose
         current = sizes[0]
         if all(np.isclose(s, current) for s in sizes):
             return
@@ -9458,33 +11690,11 @@ class View(QtWidgets.QLabel):
             self,
             "Camera pixel size mismatch",
             "The loaded channels have different camera pixel sizes:\n"
-            f"{listing}\n\nChannels with different camera pixel sizes "
-            "cannot be rendered together. Choose the pixel size to use for "
-            "all of them next. Only the loaded data is changed, the files "
-            "on disk are not modified.",
+            f"{listing}\n\nLocalization coordinates are in nm, so the "
+            "channels are rendered together correctly; the camera pixel "
+            "size only sets the extent of each channel's field of view. "
+            "Check the metadata if the files come from the same camera.",
         )
-        chosen, ok = QtWidgets.QInputDialog.getDouble(
-            self,
-            "Camera pixel size",
-            "Camera pixel size in nm to use for all channels:",
-            value=current,
-            min=0.01,
-            max=10000,
-            decimals=2,
-        )
-        if not ok:  # canceled; the channels still have to be renderable
-            chosen = current
-        for info in self.infos:
-            try:
-                lib.overwrite_metadata(info, "Pixelsize", chosen)
-            except KeyError:
-                info.append(
-                    {
-                        "Generated by": f"Picasso v{__version__} Render",
-                        "Pixelsize": chosen,
-                    }
-                )
-        self.window.display_settings_dlg.silent_pixelsize_update(chosen)
 
     def add(
         self,
@@ -9493,6 +11703,7 @@ class View(QtWidgets.QLabel):
         info: list[dict],
         render_index=None,
         render_: bool = True,
+        fit_canvas_: bool = True,
     ) -> None:
         """Add localizations that have been read from disk (by
         ``LocsLoadWorker``) as a new channel.
@@ -9504,6 +11715,8 @@ class View(QtWidgets.QLabel):
         New in v0.11.0: Can read a SMAP _sml.mat file.
         New in v0.11.0: Files are read on a background thread, see
         ``LocsLoadWorker``.
+        New in v1.0.0: Can read a PyME .h5r/.hdf file, one channel per
+        ``probe`` value.
 
         Parameters
         ----------
@@ -9519,10 +11732,15 @@ class View(QtWidgets.QLabel):
         render_ : bool, optional
             Specifies if the loaded files should be rendered
             (default True).
+        fit_canvas_ : bool, optional
+            If True (default), the canvas of the channels is fitted when
+            any channel's canvas was translated (see ``fit_canvas``).
+            False for channels that replace the loaded ones, which are
+            in a frame of their own (e.g., stitched tiles).
         """
-        # update pixelsize (credits to Boyd Peters #602)
-        pixelsize = self._metadata_pixelsize(path, info)
-        self.window.display_settings_dlg.silent_pixelsize_update(pixelsize)
+        # the field of view needs the pixel size (credits to Boyd
+        # Peters #602)
+        self._metadata_pixelsize(path, info)
 
         # the cached raw image holds one plane per channel loaded so far,
         # so it must not be reused once a channel is added
@@ -9537,7 +11755,7 @@ class View(QtWidgets.QLabel):
         # a channel whose canvas was translated (e.g., by moving it
         # beyond the top left edge and saving) is brought into the same
         # frame as the loaded channels (see lib.fit_canvas)
-        if any(
+        if fit_canvas_ and any(
             lib.get_from_metadata(inf, key) is not None
             for inf in self.infos
             for key in lib.CANVAS_OFFSET_KEYS
@@ -9558,15 +11776,9 @@ class View(QtWidgets.QLabel):
             self.update_scene()
 
         if "z" in locs.columns:
-            # append z coordinates for slicing
-            self.window.slicer_dialog.zcoord.append(locs["z"])
             # unlock 3D settings
             for action in self.window.actions_3d:
                 action.setVisible(True)
-        else:
-            self.window.slicer_dialog.zcoord.append(
-                []
-            )  # empty list for 2D data
 
         # allow using View, Tools and Postprocess menus
         for menu in self.window.menus:
@@ -9590,19 +11802,21 @@ class View(QtWidgets.QLabel):
         self.clear_move_undo()
 
     def _metadata_pixelsize(self, path: str, info: list[dict]) -> float:
-        """Camera pixel size (nm) stored in ``info``. Metadata written by
-        old Picasso versions does not store it; then the user is asked
-        for it and it is added to ``info``, such that rendering etc. work
-        as usual."""
+        """Camera pixel size (nm) stored in ``info``. Files written
+        before Picasso 1.0 are converted to nm when read, which records
+        the pixel size (see ``io.load_locs``); should it still be
+        missing (e.g., an importer without one), the user is asked for
+        it and it is added to ``info``, such that the field of view is
+        defined."""
         pixelsize = lib.get_from_metadata(info, "Pixelsize")
         if pixelsize is not None:
             return pixelsize
         pixelsize = self._prompt_pixelsize(path)
         if pixelsize is None:  # canceled by the user
-            pixelsize = self.pixelsize
+            pixelsize = self.default_pixelsize()
         info.append(
             {
-                "Generated by": f"Picasso v{__version__} Render",
+                **lib.step_info("Render"),
                 "Pixelsize": pixelsize,
             }
         )
@@ -9625,9 +11839,9 @@ class View(QtWidgets.QLabel):
                     self.group_color = render.get_group_color(self.locs[0])
             disp_sett_dlg.parameter.clear()
             disp_sett_dlg.parameter.addItems(locs.columns.to_list())
-            disp_sett_dlg.render_groupbox.setEnabled(True)
+            disp_sett_dlg.render_groupbox.content.setEnabled(True)
         else:
-            disp_sett_dlg.render_groupbox.setEnabled(False)
+            disp_sett_dlg.render_groupbox.content.setEnabled(False)
             self.x_render_state = False
 
     def add_multiple(
@@ -9653,11 +11867,15 @@ class View(QtWidgets.QLabel):
         """
         if not len(paths):
             return
-        # ask for the camera pixel size of formats that do not store it
+        # ask for the camera pixel size of files that do not store it
         # before loading starts, i.e. while still on the GUI thread
         jobs = []
         for path in sorted(paths):
-            if path.endswith((".csv", ".mat")):
+            if (
+                path.endswith((".csv", ".mat"))
+                or (io.is_pyme_file(path) and io.pyme_pixelsize(path) is None)
+                or _legacy_locs_without_pixelsize(path)
+            ):
                 pixelsize = self._prompt_pixelsize(path)
                 if pixelsize is None:  # canceled by the user
                     continue
@@ -9682,6 +11900,7 @@ class View(QtWidgets.QLabel):
         self._load_fit_in_view = len(self.locs) == 0
         self._load_callback = on_finished
         self._load_index = 0
+        self._load_n_steps = len(jobs) * LOAD_PROGRESS_RESOLUTION
 
         # each file spans LOAD_PROGRESS_RESOLUTION steps, such that the
         # bar also advances *within* a file, from the worker's reports
@@ -9689,7 +11908,7 @@ class View(QtWidgets.QLabel):
             "Loading localizations...",
             "Cancel",
             0,
-            len(jobs) * LOAD_PROGRESS_RESOLUTION,
+            self._load_n_steps,
             self,
         )
         progress.setWindowTitle("Loading channels")
@@ -9709,8 +11928,10 @@ class View(QtWidgets.QLabel):
         thread.started.connect(worker.run)
         worker.progress.connect(self._on_load_progress)
         worker.subprogress.connect(self._on_load_subprogress)
+        worker.indexing.connect(self._on_load_indexing)
         worker.loaded.connect(self._on_locs_loaded)
         worker.failed.connect(self._on_load_failed)
+        worker.warned.connect(self._on_load_warned)
         worker.finished.connect(self._on_load_finished)
         # direct connection so that the flag is set immediately; the
         # worker thread is busy in run() and would not service a queued
@@ -9734,7 +11955,19 @@ class View(QtWidgets.QLabel):
         self._load_index = index
         if self._load_progress is not None:
             self._load_progress.setLabelText(f"Loading {filename}...")
+            # leave the busy state of a previous file's indexing
+            self._load_progress.setRange(0, self._load_n_steps)
             self._load_progress.setValue(index * LOAD_PROGRESS_RESOLUTION)
+
+    def _on_load_indexing(self, filename: str) -> None:
+        """Show that the current file is being indexed. The build
+        reports no progress, so the bar turns into a busy indicator
+        until the next file starts."""
+        if self._load_progress is not None:
+            self._load_progress.setLabelText(
+                f"Building spatial index for {filename}..."
+            )
+            self._load_progress.setRange(0, 0)
 
     def _on_load_subprogress(self, done: int, total: int) -> None:
         """Advance the bar within the current file, from the worker's
@@ -9770,6 +12003,15 @@ class View(QtWidgets.QLabel):
                 "An error occurred while loading "
                 f"{os.path.basename(path)}:\n{message}"
             ),
+        )
+
+    def _on_load_warned(self, path: str, message: str) -> None:
+        """Report what was noticed while reading a file, e.g., that
+        localizations were dropped; the file is loaded nonetheless."""
+        QtWidgets.QMessageBox.warning(
+            self,
+            "Warning",
+            f"While loading {os.path.basename(path)}:\n{message}",
         )
 
     def _on_load_finished(self) -> None:
@@ -9875,9 +12117,6 @@ class View(QtWidgets.QLabel):
             # change back to the linked windows
             self.index_blocks[j] = None
             self.render_index[j] = source.render_index[i]
-            self.window.slicer_dialog.zcoord[j] = (
-                locs["z"] if "z" in locs.columns else []
-            )
         if (
             len(self.locs) == 1
             and "group" in self.locs[0].columns
@@ -9900,6 +12139,101 @@ class View(QtWidgets.QLabel):
         self.locs[channel] = self.locs[channel].copy()
         self.infos[channel] = copy.deepcopy(self.infos[channel])
         self._copy_drift(channel)
+
+    def reorder_channels(self, order: list[int]) -> None:
+        """Reorder the loaded channels, together with everything that
+        refers to them by their index. The widgets of the Files dialog
+        are reordered by ``DatasetDialog.reorder_channels``, which calls
+        this method.
+
+        The lists are permuted in place, since several dialogs keep
+        references to them.
+
+        Parameters
+        ----------
+        order : list of ints
+            The channel indices in the new order, i.e., the channel at
+            index ``order[k]`` moves to index ``k``.
+        """
+        new_index = {old: new for new, old in enumerate(order)}
+
+        def permute(items: list) -> None:
+            if len(items) == len(order):
+                items[:] = [items[old] for old in order]
+
+        for items in (
+            self.locs,
+            self.infos,
+            self.locs_paths,
+            self.index_blocks,
+            self.render_index,
+            self._drift,
+            self._driftfiles,
+            self.currentdrift,
+        ):
+            permute(items)
+        # the cached image holds one plane per channel; render again
+        self.image = None
+        self.median_lp = np.mean(
+            [np.median(self.locs[0]["lpx"]), np.median(self.locs[0]["lpy"])]
+        )
+        self._move_undo = [
+            (tuple(new_index[i] for i in channels), dx, dy)
+            for channels, dx, dy in self._move_undo
+        ]
+        if getattr(self, "profile_channels", None) is not None:
+            self.profile_channels = [
+                new_index[i] for i in self.profile_channels
+            ]
+        if isinstance(getattr(self, "channel", None), int):
+            self.channel = new_index.get(self.channel, self.channel)
+
+        window = self.window
+        if window.slicer_dialog.isVisible():
+            window.slicer_dialog.calculate_histogram()
+        tools_dialog = window.tools_settings_dialog
+        permute(tools_dialog._move_selection)
+        tools_dialog._update_move_channels_label()
+        tools_dialog.update_move_undo()
+        clusterer = window.test_clusterer_dialog
+        current = clusterer.channels.currentIndex()
+        clusterer.channels.blockSignals(True)
+        clusterer.channels.clear()
+        clusterer.channels.addItems(
+            [os.path.basename(path) for path in self.locs_paths]
+        )
+        if current >= 0:
+            clusterer.channels.setCurrentIndex(new_index[current])
+        clusterer.channels.blockSignals(False)
+        if isinstance(getattr(clusterer, "channel", None), int):
+            clusterer.channel = new_index.get(
+                clusterer.channel, clusterer.channel
+            )
+        mask_dialog = window.mask_settings_dialog
+        if isinstance(mask_dialog.channel, int):
+            mask_dialog.channel = new_index.get(
+                mask_dialog.channel, mask_dialog.channel
+            )
+        if mask_dialog.save_all.isChecked():
+            permute(mask_dialog.index_locs)
+            permute(mask_dialog.index_locs_out)
+        for spiral in (window.x_spiral, window.y_spiral):
+            moved = {new_index[i]: v for i, v in spiral.items()}
+            spiral.clear()
+            spiral.update(moved)
+        if window.metadata_dialog.isVisible():
+            window.show_metadata()
+        # linked windows compare the channels position by position to
+        # find replaced ones; a reorder replaces none
+        if window.link_group is not None:
+            window.link_group.channels_reordered(window)
+        # the 3D window keeps its own copies of the channels, in order
+        window_rot = getattr(window, "window_rot", None)
+        if window_rot is not None:
+            view_rot = window_rot.view_rot
+            permute(view_rot.locs)
+            permute(view_rot.infos)
+            view_rot.image = None
 
     def _finish_load(self) -> None:
         """Tear down the worker thread and the progress dialog."""
@@ -10006,9 +12340,8 @@ class View(QtWidgets.QLabel):
         picks.
 
         The strokes of every pick the new one touches are pulled into a
-        single pick, which is appended last so that the newest stroke is
-        always ``self._picks[-1][-1]``. A press and release without a
-        drag paints a dot.
+        single pick, which is appended last. A press and release without
+        a drag paints a dot.
 
         Parameters
         ----------
@@ -10040,20 +12373,6 @@ class View(QtWidgets.QLabel):
         kept.append(merged)
         self._picks = kept
 
-        self.update_pick_info_short()
-        self.update_scene(picks_only=True)
-
-    def remove_last_brush_stroke(self) -> None:
-        """Remove the brush stroke painted last.
-
-        Dropping a stroke can break a pick apart again - it may have
-        been the only thing joining two painted regions - so the
-        remaining strokes are re-merged from scratch.
-        """
-        if not len(self._picks):
-            return
-        strokes = self._picks.pop()[:-1]
-        self._picks.extend(lib.merge_brush_strokes(strokes))
         self.update_pick_info_short()
         self.update_scene(picks_only=True)
 
@@ -10142,9 +12461,10 @@ class View(QtWidgets.QLabel):
             pick_shape, pick_size = self._pick_shape, self._pick_size
 
             def align():
-                return postprocess.align_from_picked(
+                return postprocess.align(
                     locs,
                     infos,
+                    method="picked",
                     picks=picks,
                     pick_shape=pick_shape,
                     pick_size=pick_size,
@@ -10154,9 +12474,24 @@ class View(QtWidgets.QLabel):
         else:  # align using whole images
 
             def align():
-                return postprocess.align_rcc(locs, infos)
+                return postprocess.align(locs, infos, method="rcc")
 
-        self.locs = lib.run_with_status(align, "Aligning channels...", self)
+        self.locs, infos = lib.run_with_status(
+            align, "Aligning channels...", self
+        )
+        for channel, info in enumerate(infos):
+            # a new list, the old one may be shared with linked windows
+            self.infos[channel] = info
+        if not keep_non_overlapping_setting():
+            try:
+                self.locs = postprocess.remove_non_overlapping_locs(self.locs)
+            except ValueError:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Align channels",
+                    "The aligned channels do not overlap, so all"
+                    " localizations were kept.",
+                )
         self.update_scene(resample_locs=True)
 
     @check_pick
@@ -10168,23 +12503,27 @@ class View(QtWidgets.QLabel):
 
         See ``self.link`` for more info."""
         channel = self.get_channel()
-        progress = lib.ProgressDialog(
-            "Combining localizations in picks", 0, len(self._picks), self
-        )
         if self._pick_shape == "Circle":
             index_blocks = self._pick_index(channel)
         else:
             index_blocks = None
-        self.locs[channel] = postprocess.combine_locs_in_picks(
-            self.locs[channel],
-            self.infos[channel],
-            picks=self._picks,
-            pick_shape=self._pick_shape,
-            pick_size=self._pick_size,
-            index_blocks=index_blocks,
-            progress_callback=progress.set_value,
+        progress = lib.ProgressDialog(
+            "Combining localizations in picks", 0, 0, self
         )
-        progress.close()
+        try:
+            self.locs[channel], self.infos[channel] = (
+                postprocess.combine_locs_in_picks(
+                    self.locs[channel],
+                    self.infos[channel],
+                    picks=self._picks,
+                    pick_shape=self._pick_shape,
+                    pick_size=self._pick_size,
+                    index_blocks=index_blocks,
+                    progress=progress,
+                )
+            )
+        finally:
+            progress.close()
 
         if "group" in self.locs[channel].columns:
             self.group_color = render.get_group_color(
@@ -10214,10 +12553,9 @@ class View(QtWidgets.QLabel):
             )
             return
 
-        r_max, max_dark, ok = LinkDialog.getParams()
+        r_max, max_dark, ok = LinkDialog.getParams()  # nm
         if not ok:
             return
-        r_max /= self.pixelsize  # nm to pixels
         jobs = [(c, self.locs[c], self.infos[c]) for c in channels]
 
         def compute(progress: lib.TaskProgress) -> list[tuple]:
@@ -10229,17 +12567,22 @@ class View(QtWidgets.QLabel):
                         f"Linking localizations (channel {i + 1}/"
                         f"{len(jobs)})..."
                     )
-                progress.phase(description, 0)  # cancellation point
-                linked_locs = postprocess.link(
+                # cancellation point
+                lib.start_phase(progress, description, 0)
+                linked_locs, linked_info = postprocess.link(
                     locs, info, r_max=r_max, max_dark_time=max_dark
                 )
-                results.append((c, linked_locs))
+                results.append((c, linked_locs, linked_info))
             return results
 
         def apply(results: list[tuple]) -> None:
-            for c, linked_locs in results:
+            for c, linked_locs, linked_info in results:
                 self.locs[c] = linked_locs
-            grouped = [locs for _, locs in results if "group" in locs.columns]
+                # a new list, the old one may be shared with linked windows
+                self.infos[c] = linked_info
+            grouped = [
+                locs for _, locs, _ in results if "group" in locs.columns
+            ]
             if grouped:
                 self.group_color = render.get_group_color(
                     grouped[-1], shuffle=True
@@ -10281,14 +12624,13 @@ class View(QtWidgets.QLabel):
             return
         # by default, do not allow transient dark frames, so that only
         # localizations in strictly consecutive frames form an event
-        r_max, max_dark, ok = LinkDialog.getParams(max_dark_time=0)
+        r_max, max_dark, ok = LinkDialog.getParams(max_dark_time=0)  # nm
         if not ok:
             return
-        r_max /= self.pixelsize  # nm to pixels
-        locs = self.locs[channel]
-        locs = lib.run_with_status(
+        locs, info = self.locs[channel], self.infos[channel]
+        locs, info = lib.run_with_status(
             lambda: postprocess.select_binding_event_cores(
-                locs, r_max=r_max, max_dark_time=max_dark
+                locs, info, r_max=r_max, max_dark_time=max_dark
             ),
             "Selecting binding event cores...",
             self,
@@ -10305,15 +12647,8 @@ class View(QtWidgets.QLabel):
             )
             return
         self.locs[channel] = locs
-        self.infos[channel].append(
-            {
-                "Generated by": (
-                    f"Picasso v{__version__} Render : Binding event cores"
-                ),
-                "Max. distance (nm)": r_max * self.pixelsize,
-                "Max. transient dark frames": max_dark,
-            }
-        )
+        # a new list, the old one may be shared with linked windows
+        self.infos[channel] = info
         self.group_color = render.get_group_color(locs, shuffle=True)
         self.update_scene(resample_locs=True)
 
@@ -10420,30 +12755,28 @@ class View(QtWidgets.QLabel):
         """
         locs = self.locs[channel]
         info = self.infos[channel]
-        pixelsize = self.pixelsize
 
-        # Only pass radius_z for 3D data; convert nm -> camera pixels.
-        is_3d = "z" in locs.columns
-        radius_z_px = (
-            radius_z / pixelsize if (is_3d and radius_z is not None) else None
-        )
+        # only pass radius_z for 3D data
+        if not ("z" in locs.columns and radius_z is not None):
+            radius_z = None
 
         def job(progress: lib.TaskProgress) -> None:
-            progress.phase("Applying DBSCAN. This may take a while.", 0)
-            clustered_locs, dbscan_info = clusterer.dbscan(
+            lib.start_phase(
+                progress, "Applying DBSCAN. This may take a while.", 0
+            )
+            clustered_locs, clustered_info = clusterer.dbscan(
                 locs,
-                radius / pixelsize,  # convert to camera pixels
-                min_density,
-                pixelsize=pixelsize,
+                info,
+                radius=radius,
+                min_samples=min_density,
                 min_locs=min_locs,
-                radius_z=radius_z_px,
+                radius_z=radius_z,
             )
             self._save_clusters(
                 progress,
                 path,
                 clustered_locs,
-                info + [dbscan_info],
-                pixelsize,
+                clustered_info,
                 save_centers,
                 save_areas,
             )
@@ -10456,7 +12789,6 @@ class View(QtWidgets.QLabel):
 
         # get HDBSCAN parameters
         params, ok = HdbscanDialog.getParams()
-        params["cluster_eps"] /= self.pixelsize
         if ok:
             if channel == len(self.locs_paths):  # apply to all channels
                 # get saving name suffix
@@ -10547,23 +12879,23 @@ class View(QtWidgets.QLabel):
         """
         locs = self.locs[channel]
         info = self.infos[channel]
-        pixelsize = self.pixelsize
 
         def job(progress: lib.TaskProgress) -> None:
-            progress.phase("Applying HDBSCAN. This may take a while.", 0)
-            clustered_locs, hdbscan_info = clusterer.hdbscan(
+            lib.start_phase(
+                progress, "Applying HDBSCAN. This may take a while.", 0
+            )
+            clustered_locs, clustered_info = clusterer.hdbscan(
                 locs,
-                min_cluster,
-                min_samples,
-                pixelsize=pixelsize,
+                info,
+                min_cluster_size=min_cluster,
+                min_samples=min_samples,
                 cluster_eps=cluster_eps,
             )
             self._save_clusters(
                 progress,
                 path,
                 clustered_locs,
-                info + [hdbscan_info],
-                pixelsize,
+                clustered_info,
                 save_centers,
                 save_areas,
             )
@@ -10574,17 +12906,13 @@ class View(QtWidgets.QLabel):
         """Get a channel, parameters and path for SMLM clustering."""
         channel = self.get_channel_all_seq("SMLM clusterer")
 
-        # get clustering parameters
-        pixelsize = self.pixelsize
+        # get clustering parameters (nm)
         if channel is None or channel == len(self.locs_paths):
             # no channel selected or "apply to all"
             flag_3D = any("z" in _.columns for _ in self.locs)
         else:
             flag_3D = "z" in self.locs[channel].columns
         params, ok = SMLMDialog.getParams(flag_3D=flag_3D)
-        # convert to camera pixels
-        params["radius_xy"] = params["radius_xy"] / pixelsize
-        params["radius_z"] = params["radius_z"] / pixelsize
 
         if ok:
             if channel == len(self.locs_paths):  # apply to all
@@ -10658,10 +12986,9 @@ class View(QtWidgets.QLabel):
         path : str
             Path to save clustered localizations.
         radius_xy : float
-            Clustering radius in xy plane (camera pixels).
+            Clustering radius in xy plane (nm).
         radius_z : float
-            Clustering radius in z plane (camera pixels). Only used for
-            3D data.
+            Clustering radius in z plane (nm). Only used for 3D data.
         min_locs : int
             Minimum number of localizations in a cluster.
         frame_analysis : bool
@@ -10676,28 +13003,24 @@ class View(QtWidgets.QLabel):
         job : callable
             Takes the task's ``lib.TaskProgress``.
         """
-        # for converting z coordinates
-        pixelsize = self.pixelsize
         locs = self.locs[channel]
         info = self.infos[channel]
 
         def job(progress: lib.TaskProgress) -> None:
-            progress.phase("Clustering localizations", len(locs))
-            clustered_locs, new_info = clusterer.cluster(
+            clustered_locs, clustered_info = clusterer.cluster(
                 locs,
-                radius_xy,
-                min_locs,
-                frame_analysis,
+                info,
+                radius_xy=radius_xy,
+                min_locs=min_locs,
+                frame_analysis=frame_analysis,
                 radius_z=radius_z,
-                pixelsize=pixelsize,
                 progress=progress,
             )
             self._save_clusters(
                 progress,
                 path,
                 clustered_locs,
-                info + [new_info],
-                pixelsize,
+                clustered_info,
                 save_centers,
                 save_areas,
             )
@@ -10710,7 +13033,6 @@ class View(QtWidgets.QLabel):
         path: str,
         clustered_locs: pd.DataFrame,
         info: list[dict],
-        pixelsize: float,
         save_centers: bool,
         save_areas: bool,
     ) -> None:
@@ -10728,8 +13050,6 @@ class View(QtWidgets.QLabel):
             Clustered localizations.
         info : list of dicts
             Metadata of the clustered localizations.
-        pixelsize : float
-            Camera pixel size in nm.
         save_centers, save_areas : bool
             Whether to calculate and save cluster centers and areas.
         """
@@ -10738,20 +13058,14 @@ class View(QtWidgets.QLabel):
         io.save_locs(path, clustered_locs, info)
         base = os.path.splitext(path)[0]
         if save_centers:
-            progress.phase("Calculating cluster centers", 0)
-            centers = clusterer.find_cluster_centers(
-                clustered_locs, pixelsize=pixelsize, progress=progress
+            centers, centers_info = clusterer.find_cluster_centers(
+                clustered_locs, info, progress=progress
             )
             progress.check_canceled()
-            io.save_locs(base + "_centers.hdf5", centers, info)
+            io.save_locs(base + "_centers.hdf5", centers, centers_info)
         if save_areas:
             areas = clusterer.cluster_areas(
-                clustered_locs,
-                info,
-                progress.callback(
-                    "Calculating cluster areas",
-                    len(np.unique(clustered_locs["group"])),
-                ),
+                clustered_locs, info, progress=progress
             )
             progress.check_canceled()
             areas.to_csv(base + "_areas.csv", index=False)
@@ -10906,7 +13220,7 @@ class View(QtWidgets.QLabel):
         info = self.infos[channel]
 
         def job(progress: lib.TaskProgress) -> Callable | None:
-            g5m_centers, clustered_locs, new_info = g5m.g5m(
+            g5m_centers, new_info, clustered_locs = g5m.g5m(
                 locs=locs,
                 info=info,
                 min_locs=params["min_locs"],
@@ -10918,9 +13232,9 @@ class View(QtWidgets.QLabel):
                 covariance_type=params.get("covariance_type", "auto"),
                 postprocess=params["postprocess_check"],
                 max_locs_per_cluster=params["max_locs_per_cluster"][channel],
-                asynch=params["multiprocessing_check"],
+                parallel=params["multiprocessing_check"],
                 group_column=params["group_column"],
-                callback_parent=progress,
+                progress=progress,
             )
             if g5m_centers is None:
                 return None
@@ -10947,7 +13261,7 @@ class View(QtWidgets.QLabel):
                 )
                 # automatically save rel_sigma plot
                 lib.plot_rel_sigma_check(
-                    g5m_centers, new_info, base + "_relsigma_check.png"
+                    g5m_centers, new_info, path=base + "_relsigma_check.png"
                 )
 
             return plot_checks
@@ -11191,7 +13505,6 @@ class View(QtWidgets.QLabel):
                 image=image,
                 viewport=self.viewport,
                 points=point_set,
-                pixelsize=self.pixelsize,
                 mark_width=mark_width,
                 style=style,
             )
@@ -11206,7 +13519,6 @@ class View(QtWidgets.QLabel):
             image=image,
             viewport=self.viewport,
             points=self._points,
-            pixelsize=self.pixelsize,
             mark_width=mark_width,
             cursor=cursor,
             style=style,
@@ -11236,11 +13548,64 @@ class View(QtWidgets.QLabel):
                 image=image,
                 viewport=self.viewport,
                 scalebar_length_nm=d_dialog.scalebar.value(),
-                pixelsize=self.pixelsize,
                 display_length=d_dialog.scalebar_text.isChecked(),
                 color=color,
+                # as large as the windows' text on screen, see
+                # theme.unscaled_text for exports
+                text_fontsize=theme.scaled_text_size(
+                    render.SCALEBAR_FONT_SIZE
+                ),
             )
         return image
+
+    def draw_grid(
+        self,
+        image: QtGui.QImage,
+        viewport: tuple | None = None,
+    ) -> QtGui.QImage:
+        """Draw the grid set in the Display Settings, if shown.
+
+        Parameters
+        ----------
+        image : QImage
+            Image containing rendered localizations.
+        viewport : tuple, optional
+            Field of view shown in ``image``. Default is the current
+            viewport.
+
+        Returns
+        -------
+        image : QImage
+            Image with the drawn grid.
+        """
+        grid = self.window.display_settings_dlg.grid_box.grid()
+        if grid is None:
+            return image
+        return render.draw_grid(
+            image,
+            self.viewport if viewport is None else viewport,
+            grid,
+            color_range=self._color_range,
+        )
+
+    def optimal_grid_spacing(self) -> int | None:
+        """Automatic grid spacing (nm): approx. 1/10 of the current
+        viewport's width, rounded like the scale bar; None without a
+        view."""
+        if getattr(self, "viewport", None) is None:
+            return None
+        width = render.viewport_width(self.viewport)
+        spacing = render.optimal_scalebar_length(
+            width, fraction=render.AUTO_GRID_FRACTION
+        )
+        return spacing if spacing > 0 else None
+
+    def set_optimal_grid_spacing(self) -> None:
+        """Set the grid spacing to ``optimal_grid_spacing`` if the
+        spacing is automatic."""
+        spacing = self.optimal_grid_spacing()
+        if spacing is not None:
+            self.window.display_settings_dlg.grid_box.set_auto_spacing(spacing)
 
     def draw_legend(self, image: QtGui.QImage) -> QtGui.QImage:
         """
@@ -11272,6 +13637,7 @@ class View(QtWidgets.QLabel):
                 image=image,
                 channel_names=channel_names,
                 channel_colors=channel_colors,
+                text_fontsize=theme.scaled_text_size(render.LEGEND_FONT_SIZE),
             )
         return image
 
@@ -11414,6 +13780,7 @@ class View(QtWidgets.QLabel):
             self.viewport = self.adjust_viewport_to_view(viewport)
             if not use_cache:
                 self.set_optimal_scalebar(silent=True)
+                self.set_optimal_grid_spacing()
             if use_cache or not self.async_rendering:
                 # cache redraws (contrast/colormap tweaks) are ~40 ms
                 # since the fused post-processing and stay synchronous
@@ -11501,6 +13868,8 @@ class View(QtWidgets.QLabel):
         target = self.window.image_overlay_dialog.draw(
             target, self._viewport_key()
         )
+        target = self.draw_grid(target)
+        target = self.spt.draw_tracks(target)
         # overlays go on the visible crop, so they keep their corner
         # positions regardless of the render margin
         target = self.draw_scalebar(target)
@@ -11523,9 +13892,14 @@ class View(QtWidgets.QLabel):
         thread, directly for synchronous renders or from
         ``_on_render_finished``."""
         self._set_blit_source(qimage, rendered_viewport)
-        # adjust zoom in Display Settings Dialog
-        dppvp = self.display_pixels_per_viewport_pixels()
-        self.window.display_settings_dlg.set_zoom_silently(dppvp)
+        # the contrast bar below continues the image's background
+        style_contrast_bar = getattr(self.window, "style_contrast_bar", None)
+        if style_contrast_bar is not None:
+            style_contrast_bar(self._color_range[0])
+        # show the zoom in the Display Settings Dialog
+        self.window.display_settings_dlg.set_display_width_silently(
+            1e-3 * self.display_width()
+        )
         self._compose_visible()
         self._update_renderer_label()
 
@@ -11550,8 +13924,12 @@ class View(QtWidgets.QLabel):
         self.qimage = self.draw_move_shift(self.qimage)
         self.qimage = self.draw_link_crosshair(self.qimage)
 
-        # convert to pixmap
-        self.pixmap = QtGui.QPixmap.fromImage(self.qimage)
+        # convert to pixmap, as people with color blindness see it if
+        # View > Color vision preview is on (self.qimage, which saving
+        # and exporting use, keeps its colors)
+        self.pixmap = QtGui.QPixmap.fromImage(
+            self.window.color_vision_image(self.qimage)
+        )
         self.setPixmap(self.pixmap)
         self.window.update_info()
         self.picks_drawn.emit()
@@ -11590,8 +13968,8 @@ class View(QtWidgets.QLabel):
         vmax = self.window.display_settings_dlg.maximum.value()
         contrast = None if autoscale else (vmin, vmax)
         colors = self.read_colors()
-        relative_intensities = self.read_relative_intensities()
-        self._remember_color_range(locs, colors, relative_intensities, cmap)
+        channel_contrast = self.read_channel_contrast()
+        self._remember_color_range(locs, colors, channel_contrast, cmap)
         return (
             dict(
                 locs=locs,
@@ -11609,7 +13987,7 @@ class View(QtWidgets.QLabel):
                 background_color=self.window.dataset_dialog.background_color,
                 single_channel_colormap=cmap,
                 colors=colors,
-                relative_intensities=relative_intensities,
+                channel_contrast=channel_contrast,
                 return_contrast_limits=True,
                 return_raw_image=True,
             ),
@@ -11620,7 +13998,7 @@ class View(QtWidgets.QLabel):
         self,
         locs: pd.DataFrame | list[pd.DataFrame],
         colors: list,
-        relative_intensities: list[float],
+        channel_contrast: list[tuple[float, float]],
         cmap: str | np.ndarray,
     ) -> None:
         """Store the colors of pixels without localizations and at the
@@ -11631,10 +14009,10 @@ class View(QtWidgets.QLabel):
         self._color_range = render.color_range(
             None if isinstance(locs, pd.DataFrame) else len(locs),
             colors=colors,
-            relative_intensities=relative_intensities,
             invert_colors=dataset_dialog.wbackground.isChecked(),
             background_color=dataset_dialog.background_color,
             single_channel_colormap=cmap,
+            channel_contrast=channel_contrast,
         )
 
     def _user_settings(self) -> dict:
@@ -11665,7 +14043,7 @@ class View(QtWidgets.QLabel):
 
     def _global_precision(self, channel: int) -> tuple[float, float] | None:
         """The blur of *Global loc. prec.* for ``channel``: the median
-        ``lpx`` and ``lpy`` (camera pixels) of all its localizations,
+        ``lpx`` and ``lpy`` (nm) of all its localizations,
         computed once per loaded DataFrame and remembered, so the blur
         is the same at every zoom level and rotation and no render
         recomputes it. None when the channel has no precision columns."""
@@ -11987,10 +14365,11 @@ class View(QtWidgets.QLabel):
 
     def dropEvent(self, event: QtGui.QDropEvent) -> None:
         """When a file is dropped onto the window, if the file ends with
-        ``.hdf5``, try loading localizations. If it ends with ``.txt``,
-        try loading a fov file. If it ends with ``.yaml``, try loading
-        pick regions. If it is a single ``.png`` or ``.tif`` image,
-        overlay it (see ``ImageOverlayDialog``)."""
+        ``.hdf5`` (or is a PyME ``.h5r``/``.hdf`` file), try loading
+        localizations. If it ends with ``.txt``, try loading a fov file.
+        If it ends with ``.yaml``, try loading pick regions. If it is a
+        single ``.png`` or ``.tif`` image, overlay it (see
+        ``ImageOverlayDialog``)."""
         urls = event.mimeData().urls()
         paths = [_.toLocalFile() for _ in urls]
         extensions = [os.path.splitext(_)[1].lower() for _ in paths]
@@ -12002,13 +14381,12 @@ class View(QtWidgets.QLabel):
             self.window.image_overlay_dialog.load_image(paths[0])
             return
         if extensions == [".yaml"]:  # just one yaml dropped
-            with open(paths[0], "r") as f:
-                file = yaml.full_load(f)
+            file = io.load_yaml(paths[0])
             if not isinstance(file, dict):
                 return
             # try loading a screenshot
             if "Max. density" in file:
-                self.load_screenshot(file)
+                self.load_screenshot(file, paths[0])
             # load pick regions
             loaded_shape = file.get("Shape", None)
             if loaded_shape in lib.PICK_SHAPES:
@@ -12019,22 +14397,31 @@ class View(QtWidgets.QLabel):
             self.add_multiple(paths)
         else:
             paths = [
-                path for path, ext in zip(paths, extensions) if ext == ".hdf5"
+                path
+                for path, ext in zip(paths, extensions)
+                if ext == ".hdf5" or ext in io.PYME_EXTENSIONS
             ]
             self.add_multiple(paths)
 
+    def full_fov_viewport(self) -> list[tuple[float, float]]:
+        """The viewport covering the whole field of view of every
+        loaded channel, ``[(0, 0), (height, width)]`` in nm (see
+        ``movie_size``)."""
+        movie_height, movie_width = self.movie_size()
+        return [(0, 0), (movie_height, movie_width)]
+
     def fit_in_view(self, autoscale: bool = False) -> None:
         """Update scene with all localizations shown."""
-        movie_height, movie_width = self.movie_size()
-        viewport = [(0, 0), (movie_height, movie_width)]
-        self.update_scene(viewport=viewport, autoscale=autoscale)
+        self.update_scene(
+            viewport=self.full_fov_viewport(), autoscale=autoscale
+        )
 
     @check_pick
     def move_to_pick(self) -> None:
         """Adjust viewport to show a pick identified by its id."""
         # get pick id
         pick_no, ok = QtWidgets.QInputDialog.getInt(
-            self, "", "Input pick number: ", 0, 0
+            self, "", "Input pick number: ", 0, 0, len(self._picks) - 1
         )
         if ok:
             # raise error when pick id too high
@@ -12055,62 +14442,74 @@ class View(QtWidgets.QLabel):
     def export_grayscale(self, suffix: str, dpi: int = 96) -> None:
         """Export grayscale rendering of the current viewport for each
         channel separately."""
-        kwargs = self.get_render_kwargs()
-        for i in range(len(self.locs)):
-            locs = self._display_locs(i)
-            path = os.path.splitext(self.locs_paths[i])[0] + suffix
-            # render like in self.render_scene
-            vmin = self.window.display_settings_dlg.minimum.value()
-            vmax = self.window.display_settings_dlg.maximum.value()
-            locs_ = (
-                locs.drop(columns="group") if "group" in locs.columns else locs
-            )
-            invert_colors = self.window.dataset_dialog.wbackground.isChecked()
-            qimage = render.render_scene(
-                locs_,
-                self.infos[i],
-                **kwargs,
-                contrast=(vmin, vmax),
-                invert_colors=invert_colors,
-                single_channel_colormap="gray",
-                relative_intensities=[
-                    self.window.dataset_dialog.intensitysettings[i].value()
-                ],
-            )[0]
-            # modify qimage like in self.draw_scene
-            qimage = qimage.scaled(
-                self.width(),
-                self.height(),
-                QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
-            )
-            qimage = self.draw_scalebar(qimage)
-            qimage = self.draw_minimap(qimage)
-            qimage = self.draw_legend(qimage)
-            qimage = self.draw_picks(qimage)
-            qimage = self.draw_points(qimage)
-            # save image
-            if path.endswith(".pdf"):
-                render.export_qimage_to_pdf(qimage, path)
-            elif path.endswith(".svg"):
-                render.export_qimage_to_svg(qimage, path)
-            else:
-                qimage.save(path)
+        # exported with the text sizes they always had, not those of
+        # the windows
+        with theme.unscaled_text():
+            kwargs = self.get_render_kwargs()
+            dataset_dialog = self.window.dataset_dialog
+            for i in range(len(self.locs)):
+                locs = self._display_locs(i)
+                path = os.path.splitext(self.locs_paths[i])[0] + suffix
+                # render like in self.render_scene, with the channel's own
+                # contrast window (in percent of the global one)
+                vmin = self.window.display_settings_dlg.minimum.value()
+                vmax = self.window.display_settings_dlg.maximum.value()
+                if len(self.locs) > 1:
+                    span = vmax - vmin
+                    low = dataset_dialog.contrast_low[i].value() / 100
+                    high = dataset_dialog.contrast_high[i].value() / 100
+                    vmin, vmax = vmin + low * span, vmin + high * span
+                locs_ = (
+                    locs.drop(columns="group")
+                    if "group" in locs.columns
+                    else locs
+                )
+                invert_colors = dataset_dialog.wbackground.isChecked()
+                qimage = render.render_scene(
+                    locs_,
+                    self.infos[i],
+                    **kwargs,
+                    contrast=(vmin, vmax),
+                    invert_colors=invert_colors,
+                    single_channel_colormap="gray",
+                )[0]
+                # modify qimage like in self.draw_scene
+                qimage = qimage.scaled(
+                    self.width(),
+                    self.height(),
+                    QtCore.Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                )
+                qimage = self.draw_grid(qimage)
+                qimage = self.spt.draw_tracks(qimage, channels=[i])
+                qimage = self.draw_scalebar(qimage)
+                qimage = self.draw_minimap(qimage)
+                qimage = self.draw_legend(qimage)
+                qimage = self.draw_picks(qimage)
+                qimage = self.draw_points(qimage)
+                # save image
+                if path.endswith(".pdf"):
+                    render.export_qimage_to_pdf(qimage, path)
+                elif path.endswith(".svg"):
+                    render.export_qimage_to_svg(qimage, path)
+                else:
+                    qimage.save(path)
 
-            # save metadata
-            info = self.window.export_current_info(path=None)
-            info["Colormap"] = "gray"
-            io.save_info(os.path.splitext(path)[0] + ".yaml", [info])
+                # save metadata
+                info = self.window.export_current_info(path=None)
+                info["Colormap"] = "gray"
+                io.save_info(os.path.splitext(path)[0] + ".yaml", [info])
 
-            # save a copy with scale bar if not present
-            scalebar_box = self.window.display_settings_dlg.scalebar_groupbox
-            scalebar = scalebar_box.isChecked()
-            if not scalebar:
-                spath = os.path.splitext(path)[0] + "_scalebar.png"
-                scalebar_box.setChecked(True)
-                self.set_optimal_scalebar(force=True)
-                qimage_scale = self.draw_scalebar(qimage)
-                qimage_scale.save(spath)
-                scalebar_box.setChecked(False)
+                # save a copy with scale bar if not present
+                display_settings = self.window.display_settings_dlg
+                scalebar_box = display_settings.scalebar_groupbox
+                scalebar = scalebar_box.isChecked()
+                if not scalebar:
+                    spath = os.path.splitext(path)[0] + "_scalebar.png"
+                    scalebar_box.setChecked(True)
+                    self.set_optimal_scalebar(force=True)
+                    qimage_scale = self.draw_scalebar(qimage)
+                    qimage_scale.save(spath)
+                    scalebar_box.setChecked(False)
 
     def get_channel(self, title: str = "Choose a channel") -> int | None:
         """Open an input dialog to ask for a channel. Return the channel
@@ -12258,7 +14657,6 @@ class View(QtWidgets.QLabel):
         """
         # blur method
         disp_dlg = self.window.display_settings_dlg
-        pixelsize = self.pixelsize
         # if self._pan:  # no blur when panning
         #     blur_method = None
         # else:  # selected method
@@ -12279,40 +14677,30 @@ class View(QtWidgets.QLabel):
                 blur_method
             ]  # convert from display name to render name
 
-        # oversampling
-        optimal_oversampling = self.display_pixels_per_viewport_pixels()
-        optimal_disp_px_size = pixelsize / optimal_oversampling
+        # the display pixel size at which one rendered pixel is one
+        # screen pixel
+        optimal_disp_px_size = 1 / self.display_pixels_per_viewport_pixels()
         if disp_px_size is None:
+            # a rendered pixel cannot be smaller than a screen pixel
+            disp_dlg.set_min_disp_px_silently(optimal_disp_px_size)
             if disp_dlg.dynamic_disp_px.isChecked():
                 disp_dlg.set_disp_px_silently(optimal_disp_px_size)
+                # exact, the spin box rounds to its decimals
                 disp_px_size = optimal_disp_px_size
             else:
-                if disp_dlg.disp_px_size.value() < optimal_disp_px_size:
-                    QtWidgets.QMessageBox.information(
-                        self,
-                        "Display pixel size too low",
-                        (
-                            "Display pixel size will be adjusted to"
-                            " match the display pixel density."
-                        ),
-                    )
-                    disp_dlg.set_disp_px_silently(optimal_disp_px_size)
-                    disp_px_size = optimal_disp_px_size
-                else:
-                    disp_px_size = disp_dlg.disp_px_size.value()
+                disp_px_size = disp_dlg.disp_px_size.value()
 
         # viewport and min blur
         viewport = self.viewport if viewport is None else viewport
 
-        min_blur_width = (
+        min_blur_width = float(
             disp_dlg.min_blur_width.value()
             if min_blur_width is None
             else min_blur_width
         )
-        min_blur_width = float(min_blur_width / pixelsize)
         max_blur_width = self._max_blur_width()
         if max_blur_width is not None:
-            max_blur_width = float(max_blur_width / pixelsize)
+            max_blur_width = float(max_blur_width)
 
         kwargs = {
             "disp_px_size": disp_px_size,
@@ -12371,33 +14759,77 @@ class View(QtWidgets.QLabel):
 
     def load_single_txt(self, path: str) -> None:
         """Tries to load a single .txt file that contains either FOV
-        coordinates or is a drift correction file."""
+        coordinates or is a drift correction file (both in nm; files
+        written before Picasso 1.0 are in camera pixels and converted
+        with the camera pixel size of the channels' metadata)."""
         try:
             data = np.loadtxt(path)
         except ValueError:
             return
         if data.shape == (4,):  # try loading FOV
-            self.load_fov_drop(data)
+            fov = self.read_fov_file(path)
+            if fov is not None:
+                self.load_fov_drop(fov)
         elif data.ndim == 2 and data.shape[1] in [2, 3]:  # try loading drift
             channel = self.get_channel_all_seq(
                 "Select channel for drift correction"
             )
             if channel is None:
                 return
-            self.load_drift_drop(channel, data)
+            drift = self._read_drift_file(path, channel)
+            if drift is not None:
+                self.load_drift_drop(channel, drift.to_numpy())
+
+    def _load_or_report(self, loader, path: str, **kwargs):
+        """Load ``path`` with ``loader`` (see
+        ``lib_qt.load_or_ask_pixelsize``), telling the user why the file
+        could not be opened, e.g., a newer format version. None if
+        canceled or not loaded."""
+        try:
+            return lib_qt.load_or_ask_pixelsize(self, loader, path, **kwargs)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
+            return None
+
+    def _read_drift_file(
+        self, path: str, channel: int = 0
+    ) -> pd.DataFrame | None:
+        """Read a drift .txt file in nm (see ``io.load_drift``); a file
+        written before Picasso 1.0 (x, y in camera pixels) is converted
+        with the camera pixel size of ``channel`` (its metadata), which
+        the user is asked for if no channel is loaded. None if
+        canceled or not loaded."""
+        pixelsizes = self.pixelsizes
+        if channel >= len(pixelsizes):  # all channels: the first one's
+            channel = 0
+        return self._load_or_report(
+            io.load_drift,
+            path,
+            pixelsize=pixelsizes[channel] if pixelsizes else None,
+        )
+
+    def read_fov_file(self, path: str) -> FloatArray1D | None:
+        """Read a FOV .txt file in nm (see ``load_fov_file``); a file
+        written before Picasso 1.0 (camera pixels) is converted with the
+        camera pixel size of the first channel (its metadata), which the
+        user is asked for if no channel is loaded. None if canceled."""
+        pixelsizes = self.pixelsizes
+        return self._load_or_report(
+            load_fov_file,
+            path,
+            pixelsize=pixelsizes[0] if pixelsizes else None,
+        )
 
     def load_fov_drop(self, fov: FloatArray1D) -> None:
-        """Check if path is a fov .txt file (4 coordinates) and load the
-        FOV."""
+        """Show the FOV ``(x, y, width, height)`` (nm) of a dropped FOV
+        .txt file."""
         (x, y, w, h) = fov
         if w > 0 and h > 0:
             self.window.resize_view_to_fov(w, h)
             viewport = [(y, x), (y + h, x + w)]
             self.update_scene(viewport=viewport)
-            self.window.info_dialog.xy_label.setText(f"{x:.2f} / {y:.2f} ")
-            self.window.info_dialog.wh_label.setText(
-                f"{w:.2f} / {h:.2f} pixels"
-            )
+            self.window.info_dialog.xy_label.setText(f"{x:.1f} / {y:.1f} nm")
+            self.window.info_dialog.wh_label.setText(f"{w:.1f} / {h:.1f} nm")
 
     def load_drift_drop(self, channel: int, drift: FloatArray2D) -> None:
         """Attempts to load a drift .txt file (2 or 3 columns) and apply
@@ -12453,42 +14885,98 @@ class View(QtWidgets.QLabel):
             drift_df["z"] = drift[:, 2]
         self._apply_drift(channel, drift_df)
 
+    def _read_picks_file(self, path: str) -> tuple | None:
+        """Read a picks .yaml file in nm (see ``io.load_picks``); a file
+        written before Picasso 1.0 (camera pixels) is converted with
+        the camera pixel size of the first channel (its metadata), which
+        the user is asked for if no channel is loaded. None if
+        canceled."""
+        pixelsizes = self.pixelsizes
+        return self._load_or_report(
+            io.load_picks,
+            path,
+            pixelsize=pixelsizes[0] if pixelsizes else None,
+        )
+
     def load_picks(self, path: str) -> None:
-        """Load picks from .yaml file.
+        """Load picks from .yaml file (nm; see ``_read_picks_file`` for
+        files written before Picasso 1.0).
 
         Raises
         ------
         ValueError
             If .yaml file is not recognized.
         """
-        pixelsize = self.pixelsize
+        loaded = self._read_picks_file(path)
+        if loaded is None:  # canceled
+            return
         tools_dlg = self.window.tools_settings_dialog
         self._picks = []
         self._pick_shape = None
-        self._picks, self._pick_shape, size = io.load_picks(
-            path, pixelsize=pixelsize
-        )
+        self._picks, self._pick_shape, size = loaded
         tools_dlg.pick_shape.setCurrentText(self._pick_shape)
         if self._pick_shape == "Circle":
-            tools_dlg.pick_diameter.setValue(size * pixelsize)
+            tools_dlg.pick_diameter.setValue(size)
         elif self._pick_shape == "Rectangle":
-            tools_dlg.pick_width.setValue(size * pixelsize)
+            tools_dlg.pick_width.setValue(size)
         elif self._pick_shape == "Square":
-            tools_dlg.pick_side_length.setValue(size * pixelsize)
+            tools_dlg.pick_side_length.setValue(size)
         elif self._pick_shape == "Brush" and len(self._picks):
             # brush strokes keep their own widths; seed the spin box
             # with the widest one so the next stroke matches the picks
             widest = max(stroke[0] for pick in self._picks for stroke in pick)
-            tools_dlg.brush_width.setValue(widest * pixelsize)
+            tools_dlg.brush_width.setValue(widest)
 
         # update Info Dialog
         self.update_pick_info_short()
         self.update_scene(picks_only=True)
 
-    def load_screenshot(self, file: dict) -> None:  # noqa: C901
-        """Load screenshot settings from a .yaml file."""
+    def load_screenshot(  # noqa: C901
+        self, file: dict, path: str = "The view settings file"
+    ) -> None:
+        """Load screenshot settings from a .yaml file (see
+        ``Window.export_current_info``) read from ``path``. Files
+        written before Picasso 1.0 (no ``picasso_format``) store the FOV
+        in camera pixels and the zoom as screen pixels per camera pixel;
+        both are converted with the camera pixel size of the first
+        channel (its metadata), which the user is asked for if no
+        channel is loaded. A file of a newer major format version is
+        refused (see ``io.check_format_version``)."""
+        try:
+            io.check_format_version(
+                file.get(io.FORMAT_VERSION_ATTR),
+                path,
+                kind="view settings file",
+            )
+        except io.FileFormatError as error:
+            lib.show_load_error(self, path, error)
+            return
         disp_dlg = self.window.display_settings_dlg
-        x, y, w, h = file["FOV (X, Y, Width, Height)"]
+        legacy_file = io.FORMAT_VERSION_ATTR not in file
+        pixelsizes = self.pixelsizes
+        pixelsize = pixelsizes[0] if pixelsizes else None
+        if pixelsize is None and (
+            (legacy_file and FOV_KEY not in file)
+            or (ZOOM_KEY not in file and file.get(LEGACY_ZOOM_KEY))
+            or "Min. blur (cam. px)" in file
+        ):
+            pixelsize = lib_qt.ask_pixelsize(self, path)
+            if pixelsize is None:  # canceled
+                return
+        if FOV_KEY in file:
+            x, y, w, h = file[FOV_KEY]
+        else:
+            x, y, w, h = file[LEGACY_FOV_KEY]
+            if legacy_file:
+                x, y, w, h = (_ * pixelsize for _ in (x, y, w, h))
+        # nm per screen pixel
+        zoom = file.get(ZOOM_KEY)
+        if zoom is None and file.get(LEGACY_ZOOM_KEY):
+            # screen pixels per camera pixel
+            zoom = pixelsize / file[LEGACY_ZOOM_KEY]
+        if zoom:
+            # the view shows the FOV at the saved zoom
+            self.window.resize_view(w / zoom, h / zoom)
         viewport = [(y, x), (y + h, x + w)]
         self.update_scene(viewport=viewport)
         if "Max. density" in file:
@@ -12504,10 +14992,15 @@ class View(QtWidgets.QLabel):
                     break
         if "Min. blur (cam. px)" in file:
             disp_dlg.min_blur_width.setValue(
-                file["Min. blur (cam. px)"] * self.pixelsize
+                file["Min. blur (cam. px)"] * pixelsize
             )
         elif "Min. blur (nm)" in file:
             disp_dlg.min_blur_width.setValue(file["Min. blur (nm)"])
+        if (
+            "Display pixel size (nm)" in file
+            and not disp_dlg.dynamic_disp_px.isChecked()
+        ):
+            disp_dlg.disp_px_size.setValue(file["Display pixel size (nm)"])
         if "Colors" in file and len(file["Colors"]) == len(self.locs):
             dataset_dialog = self.window.dataset_dialog
             missing: list[str] = []
@@ -12516,9 +15009,7 @@ class View(QtWidgets.QLabel):
                     dataset_dialog.resolve_color_identifier(color)
                 except ValueError:
                     missing.append(color)
-                    fallback = dataset_dialog.default_colors[
-                        min(i, len(dataset_dialog.default_colors) - 1)
-                    ]
+                    fallback = dataset_dialog.default_channel_color(i)
                     dataset_dialog.colorselection[i].setCurrentText(fallback)
                     continue
                 dataset_dialog.colorselection[i].setCurrentText(color)
@@ -12534,56 +15025,65 @@ class View(QtWidgets.QLabel):
             disp_dlg.scalebar.setValue(file["Scalebar length (nm)"])
         elif "Scale bar length (nm)" in file:
             disp_dlg.scalebar.setValue(file["Scale bar length (nm)"])
+        channel_contrast = file.get(CHANNEL_CONTRAST_KEY)
+        if channel_contrast is not None and len(channel_contrast) == len(
+            self.locs
+        ):
+            dataset_dialog = self.window.dataset_dialog
+            for i, (low, high) in enumerate(channel_contrast):
+                dataset_dialog.set_channel_contrast(i, low, high, update=False)
+            dataset_dialog.update_channel_contrast()
 
-    @check_picks
-    @check_circular_picks
     def subtract_picks(self, path: str) -> None:
         """Clear selected picks that cover the picks loaded from path.
+        Only circular picks can be subtracted; for other shapes, a
+        warning is shown.
 
         Parameters
         ----------
         path : str
             Path specifying .yaml file with picks.
-
-        Raises
-        ------
-        ValueError
-            If .yaml file is not recognized.
-        NotImplementedError
-            Non-circular picks have not been implemented yet.
         """
+        # not with the check_circular_picks decorator, which would drop
+        # the path
+        if self._pick_shape != "Circle":
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Pick Error",
+                "This operation is only implemented for these pick "
+                "shapes: Circle.",
+            )
+            return
+        loaded = self._read_picks_file(path)
+        if loaded is None:  # canceled
+            return
+        picks, shape, diameter = loaded
+        if shape != "Circle":
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Pick Error",
+                "Only circular picks can be subtracted; the file holds "
+                f"{shape.lower()} picks.",
+            )
+            return
         oldpicks = self._picks.copy()
 
-        # load .yaml
-        with open(path, "r") as f:
-            regions = yaml.full_load(f)
-            self._picks = regions["Centers"]
-            if "Diameter (nm)" in regions:
-                diameter = regions["Diameter (nm)"] / self.pixelsize
-            elif "Diameter" in regions:
-                diameter = regions["Diameter"]
-
-            # calculate which picks are to stay
-            distances = (
-                np.sum(
-                    (euclidean_distances(oldpicks, self._picks) < diameter / 2)
-                    * 1,
-                    axis=1,
-                )
-                >= 1
+        # calculate which picks are to stay
+        distances = (
+            np.sum(
+                (euclidean_distances(oldpicks, picks) < diameter / 2) * 1,
+                axis=1,
             )
-            filtered_list = [i for (i, v) in zip(oldpicks, distances) if not v]
+            >= 1
+        )
+        self._picks = [i for (i, v) in zip(oldpicks, distances) if not v]
 
-            self._picks = filtered_list
-
-            self.update_pick_info_short()
-            self.window.tools_settings_dialog.pick_diameter.setValue(
-                regions["Diameter (nm)"]
-            )
-            self.update_scene(picks_only=True)
+        self.update_pick_info_short()
+        self.window.tools_settings_dialog.pick_diameter.setValue(diameter)
+        self.update_scene(picks_only=True)
 
     def map_to_movie(self, position: QtCore.QPoint) -> QtCore.QPoint:
-        """Convert coordinates from display units to camera units."""
+        """Convert coordinates from screen pixels to nm."""
         v_height, v_width = render.viewport_size(self.viewport)
         x_rel = position.x() / self.width()
         x_movie = x_rel * v_width + self.viewport[0][1]
@@ -12592,12 +15092,14 @@ class View(QtWidgets.QLabel):
         return x_movie, y_movie
 
     def max_movie_height(self) -> float:
-        """Return maximum height of all loaded images."""
-        return max(info[0]["Height"] for info in self.infos)
+        """Return maximum height (nm) of the fields of view of all
+        loaded channels, see ``lib.field_of_view``."""
+        return max(lib.field_of_view(info)[1] for info in self.infos)
 
     def max_movie_width(self) -> float:
-        """Return maximum width of all loaded images."""
-        return max([info[0]["Width"] for info in self.infos])
+        """Return maximum width (nm) of the fields of view of all loaded
+        channels, see ``lib.field_of_view``."""
+        return max(lib.field_of_view(info)[0] for info in self.infos)
 
     def _mouse_move_pick(self, event: QtCore.QEvent) -> None:
         """Update the in-progress rectangular, box or brush pick
@@ -12619,7 +15121,7 @@ class View(QtWidgets.QLabel):
     def mouseMoveEvent(self, event: QtCore.QEvent) -> None:
         """Drawing zoom-in rectangle, panning or drawing a rectangular
         pick."""
-        if not len(self.locs):
+        if not self.n_channels:  # not locs: hovering reads nothing back
             return
         if self.window.link_group is not None:
             self.cursor_moved.emit(self.map_to_movie(event.pos()))
@@ -12635,9 +15137,9 @@ class View(QtWidgets.QLabel):
             return
 
         # dragging the zoom-in rectangle (Zoom tool, or Shift + left in
-        # every tool); it only stretches towards the bottom right
-        if self.rubberband.isVisible():
-            self.rubberband.setGeometry(QtCore.QRect(self.origin, event.pos()))
+        # every tool), in any direction
+        if self.zoom_rectangle.active:
+            self.zoom_rectangle.move(event.pos())
             return
 
         # if drawing a rectangular or box pick
@@ -12655,7 +15157,7 @@ class View(QtWidgets.QLabel):
         crosshairs when the cursor leaves the canvas."""
         if self._mode == "Measure" and self._measure_cursor is not None:
             self._measure_cursor = None
-            if len(self.locs):
+            if self.n_channels:
                 self.update_scene(picks_only=True)
         if self.window.link_group is not None:
             self.cursor_moved.emit(None)
@@ -12672,10 +15174,10 @@ class View(QtWidgets.QLabel):
         """
         if self._pan and not buttons & self._pan_button:
             self._stop_pan()
-        if self.rubberband.isVisible() and not (
+        if self.zoom_rectangle.active and not (
             buttons & QtCore.Qt.MouseButton.LeftButton
         ):
-            self.rubberband.hide()
+            self.zoom_rectangle.drop()
 
     def _start_pan(self, event: QtCore.QEvent) -> None:
         """Begin dragging the view; ``_pan_button`` remembers which
@@ -12856,7 +15358,7 @@ class View(QtWidgets.QLabel):
 
     def _record_manual_shift(self, channel: int, dx: float, dy: float) -> None:
         """Accumulate the shift of ``channel`` done with the Move tool
-        (camera pixels) in its metadata."""
+        (nm) in its metadata."""
         info = self.infos[channel]
         for key, shift in zip(MANUAL_SHIFT_KEYS, (dx, dy)):
             info[-1][key] = float(
@@ -12882,7 +15384,8 @@ class View(QtWidgets.QLabel):
             dx, dy = shifts[0]
             if dx or dy:
                 self._translate_overlays(dx, dy)
-                if self.viewport:
+                # no viewport yet while the first file is being added
+                if getattr(self, "viewport", None):
                     self.viewport = render.shift_viewport(
                         self.viewport, dx, dy
                     )
@@ -12931,8 +15434,8 @@ class View(QtWidgets.QLabel):
         self.update_scene()
 
     def _translate_overlays(self, dx: float, dy: float) -> None:
-        """Move picks and measured points by ``(dx, dy)`` camera pixels
-        along with the localizations."""
+        """Move picks and measured points by ``(dx, dy)`` nm along with
+        the localizations."""
         self._picks = lib.translate_picks(
             self._picks, self._pick_shape, dx, dy
         )
@@ -12959,11 +15462,7 @@ class View(QtWidgets.QLabel):
         if not self._move_channels or self._move_cursor is None:
             return image
         dx, dy = self._move_shift
-        pixelsize = self.pixelsize
-        text = (
-            f"Δx = {dx:.2f} px ({dx * pixelsize:.1f} nm)\n"
-            f"Δy = {dy:.2f} px ({dy * pixelsize:.1f} nm)"
-        )
+        text = f"Δx = {dx:.1f} nm\nΔy = {dy:.1f} nm"
         style = self.window.tools_settings_dialog.move_overlay_style()
         painter = style.painter(image)
         # the label grows with its font
@@ -13019,7 +15518,7 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         position : tuple or None
-            (x, y) in camera pixels, or None to hide the crosshair.
+            (x, y) in nm, or None to hide the crosshair.
         """
         if position == self._link_crosshair:
             return
@@ -13043,8 +15542,7 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         center : tuple
-            Viewport center (y, x) of the linked window, in camera
-            pixels.
+            Viewport center (y, x) of the linked window, in nm.
         scale : float
             Camera pixels per display pixel of the linked window.
         use_center, use_scale : bool
@@ -13082,10 +15580,15 @@ class View(QtWidgets.QLabel):
         left = button == QtCore.Qt.MouseButton.LeftButton
         # the pressed button is not held yet in a stale drag's state
         self._drop_stale_drags(event.buttons() & ~button)
+        # the right (or any other) button cancels a zoom-in rectangle
+        # being dragged
+        if self.zoom_rectangle.press(button):
+            event.accept()
+            return
         # a triple click with the Zoom tool fits the image to the window
         # (like Ctrl + W); Pick and Measure keep their clicks
         if self._triple_click.is_third(event) and self._mode == "Zoom":
-            self.rubberband.hide()  # the double click's press started one
+            self.zoom_rectangle.drop()  # the double click's press started one
             self.fit_in_view()
             event.accept()
             return
@@ -13111,12 +15614,7 @@ class View(QtWidgets.QLabel):
     def _start_zoom_rectangle(self, event: QtCore.QEvent) -> None:
         """Begin dragging the zoom-in rectangle (rubber band) from the
         cursor; the release zooms to it (see ``_mouse_release_zoom``)."""
-        if not self.rubberband.isVisible():
-            self.origin = QtCore.QPoint(event.pos())
-            self.rubberband.setGeometry(
-                QtCore.QRect(self.origin, QtCore.QSize())
-            )
-            self.rubberband.show()
+        self.zoom_rectangle.start(event.pos())
         event.accept()
 
     def _mouse_release_zoom(self, event: QtCore.QEvent) -> None:
@@ -13124,14 +15622,14 @@ class View(QtWidgets.QLabel):
         (panning ends in ``mouseReleaseEvent``, for every tool)."""
         if (
             event.button() == QtCore.Qt.MouseButton.LeftButton
-            and self.rubberband.isVisible()
+            and self.zoom_rectangle.active
         ):  # zoom in if the zoom-in rectangle is visible
-            end = QtCore.QPoint(event.pos())
-            if end.x() > self.origin.x() and end.y() > self.origin.y():
-                x_min_rel = self.origin.x() / self.width()
-                x_max_rel = end.x() / self.width()
-                y_min_rel = self.origin.y() / self.height()
-                y_max_rel = end.y() / self.height()
+            rect = self.zoom_rectangle.finish(event.pos())
+            if rect is not None:
+                x_min_rel = rect.left() / self.width()
+                x_max_rel = rect.right() / self.width()
+                y_min_rel = rect.top() / self.height()
+                y_max_rel = rect.bottom() / self.height()
                 viewport_height, viewport_width = render.viewport_size(
                     self.viewport
                 )
@@ -13141,7 +15639,6 @@ class View(QtWidgets.QLabel):
                 y_max = self.viewport[0][0] + y_max_rel * viewport_height
                 viewport = [(y_min, x_min), (y_max, x_max)]
                 self.update_scene(viewport)
-            self.rubberband.hide()
         else:
             event.ignore()
 
@@ -13219,14 +15716,15 @@ class View(QtWidgets.QLabel):
 
     def _mouse_release_pick_brush(self, event: QtCore.QEvent) -> None:
         """Finish and merge the in-progress brush stroke (left
-        click), or undo the last stroke (right click)."""
+        click), or remove the pick under the cursor (right click)."""
         # finish painting the stroke and merge it into the picks
         if event.button() == QtCore.Qt.MouseButton.LeftButton:
             self.add_brush_stroke(event.pos())
             event.accept()
-        # undo the last stroke, like the polygon's last vertex
+        # remove pick
         elif event.button() == QtCore.Qt.MouseButton.RightButton:
-            self.remove_last_brush_stroke()
+            x, y = self.map_to_movie(event.pos())
+            self.remove_picks((x, y))
             event.accept()
         else:
             event.ignore()
@@ -13281,10 +15779,16 @@ class View(QtWidgets.QLabel):
             event.accept()
             return
 
+        # the releases ending a canceled zoom-in rectangle add no pick
+        # or measure point
+        if self.zoom_rectangle.swallows_release(event.button()):
+            event.accept()
+            return
+
         # releasing a dragged zoom-in rectangle zooms in whatever the
         # tool (Shift + left starts one in every tool); the release is
         # consumed so it adds no pick or measure point
-        if self.rubberband.isVisible():
+        if self.zoom_rectangle.active:
             self._mouse_release_zoom(event)
             event.accept()
             return
@@ -13305,8 +15809,9 @@ class View(QtWidgets.QLabel):
         self.mousePressEvent(event)
         self._triple_click.double_clicked(event)
 
-    def movie_size(self) -> tuple[int, int]:
-        """Return tuple with movie height and width."""
+    def movie_size(self) -> tuple[float, float]:
+        """Return tuple with the height and width (nm) of the field of
+        view covering all loaded channels."""
         movie_height = self.max_movie_height()
         movie_width = self.max_movie_width()
         return (movie_height, movie_width)
@@ -13349,18 +15854,16 @@ class View(QtWidgets.QLabel):
         localizations in channels 1 and 2. Save as localizations .hdf5
         file of channel 1. Runs on a worker thread, so it only reads the
         view's state."""
-        pixelsize = self.pixelsize
-        # extract x, y and z from both channels
-        if "z" in self.locs[channel1].columns:
-            X1 = self.locs[channel1][["x", "y", "z"]].to_numpy()
-        else:
-            X1 = self.locs[channel1][["x", "y"]].to_numpy()
-        if "z" in self.locs[channel2].columns:
-            X2 = self.locs[channel2][["x", "y", "z"]].to_numpy()
-        else:
-            X2 = self.locs[channel2][["x", "y"]].to_numpy()
-        X1[:, :2] *= pixelsize  # convert x and y to nm
-        X2[:, :2] *= pixelsize
+        # extract x, y and z (nm) from both channels; z only if both
+        # channels have it
+        columns = ["x", "y"]
+        if all(
+            "z" in self.locs[channel].columns
+            for channel in (channel1, channel2)
+        ):
+            columns.append("z")
+        X1 = self.locs[channel1][columns].to_numpy()
+        X2 = self.locs[channel2][columns].to_numpy()
 
         # get nnd and append to locs to save
         nn = postprocess.nn_analysis(X1, X2, nn_count)
@@ -13370,16 +15873,431 @@ class View(QtWidgets.QLabel):
 
         # save new locs
         new_info = {
-            "Generated by": "Picasso Render Nearest Neighbor Analysis",
-            "Pixelsize (nm)": pixelsize,
+            **lib.step_info("Render : Nearest neighbor analysis"),
             "Nearest neighbors": nn_count,
             "Channel 1": self.locs_paths[channel1],
             "Channel 2": self.locs_paths[channel2],
         }
         io.save_locs(path, new_locs, self.infos[channel1] + [new_info])
 
+    def cbc(self) -> None:
+        """Ask for the channels and parameters of coordinate-based
+        colocalization (CBC), compute it on a worker thread and save
+        the scored channels with the new CBC column(s), see
+        ``postprocess.cbc`` and ``postprocess.cbc_all_pairs``."""
+        n_channels = len(self.locs_paths)
+        if n_channels < 2:
+            QtWidgets.QMessageBox.information(
+                self,
+                "CBC",
+                "Coordinate-based colocalization requires at least two "
+                "channels.",
+            )
+            return
+        params, ok = CBCDialog.getParams(self.window)
+        if not ok:
+            return
+        pair = params["pair"]
+        names = params["names"]
+        used = list(range(n_channels)) if pair is None else list(pair)
+
+        # unlinked localizations count each binding event several times
+        unlinked = [i for i in used if "len" not in self.locs[i].columns]
+        if unlinked:
+            reply = QtWidgets.QMessageBox.warning(
+                self,
+                "CBC",
+                "These channels are not linked (no 'len' column), so each "
+                "binding event is counted several times in the CBC:\n\n"
+                + "\n".join(
+                    self.window.dataset_dialog.checks[i].text()
+                    for i in unlinked
+                )
+                + "\n\nConsider linking them first (Postprocess > Link "
+                "localizations).\n\nContinue anyway?",
+                QtWidgets.QMessageBox.StandardButton.Yes
+                | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No,
+            )
+            if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+
+        # where to save
+        if pair is not None:
+            path, ext = lib.get_save_filename_ext_dialog(
+                self,
+                "Save localizations with CBC",
+                os.path.splitext(self.locs_paths[pair[0]])[0] + "_cbc.hdf5",
+                filter="*.hdf5",
+                check_ext=".yaml",
+            )
+            if not path:
+                return
+            out_paths = [path]
+        else:
+            folder = QtWidgets.QFileDialog.getExistingDirectory(
+                self,
+                "Folder to save the localizations with CBC",
+                os.path.dirname(self.locs_paths[0]),
+            )
+            if not folder:
+                return
+            out_paths = [
+                os.path.join(
+                    folder,
+                    os.path.splitext(os.path.basename(path))[0] + "_cbc.hdf5",
+                )
+                for path in self.locs_paths
+            ]
+            existing = [p for p in out_paths if os.path.exists(p)]
+            if existing:
+                reply = QtWidgets.QMessageBox.question(
+                    self,
+                    "CBC",
+                    "These files exist already and will be overwritten:\n"
+                    + "\n".join(os.path.basename(p) for p in existing),
+                )
+                if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+                    return
+
+        # snapshot the inputs for the worker thread
+        locs = [self.locs[i] for i in used]
+        infos = [self.infos[i] for i in used]
+        kwargs = dict(
+            r_max=params["r_max"],
+            steps=params["steps"],
+            use_z=params["use_z"],
+            undefined=params["undefined"],
+            remove_undefined=params["remove_undefined"],
+        )
+
+        def compute(progress: lib.TaskProgress) -> None:
+            with warnings.catch_warnings():  # the user was asked
+                warnings.filterwarnings("ignore", message=".*not linked")
+                if pair is None:
+                    all_locs, all_infos = postprocess.cbc_all_pairs(
+                        locs,
+                        infos,
+                        names=names,
+                        progress=progress,
+                        **kwargs,
+                    )
+                else:
+                    new_locs, new_info = postprocess.cbc(
+                        locs[0],
+                        infos[0],
+                        partner_locs=locs[1],
+                        partner_names=names[pair[1]],
+                        progress=progress,
+                        **kwargs,
+                    )
+                    all_locs, all_infos = [new_locs], [new_info]
+            progress.check_canceled()
+            for i, (new_locs, new_info) in enumerate(zip(all_locs, all_infos)):
+                if i >= len(out_paths):
+                    break  # single pair: only the scored channel
+                io.save_locs(out_paths[i], new_locs, new_info)
+
+        lib.run_task(
+            compute,
+            "Calculating CBC...",
+            self.window,
+            title="CBC",
+        )
+
+    def spatial_statistic(self, statistic: str) -> None:
+        """Ask for the channel, regions and parameters of a spatial
+        statistic (a key of ``SPATIAL_STATISTICS``, e.g., Ripley's H
+        function or the radial distribution function), compute it on a
+        worker thread and plot it, see ``postprocess.ripley_h`` and
+        ``postprocess.rdf``."""
+        if not self.locs_paths:
+            return
+        params, ok = SpatialStatisticDialog.getParams(self.window, statistic)
+        if not ok:
+            return
+        spec = SPATIAL_STATISTICS[statistic]
+        name = spec["title"]
+        partner = params["partner"]
+        if spec["multichannel"]:
+            used = params["channels"]
+        elif partner is None:
+            used = [params["channel"]]
+        else:
+            used = [params["channel"], partner]
+        channel = used[0]
+        titles = [self.window.dataset_dialog.checks[i].text() for i in used]
+        if len(titles) > 2:
+            title = ", ".join(titles[:-1]) + " and " + titles[-1]
+        else:
+            title = " and ".join(titles)
+
+        # each molecule of localizations counts as many times as it was
+        # localized, which looks like clustering
+        not_molecules = [
+            t
+            for i, t in zip(used, titles)
+            if not postprocess._are_molecules(self.locs[i])
+        ]
+        if not_molecules:
+            reply = QtWidgets.QMessageBox.warning(
+                self,
+                name,
+                f"{' and '.join(not_molecules)} "
+                f"{'do' if len(not_molecules) > 1 else 'does'} not contain "
+                "molecules (no 'n_events' or 'std_frame' column), so each "
+                "molecule is counted as many times as it was localized, "
+                "which appears as clustering at short distances.\n\n"
+                "Consider finding the molecules first, e.g., with "
+                "Postprocess > Molecular mapping (G5M) or by clustering "
+                "with 'Save cluster centers'.\n\nContinue anyway?",
+                QtWidgets.QMessageBox.StandardButton.Yes
+                | QtWidgets.QMessageBox.StandardButton.No,
+                QtWidgets.QMessageBox.StandardButton.No,
+            )
+            if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+
+        # snapshot the inputs for the worker thread
+        locs = self.locs[channel]
+        info = self.infos[channel]
+        if params["region"] == "picks":
+            picks = list(self._picks)
+            pick_shape, pick_size = self._pick_shape, self._pick_size
+        elif params["region"] == "view":
+            (y_min, x_min), (y_max, x_max) = self.viewport
+            picks = [((x_min, y_min), (x_max, y_max))]
+            pick_shape, pick_size = "Box", None
+        else:
+            picks, pick_shape, pick_size = None, None, None
+        kwargs = dict(
+            r_max=params["r_max"],
+            steps=params["steps"],
+            n_simulations=params["n_simulations"],
+            use_z=params["use_z"],
+            z_range=params["z_range"],
+            simulated_z=params["simulated_z"],
+            cross_null=params["cross_null"],
+        )
+        if spec["multichannel"]:
+            locs = [self.locs[i] for i in used]
+            kwargs["names"] = titles
+        else:
+            kwargs["edge_correction"] = params["edge_correction"]
+            kwargs["partner_locs"] = (
+                None if partner is None else self.locs[partner]
+            )
+
+        def compute(progress: lib.TaskProgress) -> tuple[dict, list[str]]:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                result = spec["compute"](
+                    locs,
+                    info,
+                    picks=picks,
+                    pick_shape=pick_shape,
+                    pick_size=pick_size,
+                    progress=progress,
+                    **kwargs,
+                )
+            # the user was asked about the molecules already
+            messages = [
+                str(w.message)
+                for w in caught
+                if "not molecules" not in str(w.message)
+            ]
+            return result, messages
+
+        def show(output: tuple[dict, list[str]]) -> None:
+            result, messages = output
+            # keep a reference to the window to prevent garbage collection
+            window = SpatialStatisticPlotWindow(
+                result, self.locs_paths[channel], title, statistic
+            )
+            self.spatial_statistic_windows[statistic] = window
+            window.show()
+            if messages:  # e.g., a max. radius too large for the z range
+                QtWidgets.QMessageBox.warning(
+                    window,
+                    name,
+                    "\n\n".join(messages),
+                )
+
+        def failed(error: Exception) -> None:
+            if isinstance(error, ValueError):  # e.g., empty picks
+                QtWidgets.QMessageBox.warning(self, name, str(error))
+            else:  # unexpected, report as usual
+                sys.excepthook(type(error), error, error.__traceback__)
+
+        lib.run_task(
+            compute,
+            f"Calculating {name}...",
+            self.window,
+            show,
+            on_failed=failed,
+            title=name,
+        )
+
+    def _camera_origin(self, channel: int) -> tuple[float, float]:
+        """Where the camera frame of ``channel`` starts in the displayed
+        coordinates (nm): the canvas offset (see ``lib.fit_canvas``)
+        plus the shifts done with the Move tool."""
+        info = self.infos[channel]
+        return tuple(
+            float(lib.get_from_metadata(info, offset_key, 0))
+            + float(lib.get_from_metadata(info, shift_key, 0.0))
+            for offset_key, shift_key in zip(
+                lib.CANVAS_OFFSET_KEYS, MANUAL_SHIFT_KEYS
+            )
+        )
+
+    def stitch(self) -> None:
+        """Ask for the tiles and parameters, stitch the channels on a
+        worker thread and replace them with one stitched channel per
+        target, see ``picasso.stitch``."""
+        if len(self.locs_paths) < 2:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Stitch tiles",
+                "Stitching requires at least two channels (tiles).",
+            )
+            return
+        params, ok = StitchDialog.getParams(self.window)
+        if not ok:
+            return
+        tiles = params["tiles"]
+        tile_numbers = params["tile_numbers"]
+
+        # snapshot the inputs for the worker thread: the localizations
+        # in their camera frame, i.e., without the canvas offset and the
+        # shifts of the Move tool
+        origins = [self._camera_origin(i) for i in range(len(self.locs))]
+        locs = []
+        for locs_, (x0, y0) in zip(self.locs, origins):
+            camera = locs_.copy()
+            camera["x"] = camera["x"] - np.float32(x0)
+            camera["y"] = camera["y"] - np.float32(y0)
+            locs.append(camera)
+        infos = list(self.infos)
+        paths = list(self.locs_paths)
+        positions = None
+        # as shown (and possibly entered) in the dialog
+        stage_um = params["stage_um"] if params["stage"] else None
+        if not params["stage"]:
+            positions = np.array(
+                [
+                    origins[np.flatnonzero(tiles == t)[0]]
+                    for t in range(tiles.max() + 1)
+                ]
+            )
+        kwargs = {
+            key: params[key]
+            for key in (
+                "targets",
+                "use_for_alignment",
+                "orientation",
+                "search_radius_um",
+                "align_z",
+                "cut_seams",
+                "offset_frames",
+            )
+        }
+
+        def compute(progress: lib.TaskProgress) -> tuple:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                result = stitch.stitch(
+                    locs,
+                    infos,
+                    tiles=tiles,
+                    positions=positions,
+                    stage_um=stage_um,
+                    paths=paths,
+                    progress=progress,
+                    **kwargs,
+                )
+            return result, [str(warning.message) for warning in caught]
+
+        def apply(output: tuple) -> None:
+            (new_locs, new_infos, report), messages = output
+            n_old = len(self.locs)
+            for label, locs_, info in zip(
+                report["targets"], new_locs, new_infos
+            ):
+                first = next(
+                    i
+                    for i, target in enumerate(params["targets"])
+                    if target == label
+                )
+                path = os.path.splitext(paths[first])[0] + "_stitched.hdf5"
+                # not in the (moved) frame of the tiles, which go below
+                self.add(path, locs_, info, render_=False, fit_canvas_=False)
+            # the tiles go once the stitched channels are in, so the
+            # window is never empty
+            for i in reversed(range(n_old)):
+                self.window.dataset_dialog._close_one_channel(i, False)
+            self._reconcile_pixelsizes()
+            self.fit_in_view(autoscale=True)
+            self._show_stitch_report(report, tile_numbers, messages)
+
+        lib.run_task(
+            compute,
+            "Stitching tiles...",
+            self.window,
+            apply,
+            title="Stitch tiles",
+        )
+
+    def _show_stitch_report(
+        self, report: dict, tile_numbers: list[int], messages: list[str]
+    ) -> None:
+        """Summarize the result of ``stitch`` in a message box.
+
+        Parameters
+        ----------
+        report : dict
+            Report returned by ``stitch.stitch``.
+        tile_numbers : list of ints
+            Tile number shown in the dialog for each tile index.
+        messages : list of str
+            Warnings raised while stitching.
+        """
+        status = {
+            "empty": "no localizations in the overlap",
+            "weak": "overlaps did not match",
+            "inconsistent": "dropped, disagrees with the other overlaps",
+        }
+        lines = [
+            f"Stitched {len(tile_numbers)} tiles into "
+            f"{len(report['targets'])} channel(s)."
+        ]
+        if report["orientation"] is not None:
+            lines.append(
+                "Stage orientation: "
+                + stitch.describe_orientation(report["orientation"])
+            )
+        lines += ["", "Overlaps:"]
+        for pair in report["pairs"]:
+            a, b = (tile_numbers[t] for t in pair["tiles"])
+            if pair["used"]:
+                text = (
+                    f"{100 * pair['fraction']:.0f}% matched, residual "
+                    f"{pair['residual']:.1f} nm"
+                )
+            else:
+                text = status[pair["status"]]
+            lines.append(f"  Tiles {a} and {b}: {text}")
+        lines += [""] + messages
+        lines.append(
+            "Save the stitched channels with File > Save localizations."
+        )
+        QtWidgets.QMessageBox.information(
+            self, "Stitch tiles", "\n".join(lines)
+        )
+
     def display_pixels_per_viewport_pixels(self) -> float:
-        """Return optimal oversampling given viewport size."""
+        """Return the number of screen pixels per nm of the viewport,
+        i.e., the inverse of the screen pixel size."""
         v_height, v_width = render.viewport_size(self.viewport)
         os_horizontal = self.width() / v_width
         os_vertical = self.height() / v_height
@@ -13595,10 +16513,10 @@ class View(QtWidgets.QLabel):
                 removelist, i = self._handle_pick_selection_reply(
                     reply, pick, removelist, i
                 )
+                plt.close(fig)
                 if i is None:  # cancel
                     break
                 i += 1
-                plt.close()
 
         # remove picks
         for pick in removelist:
@@ -13615,7 +16533,9 @@ class View(QtWidgets.QLabel):
             if pick in removelist:
                 removelist.remove(pick)
         elif reply == "Reject":
-            removelist.append(pick)
+            # a pick rejected again after going back is removed once
+            if pick not in removelist:
+                removelist.append(pick)
         elif reply == "Back":
             if i >= 2:
                 i -= 2
@@ -13627,33 +16547,31 @@ class View(QtWidgets.QLabel):
 
     @property
     def _pick_size(self) -> float:
-        """Return the size of the pick in camera pixels. For circle this
-        is the diameter. For square this is the side length. For
-        rectangle this is the width (perpendicular to the drawing
-        direction). For polygon, box and brush this is None: they carry
-        their own extent. For the width of the next brush stroke, see
+        """Return the size of the pick in nm. For circle this is the
+        diameter. For square this is the side length. For rectangle this
+        is the width (perpendicular to the drawing direction). For
+        polygon, box and brush this is None: they carry their own
+        extent. For the width of the next brush stroke, see
         ``_brush_width``."""
         tools_dialog = self.window.tools_settings_dialog
-        pixelsize = self.pixelsize
         if self._pick_shape == "Circle":
-            pick_size = tools_dialog.pick_diameter.value() / pixelsize
+            pick_size = tools_dialog.pick_diameter.value()
         elif self._pick_shape == "Square":
-            pick_size = tools_dialog.pick_side_length.value() / pixelsize
+            pick_size = tools_dialog.pick_side_length.value()
         elif self._pick_shape == "Rectangle":
-            pick_size = tools_dialog.pick_width.value() / pixelsize
+            pick_size = tools_dialog.pick_width.value()
         else:
             pick_size = None
         return pick_size
 
     @property
     def _brush_width(self) -> float:
-        """Return the width of the next brush stroke in camera pixels.
+        """Return the width of the next brush stroke in nm.
 
         Only new strokes use it: every stroke already painted keeps the
         width it was drawn with, so this is not the size of any existing
         pick (see ``_pick_size``, which is None for brush picks)."""
-        tools_dialog = self.window.tools_settings_dialog
-        return tools_dialog.brush_width.value() / self.pixelsize
+        return self.window.tools_settings_dialog.brush_width.value()
 
     def _draw_pick_scatter(
         self,
@@ -13668,7 +16586,7 @@ class View(QtWidgets.QLabel):
         if is_multi:
             for ll in range(len(self.locs_paths)):
                 locs = all_picked_locs[ll][i]
-                ax.scatter(locs["x"], locs["y"], c=colors[ll], s=2)
+                ax.scatter(locs["x"], locs["y"], color=colors[ll], s=2)
         else:
             locs = all_picked_locs[i]
             ax.scatter(locs["x"], locs["y"], color=colors[channel], s=2)
@@ -13710,8 +16628,8 @@ class View(QtWidgets.QLabel):
                     x_min, x_max, y_min, y_max = lib.pick_bounds(
                         pick, self._pick_shape, self._pick_size
                     )
-                    ax.set_xlabel("X [Px]")
-                    ax.set_ylabel("Y [Px]")
+                    ax.set_xlabel("X [nm]")
+                    ax.set_ylabel("Y [nm]")
                     ax.set_xlim([x_min, x_max])
                     ax.set_ylim([y_min, y_max])
                     plt.axis("equal")
@@ -13735,10 +16653,10 @@ class View(QtWidgets.QLabel):
                     removelist, i = self._handle_pick_selection_reply(
                         reply, pick, removelist, i
                     )
+                    plt.close(fig)
                     if i is None:  # cancel
                         break
                     i += 1
-                    plt.close()
         for pick in removelist:
             self._picks.remove(pick)
         self.n_picks = len(self._picks)
@@ -13824,36 +16742,7 @@ class View(QtWidgets.QLabel):
         self.update_pick_info_short()
         self.update_scene()
 
-    def _analyze_cluster_combined(
-        self,
-        all_picked_locs: list,
-        pixelsize: float,
-    ) -> list:
-        """Iterate over picks for combined-channel k-means clustering.
-        Return list of picks to remove."""
-        removelist = []
-        for i, pick in enumerate(self._picks):
-            if "z" in all_picked_locs[0].columns:
-                reply = ClsDlg3D.getParams(
-                    all_picked_locs, i, len(self._picks), 0, pixelsize
-                )
-            else:
-                reply = ClsDlg2D.getParams(
-                    all_picked_locs, i, len(self._picks), 0
-                )
-            if reply == 1:
-                pass  # accepted
-            elif reply == 2:
-                break  # canceled
-            else:
-                removelist.append(pick)  # discard
-        return removelist
-
-    def _analyze_cluster_single(
-        self,
-        all_picked_locs: list,
-        pixelsize: float,
-    ) -> tuple:
+    def _analyze_cluster_single(self, all_picked_locs: list) -> tuple:
         """Iterate over picks for single-channel k-means clustering.
         Return (removelist, saved_locs, clustered_locs)."""
         removelist = []
@@ -13862,9 +16751,12 @@ class View(QtWidgets.QLabel):
         n_clusters, ok = QtWidgets.QInputDialog.getInt(
             self,
             "Input Dialog",
-            "Enter inital number of clusters:",
+            "Enter initial number of clusters:",
             10,
+            1,
         )
+        if not ok:
+            return removelist, saved_locs, clustered_locs
         for i, pick in enumerate(self._picks):
             reply = 3
             while reply == 3:
@@ -13874,7 +16766,6 @@ class View(QtWidgets.QLabel):
                         i,
                         len(self._picks),
                         n_clusters,
-                        pixelsize,
                     )
                 else:
                     reply, nc, l_locs, c_locs = ClsDlg2D.getParams(
@@ -13909,61 +16800,64 @@ class View(QtWidgets.QLabel):
             filter="*.hdf5",
             check_ext=".yaml",
         )
-        if path:
-            saved_locs = pd.concat(saved_locs, ignore_index=True)
-            if saved_locs is not None:
-                pick_info = {
-                    "Generated by:": f"Picasso v{__version__} Render",
-                    "Pick Shape": self._pick_shape,
-                }
-                # writes the size entry the current shape actually has,
-                # in nm; polygons and boxes carry their own extent
-                self._add_shape_specific_info(pick_info)
-                io.save_locs(
-                    path, saved_locs, self.infos[channel] + [pick_info]
-                )
+        if not path:
+            return
+        saved_locs = pd.concat(saved_locs, ignore_index=True)
+        pick_info = {
+            **lib.step_info("Render"),
+            "Pick Shape": self._pick_shape,
+        }
+        # writes the size entry the current shape actually has, in nm;
+        # polygons and boxes carry their own extent
+        self._add_shape_specific_info(pick_info)
+        io.save_locs(path, saved_locs, self.infos[channel] + [pick_info])
         # save pick properties
         base, ext = os.path.splitext(path)
         out_path = base + "_properties.hdf5"
-        r_max = 2 * max(
-            self.infos[channel][0]["Height"],
-            self.infos[channel][0]["Width"],
-        )
+        r_max = 2 * max(lib.field_of_view(self.infos[channel]))  # nm
         max_dark, ok = QtWidgets.QInputDialog.getInt(
-            self, "Input Dialog", "Enter gap size:", 3
+            self, "Input Dialog", "Enter gap size:", 3, 0
         )
+        if not ok:
+            return
         out_locs = []
         progress = lib.ProgressDialog(
             "Calculating kinetics", 0, len(clustered_locs), self
         )
         progress.set_value(0)
         dark = np.empty(len(clustered_locs))
+        # the same for every pick: the steps applied to all of them
+        kinetics_info = self.infos[channel]
         for i, pick_locs in enumerate(clustered_locs):
+            pick_info = self.infos[channel]
             if "len" not in pick_locs.columns:
-                pick_locs = postprocess.link(
+                pick_locs, pick_info = postprocess.link(
                     pick_locs,
-                    self.infos[channel],
+                    pick_info,
                     r_max=r_max,
                     max_dark_time=max_dark,
                 )
-            pick_locs = postprocess.compute_dark_times(pick_locs)
+            pick_locs, kinetics_info = postprocess.compute_dark_times(
+                pick_locs, pick_info
+            )
             dark[i] = lib.estimate_kinetic_rate(pick_locs["dark"].to_numpy())
             out_locs.append(pick_locs)
             progress.set_value(i + 1)
+        progress.close()
         out_locs = pd.concat(out_locs, ignore_index=True)
-        n_groups = len(clustered_locs)
         progress = lib.ProgressDialog(
-            "Calculating pick properties", 0, n_groups, self
+            "Calculating pick properties", 0, 0, self
         )
-        pick_props = postprocess.groupprops(
-            out_locs, callback=progress.set_value
-        )
+        try:
+            pick_props = postprocess.groupprops(out_locs, progress=progress)
+        finally:
+            progress.close()
         n_units = self.window.info_dialog.calculate_n_units(dark)
         pick_props["n_units"] = n_units
         influx = self.window.info_dialog.influx_rate.value()
-        info = self.infos[channel] + [
+        info = kinetics_info + [
             {
-                "Generated by": f"Picasso v{__version__}: Render",
+                **lib.step_info("Render"),
                 "Influx rate": influx,
             }
         ]
@@ -13972,29 +16866,15 @@ class View(QtWidgets.QLabel):
     @check_pick
     def analyze_cluster(self) -> None:
         """Clusters picked localizations using k-means clustering."""
-        channel = self.get_channel3d("Show Pick 3D")
+        channel = self.get_channel("Cluster in pick")
         removelist = []
         saved_locs = []
         clustered_locs = []
-        pixelsize = self.pixelsize
-        if channel is not None:
-            if channel is len(self.locs_paths):
-                all_picked_locs = [
-                    self.picked_locs(k) for k in range(len(self.locs_paths))
-                ]
-                if self._picks:
-                    removelist = self._analyze_cluster_combined(
-                        all_picked_locs, pixelsize
-                    )
-            else:
-                all_picked_locs = self.picked_locs(channel)
-                if self._picks:
-                    removelist, saved_locs, clustered_locs = (
-                        self._analyze_cluster_single(
-                            all_picked_locs,
-                            pixelsize,
-                        )
-                    )
+        if channel is not None and self._picks:
+            all_picked_locs = self.picked_locs(channel)
+            removelist, saved_locs, clustered_locs = (
+                self._analyze_cluster_single(all_picked_locs)
+            )
         if saved_locs:
             self._save_cluster_results(saved_locs, clustered_locs, channel)
         for pick in removelist:
@@ -14033,6 +16913,8 @@ class View(QtWidgets.QLabel):
             QtGui.QImage.Format.Format_RGBA8888,
         )
         self.setPixmap((QtGui.QPixmap(im)))
+        # shown in the view; pyplot keeps every figure until closed
+        plt.close(fig)
         self.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
 
     def _find_picks_outside_range(
@@ -14150,7 +17032,7 @@ class View(QtWidgets.QLabel):
         for i, pick in enumerate(self._picks):
             x, y = pick
             # extract locs at a given region - numba version
-            block_locs_xy = postprocess.get_block_locs_at_numba(
+            block_locs_xy = postprocess.get_block_locs_at(
                 int(x / r),
                 int(y / r),
                 locs_xy,
@@ -14159,7 +17041,7 @@ class View(QtWidgets.QLabel):
                 index_blocks[6],
                 index_blocks[7],
             )
-            pick_locs_xy = lib.locs_at_numba(x, y, block_locs_xy, r)
+            pick_locs_xy = lib.locs_in_circle(x, y, block_locs_xy, r)
             loccount[i] = pick_locs_xy.shape[1]
             progress.set_value(i)
         progress.close()
@@ -14239,10 +17121,43 @@ class View(QtWidgets.QLabel):
             channels = [channel]
         if 0 in channels:  # render by property splits the first channel
             self.x_locs = None
+        self.spt.invalidate(channel)
         # linked windows sharing a changed channel update theirs
         self.window.link_channels_changed(
             [(self.locs[i], i) for i in channels]
         )
+
+    def idle_busy(self) -> bool:
+        """Whether localizations load, channels are moved or a render
+        is due, when nothing is to be released (``picasso.gui.idle``)."""
+        return (
+            self._load_thread is not None
+            or bool(self._move_channels)
+            or self._refine_timer.isActive()
+        )
+
+    def release_idle_memory(self) -> bool:
+        """Drop the caches that are rebuilt on demand, while the GUI is
+        idle (see ``picasso.gui.idle``): the raw image of the last
+        render (the next contrast change renders anew), the first
+        channel split by property and the pick index blocks of channels
+        without a render index. The shown frame and the render index
+        stay. Returns False, releasing nothing, while busy."""
+        if self.idle_busy():
+            return False
+        self.image = None
+        # the next cache redraw renders the tight viewport, not the
+        # margin of the dropped asynchronous render
+        self._image_viewport = None
+        self.x_locs = None
+        # not invalidate_locs_index: linked windows would take that for
+        # changed localizations. n_channels, not locs: a linked window
+        # may have moved them to disk in this release already, and
+        # reading them back here would write them out a second time,
+        # leaving the windows with separate copies of shared channels
+        self.index_blocks = [None] * self.n_channels
+        self.spt.invalidate()  # the track segments, rebuilt when drawn
+        return True
 
     @check_pick
     def pick_areas(self) -> FloatArray1D:
@@ -14254,10 +17169,8 @@ class View(QtWidgets.QLabel):
             Areas of all picks. For circular and square picks all values
             are the same.
         """
-        px = self.pixelsize
         areas = lib.pick_areas(self._picks, self._pick_shape, self._pick_size)
-        areas *= (px * 1e-3) ** 2  # convert to um^2
-        return areas
+        return areas * 1e-6  # nm^2 to um^2
 
     def pick_fiducials(self) -> None:
         """Find the circular picks centered around the fiducials and
@@ -14288,9 +17201,8 @@ class View(QtWidgets.QLabel):
             QtWidgets.QMessageBox.warning(self, "Warning", message)
             return
 
-        self.window.tools_settings_dialog.pick_diameter.setValue(
-            box * self.pixelsize
-        )
+        # the box (nm) found around the fiducials becomes the diameter
+        self.window.tools_settings_dialog.pick_diameter.setValue(box)
         self.add_picks(picks)
 
     def plot_profile(self) -> None:
@@ -14314,22 +17226,15 @@ class View(QtWidgets.QLabel):
         selected."""
         self.profiles = []
         self.profile_channels = channels
-        pick_size = (
-            self._pick_size / 2
-            if self._pick_shape == "Circle"
-            else self._pick_size
-        )
         for channel in channels:
             picked_locs = postprocess.picked_locs(
                 self.locs[channel],
                 self.infos[channel],
                 picks=self._picks,
                 pick_shape=self._pick_shape,
-                pick_size=pick_size,
+                pick_size=self._pick_size,
             )[0]
-            self.profiles.append(
-                picked_locs["y_pick_rot"].to_numpy() * self.pixelsize
-            )
+            self.profiles.append(picked_locs["y_pick_rot"].to_numpy())
 
         # plot profiles
         self.canvas = lib.GenericPlotWindow("Pick profile", "render")
@@ -14574,21 +17479,20 @@ class View(QtWidgets.QLabel):
             pick.
         """
         if len(self._picks):
-            # initialize progress dialog
+            kwargs = self._picked_locs_kwargs(channel, add_group)
             progress = lib.ProgressDialog(
-                "Creating localization list", 0, len(self._picks), self
+                "Creating localization list", 0, 0, self
             )
-            progress.set_value(0)
-            return postprocess.picked_locs(
-                **self._picked_locs_kwargs(channel, add_group),
-                callback=progress.set_value,
-            )
+            try:
+                return postprocess.picked_locs(**kwargs, progress=progress)
+            finally:
+                progress.close()
 
     def _picked_locs_kwargs(
         self, channel: int, add_group: bool = True
     ) -> dict:
         """Arguments of ``postprocess.picked_locs`` for the current picks
-        in ``channel``, without the callback.
+        in ``channel``, without the progress tracker.
 
         Resolving the spatial index may build it (and show a dialog), so
         this runs on the GUI thread; the picking itself can then run on
@@ -14596,16 +17500,13 @@ class View(QtWidgets.QLabel):
         """
         index_blocks = None
         if self._pick_shape == "Circle":
-            pick_size = self._pick_size / 2
             index_blocks = self._pick_index(channel)
-        else:
-            pick_size = self._pick_size
         return dict(
             locs=self.locs[channel],
             info=self.infos[channel],
             picks=list(self._picks),
             pick_shape=self._pick_shape,
-            pick_size=pick_size,
+            pick_size=self._pick_size,
             add_group=add_group,
             index_blocks=index_blocks,
         )
@@ -14667,16 +17568,17 @@ class View(QtWidgets.QLabel):
         channel : int
             Index of the channel were localizations are removed.
         """
-        locs = self.locs[channel]
-        locs = postprocess.remove_locs_in_picks(
-            locs=locs,
-            info=self.infos[channel],
-            picks=self._picks,
-            pick_shape=self._pick_shape,
-            pick_size=self._pick_size,
-            index_blocks=self._pick_index(channel),
+        # a new list, the old one may be shared with linked windows
+        self.locs[channel], self.infos[channel] = (
+            postprocess.remove_locs_in_picks(
+                self.locs[channel],
+                self.infos[channel],
+                picks=self._picks,
+                pick_shape=self._pick_shape,
+                pick_size=self._pick_size,
+                index_blocks=self._pick_index(channel),
+            )
         )
-        self.locs[channel] = locs
         self.update_scene(resample_locs=True)
 
     def remove_polygon_point(self) -> None:
@@ -14794,8 +17696,8 @@ class View(QtWidgets.QLabel):
         contrast = None if autoscale else (vmin, vmax)
         raw_image = self.image if use_cache else None
         colors = self.read_colors()
-        relative_intensities = self.read_relative_intensities()
-        self._remember_color_range(locs, colors, relative_intensities, cmap)
+        channel_contrast = self.read_channel_contrast()
+        self._remember_color_range(locs, colors, channel_contrast, cmap)
 
         qimage, n_locs, (vmin, vmax), raw_image = render.render_scene(
             locs=locs,
@@ -14810,7 +17712,7 @@ class View(QtWidgets.QLabel):
             background_color=self.window.dataset_dialog.background_color,
             single_channel_colormap=cmap,
             colors=colors,
-            relative_intensities=relative_intensities,
+            channel_contrast=channel_contrast,
             raw_image_cache=raw_image,
             return_contrast_limits=True,
             return_raw_image=True,
@@ -14902,32 +17804,37 @@ class View(QtWidgets.QLabel):
 
         return colors
 
-    def read_relative_intensities(self) -> list[float]:
-        """Find currently selected relative intensities for multicolor
-        rendering.
+    def read_channel_contrast(self) -> list[tuple[float, float]]:
+        """Find the currently selected per-channel contrast for
+        multicolor rendering.
 
-        If multiple channels are loaded, ensure that only the ones which
-        are checked in the Dataset Dialog are rendered with their selected
-        relative intensities.
+        Only the channels which are checked in the Dataset Dialog are
+        included, each as a ``(low, high)`` fraction of the global
+        contrast window (see ``render.render_scene``).
 
-        If render by property is selected, the relative intensities are
-        set to 1 for all 'channels', i.e., colors.
+        If render by property is selected or a single channel is split
+        by its groups, every 'channel', i.e., color, uses the global
+        contrast.
 
         Returns
         -------
-        relative_intensities : list
-            List of relative intensities for each channel.
+        channel_contrast : list of tuple of float
+            ``(low, high)`` contrast window of each rendered channel.
         """
-        relative_intensities = [
-            self.window.dataset_dialog.intensitysettings[i].value()
+        dataset_dialog = self.window.dataset_dialog
+        channel_contrast = [
+            (
+                dataset_dialog.contrast_low[i].value() / 100,
+                dataset_dialog.contrast_high[i].value() / 100,
+            )
             for i in range(len(self.locs))
-            if self.window.dataset_dialog.checks[i].isChecked()
+            if dataset_dialog.checks[i].isChecked()
         ]
         if self.x_render_state:
-            relative_intensities = [1.0] * len(self.property_locs())
+            channel_contrast = [(0.0, 1.0)] * len(self.property_locs())
         elif len(self.locs) == 1 and "group" in self.locs[0].columns:
-            relative_intensities = [1.0] * N_GROUP_COLORS
-        return relative_intensities
+            channel_contrast = [(0.0, 1.0)] * N_GROUP_COLORS
+        return channel_contrast
 
     def _render_by_property_locs(
         self,
@@ -15000,6 +17907,19 @@ class View(QtWidgets.QLabel):
             infos = infos[0]
         return locs, infos
 
+    def _single_channel_mode(self) -> str | None:
+        """How a single loaded channel is rendered: "property" (render
+        by property), "group" (split by its group column) or
+        "colormap" (the Display settings colormap); None if several
+        channels are loaded."""
+        if len(self.locs) != 1:
+            return None
+        if self.window.display_settings_dlg.render_check.isChecked():
+            return "property"
+        if "group" in self.locs[0].columns:
+            return "group"
+        return "colormap"
+
     def _prepare_locs_for_rendering(
         self,
         viewport: (
@@ -15035,6 +17955,9 @@ class View(QtWidgets.QLabel):
         # if multiple channels are loaded, selected only the ones which
         # are checked in the Dataset Dialog
         locs, infos = self._filter_checked_channels(locs, infos)
+        self.window.dataset_dialog.set_single_channel_mode(
+            self._single_channel_mode()
+        )
         return locs, infos
 
     def resizeEvent(self, event: QtGui.QResizeEvent) -> None:
@@ -15049,11 +17972,7 @@ class View(QtWidgets.QLabel):
         pick_info : dict
             Dictionary to update with shape-specific info.
         """
-        picksize_nm = (
-            self._pick_size * self.pixelsize
-            if self._pick_size is not None
-            else None
-        )
+        picksize_nm = self._pick_size  # None for polygons, boxes, brush
         if self._pick_shape == "Circle":
             pick_info["Pick Diameter (nm)"] = picksize_nm
         elif self._pick_shape == "Rectangle":
@@ -15069,8 +17988,8 @@ class View(QtWidgets.QLabel):
             pick_info["Number of picks"] -= 1
 
     def _picks_dict(self, picks: list | None = None) -> dict:
-        """Build the dictionary describing pick regions, in the format
-        used by ``save_picks`` and read by ``io.load_picks``.
+        """The dictionary describing pick regions (nm), in the format of
+        the picks .yaml files, see ``io.picks_dict``.
 
         Parameters
         ----------
@@ -15084,54 +18003,7 @@ class View(QtWidgets.QLabel):
         """
         if picks is None:
             picks = self._picks
-        regions = {}
-        pixelsize = self.pixelsize
-        if self._pick_shape == "Circle":
-            d = self._pick_size * pixelsize
-            regions["Diameter (nm)"] = float(d)
-            regions["Centers"] = [[float(_[0]), float(_[1])] for _ in picks]
-        elif self._pick_shape == "Rectangle":
-            w = self._pick_size * pixelsize
-            regions["Width (nm)"] = float(w)
-            regions["Center-Axis-Points"] = [
-                [
-                    [float(s[0]), float(s[1])],
-                    [float(e[0]), float(e[1])],
-                ]
-                for s, e in picks
-            ]
-        elif self._pick_shape == "Polygon":
-            vertices = []
-            for pick in picks:
-                if len(pick):
-                    vertices.append([[float(v[0]), float(v[1])] for v in pick])
-            regions["Vertices"] = vertices
-        elif self._pick_shape == "Square":
-            a = self._pick_size * pixelsize
-            regions["Side Length (nm)"] = float(a)
-            regions["Centers"] = [[float(_[0]), float(_[1])] for _ in picks]
-        elif self._pick_shape == "Box":
-            # each box carries its own extent, so no size is saved
-            regions["Corners"] = [
-                [
-                    [float(c0[0]), float(c0[1])],
-                    [float(c1[0]), float(c1[1])],
-                ]
-                for c0, c1 in picks
-            ]
-        elif self._pick_shape == "Brush":
-            # a flat, ordered stroke list: which strokes form one pick
-            # follows from their geometry and is re-derived on loading
-            regions["Strokes"] = [
-                {
-                    "Width (nm)": float(stroke[0] * pixelsize),
-                    "Path": [[float(x), float(y)] for x, y in stroke[1]],
-                }
-                for pick in picks
-                for stroke in pick
-            ]
-        regions["Shape"] = self._pick_shape
-        return regions
+        return io.picks_dict(picks, self._pick_shape, self._pick_size)
 
     def _add_picks_to_info(
         self, pick_info: dict, picks: list | None = None
@@ -15171,7 +18043,7 @@ class View(QtWidgets.QLabel):
         else:
             areas_ = areas
         pick_info = {
-            "Generated by": f"Picasso v{__version__} Render : Pick",
+            **lib.step_info("Render : Pick"),
             "Pick Shape": self._pick_shape,
             "Pick Areas (um^2)": [float(_) for _ in areas_],
             "Area (um^2)": float(np.sum(areas)),
@@ -15222,7 +18094,7 @@ class View(QtWidgets.QLabel):
             areas = self.pick_areas()
             for i, pick_locs in enumerate(locs):
                 pick_info = {
-                    "Generated by": f"Picasso v{__version__} Render : Pick",
+                    **lib.step_info("Render : Pick"),
                     "Pick Shape": self._pick_shape,
                     "Area (um^2)": float(areas[i]),
                 }
@@ -15284,7 +18156,7 @@ class View(QtWidgets.QLabel):
             areas = self.pick_areas()
             for i, pick_locs in enumerate(locs):
                 pick_info = {
-                    "Generated by": f"Picasso v{__version__} Render : Pick",
+                    **lib.step_info("Render : Pick"),
                     "Pick Shape": self._pick_shape,
                     "Area (um^2)": float(areas[i]),
                     "Channels combined": self.locs_paths,
@@ -15339,7 +18211,7 @@ class View(QtWidgets.QLabel):
         n_picks = len(self._picks)
         influx = self.window.info_dialog.influx_rate.value()
         max_dark_time = self.window.info_dialog.max_dark_time.value()
-        gen_by = f"Picasso v{__version__}: Render Pick Properties"
+        step = "Render : Pick properties"
         inputs = []  # (path, info, locs or picking arguments)
         for path, channel in jobs:
             if n_picks:
@@ -15352,34 +18224,25 @@ class View(QtWidgets.QLabel):
             for path, info, source in inputs:
                 if n_picks:
                     picked_locs = postprocess.picked_locs(
-                        **source,
-                        callback=progress.callback(
-                            "Creating localization list", n_picks
-                        ),
+                        **source, progress=progress
                     )
                 else:
-                    progress.phase("Grouping localizations", 0)
+                    lib.start_phase(progress, "Grouping localizations", 0)
                     picked_locs = [
                         source[source["group"] == i]
                         for i in np.unique(source["group"])
                     ]
-                n = len(picked_locs)
                 pick_props = postprocess.pick_properties(
                     picked_locs=picked_locs,
                     info=info,
                     max_dark_time=max_dark_time,
                     influx_rate=influx,
                     pick_areas=pick_areas,
-                    kinetics_progress=progress.callback(
-                        "Calculating kinetics", n
-                    ),
-                    groupprops_progress=progress.callback(
-                        "Calculating pick properties", n
-                    ),
+                    progress=progress,
                 )
                 progress.check_canceled()
                 new_info = info + [
-                    {"Generated by": gen_by, "Influx rate": influx}
+                    lib.step_info(step, **{"Influx rate": influx})
                 ]
                 io.save_datasets(path, new_info, groups=pick_props)
 
@@ -15400,8 +18263,7 @@ class View(QtWidgets.QLabel):
         """
         if len(self._picks) == 0:
             return
-        with open(path, "w") as f:
-            yaml.dump(self._picks_dict(), f)
+        io.save_picks(path, self._picks, self._pick_shape, self._pick_size)
 
     def activate_render_property(self) -> None:
         """Assign localizations by color to render a chosen property."""
@@ -15521,16 +18383,19 @@ class View(QtWidgets.QLabel):
         self.update_scene(picks_only=True)
         self.update_pick_info_short()
 
-    def set_zoom(self, zoom: float) -> None:
-        """Zoom in/out by the given factor.
+    def display_width(self) -> float:
+        """Return the width (nm) of the region shown in the window."""
+        return self.width() / self.display_pixels_per_viewport_pixels()
+
+    def set_display_width(self, width: float) -> None:
+        """Zoom so that the window shows a region ``width`` nm wide.
 
         Parameters
         ----------
-        zoom : float
-            Zoom factor.
+        width : float
+            Width of the region shown in the window (nm).
         """
-        current_zoom = self.display_pixels_per_viewport_pixels()
-        self.zoom(current_zoom / zoom)
+        self.zoom(width / self.display_width())
 
     def set_optimal_scalebar(
         self, force: bool = False, silent: bool = False
@@ -15540,9 +18405,8 @@ class View(QtWidgets.QLabel):
             self.window.display_settings_dlg.optimal_scalebar_check.isChecked()
         )
         if force or optimal_scalebar_checked:
-            pixelsize = self.pixelsize
             width = render.viewport_width(self.viewport)
-            scalebar = render.optimal_scalebar_length(pixelsize, width)
+            scalebar = render.optimal_scalebar_length(width)
             scalebar_spinbox = self.window.display_settings_dlg.scalebar
             scalebar_spinbox.blockSignals(True)
             scalebar_spinbox.setValue(scalebar)
@@ -15599,11 +18463,9 @@ class View(QtWidgets.QLabel):
             return
 
         # get parameters for AIM
-        params, ok = AIMDialog.getParams(self.window)
+        params, ok = AIMDialog.getParams(self.window)  # nm
         if not ok:
             return
-        params["intersect_d"] = params["intersect_d"] / self.pixelsize
-        params["roi_r"] = params["roi_r"] / self.pixelsize
 
         if channel == len(self.locs_paths):  # apply to all channels
             channels = list(range(len(self.locs_paths)))
@@ -15614,11 +18476,6 @@ class View(QtWidgets.QLabel):
         def compute(progress: lib.TaskProgress) -> list[tuple]:
             results = []
             for c, locs, info in jobs:
-                n_frames = lib.get_from_metadata(
-                    info, "Frames", raise_error=True
-                )
-                n_segments = int(np.ceil(n_frames / params["segmentation"]))
-                progress.phase("Undrifting by AIM (1/2)", n_segments)
                 new_locs, new_info, drift = aim.aim(
                     locs, info, **params, progress=progress
                 )
@@ -15638,7 +18495,7 @@ class View(QtWidgets.QLabel):
 
         lib.run_task(
             compute,
-            "Undrifting by AIM (1/2)",
+            "Undrifting by AIM",
             self.window,
             apply,
             title="Undrift by AIM",
@@ -15665,26 +18522,26 @@ class View(QtWidgets.QLabel):
         def compute(progress: lib.TaskProgress) -> list[tuple]:
             results = []
             for c, locs, info in jobs:
-                n_segments = postprocess.n_segments(info, segmentation)
-                n_pairs = int(n_segments * (n_segments - 1) / 2)
-                # the undrifted locs are ignored, since _apply_drift
-                # assigns them together with the drift attributes
-                drift, _ = postprocess.undrift(
+                new_locs, new_info, drift = postprocess.undrift(
                     locs,
                     info,
-                    segmentation,
-                    False,
-                    progress.callback("Generating segments", n_segments),
-                    progress.callback("Correlating image pairs", n_pairs),
+                    segmentation=segmentation,
+                    display=False,
+                    progress=progress,
                 )
-                results.append((c, drift))
+                results.append((c, new_locs, new_info, drift))
             return results
 
         def apply(results: list[tuple]) -> None:
-            for c, drift in results:
+            for c, locs, new_info, drift in results:
+                self.locs[c] = locs
+                # a new list, the old one may be shared with linked windows
+                self.infos[c] = new_info
                 self.invalidate_locs_index(c)
                 self.add_drift(c, drift)
-                self._apply_drift(c, drift)
+                self._drift[c] = drift
+                self.currentdrift[c] = copy.copy(drift)
+            self.update_scene(resample_locs=True)
             if len(channels) == 1:
                 self.show_drift()
 
@@ -15715,9 +18572,15 @@ class View(QtWidgets.QLabel):
         used as a reference. Returns None if canceled."""
         ref_channel = 0 if channel == len(self.locs_paths) else channel
         n_frames = self.infos[ref_channel][0]["Frames"]
-        default_segmentation = int(n_frames / 4) if n_frames < 1000 else 1000
+        # at most a quarter of the movie: RCC needs at least 4 segments
+        default_segmentation = min(1000, int(n_frames) // 4)
         segmentation, ok = QtWidgets.QInputDialog.getInt(
-            self, "Undrift by RCC", "Segmentation:", default_segmentation
+            self,
+            "Undrift by RCC",
+            "Segmentation:",
+            max(1, default_segmentation),
+            1,
+            max(1, int(n_frames)),
         )
         return segmentation if ok else None
 
@@ -15766,10 +18629,7 @@ class View(QtWidgets.QLabel):
         undrift_z : bool
             Whether to also undrift in z (ignored for 2D data).
         """
-        pick_shape = self._pick_shape
-        pick_size = (
-            self._pick_size / 2 if pick_shape == "Circle" else self._pick_size
-        )
+        pick_shape, pick_size = self._pick_shape, self._pick_size
         picks = list(self._picks)
         jobs = [  # channel, locs, info, index
             (
@@ -15870,7 +18730,7 @@ class View(QtWidgets.QLabel):
         drift["y"] = -drift["y"]
         if "z" in drift.columns:
             drift["z"] = -drift["z"]
-        self.locs[channel] = postprocess.apply_drift(
+        self.locs[channel], _ = postprocess.apply_drift(
             self.locs[channel], self.infos[channel], drift=drift
         )
         self.invalidate_locs_index(channel)
@@ -15919,14 +18779,18 @@ class View(QtWidgets.QLabel):
                 directory=self.locs_paths[channel],
             )
             if path:
-                drift = io.load_drift(path)
+                drift = self._read_drift_file(path, channel)
+                if drift is None:  # canceled
+                    return
                 self._apply_drift(channel, drift)
                 self._driftfiles[channel] = path
 
     def _apply_drift(self, channel: int, drift: pd.DataFrame) -> None:
         """Shift localizations in a given channel based on drift from a
-        .txt file."""
-        self.locs[channel] = postprocess.apply_drift(
+        .txt file. The drift is recorded in the metadata on saving
+        (``Last driftfile``)."""
+        # a new list, the old one may be shared with linked windows
+        self.locs[channel], self.infos[channel] = postprocess.apply_drift(
             self.locs[channel], self.infos[channel], drift=drift
         )
         self._drift[channel] = drift
@@ -15955,13 +18819,14 @@ class View(QtWidgets.QLabel):
             )
             return
 
-        # automatically assign the group if picks are present
+        # automatically assign the group if picks are present; the
+        # localizations change only once the user confirmed
         if "group" not in self.locs[0].columns and len(self._picks):
             locs = self.picked_locs(0, add_group=True)
             locs = pd.concat(locs, ignore_index=True)
-            self.locs[0] = locs
             remove_group = True
         elif "group" in self.locs[0].columns:
+            locs = self.locs[0]
             remove_group = False
         else:
             QtWidgets.QMessageBox.information(
@@ -15979,12 +18844,10 @@ class View(QtWidgets.QLabel):
             self,
             "Input Dialog",
             "Set number of elements per column:",
-            int(np.ceil(np.sqrt(len(np.unique(self.locs[0]["group"]))))),
-            max=len(np.unique(self.locs[0]["group"])),
+            int(np.ceil(np.sqrt(len(np.unique(locs["group"]))))),
+            max=len(np.unique(locs["group"])),
         )
         if not ok:
-            if remove_group:
-                self.locs[0].drop(columns="group", inplace=True)
             return
         spacing, ok = QtWidgets.QInputDialog.getInt(
             self,
@@ -15993,14 +18856,11 @@ class View(QtWidgets.QLabel):
             250,
         )
         if not ok:
-            if remove_group:
-                self.locs[0].drop(columns="group", inplace=True)
             return
-        spacing /= self.pixelsize
 
-        self.locs[0], self.infos[0][0] = lib.unfold_localizations_square(
-            locs=self.locs[0],
-            info=self.infos[0][0],
+        self.locs[0], self.infos[0] = lib.unfold_localizations_square(
+            locs,
+            self.infos[0],
             n_square=n_square,
             spacing=spacing,
         )
@@ -16016,8 +18876,8 @@ class View(QtWidgets.QLabel):
         Parameters
         ----------
         size : float
-            Diameter of the cursor in camera pixels: the pick diameter
-            for circular picks, the stroke width for brush picks.
+            Diameter of the cursor in nm: the pick diameter for circular
+            picks, the stroke width for brush picks.
         """
         diameter = int(
             self.width() * size / render.viewport_width(self.viewport)
@@ -16126,28 +18986,22 @@ class View(QtWidgets.QLabel):
         if channel is None:
             return
         pick_kwargs = self._picked_locs_kwargs(channel)
-        n_picks = len(self._picks)
         info = self.infos[channel]
         max_dark_time = self.window.info_dialog.max_dark_time.value()
         is_3d = "z" in self.locs[channel].columns
 
         def compute(progress: lib.TaskProgress) -> tuple:
             picked_locs = postprocess.picked_locs(
-                **pick_kwargs,
-                callback=progress.callback(
-                    "Creating localization list", n_picks
-                ),
+                **pick_kwargs, progress=progress
             )
             stats = postprocess.evaluate_picks(
                 picked_locs=picked_locs,
                 info=info,
                 max_dark_time=max_dark_time,
-                progress_callback=progress.callback(
-                    "Calculating pick statistics", n_picks
-                ),
+                progress=progress,
             )
             new_locs = stats[-1]
-            progress.phase("Fitting kinetics", 0)
+            lib.start_phase(progress, "Fitting kinetics", 0)
             fit_result_len = lib.fit_cum_exp(new_locs["len"].to_numpy())
             fit_result_dark = lib.fit_cum_exp(new_locs["dark"].to_numpy())
             return stats, fit_result_len, fit_result_dark
@@ -16157,7 +19011,6 @@ class View(QtWidgets.QLabel):
             "Creating localization list",
             self,
             lambda result: self._show_pick_info_long(is_3d, *result),
-            maximum=n_picks,
         )
 
     def _show_pick_info_long(
@@ -16244,7 +19097,7 @@ class View(QtWidgets.QLabel):
         self.scene_requested.emit()
         # Clear slicer cache
         self.window.slicer_dialog.slicer_cache = {}
-        if len(self.locs):
+        if self.n_channels:  # a redraw of the picks reads nothing back
             if resample_locs:
                 self.invalidate_locs_index()
             viewport = viewport or self.viewport
@@ -16351,11 +19204,22 @@ class View(QtWidgets.QLabel):
             self.zoom(scale, cursor_position=position)
 
     @property
-    def pixelsize(self) -> float:
-        if hasattr(self.window, "display_settings_dlg"):
-            return self.window.display_settings_dlg.pixelsize.value()
-        else:
-            return 100
+    def pixelsizes(self) -> list[float]:
+        """Camera pixel size (nm) of each channel, from its metadata
+        (``Pixelsize``). Coordinates are in nm; the pixel size
+        defines the camera grid (field of view, identifications) and
+        converts files written before Picasso 1.0."""
+        pixelsizes = []
+        for info in self.infos:
+            pixelsize = lib.get_from_metadata(info, "Pixelsize")
+            pixelsizes.append(None if pixelsize is None else float(pixelsize))
+        return pixelsizes
+
+    def default_pixelsize(self) -> float:
+        """Camera pixel size (nm) offered when a file does not record
+        it: the last loaded channel's, else 130 nm."""
+        pixelsizes = [_ for _ in self.pixelsizes if _ is not None]
+        return pixelsizes[-1] if pixelsizes else 130.0
 
 
 class Window(QtWidgets.QMainWindow):
@@ -16367,6 +19231,15 @@ class Window(QtWidgets.QMainWindow):
     ----------
     actions_3d : list
         Specifies actions that are displayed for 3D data only.
+    color_vision : str or None
+        Color vision deficiency simulated on screen (main and 3D
+        window), see ``set_color_vision``; None for normal vision.
+    contrast_bar : QWidget
+        Holds ``contrast_slider`` and its Auto button below the view;
+        shown if ``contrast_slider`` is on in the user settings.
+    contrast_slider : DensityContrastSlider
+        Slider for the minimum and maximum density, bound to the spin
+        boxes of ``display_settings_dlg``.
     data_actions : list of QAction
         Actions of the View, Tools and Postprocess menus, which the
         toolbar may show, enabled once a file is loaded.
@@ -16402,11 +19275,11 @@ class Window(QtWidgets.QMainWindow):
     window_rot : RotationWindow
         Instance of the class for displaying 3D data with rotation.
     x_spiral : dict[int, np.array]
-        x coordinates before the last spiral action in ``ApplyDialog``,
-        keyed by channel index.
+        x displacement (nm) of the last spiral action in
+        ``ApplyDialog``, keyed by channel index.
     y_spiral : dict[int, np.array]
-        y coordinates before the last spiral action in ``ApplyDialog``,
-        keyed by channel index.
+        y displacement (nm) of the last spiral action in
+        ``ApplyDialog``, keyed by channel index.
     """
 
     DOCS_URL = docs_url("render.html")
@@ -16425,9 +19298,151 @@ class Window(QtWidgets.QMainWindow):
         # windows opened as linked windows never close the application
         self._is_secondary = link_group is not None
         self.link_group = None
+        self.color_vision = None
         self.initUI(plugins_loaded)
         if link_group is not None:
             link_group.add(self)
+
+    def _build_contrast_bar(self) -> QtWidgets.QWidget:
+        """Build the contrast slider shown below the view (if the user
+        settings ask for it, see ``apply_contrast_slider_setting``).
+
+        The slider is a second view onto the minimum and maximum density
+        of the display settings dialog, like the slider in the dialog;
+        the Auto button next to it autoscales the contrast once. Its
+        colors follow the image's background, see
+        ``style_contrast_bar``.
+
+        Returns
+        -------
+        contrast_bar : QWidget
+            The slider and the Auto button, hidden until
+            ``apply_contrast_slider_setting`` runs.
+        """
+        dialog = self.display_settings_dlg
+        self.contrast_slider = lib.DensityContrastSlider(
+            dialog.minimum,
+            dialog.maximum,
+            image=lambda: getattr(self.view, "image", None),
+        )
+        self.contrast_slider.setToolTip(
+            "Drag the minimum and maximum density rendered (localizations"
+            " per display pixel)."
+        )
+        self._contrast_auto_button = QtWidgets.QToolButton()
+        auto_button = self._contrast_auto_button
+        auto_button.setText("Auto")
+        auto_button.setToolTip("Set the contrast automatically.")
+        font = auto_button.font()
+        font.setPointSizeF(font.pointSizeF() * 0.8)
+        auto_button.setFont(font)
+        auto_button.setFixedHeight(
+            max(15, auto_button.fontMetrics().height() + 2)
+        )
+        auto_button.clicked.connect(self._autoscale_contrast)
+        contrast_bar = QtWidgets.QWidget()
+        contrast_bar.setObjectName("contrastBar")
+        # paints the background of its style sheet (a plain QWidget
+        # does not), see ``style_contrast_bar``
+        contrast_bar.setAttribute(
+            QtCore.Qt.WidgetAttribute.WA_StyledBackground, True
+        )
+        layout = QtWidgets.QHBoxLayout(contrast_bar)
+        layout.setContentsMargins(4, 2, 4, 2)
+        layout.setSpacing(4)
+        layout.addWidget(self.contrast_slider)
+        layout.addWidget(auto_button)
+        contrast_bar.setVisible(False)
+        return contrast_bar
+
+    def style_contrast_bar(self, background: np.ndarray | None) -> None:
+        """Color the contrast bar like the background of the rendered
+        image, so that it continues the image instead of the window.
+
+        The groove, the outline and the text of the Auto button are
+        light on a dark background and dark on a light one; the handles
+        keep the accent color.
+
+        Parameters
+        ----------
+        background : np.ndarray or None
+            RGB color (uint8) of shape ``(3,)`` of pixels without
+            localizations, see ``render.color_range``. None restores the
+            colors of the theme, e.g., while nothing is rendered.
+        """
+        if background is None:
+            self._contrast_bar_color = None
+            self.contrast_bar.setStyleSheet("")
+            self.contrast_slider.setPalette(QtGui.QPalette())
+            self._contrast_auto_button.setStyleSheet(
+                """
+                QToolButton {
+                    border: 1px solid palette(mid);
+                    border-radius: 3px;
+                    padding: 0px 4px;
+                    background: transparent;
+                }
+                QToolButton:pressed {
+                    border-color: palette(highlight);
+                    background: palette(highlight);
+                    color: palette(highlighted-text);
+                }
+                """
+            )
+            return
+        r, g, b = (int(c) for c in background[:3])
+        if getattr(self, "_contrast_bar_color", None) == (r, g, b):
+            return
+        self._contrast_bar_color = (r, g, b)
+        # perceived lightness (Rec. 709 luma) decides light or dark text
+        light = 0.2126 * r + 0.7152 * g + 0.0722 * b > 127.5
+        fg = (0, 0, 0) if light else (255, 255, 255)
+        # the groove and the outline: the text color, blended into the
+        # background
+        mid = tuple(round(0.65 * c + 0.35 * f) for c, f in zip((r, g, b), fg))
+        dim = tuple(round(0.8 * c + 0.2 * f) for c, f in zip((r, g, b), fg))
+        bg_css = f"rgb({r}, {g}, {b})"
+        fg_css = "rgb({}, {}, {})".format(*fg)
+        mid_css = "rgb({}, {}, {})".format(*mid)
+        self.contrast_bar.setStyleSheet(
+            f"#contrastBar {{ background: {bg_css}; }}"
+        )
+        palette = self.contrast_slider.palette()
+        palette.setColor(QtGui.QPalette.ColorRole.Mid, QtGui.QColor(*mid))
+        palette.setColor(
+            QtGui.QPalette.ColorGroup.Disabled,
+            QtGui.QPalette.ColorRole.Midlight,
+            QtGui.QColor(*dim),
+        )
+        self.contrast_slider.setPalette(palette)
+        self._contrast_auto_button.setStyleSheet(
+            f"""
+            QToolButton {{
+                border: 1px solid {mid_css};
+                border-radius: 3px;
+                padding: 0px 4px;
+                background: transparent;
+                color: {fg_css};
+            }}
+            QToolButton:pressed {{
+                border-color: palette(highlight);
+                background: palette(highlight);
+                color: palette(highlighted-text);
+            }}
+            """
+        )
+
+    def _autoscale_contrast(self) -> None:
+        """Re-render with the contrast set automatically."""
+        if self.view.locs:
+            self.view.update_scene(autoscale=True)
+
+    def apply_contrast_slider_setting(self) -> None:
+        """Show or hide the contrast slider below the view, as set by
+        ``contrast_slider`` in the user settings (hidden by default)."""
+        self.contrast_bar.setVisible(
+            lib.contrast_slider_setting("Render", False)
+        )
 
     def setWindowTitle(self, title: str) -> None:
         """Set the window title; linked windows are numbered.
@@ -16459,7 +19474,14 @@ class Window(QtWidgets.QMainWindow):
         self.setWindowIcon(icon)
         self.view = View(self)  # displays rendered locs
         self.view.setMinimumSize(1, 1)
-        self.setCentralWidget(self.view)
+        # the contrast slider is added below the view once the display
+        # settings dialog, whose spin boxes it is bound to, exists
+        central_widget = QtWidgets.QWidget()
+        central_layout = QtWidgets.QVBoxLayout(central_widget)
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
+        central_layout.addWidget(self.view)
+        self.setCentralWidget(central_widget)
 
         # User-defined colormaps, keyed by name, each a list of
         # [position, R, G, B] stops in [0, 1]. Populated from
@@ -16471,6 +19493,11 @@ class Window(QtWidgets.QMainWindow):
 
         # set up dialogs
         self.display_settings_dlg = DisplaySettingsDialog(self)
+        self.contrast_bar = self._build_contrast_bar()
+        # in the colors of the theme until the first render
+        self._contrast_bar_color = None
+        self.style_contrast_bar(None)
+        central_layout.addWidget(self.contrast_bar)
         self.tools_settings_dialog = ToolsSettingsDialog(self)
         self.view._pick_shape = (
             self.tools_settings_dialog.pick_shape.currentText()
@@ -16487,6 +19514,9 @@ class Window(QtWidgets.QMainWindow):
         self.window_rot = RotationWindow(self)
         self.test_clusterer_dialog = TestClustererDialog(self)
         self.user_settings_dialog = lib.UserSettingsDialog(self)
+        self.user_settings_dialog.saved.connect(
+            self.apply_contrast_slider_setting
+        )
 
         self.dialogs = [
             self.display_settings_dlg,
@@ -16565,32 +19595,16 @@ class Window(QtWidgets.QMainWindow):
         if IMSWRITER:
             export_ims_action = file_menu.addAction("Export ROI for Imaris...")
             export_ims_action.triggered.connect(self.export_fov_ims)
+        file_menu.addSeparator()
+        convert_units_action = file_menu.addAction("Convert files to nm...")
+        convert_units_action.setToolTip(
+            "Convert files written before Picasso 1.0 (camera pixels) to nm."
+        )
+        convert_units_action.triggered.connect(self.convert_units)
 
         # sound notification submenu
         file_menu.addSeparator()
-        sounds_menu = file_menu.addMenu("Sound notifications")
-        sounds_menu.setIcon(theme.icon("sound"))
-        sounds_actiongroup = QtGui.QActionGroup(self.menu_bar)
-        default_sound_path = lib.get_sound_notification_path()  # last used
-        default_sound_name = os.path.basename(str(default_sound_path))
-        for sound in lib.get_available_sound_notifications():
-            sound_name = os.path.splitext(str(sound))[0].replace("_", " ")
-            action = sounds_actiongroup.addAction(
-                QtGui.QAction(sound_name, sounds_menu, checkable=True)
-            )
-            action.setObjectName(sound)  # store full name
-            if default_sound_name == sound:
-                action.setChecked(True)
-            sounds_menu.addAction(action)
-        sounds_actiongroup.triggered.connect(lib.set_sound_notification)
-        sounds_menu.addSeparator()
-        open_sounds_action = sounds_menu.addAction(
-            "Open notification sounds folder..."
-        )
-        open_sounds_action.setIcon(theme.icon("open"))
-        open_sounds_action.triggered.connect(
-            lib.open_sound_notifications_folder
-        )
+        lib.add_sound_notifications_menu(file_menu)
 
         # remove all locs
         file_menu.addSeparator()
@@ -16599,7 +19613,7 @@ class Window(QtWidgets.QMainWindow):
         delete_action.setShortcuts(
             ["Ctrl+Shift+Backspace", "Ctrl+Shift+Delete"]
         )
-        delete_action.triggered.connect(self.remove_locs)
+        delete_action.triggered.connect(self.ask_remove_locs)
 
         picasso_settings_action = file_menu.addAction("Picasso settings...")
         picasso_settings_action.setIcon(theme.icon("picasso-settings"))
@@ -16626,6 +19640,7 @@ class Window(QtWidgets.QMainWindow):
         dataset_action.triggered.connect(self.dataset_dialog.show)
         overlay_action = view_menu.addAction("Overlay image...")
         overlay_action.triggered.connect(self.open_image_overlay)
+        self.add_color_vision_menu(view_menu)
 
         # moving and zooming are not in the menu (the mouse does them),
         # but their shortcuts work in the whole window; a rebuilt UI
@@ -16733,6 +19748,10 @@ class Window(QtWidgets.QMainWindow):
         clear_picks_action = tools_menu.addAction("Clear picks")
         clear_picks_action.triggered.connect(self.view.clear_picks)
         clear_picks_action.setShortcut("Ctrl+C")
+
+        clear_measure_action = tools_menu.addAction("Clear measurements")
+        clear_measure_action.triggered.connect(self.view.remove_points)
+        clear_measure_action.setShortcut("Ctrl+Shift+C")
 
         remove_locs_picks_action = tools_menu.addAction(
             "Remove localizations in picks"
@@ -16855,6 +19874,8 @@ class Window(QtWidgets.QMainWindow):
         )
         align_action.setIcon(theme.icon("align"))
         align_action.triggered.connect(self.view.align)
+        stitch_action = postprocess_menu.addAction("Stitch tiles...")
+        stitch_action.triggered.connect(self.view.stitch)
         combine_action = postprocess_menu.addAction(
             "Combine localizations in picks"
         )
@@ -16878,20 +19899,60 @@ class Window(QtWidgets.QMainWindow):
         clusterer_action.triggered.connect(self.view.smlm_clusterer)
         test_cluster_action = clustering_menu.addAction("Test clustering...")
         test_cluster_action.triggered.connect(self.test_clusterer_dialog.show)
+        spt_menu = postprocess_menu.addMenu("Single-particle tracking")
+        track_action = spt_menu.addAction("Track particles...")
+        track_action.triggered.connect(lambda: self.view.spt.track())
+        analyze_tracks_action = spt_menu.addAction(
+            "Analyze tracks (MSD, jump distances)..."
+        )
+        analyze_tracks_action.triggered.connect(
+            lambda: self.view.spt.analyze()
+        )
 
         postprocess_menu.addSeparator()
         nn_action = postprocess_menu.addAction(
             "Calculate nearest neighbor distances..."
         )
         nn_action.triggered.connect(self.view.nearest_neighbor)
+        cbc_action = postprocess_menu.addAction(
+            "Coordinate-based colocalization (CBC)..."
+        )
+        cbc_action.triggered.connect(self.view.cbc)
 
         postprocess_menu.addSeparator()
         resi_action = postprocess_menu.addAction("RESI...")
         resi_action.triggered.connect(self.open_resi_dialog)
-
-        postprocess_menu.addSeparator()
         g5m_action = postprocess_menu.addAction("Molecular mapping (G5M)...")
         g5m_action.triggered.connect(self.view.g5m)
+        spatial_menu = postprocess_menu.addMenu("Spatial statistics")
+        ripley_h_action = spatial_menu.addAction("Ripley's H function...")
+        ripley_h_action.setToolTip(
+            "Whether the localizations are clustered, randomly"
+            " distributed or dispersed, and on which length scales."
+        )
+        ripley_h_action.triggered.connect(
+            lambda: self.view.spatial_statistic("ripley_h")
+        )
+        rdf_action = spatial_menu.addAction(
+            "Radial distribution function (RDF)..."
+        )
+        rdf_action.setToolTip(
+            "Density of neighbors at each distance from a localization,"
+            " relative to the mean density."
+        )
+        rdf_action.triggered.connect(
+            lambda: self.view.spatial_statistic("rdf")
+        )
+        nnd_action = spatial_menu.addAction(
+            "Nearest neighbor distances (all channels)..."
+        )
+        nnd_action.setToolTip(
+            "Distributions of the 1st nearest neighbor distances within"
+            " and between channels, compared with random simulations."
+        )
+        nnd_action.triggered.connect(
+            lambda: self.view.spatial_statistic("nnd")
+        )
 
         self.load_user_settings()
         # the Render keys the settings file does not name yet are
@@ -16997,6 +20058,7 @@ class Window(QtWidgets.QMainWindow):
                 self.link_group.remove(self, detach_data=False)
             if self in Window._secondary_windows:
                 Window._secondary_windows.remove(self)
+            toolbars.clear_toolbars(self)
             self.deleteLater()
             event.accept()
             return
@@ -17022,6 +20084,15 @@ class Window(QtWidgets.QMainWindow):
         settings["Render"][
             "ToolStyles"
         ] = self.tools_settings_dialog.overlay_style_settings()
+        settings["Render"][
+            "Grid"
+        ] = self.display_settings_dlg.grid_box.settings()
+        settings["Render"][
+            "Grid3D"
+        ] = self.window_rot.display_settings_dlg.grid_box.settings()
+        settings["Render"][
+            "Tracks"
+        ] = self.display_settings_dlg.tracks_box.settings()
         io.save_user_settings(settings)
         QtWidgets.QApplication.instance().closeAllWindows()
 
@@ -17034,7 +20105,8 @@ class Window(QtWidgets.QMainWindow):
             checked_channels = [
                 _.isChecked() for _ in self.dataset_dialog.checks
             ]
-            idx = checked_channels.index(True)
+            # the first channel if none is shown
+            idx = checked_channels.index(True) if any(checked_channels) else 0
             base, ext = os.path.splitext(self.view.locs_paths[idx])
         except AttributeError:
             return
@@ -17064,23 +20136,33 @@ class Window(QtWidgets.QMainWindow):
                 )
                 if not ok:
                     return
-            if not scalebar:
-                self.display_settings_dlg.scalebar_groupbox.setChecked(True)
-                self.view.set_optimal_scalebar(force=True)
-                qimage_scale = self.view.draw_scalebar(self.view.qimage)
-                new_path, ext = os.path.splitext(path)
-                new_path = new_path + "_scalebar" + ext
-                if path.endswith(".pdf"):
-                    render.export_qimage_to_pdf(
-                        qimage_scale, new_path, dpi=dpi
-                    )
-                else:
-                    qimage_scale.save(new_path)
-                self.display_settings_dlg.scalebar_groupbox.setChecked(False)
-            self.save_qimage_to_path(path, self.view.qimage, dpi=dpi)
+            # exported with the text sizes they always had, not those of
+            # the windows: compose the view again for the export
+            with theme.unscaled_text():
+                self.view._compose_visible()
+                self._export_current_images(path, scalebar, dpi)
+            self.view._compose_visible()
             self.view.save_property_colorbar(path)
             self.export_current_info(path)
         self.view.setMinimumSize(1, 1)
+
+    def _export_current_images(
+        self, path: str, scalebar: bool, dpi: int | None
+    ) -> None:
+        """Save the current view to ``path`` and, without a scale bar
+        shown, a copy with a scale bar (see ``export_current``)."""
+        if not scalebar:
+            self.display_settings_dlg.scalebar_groupbox.setChecked(True)
+            self.view.set_optimal_scalebar(force=True)
+            qimage_scale = self.view.draw_scalebar(self.view.qimage)
+            new_path, ext = os.path.splitext(path)
+            new_path = new_path + "_scalebar" + ext
+            if path.endswith(".pdf"):
+                render.export_qimage_to_pdf(qimage_scale, new_path, dpi=dpi)
+            else:
+                qimage_scale.save(new_path)
+            self.display_settings_dlg.scalebar_groupbox.setChecked(False)
+        self.save_qimage_to_path(path, self.view.qimage, dpi=dpi)
 
     def save_qimage_to_path(
         self,
@@ -17150,8 +20232,9 @@ class Window(QtWidgets.QMainWindow):
         d = self.display_settings_dlg
         colors = [_.currentText() for _ in self.dataset_dialog.colorselection]
         info = {
-            "FOV (X, Y, Width, Height)": fov_info,
-            "Zoom": d.zoom.value(),
+            io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION,
+            FOV_KEY: [float(_) for _ in fov_info],
+            ZOOM_KEY: (1 / self.view.display_pixels_per_viewport_pixels()),
             "Display pixel size (nm)": (
                 d.disp_px_size.value()
                 if disp_px_size is None
@@ -17168,6 +20251,7 @@ class Window(QtWidgets.QMainWindow):
             "Scale bar length (nm)": d.scalebar.value(),
             "Localizations loaded": self.view.locs_paths,
             "Colors": colors,
+            **self.dataset_dialog.export_channel_contrast(),
             "Min. blur (nm)": (
                 d.min_blur_width.value()
                 if min_blur_width is None
@@ -17181,6 +20265,7 @@ class Window(QtWidgets.QMainWindow):
             info["Render property colors"] = d.color_step.value()
             info["Colormap property"] = d.colormap_prop.currentText()
         info.update(self.image_overlay_dialog.export_info())
+        info.update(self.display_settings_dlg.grid_box.export_info())
         if path is not None:
             path, ext = os.path.splitext(path)
             path = path + ".yaml"
@@ -17212,6 +20297,8 @@ class Window(QtWidgets.QMainWindow):
             viewport = [(0, 0), (movie_height, movie_width)]
             qimage = self.view.render_scene(cache=False, viewport=viewport)
             qimage = self.image_overlay_dialog.draw(qimage, viewport)
+            qimage = self.view.draw_grid(qimage, viewport)
+            qimage = self.view.spt.draw_tracks(qimage, viewport)
             dpi = None
             if path.endswith(".pdf"):
                 dpi, ok = QtWidgets.QInputDialog.getInt(
@@ -17263,11 +20350,24 @@ class Window(QtWidgets.QMainWindow):
         new_max = old_max * (kwargs["disp_px_size"] / old_disp_px_size) ** 2
         min_spin.blockSignals(True)
         max_spin.blockSignals(True)
-        min_spin.setValue(new_min)
-        max_spin.setValue(new_max)
+        try:
+            min_spin.setValue(new_min)
+            max_spin.setValue(new_max)
+            self._export_view(path, kwargs)
+        finally:  # restore contrast, also when canceled
+            min_spin.setValue(old_min)
+            max_spin.setValue(old_max)
+            min_spin.blockSignals(False)
+            max_spin.blockSignals(False)
 
+    def _export_view(self, path: str, kwargs: dict) -> None:
+        """Render and save the view described by ``kwargs`` (see
+        ``ExportKwargsDialog``) to ``path``, with its metadata and, if
+        the scale bar is not shown, a copy with a scale bar."""
         qimage = self.view.render_scene(cache=False, **kwargs)
         qimage = self.image_overlay_dialog.draw(qimage, kwargs["viewport"])
+        qimage = self.view.draw_grid(qimage, kwargs["viewport"])
+        qimage = self.view.spt.draw_tracks(qimage, kwargs["viewport"])
         dpi = None
         if path.endswith(".pdf"):
             dpi, ok = QtWidgets.QInputDialog.getInt(
@@ -17289,17 +20389,10 @@ class Window(QtWidgets.QMainWindow):
                 image=qimage,
                 viewport=kwargs["viewport"],
                 scalebar_length_nm=self.display_settings_dlg.scalebar.value(),
-                pixelsize=self.view.pixelsize,
             )
             new_path, ext = os.path.splitext(path)
             new_path = new_path + "_scalebar" + ext
             self.save_qimage_to_path(new_path, qimage_scale, dpi=dpi)
-
-        # restore contrast
-        min_spin.setValue(old_min)
-        max_spin.setValue(old_max)
-        min_spin.blockSignals(False)
-        max_spin.blockSignals(False)
 
     def export_grayscale(self) -> None:
         """Export each channel in grayscale."""
@@ -17313,10 +20406,14 @@ class Window(QtWidgets.QMainWindow):
             "_grayscale.png",
         )
         if ok:
-            assert suffix.endswith((".png", ".tif", ".pdf", ".svg")), (
-                "Invalid extension. Only .png, .tif, .pdf and .svg are"
-                " allowed."
-            )
+            if not suffix.endswith((".png", ".tif", ".pdf", ".svg")):
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Save each channel in grayscale",
+                    f"The suffix {suffix!r} does not end with .png, .tif,"
+                    " .pdf or .svg.",
+                )
+                return
             if suffix.endswith(".pdf"):
                 dpi, ok = QtWidgets.QInputDialog.getInt(
                     self,
@@ -17348,6 +20445,7 @@ class Window(QtWidgets.QMainWindow):
             ".3d for ViSP",
             ".csv for ThunderSTORM",
             ".mat for SMAP",
+            ".hdf for PyME",
         ]
         item, ok = QtWidgets.QInputDialog.getItem(
             self, "Select Export", "Formats", items, 0, False
@@ -17358,7 +20456,10 @@ class Window(QtWidgets.QMainWindow):
         ext = item.split()[0]
 
         # get save file name
-        if channel is len(self.view.locs_paths):  # all channels
+        if channel == len(self.view.locs_paths) and item == ".hdf for PyME":
+            # PyME stores all channels in one file (probe column)
+            self.export_pyme_all_channels()
+        elif channel == len(self.view.locs_paths):  # all channels
             base, _ = os.path.splitext(self.view.locs_paths[0])
             suffix, ok = QtWidgets.QInputDialog.getText(
                 self,
@@ -17400,10 +20501,61 @@ class Window(QtWidgets.QMainWindow):
             io.export_thunderstorm(path, locs, info)
         elif item == ".mat for SMAP":
             io.export_smap(path, locs, info)
+        elif item == ".hdf for PyME":
+            io.export_pyme(path, locs, info)
+
+    def export_pyme_all_channels(self) -> None:
+        """Export all channels as one PyME .hdf file, in which the
+        channels are told apart by the ``probe`` column."""
+        base, _ = os.path.splitext(self.view.locs_paths[0])
+        path, _ = lib.get_save_filename_ext_dialog(
+            self,
+            "Export localizations",
+            base + "_export.hdf",
+            filter="*.hdf",
+        )
+        if not path:
+            return
+        try:
+            io.export_pyme_multi(
+                path,
+                self.view.locs,
+                self.view.infos,
+                channel_names=[
+                    os.path.basename(p) for p in self.view.locs_paths
+                ],
+            )
+        except ValueError as e:  # e.g., different pixel sizes
+            QtWidgets.QMessageBox.warning(self, "Export localizations", str(e))
 
     def export_fov_ims(self) -> None:  # noqa: C901
         """Export current FOV to .ims."""
         if self.no_locs_warning("Export ROI for Imaris"):
+            return
+        n_channels = len(self.view.locs_paths)
+        checked = [
+            self.dataset_dialog.checks[channel].isChecked()
+            for channel in range(n_channels)
+        ]
+        # refuse before the file is asked for (and an old one removed)
+        has_zs = {
+            "z" in self.view.locs[channel].columns
+            for channel in range(n_channels)
+            if checked[channel]
+        }
+        if not has_zs:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Export ROI for Imaris",
+                "Show at least one channel to export.",
+            )
+            return
+        if len(has_zs) > 1:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Export ROI for Imaris",
+                "Cannot export localizations with and without z together.",
+            )
             return
         base, ext = os.path.splitext(self.view.locs_paths[0])
         out_path = base + ".ims"
@@ -17418,31 +20570,13 @@ class Window(QtWidgets.QMainWindow):
             os.remove(path)
 
         if path:
-            n_channels = len(self.view.locs_paths)
-            viewport = self.view.viewport
-            oversampling = (
-                self.view.pixelsize
-                / self.display_settings_dlg.disp_px_size.value()
-            )
+            viewport = self.view.viewport  # nm
+            disp_px_size = self.display_settings_dlg.disp_px_size.value()
+            oversampling = 1 / disp_px_size  # rendered pixels per nm
             maximum = self.display_settings_dlg.maximum.value()
-
-            pixelsize = self.view.pixelsize
-            checked = [
-                self.dataset_dialog.checks[channel].isChecked()
-                for channel in range(n_channels)
-            ]
             colors = self.view.read_colors()
 
             def export():  # noqa: C901
-                # defaults for the image extents, used where the loaded
-                # metadata (e.g. of an .ims movie) does not provide them
-                ims_fields = {
-                    "ExtMin0": 0,
-                    "ExtMin1": 0,
-                    "ExtMin2": -0.5,
-                    "ExtMax2": 0.5,
-                }
-
                 (y_min, x_min), (y_max, x_max) = viewport
 
                 z_mins = []
@@ -17463,15 +20597,14 @@ class Window(QtWidgets.QMainWindow):
                         )
 
                         add_dict = {}
-                        add_dict["Generated by"] = (
-                            f"Picasso v{__version__} Render (IMS Export)"
-                        )
+                        add_dict.update(lib.step_info("Render (IMS Export)"))
 
-                        for k, v in ims_fields.items():
-                            if not any(
-                                k in d for d in self.view.infos[channel]
-                            ):
-                                add_dict[k] = v
+                        # the extents of the .ims movie the localizations
+                        # come from (defaults for other movies), so that
+                        # the exported files overlay it in Imaris
+                        add_dict.update(
+                            image_extents(self.view.infos[channel])
+                        )
 
                         info = self.view.infos[channel] + [add_dict]
                         if not to_render:
@@ -17491,12 +20624,6 @@ class Window(QtWidgets.QMainWindow):
                             has_z = False
 
                         to_render.append(channel)
-
-                if not has_z:
-                    if len(z_mins) > 0:
-                        raise NotImplementedError(
-                            "Can't export mixed files with and without z."
-                        )
 
                 if has_z:
                     z_min = min(z_mins)
@@ -17519,7 +20646,6 @@ class Window(QtWidgets.QMainWindow):
                             x_max,
                             z_min,
                             z_max,
-                            pixelsize,
                         )
                     else:
                         n, image = render._render_hist(
@@ -17531,7 +20657,9 @@ class Window(QtWidgets.QMainWindow):
                             x_max,
                         )
 
-                    image = image / maximum * 65535
+                    # brighter than the contrast maximum saturates
+                    # instead of wrapping around in 16 bits
+                    image = np.clip(image / maximum * 65535, 0, 65535)
                     data = image.astype("uint16")
                     data = np.rot90(np.fliplr(data))
                     all_img.append(data)
@@ -17554,12 +20682,11 @@ class Window(QtWidgets.QMainWindow):
                     s_image,
                     path,
                     colors_ims,
-                    oversampling,
+                    disp_px_size,
                     viewport,
                     ims_info,
                     z_min,
                     z_max,
-                    pixelsize,
                 )
 
             lib.run_with_status(export, "Exporting ROIs...", self)
@@ -17588,8 +20715,9 @@ class Window(QtWidgets.QMainWindow):
             QtWidgets.QMessageBox.information(self, "Warning", warning)
 
     def load_user_settings(self) -> None:  # noqa: C901
-        """Load user settings (colormaps, current directory and the
-        appearance of the tools)."""
+        """Load user settings (colormaps, current directory, the
+        appearance of the tools and whether the contrast slider is
+        shown)."""
         settings = io.load_user_settings()
         # the section may be absent, or present without these keys (the
         # file names only what the user or a persisted default set)
@@ -17640,6 +20768,21 @@ class Window(QtWidgets.QMainWindow):
         self.tools_settings_dialog.load_overlay_style_settings(
             render_settings.get("ToolStyles")
         )
+        # the grids of the 2D and 3D windows
+        self.display_settings_dlg.grid_box.load_settings(
+            render_settings.get("Grid")
+        )
+        self.window_rot.display_settings_dlg.grid_box.load_settings(
+            render_settings.get("Grid3D")
+        )
+        # the look of the tracks of single-particle tracking
+        self.display_settings_dlg.tracks_box.load_settings(
+            render_settings.get("Tracks")
+        )
+        self.apply_contrast_slider_setting()
+        # written to the file with their defaults if missing
+        keep_non_overlapping_setting()
+        confirm_remove_locs_setting()
 
     def open_apply_dialog(self) -> None:
         """Load expression and apply it to locs."""
@@ -17663,18 +20806,18 @@ class Window(QtWidgets.QMainWindow):
                 if var_1 == "z":
                     var_2 = "z"
                     var_1 = input[2]
-                pixelsize = self.view.pixelsize
                 templocs = self.view.locs[channel][var_1].copy()
-                movie_height, movie_width = self.view.movie_size()
+                movie_height, movie_width = self.view.movie_size()  # nm
                 if var_1 == "x":
                     dist = movie_width
                 else:
                     dist = movie_height
 
+                # z is centered on the field of view (all in nm)
                 self.view.locs[channel][var_1] = (
-                    self.view.locs[channel][var_2] / pixelsize + dist / 2
+                    self.view.locs[channel][var_2] + dist / 2
                 )  # exchange w. info
-                self.view.locs[channel][var_2] = templocs * pixelsize
+                self.view.locs[channel][var_2] = templocs
             else:
                 var_1 = input[1]
                 var_2 = input[2]
@@ -17683,31 +20826,31 @@ class Window(QtWidgets.QMainWindow):
                 self.view.locs[channel][var_2] = templocs
 
         elif input[0] == "spiral" and len(input) == 3:
-            # spiral uses radius and turns
+            # spiral uses radius (nm) and turns
             radius = float(input[1])
             turns = int(input[2])
             maxframe = self.view.infos[channel][0]["Frames"]
-
-            self.x_spiral[channel] = self.view.locs[channel]["x"].copy()
-            self.y_spiral[channel] = self.view.locs[channel]["y"].copy()
 
             scale_time = maxframe / (turns * 2 * np.pi)
             scale_x = turns * 2 * np.pi
 
             x = self.view.locs[channel]["frame"] / scale_time
+            dx = (x * np.cos(x) / scale_x * radius).to_numpy()
+            dy = (x * np.sin(x) / scale_x * radius).to_numpy()
+            # the displacement is stored rather than the coordinates,
+            # since a spiral beyond the canvas grows it, which
+            # translates the localizations
+            self.x_spiral[channel] = dx
+            self.y_spiral[channel] = dy
 
-            self.view.locs[channel]["x"] = (
-                x * np.cos(x)
-            ) / scale_x * radius + self.view.locs[channel]["x"]
-
-            self.view.locs[channel]["y"] = (
-                x * np.sin(x)
-            ) / scale_x * radius + self.view.locs[channel]["y"]
+            self.view.locs[channel]["x"] = self.view.locs[channel]["x"] + dx
+            self.view.locs[channel]["y"] = self.view.locs[channel]["y"] + dy
 
         elif input[0] == "uspiral":
             try:
-                self.view.locs[channel]["x"] = self.x_spiral[channel]
-                self.view.locs[channel]["y"] = self.y_spiral[channel]
+                locs = self.view.locs[channel]
+                locs["x"] = locs["x"] - self.x_spiral.pop(channel)
+                locs["y"] = locs["y"] - self.y_spiral.pop(channel)
                 self.display_settings_dlg.render_check.setChecked(False)
             except KeyError:
                 QtWidgets.QMessageBox.information(
@@ -17716,17 +20859,35 @@ class Window(QtWidgets.QMainWindow):
                     "Localizations have not been spiraled yet.",
                 )
         else:
-            vars = self.view.locs[channel].columns.to_list()
-            exec(cmd, {k: self.view.locs[channel][k] for k in vars})
+            locs = self.view.locs[channel]
+            code = compile(cmd, "<expression>", "exec")
+            columns = {name: locs[name] for name in locs.columns}
+            exec(code, columns)
+            # write back the columns the expression names: a column
+            # changed in place (e.g., "x += 100") is a copy from pandas 3
+            # on (Copy-on-Write) and a rebound one (e.g., "x = x * 2")
+            # never changed the localizations
+            for name in set(code.co_names).intersection(locs.columns):
+                locs[name] = columns[name]
         # localizations moved beyond the canvas grow it instead of
         # being removed when saving; the columns are replaced with
         # copies since the expression may have changed them in place
         self.view.locs_moved(channel, sanitize=True)
 
+    def convert_units(self) -> ConvertUnitsDialog:
+        """Show the dialog converting files written before Picasso 1.0
+        (camera pixels) to nm, see ``picasso.gui.convert_units``."""
+        dialog = getattr(self, "convert_units_dialog", None)
+        if dialog is None:
+            dialog = self.convert_units_dialog = ConvertUnitsDialog(self)
+        dialog.show()
+        dialog.raise_()
+        return dialog
+
     def open_file_dialog(self) -> None:
         """Open localizations file(s): Picasso (.hdf5), ThunderSTORM
-        (.csv) or SMAP (_sml.mat)."""
-        file_filter = "Localizations (*.hdf5 *.csv *.mat)"
+        (.csv), SMAP (_sml.mat) or PyME (.h5r, .hdf)."""
+        file_filter = "Localizations (*.hdf5 *.csv *.mat *.h5r *.hdf)"
         if self.pwd == []:
             paths, ext = QtWidgets.QFileDialog.getOpenFileNames(
                 self, "Add localizations", filter=file_filter
@@ -17784,10 +20945,9 @@ class Window(QtWidgets.QMainWindow):
         if self.view._pick_shape == "Brush":
             # stored as stroke dicts with widths in nm, see
             # ``RotationWindow.save_locs_rotated``
-            pixelsize = self.view.pixelsize
             self.view._picks = [
                 [
-                    (stroke["Width (nm)"] / pixelsize, stroke["Path"])
+                    (stroke["Width (nm)"], stroke["Path"])
                     for stroke in info["Pick"]
                 ]
             ]
@@ -17838,20 +20998,27 @@ class Window(QtWidgets.QMainWindow):
         else:
             new_view_h = max(view_w, view_h)
             new_view_w = new_view_h * target_aspect
+        self.resize_view(new_view_w, new_view_h)
 
+    def resize_view(self, view_w: float, view_h: float) -> None:
+        """Resize the main window so that ``view`` is ``view_w`` x
+        ``view_h`` screen pixels, or as large as fits on the screen
+        with the same aspect ratio."""
+        if view_w <= 0 or view_h <= 0:
+            return
         screen = self.screen() or QtWidgets.QApplication.primaryScreen()
         avail = screen.availableGeometry()
-        chrome_w = self.width() - view_w
-        chrome_h = self.height() - view_h
+        chrome_w = self.width() - self.view.width()
+        chrome_h = self.height() - self.view.height()
         max_view_w = max(1, avail.width() - chrome_w)
         max_view_h = max(1, avail.height() - chrome_h)
-        scale = min(1.0, max_view_w / new_view_w, max_view_h / new_view_h)
-        new_view_w *= scale
-        new_view_h *= scale
+        scale = min(1.0, max_view_w / view_w, max_view_h / view_h)
+        view_w *= scale
+        view_h *= scale
 
         self.resize(
-            int(round(new_view_w + chrome_w)),
-            int(round(new_view_h + chrome_h)),
+            int(round(view_w + chrome_w)),
+            int(round(view_h + chrome_h)),
         )
 
     def resizeEvent(self, even: QtGui.QResizeEvent) -> None:
@@ -17869,7 +21036,7 @@ class Window(QtWidgets.QMainWindow):
             locs = self.view.locs[channel].copy()
             info = self.view.infos[channel]
             new_info = {
-                "Generated by": f"Picasso v{__version__} Remove columns",
+                **lib.step_info("Remove columns"),
                 "Removed columns": to_remove,
             }
             locs.drop(columns=to_remove, inplace=True)
@@ -17941,7 +21108,7 @@ class Window(QtWidgets.QMainWindow):
                     )
                     info = self.view.infos[0] + [
                         {
-                            "Generated by": f"Picasso v{__version__} Combine",
+                            **lib.step_info("Combine"),
                             "Paths to combined files": self.view.locs_paths,
                         }
                     ]
@@ -17964,9 +21131,7 @@ class Window(QtWidgets.QMainWindow):
                         out_path = base + suffix + ".hdf5"
                         info = self.view.infos[channel] + [
                             {
-                                "Generated by": (
-                                    f"Picasso v{__version__} Render"
-                                ),
+                                **lib.step_info("Render"),
                                 "Last driftfile": (
                                     self.view._driftfiles[channel]
                                 ),
@@ -17987,7 +21152,7 @@ class Window(QtWidgets.QMainWindow):
                 if path:
                     info = self.view.infos[channel] + [
                         {
-                            "Generated by": f"Picasso v{__version__} Render",
+                            **lib.step_info("Render"),
                             "Last driftfile": self.view._driftfiles[channel],
                         }
                     ]
@@ -17997,6 +21162,8 @@ class Window(QtWidgets.QMainWindow):
         """Save picked localizations in a given channel (or all
         channels)."""
         if self.no_locs_warning("Save picked localizations"):
+            return
+        if self.no_picks_warning():
             return
         channel = self.view.get_channel_save_locs("Save picked localizations")
         if channel is not None:
@@ -18046,6 +21213,8 @@ class Window(QtWidgets.QMainWindow):
     def save_picked_locs_separately(self) -> None:
         """Save picked localizations for each pick separately."""
         if self.no_locs_warning("Save picked localizations separately"):
+            return
+        if self.no_picks_warning():
             return
         channel = self.view.get_channel_save_locs(
             "Save picked localizations separately"
@@ -18201,6 +21370,36 @@ class Window(QtWidgets.QMainWindow):
             return
         self.link_group.show_settings(self)
 
+    def ask_remove_locs(self) -> None:
+        """Remove all localizations (``remove_locs``) after asking for
+        confirmation if ``Confirm removing all localizations`` is True
+        in the user settings (False by default) and something is
+        loaded. Ticking
+        "Don't ask again" in the question turns the setting off."""
+        if self.view.locs_paths and confirm_remove_locs_setting():
+            box = QtWidgets.QMessageBox(self)
+            box.setIcon(QtWidgets.QMessageBox.Icon.Question)
+            box.setWindowTitle("Remove all localizations")
+            box.setText(
+                "Remove all loaded localizations? Unsaved changes are lost."
+            )
+            box.setStandardButtons(
+                QtWidgets.QMessageBox.StandardButton.Yes
+                | QtWidgets.QMessageBox.StandardButton.Cancel
+            )
+            box.setDefaultButton(QtWidgets.QMessageBox.StandardButton.Yes)
+            dont_ask = QtWidgets.QCheckBox("Don't ask again")
+            box.setCheckBox(dont_ask)
+            answer = box.exec()
+            if answer != QtWidgets.QMessageBox.StandardButton.Yes:
+                return
+            if dont_ask.isChecked():
+                settings = io.load_user_settings()
+                if isinstance(settings["Render"], dict):
+                    settings["Render"][CONFIRM_REMOVE_LOCS_KEY] = False
+                    io.save_user_settings(settings)
+        self.remove_locs()
+
     def remove_locs(self) -> None:
         """Remove all localizations and reset the window to its initial
         state by rebuilding the view, dialogs and menu bar."""
@@ -18213,6 +21412,31 @@ class Window(QtWidgets.QMainWindow):
             dialog.close()
         self.initUI(plugins_loaded=True)
 
+    def release_idle_memory(self) -> bool:
+        """Drop the memory that is rebuilt on demand, while the GUI is
+        idle (see ``picasso.gui.idle``): the caches of the view and of
+        the 3D view (see their ``release_idle_memory``), the frames
+        cached by the slicer, and the GPU device with the localizations
+        uploaded to it, which the next render starts again. Then the
+        localizations of all windows are moved to disk, to be read back
+        on the next action that needs them (``spill_idle_channels``).
+        The picks and everything on screen stay. Linked windows release
+        their own caches. Returns False while busy, to be asked again
+        later."""
+        if not self.view.release_idle_memory():
+            return False
+        if not self.window_rot.view_rot.release_idle_memory():
+            return False
+        contrast_bar_slider = getattr(self, "contrast_slider", None)
+        if contrast_bar_slider is not None:
+            contrast_bar_slider.release_image()
+        self.display_settings_dlg.contrast_slider.release_image()
+        self.slicer_dialog.slicer_cache = {}
+        # before the localizations: the GPU holds uploaded columns
+        if not render.backend.close(wait=False):
+            return False
+        return spill_idle_channels(self)
+
     def open_image_overlay(self) -> None:
         """Open the image overlay dialog; ask for an image right away if
         none is loaded."""
@@ -18220,6 +21444,102 @@ class Window(QtWidgets.QMainWindow):
         self.image_overlay_dialog.raise_()
         if self.image_overlay_dialog.data is None:
             self.image_overlay_dialog.open_image_dialog()
+
+    def add_color_vision_menu(self, menu: QtWidgets.QMenu) -> QtWidgets.QMenu:
+        """Add the Color vision preview submenu to ``menu`` (View menu
+        of this window or of its 3D window); its ticks follow
+        ``color_vision`` whenever it opens.
+
+        Parameters
+        ----------
+        menu : QMenu
+            Menu to add the submenu to.
+
+        Returns
+        -------
+        submenu : QMenu
+            The submenu, one exclusive action per option of
+            ``COLOR_VISION_OPTIONS``.
+        """
+        submenu = menu.addMenu("Color vision preview")
+        submenu.setToolTipsVisible(True)
+        submenu.menuAction().setToolTip(
+            "Show the image as people with color blindness see it.\n"
+            "Saved and exported images keep their colors."
+        )
+        group = QtGui.QActionGroup(submenu)
+        for deficiency, label in COLOR_VISION_OPTIONS:
+            action = submenu.addAction(label)
+            action.setCheckable(True)
+            action.setData(deficiency)
+            action.triggered.connect(
+                lambda _=False, d=deficiency: self.set_color_vision(d)
+            )
+            group.addAction(action)
+
+        def tick_current() -> None:
+            for action in group.actions():
+                action.setChecked(action.data() == self.color_vision)
+
+        submenu.aboutToShow.connect(tick_current)
+        tick_current()
+        return submenu
+
+    def set_color_vision(self, deficiency: str | None) -> None:
+        """Simulate a color vision deficiency on screen in this window
+        and its 3D window (only the display; saved and exported images
+        keep their colors).
+
+        Parameters
+        ----------
+        deficiency : str or None
+            Key of ``render.COLOR_VISION_DEFICIENCIES``, or None for
+            normal vision.
+        """
+        if deficiency not in dict(COLOR_VISION_OPTIONS):
+            raise ValueError(
+                f"Unknown color vision deficiency '{deficiency}'."
+            )
+        if deficiency == self.color_vision:
+            return
+        self.color_vision = deficiency
+        # the slicer caches the displayed pixmaps
+        self.slicer_dialog.slicer_cache = {}
+        if getattr(self.view, "qimage_no_picks", None) is not None:
+            self.view._draw_picks_and_show()
+        self.window_rot.view_rot.show_qimage()
+
+    def color_vision_image(self, image: QtGui.QImage) -> QtGui.QImage:
+        """The image to display for ``image``: as is for normal vision,
+        else simulated for ``color_vision`` and labeled at the top.
+
+        Parameters
+        ----------
+        image : QImage
+            Image with the rendered localizations and overlays.
+
+        Returns
+        -------
+        image : QImage
+            ``image`` itself or its simulated copy.
+        """
+        if self.color_vision is None:
+            return image
+        image = render.simulate_color_vision_qimage(image, self.color_vision)
+        label = dict(COLOR_VISION_OPTIONS)[self.color_vision]
+        text = f"{label.split(' (')[0]} preview"
+        painter = QtGui.QPainter(image)
+        metrics = painter.fontMetrics()
+        pad = 4
+        width = metrics.horizontalAdvance(text) + 2 * pad
+        height = metrics.height() + 2 * pad
+        width_logical = image.width() / image.devicePixelRatio()
+        rect = QtCore.QRectF((width_logical - width) / 2, 6, width, height)
+        painter.fillRect(rect, QtGui.QColor(0, 0, 0, 160))
+        painter.setPen(QtGui.QColor(255, 255, 255))
+        painter.drawText(rect, QtCore.Qt.AlignmentFlag.AlignCenter, text)
+        painter.end()
+        return image
 
     def no_locs_warning(self, title: str) -> bool:
         """Tell the user that no localizations are loaded, if so.
@@ -18239,6 +21559,23 @@ class Window(QtWidgets.QMainWindow):
         if self.view.locs:
             return False
         QtWidgets.QMessageBox.information(self, title, "No files loaded.")
+        return True
+
+    def no_picks_warning(self) -> bool:
+        """Tell the user that there are no picks, if so (see
+        ``check_pick``).
+
+        Returns
+        -------
+        missing : bool
+            True if there are no picks (the action should stop), False
+            otherwise.
+        """
+        if self.view._picks:
+            return False
+        QtWidgets.QMessageBox.information(
+            self, "Pick Error", "No localizations picked. Please pick first."
+        )
         return True
 
     def show_metadata(self) -> None:
@@ -18301,13 +21638,13 @@ class Window(QtWidgets.QMainWindow):
         self.info_dialog.locs_label.setText("{:,}".format(self.view.n_locs))
         try:
             self.info_dialog.xy_label.setText(
-                "{:.2f} / {:.2f} ".format(
+                "{:.1f} / {:.1f} nm".format(
                     self.view.viewport[0][1], self.view.viewport[0][0]
                 )
             )
             self.info_dialog.wh_label.setText(
-                f"{render.viewport_width(self.view.viewport):.2f} / "
-                f"{render.viewport_height(self.view.viewport):.2f} pixels"
+                f"{render.viewport_width(self.view.viewport):.1f} / "
+                f"{render.viewport_height(self.view.viewport):.1f} nm"
             )
         except AttributeError:
             pass
@@ -18326,17 +21663,61 @@ class Window(QtWidgets.QMainWindow):
             )
         except AttributeError:
             pass
-        try:
-            lp = self.view.median_lp * self.view.pixelsize
-            self.info_dialog.fit_precision.setText(f"{lp:.2f} nm")
-        except AttributeError:
-            pass
+        self.info_dialog.update_fit_precision()
 
     def open_resi_dialog(self) -> None:
         """Open the RESI dialog."""
         resi_dialog = RESIDialog(self)
         self.dialogs.append(resi_dialog)
         resi_dialog.show()
+
+
+def spill_idle_channels(window: Window) -> bool:
+    """Move the localizations of ``window`` and of all windows linked
+    to it to disk while the GUI is idle, together with those of their
+    open 3D views, see ``picasso.gui.idle.spill_channels``.
+
+    All windows at once: linked windows share channels, which are only
+    freed if no window holds them any more. The channels are read back
+    by each window on its next access to ``View.locs``.
+
+    Parameters
+    ----------
+    window : Window
+        The window that releases its memory; it and the windows opened
+        with ``View > New linked window`` are moved to disk.
+
+    Returns
+    -------
+    spilled : bool
+        False, nothing moved, while a window is busy.
+    """
+    windows = [window, *Window._secondary_windows]
+    if window.link_group is not None:
+        windows += window.link_group.windows
+    windows = list(
+        {id(w): w for w in windows if not sip.isdeleted(w)}.values()
+    )
+    views = [window.view for window in windows]
+    views += [window.window_rot.view_rot for window in windows]
+    if any(view.idle_busy() for view in views):
+        return False
+    groups = {
+        id(window.link_group): window.link_group
+        for window in windows
+        if window.link_group is not None
+    }
+    # the channels each linked window saw last, compared at its next
+    # redraw (render_link.LinkGroup._on_scene_requested)
+    seen = [
+        channels
+        for group in groups.values()
+        for channels in group._seen_locs.values()
+    ]
+    nbytes = idle.spill_channels(views, seen)
+    if nbytes:
+        _log.info("Moved %.0f MB of localizations to disk", nbytes / 1e6)
+    return True
 
 
 def main() -> None:

@@ -25,6 +25,10 @@ announces it through ``hub().changed``, to which the open windows
 listen. ``show_dialog`` opens the one ``PlotStyleDialog`` that edits
 it.
 
+On screen, the text sizes are multiplied by the font size of the
+windows (``theme.text_scale``); ``Figure.savefig`` is wrapped so that
+saved charts have the sizes of the settings.
+
 Windows that draw their own content apply the style by drawing inside
 ``PlotStyle.context()``, which sets matplotlib's defaults (theme, fonts,
 default colors, line width); colors that carry a meaning, such as
@@ -37,10 +41,13 @@ restyles a figure that has already been drawn.
 
 from __future__ import annotations
 
+import contextlib
+import functools
 from contextlib import AbstractContextManager
 from dataclasses import asdict, dataclass, fields, replace
 
 import matplotlib
+import matplotlib.text
 import numpy as np
 from cycler import cycler
 from matplotlib.axes import Axes
@@ -52,7 +59,7 @@ from matplotlib.colors import (
     to_hex,
 )
 from matplotlib.figure import Figure
-from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6 import QtCore, QtGui, QtWidgets, sip
 
 from .. import io, lib
 from .overlay_style import PRESET_COLORS, ColorComboBox
@@ -447,6 +454,21 @@ class PlotStyle:
         color = _color_code(self.selection_color)
         return dict(facecolor=color, edgecolor=color, alpha=SELECTION_OPACITY)
 
+    @property
+    def _label_size(self) -> float:
+        """Axis label size on screen, see ``_text_scale``."""
+        return self.font_size * _text_scale()
+
+    @property
+    def _title_size(self) -> float:
+        """Title size on screen, see ``_text_scale``."""
+        return (self.font_size + 1) * _text_scale()
+
+    @property
+    def _tick_label_size(self) -> float:
+        """Tick and legend label size on screen, see ``_text_scale``."""
+        return self.tick_size * _text_scale()
+
     def rc_params(self) -> dict:
         """The style as matplotlib rcParams, see ``context``."""
         colors = self.theme_colors
@@ -454,13 +476,13 @@ class PlotStyle:
         return {
             "figure.facecolor": colors["figure"],
             "savefig.facecolor": colors["figure"],
-            "figure.titlesize": self.font_size + 1,
+            "figure.titlesize": self._title_size,
             "axes.facecolor": colors["axes"],
             "axes.edgecolor": colors["spine"],
             "axes.labelcolor": colors["text"],
             "axes.titlecolor": colors["text"],
-            "axes.labelsize": self.font_size,
-            "axes.titlesize": self.font_size + 1,
+            "axes.labelsize": self._label_size,
+            "axes.titlesize": self._title_size,
             "axes.spines.top": classic,
             "axes.spines.right": classic,
             "axes.grid": self.grid,
@@ -471,8 +493,8 @@ class PlotStyle:
             "grid.linewidth": 1.0 if classic else 0.8,
             "xtick.color": colors["text_muted"],
             "ytick.color": colors["text_muted"],
-            "xtick.labelsize": self.tick_size,
-            "ytick.labelsize": self.tick_size,
+            "xtick.labelsize": self._tick_label_size,
+            "ytick.labelsize": self._tick_label_size,
             "xtick.major.size": 0,
             "ytick.major.size": 0,
             "xtick.minor.size": 0,
@@ -481,7 +503,7 @@ class PlotStyle:
             "legend.facecolor": colors["axes"],
             "legend.edgecolor": colors["spine"],
             "legend.labelcolor": colors["text"],
-            "legend.fontsize": self.tick_size,
+            "legend.fontsize": self._tick_label_size,
             "lines.linewidth": self.line_width,
         }
 
@@ -508,7 +530,7 @@ class PlotStyle:
         self.style_figure(figure)
         if figure._suptitle is not None:
             figure._suptitle.set_color(colors["text"])
-            figure._suptitle.set_fontsize(self.font_size + 1)
+            figure._suptitle.set_fontsize(self._title_size)
             figure._suptitle.set_visible(self.show_title)
         for axes in figure.axes:
             colorbar = getattr(axes, "_colorbar", None)
@@ -519,10 +541,10 @@ class PlotStyle:
             for title in (axes.title, axes._left_title, axes._right_title):
                 title.set_visible(self.show_title)
             axes.title.set_color(colors["text"])
-            axes.title.set_fontsize(self.font_size + 1)
+            axes.title.set_fontsize(self._title_size)
             for label in (axes.xaxis.label, axes.yaxis.label):
                 label.set_color(colors["text"])
-                label.set_fontsize(self.font_size)
+                label.set_fontsize(self._label_size)
             legend = axes.get_legend()
             if legend is not None:
                 frame = legend.get_frame()
@@ -530,11 +552,18 @@ class PlotStyle:
                 frame.set_edgecolor(colors["spine"])
                 for text in legend.get_texts():
                     text.set_color(colors["text"])
-                    text.set_fontsize(self.tick_size)
+                    text.set_fontsize(self._tick_label_size)
 
     def style_figure(self, figure: Figure) -> None:
-        """Set the background of ``figure``."""
+        """Set the background of ``figure`` and remember the text sizes
+        of this style, which saving the figure sets back to 100 % (see
+        ``_text_scale``)."""
         figure.set_facecolor(self.theme_colors["figure"])
+        figure._picasso_text_sizes = {
+            self._label_size: self.font_size,
+            self._title_size: self.font_size + 1,
+            self._tick_label_size: self.tick_size,
+        }
 
     def style_axes(self, axes: Axes, grid_axis: str = "both") -> None:
         """Apply the theme, tick label size and grid to ``axes``.
@@ -556,7 +585,7 @@ class PlotStyle:
         axes.tick_params(
             which="both",
             colors=colors["text_muted"],
-            labelsize=self.tick_size,
+            labelsize=self._tick_label_size,
             length=0,
         )
         axes.grid(False)
@@ -578,7 +607,7 @@ class PlotStyle:
                 continue
             muted = text == "Counts"
             color = self.theme_colors["text_muted" if muted else "text"]
-            setter(text, color=color, fontsize=self.font_size)
+            setter(text, color=color, fontsize=self._label_size)
 
     def title(self, figure: Figure, text: str) -> None:
         """Set the title of ``figure`` if titles are shown."""
@@ -586,7 +615,7 @@ class PlotStyle:
             figure.suptitle(
                 text,
                 color=self.theme_colors["text"],
-                fontsize=self.font_size + 1,
+                fontsize=self._title_size,
             )
 
     def bars(
@@ -640,13 +669,83 @@ class PlotStyle:
         colorbar.ax.tick_params(
             which="both",
             colors=colors["text_muted"],
-            labelsize=self.tick_size,
+            labelsize=self._tick_label_size,
             length=0,
         )
         if label is not None:
             colorbar.set_label(label)
         colorbar.ax.yaxis.label.set_color(colors["text_muted"])
-        colorbar.ax.yaxis.label.set_fontsize(self.font_size)
+        colorbar.ax.yaxis.label.set_fontsize(self._label_size)
+
+
+def _text_scale() -> float:
+    """Factor of the text sizes of the charts on screen: the font size
+    of the windows (``theme.text_scale``). Saved charts keep the sizes
+    set in the plot settings, see ``_savefig_with_saved_text_sizes``."""
+    # imported here: picasso.gui.theme is not needed before the first
+    # chart window
+    from . import theme
+
+    return theme.text_scale()
+
+
+@contextlib.contextmanager
+def _saved_text_sizes(figure: Figure):
+    """Context in which the text of ``figure`` that a ``PlotStyle``
+    sized for the screen has the sizes set in the plot settings; the
+    screen sizes come back afterwards."""
+    sizes = getattr(figure, "_picasso_text_sizes", None)
+    if not sizes or all(abs(a - b) < 1e-6 for a, b in sizes.items()):
+        yield
+        return
+
+    def saved(size: float) -> float | None:
+        for screen, size_saved in sizes.items():
+            if abs(size - screen) < 1e-6:
+                return size_saved
+        return None
+
+    texts = []
+    for text in figure.findobj(matplotlib.text.Text):
+        size = saved(text.get_fontsize())
+        if size is not None:
+            texts.append((text, text.get_fontsize()))
+            text.set_fontsize(size)
+    # ticks created while saving take the size from the axis
+    ticks = []
+    for axes in figure.axes:
+        for axis in (axes.xaxis, axes.yaxis):
+            for which in ("major", "minor"):
+                size = axis.get_tick_params(which=which).get("labelsize")
+                if size is None or saved(size) is None:
+                    continue
+                ticks.append((axis, which, size))
+                axis.set_tick_params(which=which, labelsize=saved(size))
+    try:
+        yield
+    finally:
+        for text, size in texts:
+            text.set_fontsize(size)
+        for axis, which, size in ticks:
+            axis.set_tick_params(which=which, labelsize=size)
+
+
+def _savefig_with_saved_text_sizes(savefig):
+    """Wrap ``Figure.savefig`` so that charts are saved with the text
+    sizes of the plot settings, not those enlarged (or reduced) for the
+    screen with the windows' font size."""
+
+    @functools.wraps(savefig)
+    def wrapper(figure, *args, **kwargs):
+        with _saved_text_sizes(figure):
+            return savefig(figure, *args, **kwargs)
+
+    wrapper._picasso_wrapped = True
+    return wrapper
+
+
+if not getattr(Figure.savefig, "_picasso_wrapped", False):
+    Figure.savefig = _savefig_with_saved_text_sizes(Figure.savefig)
 
 
 def windows_are_dark() -> bool:
@@ -683,6 +782,8 @@ _hub = None
 _dialog = None
 # the hub of picasso.gui.theme whose changes restyle the charts
 _windows_hub = None
+# the font size factor the charts were last restyled for
+_last_text_scale = 1.0
 
 
 def hub() -> _Hub:
@@ -701,9 +802,13 @@ def hub() -> _Hub:
 
 
 def _on_windows_theme_changed(_appearance) -> None:
-    """Restyle the charts that follow the windows' theme."""
+    """Restyle the charts that follow the windows' theme, and all
+    charts when the font size of the windows changed."""
+    global _last_text_scale
     style = current()
-    if style.theme == SAME_AS_WINDOWS:
+    scale = _text_scale()
+    if style.theme == SAME_AS_WINDOWS or scale != _last_text_scale:
+        _last_text_scale = scale
         hub().changed.emit(style)
 
 
@@ -723,7 +828,7 @@ def show_dialog(filter_options: bool = False) -> PlotStyleDialog:
         The dialog.
     """
     global _dialog
-    if _dialog is None:
+    if _dialog is None or sip.isdeleted(_dialog):
         _dialog = PlotStyleDialog(current())
         # an open dialog must not keep the app running after the last
         # main window closed
@@ -841,6 +946,11 @@ class PlotStyleDialog(lib.Dialog):
         self.tick_size.setRange(5, 32)
         self.tick_size.setSuffix(" pt")
         form.addRow("Tick label size:", self.tick_size)
+        for size in (self.font_size, self.tick_size):
+            size.setToolTip(
+                "Size in saved plots. On screen, the text is scaled with\n"
+                "the font size of the windows (File > Appearance...)."
+            )
         self.grid = QtWidgets.QCheckBox("Show grid")
         form.addRow(self.grid)
         self.show_title = QtWidgets.QCheckBox("Show titles")

@@ -35,8 +35,9 @@ Fitting can run on a CUDA-capable GPU (see :doc:`localize/gpu`). The kernels are
    :class-container: api-example
 
    Identify and fit a movie in one call and save the localizations.
-   ``identification_parameters`` takes the keys of the ``Parameters``
-   dialog; ``fitting_method`` names the PSF model and the optimizer
+   ``identification_parameters`` holds the identification settings of the
+   ``Parameters`` dialog (see :ref:`localize-identification`);
+   ``fitting_method`` names the PSF model and the optimizer
    (``gausslq``, ``gaussmle``, ``gausslq-spherical``, ``gaussmle-rotated``,
    ``spline``, ``spline-mle``, ...), with ``-gpu`` appended to fit on the
    GPU.
@@ -46,14 +47,16 @@ Fitting can run on a CUDA-capable GPU (see :doc:`localize/gpu`). The kernels are
       from picasso import io, localize
 
       movie, info = io.load_movie("movie.tif")
-      camera_info = {
-          "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Qe": 1, "Pixelsize": 130
+      camera_info = {   # Pixelsize (nm) is required: the localizations are returned in nm
+          "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Pixelsize": 130
       }
 
       locs, info = localize.localize(
           movie,
           camera_info=camera_info,
-          identification_parameters={"Box Size": 7, "Min. Net Gradient": 5000},
+          identification_parameters=localize.IdentificationParameters(
+              method=localize.NetGradient(5000), box=7
+          ),
           movie_info=info,
           fitting_method="gaussmle",
       )
@@ -100,7 +103,7 @@ Picasso Localize reads the following movie formats:
      - A dialog asks for the file specifications when the file is opened.
    * - Imaris
      - ``.ims``
-     - Supported only on Windows. For files with several channels, a dialog asks which channel to load.
+     - For files with several channels, a dialog asks which channel to load.
    * - Nikon ND2
      - ``.nd2``
      - Either a time series (e.g., SMLM measurement) or a z-stack (e.g., calibration) (``T`` or ``Z`` axis).

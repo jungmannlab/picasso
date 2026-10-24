@@ -107,11 +107,12 @@ def render_triangulation(
     Parameters
     ----------
     x, y : lib.FloatArray1D
-        Localization coordinates, camera pixels.
+        Localization coordinates (nm).
     oversampling : float
-        Display pixels per camera pixel.
+        Rendered pixels per nm, i.e., one over the display pixel
+        size.
     viewport : tuple
-        ``((y_min, x_min), (y_max, x_max))`` in camera pixels.
+        ``((y_min, x_min), (y_max, x_max))`` in nm.
     passes : int, optional
         Number of jittered triangulations averaged. 0 paints the
         unjittered triangulation alone. Default ``PASSES_DEFAULT``.

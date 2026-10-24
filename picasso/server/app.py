@@ -6,9 +6,7 @@ import os
 import socket
 from PIL import Image
 import streamlit as st
-from sqlalchemy import create_engine
 
-from picasso import localize
 from status import status
 from preview import preview
 from history import history
@@ -30,8 +28,6 @@ st.set_page_config(page_title="Picasso Server", page_icon=logo, layout="wide")
 c1, c2, c3, c4 = st.sidebar.columns((1, 1, 1, 1))
 c1.image(logo)
 c2.write("# Picasso Server")
-
-engine = create_engine("sqlite:///" + localize.db_filename(), echo=False)
 
 st.sidebar.code(f"{socket.gethostname()}\nVersion {VERSION_NO}")
 

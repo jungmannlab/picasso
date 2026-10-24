@@ -24,9 +24,17 @@ Mod = QtCore.Qt.KeyboardModifier
 
 
 class _Mouse:
-    def __init__(self, x, y, button=Btn.LeftButton, modifiers=Mod.NoModifier):
+    def __init__(
+        self,
+        x,
+        y,
+        button=Btn.LeftButton,
+        modifiers=Mod.NoModifier,
+        buttons=None,
+    ):
         self._pos = QtCore.QPoint(int(x), int(y))
         self._button = button
+        self._buttons = button if buttons is None else buttons
         self._modifiers = modifiers
 
     def pos(self):
@@ -39,7 +47,7 @@ class _Mouse:
         return self._button
 
     def buttons(self):
-        return self._button
+        return self._buttons
 
     def modifiers(self):
         return self._modifiers
@@ -158,13 +166,12 @@ def test_shift_drag_zooms_to_the_rectangle(view):
     # the outline is the 2D window's rubber band, shown while dragging
     view.mousePressEvent(_Mouse(x0, y0, modifiers=Mod.ShiftModifier))
     view.mouseMoveEvent(_Mouse(x1, y1, modifiers=Mod.ShiftModifier))
-    assert view.rubberband.isVisible()
-    assert view.rubberband.geometry() == QtCore.QRect(
+    assert view.zoom_rectangle.active
+    assert view.zoom_rectangle.band.geometry() == QtCore.QRect(
         QtCore.QPoint(x0, y0), QtCore.QPoint(x1, y1)
     )
     view.mouseReleaseEvent(_Mouse(x1, y1, modifiers=Mod.ShiftModifier))
-    assert not view.rubberband.isVisible()
-    assert view._zoom_rect is None
+    assert not view.zoom_rectangle.active
     # the rectangle's center is the new view center, its size the new
     # field (widened to the window's aspect ratio)
     cy, cx = render.viewport_center(view.viewport)
@@ -185,18 +192,64 @@ def test_tiny_shift_drag_is_ignored(view):
     assert [tuple(v) for v in view.viewport] == before
 
 
-def test_dragging_up_or_left_cancels_the_rectangle_zoom(view):
-    # as in the 2D window, the rectangle only stretches towards the
-    # bottom right; releasing above or left of the start cancels
+def test_the_rectangle_can_be_dragged_in_any_direction(view):
+    start = [tuple(v) for v in view.viewport]
+    _drag(view, 100, 60, 260, 180, modifiers=Mod.ShiftModifier)
+    zoomed = [tuple(v) for v in view.viewport]
+    assert zoomed != start
+    # from the other corners of the same rectangle
+    for x0, y0, x1, y1 in [
+        (260, 180, 100, 60),
+        (260, 60, 100, 180),
+        (100, 180, 260, 60),
+    ]:
+        view.viewport = list(start)
+        view.mousePressEvent(_Mouse(x0, y0, modifiers=Mod.ShiftModifier))
+        view.mouseMoveEvent(_Mouse(x1, y1, modifiers=Mod.ShiftModifier))
+        assert view.zoom_rectangle.band.geometry() == QtCore.QRect(
+            QtCore.QPoint(100, 60), QtCore.QPoint(260, 180)
+        )
+        view.mouseReleaseEvent(_Mouse(x1, y1, modifiers=Mod.ShiftModifier))
+        assert np.ravel(view.viewport) == pytest.approx(np.ravel(zoomed))
+
+
+def test_right_click_or_esc_cancels_the_rectangle(view):
+    view._mode = "Measure"  # releases would add or remove points
     before = [tuple(v) for v in view.viewport]
-    view.mousePressEvent(_Mouse(200, 150, modifiers=Mod.ShiftModifier))
-    view.mouseMoveEvent(_Mouse(80, 40, modifiers=Mod.ShiftModifier))
-    assert view.rubberband.geometry().width() <= 0  # collapsed, no outline
-    view.mouseReleaseEvent(_Mouse(80, 40, modifiers=Mod.ShiftModifier))
-    assert not view.rubberband.isVisible()
+    held = Btn.LeftButton | Btn.RightButton
+    view.mousePressEvent(_Mouse(100, 60, modifiers=Mod.ShiftModifier))
+    view.mouseMoveEvent(_Mouse(260, 180, modifiers=Mod.ShiftModifier))
+    view.mousePressEvent(_Mouse(260, 180, Btn.RightButton, buttons=held))
+    assert not view.zoom_rectangle.active
+    assert not view._pan  # the right press started no pan
+    view.mouseMoveEvent(_Mouse(300, 200, Btn.NoButton, buttons=held))
+    view.mouseReleaseEvent(_Mouse(300, 200, Btn.RightButton))
+    view.mouseReleaseEvent(_Mouse(300, 200))
     assert [tuple(v) for v in view.viewport] == before
-    _drag(view, 200, 150, 300, 40, modifiers=Mod.ShiftModifier)  # up-right
+    assert view._points == [] and view._point_sets == []
+    # Esc while dragging
+    view.mousePressEvent(_Mouse(100, 60, modifiers=Mod.ShiftModifier))
+    view.mouseMoveEvent(_Mouse(260, 180, modifiers=Mod.ShiftModifier))
+    _press_esc(view)
+    assert not view.zoom_rectangle.active
+    view.mouseReleaseEvent(_Mouse(260, 180))
     assert [tuple(v) for v in view.viewport] == before
+    assert view._points == []
+    # the next click acts normally again
+    view.mousePressEvent(_Mouse(50, 50))
+    view.mouseReleaseEvent(_Mouse(50, 50))
+    assert len(view._points) == 1
+
+
+def _press_esc(view):
+    QtWidgets.QApplication.sendEvent(
+        view,
+        QtGui.QKeyEvent(
+            QtCore.QEvent.Type.KeyPress,
+            QtCore.Qt.Key.Key_Escape,
+            Mod.NoModifier,
+        ),
+    )
 
 
 def test_alt_left_and_middle_button_pan_like_the_right_button(view):
@@ -206,10 +259,10 @@ def test_alt_left_and_middle_button_pan_like_the_right_button(view):
     assert right != start
     view.viewport = [tuple(v) for v in start]
     _drag(view, 200, 150, 260, 190, modifiers=Mod.AltModifier)
-    assert [tuple(v) for v in view.viewport] == pytest.approx(right)
+    assert np.ravel(view.viewport) == pytest.approx(np.ravel(right))
     view.viewport = [tuple(v) for v in start]
     _drag(view, 200, 150, 260, 190, button=Btn.MiddleButton)
-    assert [tuple(v) for v in view.viewport] == pytest.approx(right)
+    assert np.ravel(view.viewport) == pytest.approx(np.ravel(right))
     assert not view._pan
 
 
@@ -246,15 +299,15 @@ def test_triple_click_fits_and_shift_resets_rotation(view):
     assert view.rotation.as_quat()[3] != pytest.approx(1.0)  # rotation kept
     _triple_click(view, 10, 10, modifiers=Mod.ShiftModifier)
     assert view.rotation.as_quat()[3] == pytest.approx(1.0)  # reset
-    assert [tuple(v) for v in view.viewport] == pytest.approx(fitted)
-    assert not view.rubberband.isVisible()  # Shift + press started none
+    assert np.ravel(view.viewport) == pytest.approx(np.ravel(fitted))
+    assert not view.zoom_rectangle.active  # Shift + press started none
 
 
 def test_home_and_number_keys(view):
     fitted = [tuple(v) for v in view.viewport]
     view.zoom_in()
     view.keyPressEvent(_Key(QtCore.Qt.Key.Key_Home))
-    assert [tuple(v) for v in view.viewport] == pytest.approx(fitted)
+    assert np.ravel(view.viewport) == pytest.approx(np.ravel(fitted))
     view.keyPressEvent(_Key(QtCore.Qt.Key.Key_2))
     assert view.angx == pytest.approx(np.pi / 2)
     view.keyPressEvent(_Key(QtCore.Qt.Key.Key_3))

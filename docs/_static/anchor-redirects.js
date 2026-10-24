@@ -1,5 +1,5 @@
 // Redirect links to sections that moved when the Render and Localize pages
-// were split into several pages (Picasso 0.12), e.g. old bookmarks or links
+// were split into several pages (Picasso 1.0), e.g. old bookmarks or links
 // from papers: render.html#gpu-rendering -> render/performance.html#...
 // Targets are relative to the documentation root, where the old pages are.
 (function () {
@@ -45,7 +45,7 @@
     "multichannel-2d-gaussian-fitting": "localize/multichannel.html#localize-multichannel-gaussian",
     "multichannel-and-split-field-of-view": "localize/camera.html#localize-scmos-multichannel",
     "multichannel-spline-psf-e-g-biplane": "localize/spline.html#localize-multichannel-spline",
-    "quantum-efficiency": "localize/camera.html#localize-camera-config-qe",
+    "quantum-efficiency": "localize/camera.html#localize-camera-config-wavelength",
     "reading-the-calibration-plot": "localize/3d-calibration.html#localize-3d-calibration-plot",
     "reading-the-scmos-calibration-plot": "localize/camera.html#localize-scmos-plot",
     "regions-of-interest-rois": "localize/identification.html#localize-rois",
@@ -90,7 +90,6 @@
     "apply-expressions-to-localizations": "render/menu-postprocess.html#render-apply-expressions",
     "blur": "render/display-settings.html#render-blur",
     "build-an-animation": "render/3d.html#render-animation",
-    "camera": "render/display-settings.html#render-camera",
     "clear-picks-ctrl-c": "render/menu-tools.html#render-clear-picks",
     "cluster-in-pick-k-means": "render/menu-tools.html#render-cluster-in-pick",
     "color-bar-lut": "render/display-settings.html#render-colorbar-format",

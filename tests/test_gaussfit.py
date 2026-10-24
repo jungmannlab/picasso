@@ -12,11 +12,12 @@ against, in two directions:
   precision, states and iteration counts included - there is no convergence
   branch left for them to disagree on, so the comparison pins the algebra
   exactly and cannot be flaky.
-- **``picasso.gausslq``**, which minimizes the *same objective* with SciPy's
-  MINPACK instead. Different algorithms cannot be compared step for step, but
-  they must land on the same optimum - and where they differ, the fit that
-  reaches the lower chi-square is the right one. ``gausslq`` evaluates its
-  model in float32, so it is the one with slack.
+- **SciPy's MINPACK**, minimizing the *same objective* (the least-squares
+  fit of the former ``picasso.gausslq``, re-implemented here as
+  ``_minpack_fit``). Different algorithms cannot be compared step for step,
+  but they must land on the same optimum - and where they differ, the fit
+  that reaches the lower chi-square is the right one. The reference
+  evaluates its model in float32, so it is the one with slack.
 
 :authors: Rafal Kowalewski
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -28,8 +29,8 @@ from concurrent import futures
 
 import numpy as np
 import pytest
+from scipy import optimize
 
-from picasso import gausslq
 from picasso.fitting import (
     gaussfit,
     gaussfit_cuda,
@@ -38,6 +39,7 @@ from picasso.fitting import (
     seeds,
     splinefit,
 )
+from tests._progress_tracking import RecordingProgress, assert_phases_complete
 
 BOX = 7
 CENTER = (BOX - 1) / 2.0
@@ -102,10 +104,58 @@ def _seed(model, spots):
     )
 
 
+def _minpack_fit(spots, tolerance, max_iterations):
+    """Independent least-squares reference: SciPy's MINPACK ``leastsq`` on
+    ``photons * PDF_x * PDF_y + bg``, as the former ``picasso.gausslq`` fit
+    it - moment seeds, a float32 model and ``maxfev = max_iterations *
+    (n_params + 1)``.
+
+    Returns ``[x, y, photons, bg, sx, sy]`` per spot, x/y relative to the box
+    center.
+    """
+    size = spots.shape[1]
+    half = size // 2
+    grid = np.arange(-half, half + 1, dtype=np.float32)
+    yy, xx = np.mgrid[0:size, 0:size].astype(np.float32)
+
+    def pdf(mu, sigma):
+        norm = 0.3989422804014327 / sigma
+        return (norm * np.exp(-0.5 * ((grid - mu) / sigma) ** 2)).astype(
+            np.float32
+        )
+
+    def residuals(theta, spot):
+        x, y, photons, bg, sx, sy = theta
+        model = np.float32(photons) * np.outer(pdf(y, sy), pdf(x, sx))
+        return (spot - (model + np.float32(bg))).astype(np.float32).ravel()
+
+    out = np.empty((len(spots), 6), np.float32)
+    for k, spot in enumerate(spots):
+        bg = spot.min()
+        signal = spot - bg
+        total = signal.sum()
+        x0 = (signal * xx).sum() / total
+        y0 = (signal * yy).sum() / total
+        sx0 = np.sqrt((signal * (xx - x0) ** 2).sum() / total)
+        sy0 = np.sqrt((signal * (yy - y0) ** 2).sum() / total)
+        theta0 = np.array(
+            [x0 - half, y0 - half, max(1.0, total), bg, sx0, sy0], np.float32
+        )
+        out[k] = optimize.leastsq(
+            residuals,
+            theta0,
+            args=(spot,),
+            ftol=tolerance,
+            xtol=tolerance,
+            maxfev=max_iterations * (len(theta0) + 1),
+        )[0]
+    return out
+
+
 @pytest.fixture(scope="module")
 def lq_and_lm(noisy_batch):
-    """``gausslq`` and ``gaussfit`` run to convergence on the same spots."""
-    lq = gausslq.fit_spots(noisy_batch, tolerance=1e-8, max_iterations=400)
+    """MINPACK and ``gaussfit`` run to convergence on the same spots."""
+    lq = _minpack_fit(noisy_batch, tolerance=1e-8, max_iterations=400)
     lm = gaussfit.fit_spots(
         gaussfit.ELLIPTIC,
         noisy_batch,
@@ -178,17 +228,18 @@ class TestGroundTruthRecovery:
         )
 
 
-class TestGausslqParity:
+class TestMinpackParity:
     """Same model, same estimator, different optimizer.
 
-    ``gausslq`` minimizes ``sum((data - (photons * PDF_x * PDF_y + bg))^2)``;
-    the elliptical LM model is the same surface parameterized by peak height
-    instead of integrated photons, so the least-squares optimum is identical.
-    The parameterization differs only in how the optimizer walks there."""
+    ``_minpack_fit`` minimizes
+    ``sum((data - (photons * PDF_x * PDF_y + bg))^2)``; the elliptical LM
+    model is the same surface parameterized by peak height instead of
+    integrated photons, so the least-squares optimum is identical. The
+    parameterization differs only in how the optimizer walks there."""
 
     @staticmethod
-    def _as_gausslq_layout(theta):
-        """LM ``[peak, x, y, sx, sy, bg]`` -> gausslq's
+    def _as_reference_layout(theta):
+        """LM ``[peak, x, y, sx, sy, bg]`` -> the reference's
         ``[x, y, photons, bg, sx, sy]``, x/y relative to the box center."""
         peak, cx, cy, sx, sy, bg = theta.T
         photons = peak * 2.0 * np.pi * np.abs(sx * sy)
@@ -215,7 +266,7 @@ class TestGausslqParity:
 
     def test_lands_on_the_same_optimum(self, lq_and_lm):
         lq, lm = lq_and_lm
-        mapped = self._as_gausslq_layout(lm)
+        mapped = self._as_reference_layout(lm)
         # Positions and widths in pixels, background in photons.
         assert np.nanmax(np.abs(lq[:, 0] - mapped[:, 0])) < 1e-3
         assert np.nanmax(np.abs(lq[:, 1] - mapped[:, 1])) < 1e-3
@@ -228,12 +279,12 @@ class TestGausslqParity:
         """The load-bearing assertion. Two different algorithms on one
         objective will not stop at the same floating-point point, so compare
         what actually matters: neither may be the worse fit, and the LM
-        backend must not be. ``gausslq`` evaluates its model in float32
-        (``gausslq.fit_spot``), so it is the one that cannot converge tighter.
+        backend must not be. The reference evaluates its model in float32,
+        so it is the one that cannot converge tighter.
         """
         lq, lm = lq_and_lm
         chi_lm = self._chi_square(lm, noisy_batch)
-        # gausslq's layout, expressed as LM parameters, so one chi-square
+        # the reference's layout, expressed as LM parameters, so one chi-square
         # function scores both.
         peak = lq[:, 2] / (2.0 * np.pi * np.abs(lq[:, 4] * lq[:, 5]))
         as_lm = np.stack(
@@ -252,7 +303,7 @@ class TestGausslqParity:
 
     def test_photon_convention_is_not_accidentally_equal(self, lq_and_lm):
         """Guard against the mapping above being a no-op: the LM amplitude is
-        a peak height and must *not* equal gausslq's photon count."""
+        a peak height and must *not* equal the reference's photon count."""
         lq, lm = lq_and_lm
         assert np.nanmedian(np.abs(lq[:, 2] - lm[:, 0])) > 1.0
 
@@ -329,6 +380,40 @@ class TestThreading:
             pass
         fit.raise_errors()
         assert fit.current[0] <= len(noisy_batch)
+        # every claimed spot was fitted before the worker exited
+        assert fit.n_done == fit.current[0]
+
+    @pytest.mark.parametrize("multichannel", [False, True])
+    def test_async_counts_finished_spots(self, noisy_batch, multichannel):
+        """``n_done`` counts the spots whose results are written, so it ends
+        at the spot count once the fit finished."""
+        if multichannel:
+            n = 40
+            spots, _ = _multi_batch(n, [400.0, 400.0], [10.0, 10.0])
+            jac, res = _multi_geometry(n)
+            fit = gaussfit.fit_spots_multichannel_async(
+                gaussfit.MULTI_KIND_SHARED,
+                spots,
+                jac,
+                res,
+                _shared_seed(spots),
+                n_threads=2,
+            )
+        else:
+            n = len(noisy_batch)
+            seed = seeds.initial_parameters_gauss(noisy_batch, BOX).astype(
+                np.float64
+            )
+            fit = gaussfit.fit_spots_async(
+                gaussfit.ELLIPTIC, noisy_batch, seed, n_threads=2
+            )
+        seen = []
+        while not fit.finished():
+            seen.append(fit.n_done)
+        fit.raise_errors()
+        assert all(0 <= v <= n for v in seen)
+        assert all(b >= a for a, b in zip(seen, seen[1:]))
+        assert fit.n_done == fit.done[0] == fit.current[0] == n
 
 
 class TestSchedule:
@@ -344,20 +429,23 @@ class TestSchedule:
         assert gaussfit_cuda.ROTATED is gaussfit.ROTATED
         assert gaussfit_cuda.n_parameters is gaussfit.n_parameters
 
-    def test_iteration_cap_bites(self, noisy_batch):
+    @pytest.mark.parametrize("mle", [False, True], ids=["lsq", "mle"])
+    def test_iteration_cap_bites(self, noisy_batch, mle):
         seed = seeds.initial_parameters_gauss(noisy_batch, BOX).astype(
             np.float64
         )
         capped = gaussfit.fit_spots(
-            gaussfit.ELLIPTIC, noisy_batch, seed, max_iterations=2
+            gaussfit.ELLIPTIC, noisy_batch, seed, mle=mle, max_iterations=2
         )[3]
         free = gaussfit.fit_spots(
-            gaussfit.ELLIPTIC, noisy_batch, seed, max_iterations=40
+            gaussfit.ELLIPTIC, noisy_batch, seed, mle=mle, max_iterations=40
         )[3]
+        assert capped.min() >= 0
         assert capped.max() <= 2
         assert free.max() > 2
 
-    def test_looser_tolerance_stops_earlier(self, noisy_batch):
+    @pytest.mark.parametrize("mle", [False, True], ids=["lsq", "mle"])
+    def test_looser_tolerance_stops_earlier(self, noisy_batch, mle):
         seed = seeds.initial_parameters_gauss(noisy_batch, BOX).astype(
             np.float64
         )
@@ -365,6 +453,7 @@ class TestSchedule:
             gaussfit.ELLIPTIC,
             noisy_batch,
             seed,
+            mle=mle,
             tolerance=1e-1,
             max_iterations=60,
         )[3]
@@ -372,10 +461,135 @@ class TestSchedule:
             gaussfit.ELLIPTIC,
             noisy_batch,
             seed,
+            mle=mle,
             tolerance=1e-8,
             max_iterations=60,
         )[3]
         assert loose.mean() < tight.mean()
+
+    def test_cpu_least_squares_default_is_converged(self, noisy_batch):
+        """The CPU least-squares schedule (``TOLERANCE_LSQ_CPU``, kept from
+        MINPACK's ``ftol``/``xtol``) is a relative change of the chi-square
+        here, not of the parameters. It must still stop at the optimum:
+        tightening it moves no position by more than a twentieth of a
+        pixel."""
+        seed = seeds.initial_parameters_gauss(noisy_batch, BOX).astype(
+            np.float64
+        )
+        default = gaussfit.fit_spots(
+            gaussfit.ELLIPTIC,
+            noisy_batch,
+            seed,
+            tolerance=gaussfit.TOLERANCE_LSQ_CPU,
+            max_iterations=gaussfit.MAX_ITERATIONS_LSQ_CPU,
+        )[0]
+        tight = gaussfit.fit_spots(
+            gaussfit.ELLIPTIC,
+            noisy_batch,
+            seed,
+            tolerance=1e-10,
+            max_iterations=400,
+        )[0]
+        assert np.max(np.abs(default[:, 1:3] - tight[:, 1:3])) < 0.05
+
+
+class TestProgress:
+    @pytest.mark.parametrize("mle", [False, True], ids=["lsq", "mle"])
+    def test_tracker_counts_every_spot(self, noisy_batch, mle):
+        """One "Fitting spots" phase over the spots, reporting the number
+        of spots fitted so far after each chunk of them."""
+        seed = seeds.initial_parameters_gauss(noisy_batch, BOX).astype(
+            np.float64
+        )
+        tracker = RecordingProgress()
+        gaussfit.fit_spots(
+            gaussfit.ELLIPTIC,
+            noisy_batch,
+            seed,
+            mle=mle,
+            progress=tracker,
+        )
+        assert_phases_complete(tracker, ["Fitting spots"])
+        assert tracker.phases[0]["maximum"] == len(noisy_batch)
+        n = len(noisy_batch)
+        chunk = gaussfit._CHUNK_SIZE
+        assert tracker.phases[0]["values"] == [0] + [
+            min(stop, n) for stop in range(chunk, n + chunk, chunk)
+        ]
+
+    def test_multichannel_tracker(self):
+        n = 6
+        spots, _ = _multi_batch(n, [400.0, 400.0], [10.0, 10.0])
+        jac, res = _multi_geometry(n)
+        tracker = RecordingProgress()
+        gaussfit.fit_spots_multichannel(
+            gaussfit.MULTI_KIND_SHARED,
+            spots,
+            jac,
+            res,
+            _shared_seed(spots),
+            progress=tracker,
+        )
+        assert_phases_complete(tracker, ["Fitting spots"])
+        assert tracker.phases[0]["maximum"] == n
+
+    @pytest.mark.parametrize("multichannel", [False, True])
+    def test_none_is_silent_and_console_works(
+        self, noisy_batch, multichannel, capsys
+    ):
+        if multichannel:
+            n = 4
+            spots, _ = _multi_batch(n, [400.0, 400.0], [10.0, 10.0])
+            jac, res = _multi_geometry(n)
+            args = (
+                gaussfit.MULTI_KIND_SHARED,
+                spots,
+                jac,
+                res,
+                _shared_seed(spots),
+            )
+            fit = gaussfit.fit_spots_multichannel
+        else:
+            spots = noisy_batch[:4]
+            args = (gaussfit.ELLIPTIC, spots, _seed(gaussfit.ELLIPTIC, spots))
+            fit = gaussfit.fit_spots
+        fit(*args, progress=None)
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        fit(*args, progress="console")
+        assert "Fitting spots" in capsys.readouterr().err
+
+    def test_rejects_an_invalid_progress_argument(self, noisy_batch):
+        spots = noisy_batch[:2]
+        with pytest.raises(ValueError, match="Invalid progress"):
+            gaussfit.fit_spots(
+                gaussfit.ELLIPTIC,
+                spots,
+                _seed(gaussfit.ELLIPTIC, spots),
+                progress="tqdm",
+            )
+
+
+class TestChiSquare:
+    @pytest.mark.parametrize("model", MODELS)
+    def test_least_squares_reports_the_residual_sum_of_squares(
+        self, model, noisy_batch
+    ):
+        """The reported chi-square is the sum of squared residuals of the
+        fitted model against the spot - recomputed here from the closed
+        form."""
+        spots = noisy_batch[:20]
+        fitted, chi_square, _, _ = gaussfit.fit_spots(
+            model, spots, _seed(model, spots), mle=False
+        )
+        expected = [
+            (
+                (spots[k].astype(np.float64) - _reference(model, fitted[k]))
+                ** 2
+            ).sum()
+            for k in range(len(spots))
+        ]
+        np.testing.assert_allclose(chi_square, expected, rtol=1e-6)
 
 
 class TestInputValidation:
@@ -398,6 +612,13 @@ class TestInputValidation:
     def test_rejects_unknown_model(self):
         with pytest.raises(ValueError, match="Unknown Gaussian model"):
             gaussfit.fit_spots(
+                99, np.zeros((1, BOX, BOX), np.float32), np.zeros((1, 6))
+            )
+
+    def test_async_rejects_unknown_model(self):
+        """Raised by the caller's thread, before any worker starts."""
+        with pytest.raises(ValueError, match="Unknown Gaussian model"):
+            gaussfit.fit_spots_async(
                 99, np.zeros((1, BOX, BOX), np.float32), np.zeros((1, 6))
             )
 

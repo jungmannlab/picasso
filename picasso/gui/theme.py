@@ -18,9 +18,17 @@ The user chooses in ``AppearanceDialog`` (File > Appearance...):
   operating system, also when it changes while Picasso runs; "Light"
   and "Dark" fix it; "Native" is the platform's own style, the look of
   Picasso before themes existed;
+- the contrast: "High" shows black and white text and backgrounds and
+  frames in the color of the text, e.g., around input fields; "System"
+  (default) is high if the operating system asks for it (macOS:
+  Increase contrast; Windows: a contrast theme), also when this changes
+  while Picasso runs;
 - the accent color of selections, checked and default buttons, sliders
   and focus frames;
-- the font size, in percent of the system's;
+- the font size, in percent of the system's; it also scales the text
+  that Picasso draws itself on screen (``text_scale``): charts, and the
+  scale bar, legend and rotation angles on rendered images, but not in
+  saved charts and exported images (``unscaled_text``);
 - the density, i.e., the spacing of controls;
 - how the toolbars show their buttons; which actions they hold is set
   in ``picasso.gui.toolbars``.
@@ -46,7 +54,8 @@ next.
 Widgets that paint themselves take their colors from their palette and
 their stylesheets refer to it (e.g., ``palette(mid)``), so that they
 follow the theme. ``set_button_state`` marks a button, e.g., as done
-("ok"), in the colors of the theme.
+("ok"), in the colors of the theme and with an icon, so that the state
+does not rely on color alone.
 
 :author: Rafal Kowalewski
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -54,6 +63,7 @@ follow the theme. ``set_button_state`` marks a button, e.g., as done
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 from dataclasses import asdict, dataclass, fields, replace
@@ -65,6 +75,8 @@ from .. import docs_url, io, lib
 #: Modes of the theme; "System" follows the operating system and
 #: "Native" is the platform's own style.
 MODES = ("System", "Light", "Dark", "Native")
+#: Contrast of the theme; "System" follows the operating system.
+CONTRASTS = ("System", "Normal", "High")
 #: Spacing of the controls.
 DENSITIES = ("Comfortable", "Compact")
 #: How the toolbars show their buttons.
@@ -136,9 +148,62 @@ NEUTRALS = {
         "warning": "#e3a72a",
         "danger": "#ec6560",
     },
+    # high contrast: black on white and white on black, borders in the
+    # color of the text, muted text at 7:1 and disabled text at 4.5:1
+    # or more
+    "Light high contrast": {
+        "window": "#ffffff",
+        "base": "#ffffff",
+        "alternate": "#ededed",
+        "button": "#ffffff",
+        "hover": "#e0e0e0",
+        "pressed": "#c7c7c7",
+        "text": "#000000",
+        "text_muted": "#404040",
+        "text_disabled": "#6b6b6b",
+        "border": "#000000",
+        "light": "#ffffff",
+        "midlight": "#d9d9d9",
+        "mid": "#6b6b6b",
+        "dark": "#404040",
+        "shadow": "#000000",
+        "success": "#0a7048",
+        "warning": "#7a5200",
+        "danger": "#b0201b",
+    },
+    "Dark high contrast": {
+        "window": "#000000",
+        "base": "#000000",
+        "alternate": "#1c1c1c",
+        "button": "#000000",
+        "hover": "#2e2e2e",
+        "pressed": "#474747",
+        "text": "#ffffff",
+        "text_muted": "#c4c4c4",
+        "text_disabled": "#8f8f8f",
+        "border": "#ffffff",
+        "light": "#5c5c5c",
+        "midlight": "#333333",
+        "mid": "#8f8f8f",
+        "dark": "#000000",
+        "shadow": "#000000",
+        "success": "#4cd492",
+        "warning": "#ffc933",
+        "danger": "#ff7a73",
+    },
 }
 #: Button states of ``set_button_state`` -> color of ``NEUTRALS``.
 BUTTON_STATES = {"ok": "success", "warning": "warning", "danger": "danger"}
+#: Button states of ``set_button_state`` -> icon (see ``icon``) and the
+#: description read out by screen readers.
+BUTTON_STATE_ICONS = {
+    "ok": ("state-ok", "Done"),
+    "warning": ("state-warning", "Warning"),
+    "danger": ("state-danger", "Error"),
+}
+#: Dynamic property holding a button's own icon while
+#: ``set_button_state`` shows a state icon instead.
+_ICON_WITHOUT_STATE = "picassoIconWithoutState"
 
 #: Per density: layout margins of windows and of other widgets, layout
 #: spacing, padding of push buttons (vertical, horizontal) and of tool
@@ -171,6 +236,8 @@ class Appearance:
     ----------
     mode : str
         One of ``MODES``.
+    contrast : str
+        One of ``CONTRASTS``.
     accent : str
         Accent color, a hexadecimal code.
     font_scale : int
@@ -185,6 +252,7 @@ class Appearance:
     """
 
     mode: str = "System"
+    contrast: str = "System"
     accent: str = ACCENTS["Blue"]
     font_scale: int = 100
     density: str = "Comfortable"
@@ -226,6 +294,8 @@ class Appearance:
         appearance = replace(default, **values)
         if appearance.mode not in MODES:
             appearance = replace(appearance, mode=default.mode)
+        if appearance.contrast not in CONTRASTS:
+            appearance = replace(appearance, contrast=default.contrast)
         if appearance.toolbar not in TOOLBAR_STYLES:
             appearance = replace(appearance, toolbar=default.toolbar)
         if appearance.density not in DENSITIES:
@@ -279,15 +349,50 @@ def contrast_ratio(
     return (high + 0.05) / (low + 0.05)
 
 
-def _on_color(color: str) -> str:
+def _on_color(color: str, high_contrast: bool = False) -> str:
     """White text on ``color`` if it reaches the contrast that WCAG 2
-    asks of controls (3:1), as on most accent colors, else black."""
+    asks of controls (3:1), as on most accent colors, else black. In
+    high contrast, the one of the two that contrasts more (at least
+    4.5:1, which WCAG 2 asks of text)."""
+    if high_contrast:
+        white = contrast_ratio(color, "#ffffff")
+        return (
+            "#ffffff"
+            if white >= contrast_ratio(color, "#000000")
+            else ("#000000")
+        )
     if contrast_ratio(color, "#ffffff") >= 3:
         return "#ffffff"
     return "#000000"
 
 
-def build_palette(appearance: Appearance, dark: bool) -> QtGui.QPalette:
+def _colors(dark: bool, high_contrast: bool = False) -> dict:
+    """The colors of ``NEUTRALS`` of the light or dark theme, in
+    normal or high contrast."""
+    name = "Dark" if dark else "Light"
+    return NEUTRALS[f"{name} high contrast" if high_contrast else name]
+
+
+def _accent(
+    appearance: Appearance, dark: bool, high_contrast: bool = False
+) -> QtGui.QColor:
+    """The accent color of ``appearance``; in high contrast, lightened
+    (dark theme) or darkened (light theme) until it reaches 3:1 against
+    the window, as WCAG 2 asks of focus frames and selections."""
+    accent = QtGui.QColor(appearance.accent)
+    if not high_contrast:
+        return accent
+    window = _colors(dark, True)["window"]
+    for _ in range(20):
+        if contrast_ratio(accent, window) >= 3:
+            break
+        accent = accent.lighter(115) if dark else accent.darker(115)
+    return accent
+
+
+def build_palette(
+    appearance: Appearance, dark: bool, high_contrast: bool = False
+) -> QtGui.QPalette:
     """The palette of the light or dark theme with the accent color of
     ``appearance``. Every role of every color group is set, so that
     nothing of the platform's palette shows through.
@@ -298,14 +403,17 @@ def build_palette(appearance: Appearance, dark: bool) -> QtGui.QPalette:
         Gives the accent color.
     dark : bool
         Whether the dark theme is built.
+    high_contrast : bool, optional
+        Whether the high-contrast colors are used (see ``NEUTRALS``).
+        Default False.
 
     Returns
     -------
     palette : QtGui.QPalette
         The palette.
     """
-    colors = NEUTRALS["Dark" if dark else "Light"]
-    accent = QtGui.QColor(appearance.accent)
+    colors = _colors(dark, high_contrast)
+    accent = _accent(appearance, dark, high_contrast)
     link = accent.lighter(140) if dark and luminance(accent) < 0.2 else accent
     Role = QtGui.QPalette.ColorRole
     roles = {
@@ -326,7 +434,7 @@ def build_palette(appearance: Appearance, dark: bool) -> QtGui.QPalette:
         Role.Dark: colors["dark"],
         Role.Shadow: colors["shadow"],
         Role.Highlight: accent,
-        Role.HighlightedText: _on_color(appearance.accent),
+        Role.HighlightedText: _on_color(accent.name(), high_contrast),
         Role.Link: link,
         Role.LinkVisited: link.darker(120),
     }
@@ -355,9 +463,9 @@ def build_palette(appearance: Appearance, dark: bool) -> QtGui.QPalette:
     return palette
 
 
-def _state_rules(dark: bool) -> str:
+def _state_rules(dark: bool, high_contrast: bool = False) -> str:
     """Stylesheet rules of the button states of ``set_button_state``."""
-    colors = NEUTRALS["Dark" if dark else "Light"]
+    colors = _colors(dark, high_contrast)
     rules = []
     for state, key in BUTTON_STATES.items():
         color = colors[key]
@@ -372,7 +480,9 @@ def _state_rules(dark: bool) -> str:
     return "\n".join(rules)
 
 
-def stylesheet(appearance: Appearance, dark: bool) -> str:
+def stylesheet(
+    appearance: Appearance, dark: bool, high_contrast: bool = False
+) -> str:
     """The application stylesheet of ``appearance``: buttons, tool
     buttons, group boxes and the button states of ``set_button_state``.
     In the "Native" mode, only the button states.
@@ -383,6 +493,8 @@ def stylesheet(appearance: Appearance, dark: bool) -> str:
         The appearance.
     dark : bool
         Whether the dark theme is used.
+    high_contrast : bool, optional
+        Whether the high-contrast colors are used. Default False.
 
     Returns
     -------
@@ -391,12 +503,12 @@ def stylesheet(appearance: Appearance, dark: bool) -> str:
     """
     if appearance.mode == "Native":
         return _state_rules(dark)
-    colors = NEUTRALS["Dark" if dark else "Light"]
+    colors = _colors(dark, high_contrast)
     metrics = _DENSITY_METRICS[appearance.density]
     pad_v, pad_h = metrics["button_padding"]
     radius = metrics["radius"]
-    accent = appearance.accent
-    on_accent = _on_color(accent)
+    accent = _accent(appearance, dark, high_contrast).name()
+    on_accent = _on_color(accent, high_contrast)
     accent_hover = QtGui.QColor(accent).lighter(110).name()
     accent_pressed = QtGui.QColor(accent).darker(115).name()
     accent_soft = _blend(colors["button"], accent, 0.3 if dark else 0.2).name()
@@ -432,6 +544,9 @@ QPushButton:default:hover {{
 QPushButton:default:pressed {{
     background-color: {accent_pressed};
 }}
+QPushButton[compact="true"] {{
+    padding: {pad_v}px {pad_v + 2}px;
+}}
 QPushButton:flat {{
     background-color: transparent;
     border-color: transparent;
@@ -439,7 +554,7 @@ QPushButton:flat {{
 QPushButton:disabled {{
     background-color: {colors["window"]};
     color: {colors["text_disabled"]};
-    border-color: {colors["midlight"]};
+    border-color: {colors["mid" if high_contrast else "midlight"]};
 }}
 QDialogButtonBox QPushButton {{
     min-width: 4.5em;
@@ -479,21 +594,42 @@ QGroupBox::title {{
 QGroupBox:disabled {{
     color: {colors["text_disabled"]};
 }}
-{_state_rules(dark)}
+{_state_rules(dark, high_contrast)}
 """
 
 
 class _PicassoStyle(QtWidgets.QProxyStyle):
-    """Fusion with the layout margins and spacing of a density.
+    """Fusion with the layout margins and spacing of a density and, in
+    high contrast, frames in the color of the text and table grid lines
+    in the mid gray.
 
     A stylesheet cannot change the spacing of layouts, so it is set
-    here.
+    here. Fusion draws the frames of input fields, check boxes and
+    panels in a shade of the window color (2:1 against a white window,
+    less in the dark theme); in high contrast they are drawn again in
+    the color of the text. Styling these widgets in the stylesheet
+    instead would break their subcontrols (e.g., the arrows of spin
+    boxes).
 
     Parameters
     ----------
     density : str
         One of ``DENSITIES``.
+    high_contrast : bool, optional
+        Whether frames are drawn in the color of the text. Default
+        False.
     """
+
+    _FRAMED_PRIMITIVES = (
+        QtWidgets.QStyle.PrimitiveElement.PE_PanelLineEdit,
+        QtWidgets.QStyle.PrimitiveElement.PE_IndicatorCheckBox,
+        QtWidgets.QStyle.PrimitiveElement.PE_IndicatorRadioButton,
+        QtWidgets.QStyle.PrimitiveElement.PE_Frame,
+    )
+    _FRAMED_CONTROLS = (
+        QtWidgets.QStyle.ComplexControl.CC_SpinBox,
+        QtWidgets.QStyle.ComplexControl.CC_ComboBox,
+    )
 
     _MARGINS = (
         QtWidgets.QStyle.PixelMetric.PM_LayoutLeftMargin,
@@ -506,9 +642,10 @@ class _PicassoStyle(QtWidgets.QProxyStyle):
         QtWidgets.QStyle.PixelMetric.PM_LayoutVerticalSpacing,
     )
 
-    def __init__(self, density: str) -> None:
+    def __init__(self, density: str, high_contrast: bool = False) -> None:
         super().__init__("Fusion")
         self.density = density
+        self.high_contrast = high_contrast
         metrics = _DENSITY_METRICS[density]
         self._window_margin = metrics["window_margin"]
         self._child_margin = metrics["child_margin"]
@@ -524,14 +661,110 @@ class _PicassoStyle(QtWidgets.QProxyStyle):
             return self._spacing
         return super().pixelMetric(metric, option, widget)
 
+    def drawPrimitive(self, element, option, painter, widget=None):
+        super().drawPrimitive(element, option, painter, widget)
+        if self.high_contrast and element in self._FRAMED_PRIMITIVES:
+            if element == QtWidgets.QStyle.PrimitiveElement.PE_PanelLineEdit:
+                # the line edits of spin and combo boxes have no frame
+                if getattr(option, "lineWidth", 0) <= 0:
+                    return
+            ellipse = (
+                element
+                == QtWidgets.QStyle.PrimitiveElement.PE_IndicatorRadioButton
+            )
+            radius = (
+                0
+                if element == QtWidgets.QStyle.PrimitiveElement.PE_Frame
+                else 2
+            )
+            self._draw_frame(option, painter, radius, ellipse)
+
+    def drawComplexControl(self, control, option, painter, widget=None):
+        super().drawComplexControl(control, option, painter, widget)
+        if not self.high_contrast:
+            return
+        if control in self._FRAMED_CONTROLS and getattr(option, "frame", True):
+            self._draw_frame(option, painter, 2)
+        elif control == QtWidgets.QStyle.ComplexControl.CC_Slider:
+            # the handle has the color of the window in the dark theme
+            handle = QtWidgets.QStyleOptionSlider(option)
+            handle.rect = self.subControlRect(
+                control,
+                option,
+                QtWidgets.QStyle.SubControl.SC_SliderHandle,
+                widget,
+            )
+            handle.state &= ~QtWidgets.QStyle.StateFlag.State_HasFocus
+            self._draw_frame(handle, painter, 2)
+
+    def styleHint(self, hint, option=None, widget=None, returnData=None):
+        if (
+            self.high_contrast
+            and hint == QtWidgets.QStyle.StyleHint.SH_Table_GridLineColor
+        ):
+            palette = (
+                option.palette
+                if option is not None
+                else QtWidgets.QApplication.palette()
+            )
+            rgba = palette.color(QtGui.QPalette.ColorRole.Mid).rgba()
+            # Qt reads the unsigned QRgb from a signed int
+            return rgba - (1 << 32) if rgba >= 1 << 31 else rgba
+        return super().styleHint(hint, option, widget, returnData)
+
+    @staticmethod
+    def _draw_frame(
+        option: QtWidgets.QStyleOption,
+        painter: QtGui.QPainter,
+        radius: float,
+        ellipse: bool = False,
+    ) -> None:
+        """Draw a 1-pixel frame in the color of the text over the edge
+        of ``option.rect``; widgets with the keyboard focus keep
+        Fusion's frame in the accent color."""
+        if option.state & QtWidgets.QStyle.StateFlag.State_HasFocus and not (
+            ellipse or isinstance(option, QtWidgets.QStyleOptionButton)
+        ):
+            return
+        rect = QtCore.QRectF(option.rect).adjusted(0.5, 0.5, -0.5, -0.5)
+        if rect.width() <= 1 or rect.height() <= 1:
+            return
+        painter.save()
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        painter.setBrush(QtCore.Qt.BrushStyle.NoBrush)
+        painter.setPen(
+            QtGui.QPen(option.palette.color(QtGui.QPalette.ColorRole.Text), 1)
+        )
+        if ellipse:
+            painter.drawEllipse(rect)
+        else:
+            painter.drawRoundedRect(rect, radius, radius)
+        painter.restore()
+
 
 #: What the application looked like before the theme was first applied,
 #: to return to in the "Native" mode, and the applied appearance.
 _state = {
     "original": None,
     "applied": None,
+    "high_contrast": False,
     "listening": False,
 }
+
+
+def is_high_contrast(
+    appearance: Appearance, app: QtGui.QGuiApplication
+) -> bool:
+    """Whether ``appearance`` is shown in high contrast: in the
+    "System" contrast, if the operating system asks for it (Qt 6.10 and
+    later; never with earlier versions)."""
+    if appearance.contrast in ("Normal", "High"):
+        return appearance.contrast == "High"
+    hints = app.styleHints()
+    if not hasattr(hints, "accessibility"):
+        return False
+    preference = hints.accessibility().contrastPreference()
+    return preference == QtCore.Qt.ContrastPreference.HighContrast
 
 
 def is_dark(appearance: Appearance, app: QtGui.QGuiApplication) -> bool:
@@ -562,6 +795,32 @@ def _on_color_scheme_changed(_scheme: QtCore.Qt.ColorScheme) -> None:
             apply(app, applied)
 
 
+#: ``QEvent::ThemeChange``, which PyQt6's ``QEvent.Type`` lacks.
+_THEME_CHANGE = 210
+
+
+class _ContrastWatcher(QtCore.QObject):
+    """Follows the operating system to a new contrast.
+
+    PyQt6 does not expose ``QAccessibilityHints.contrastPreferenceChanged``
+    as a signal, so the contrast is read again on the theme change
+    events that the platform sends when it changes."""
+
+    def eventFilter(self, obj, event):
+        if event.type() == _THEME_CHANGE:
+            app = QtWidgets.QApplication.instance()
+            applied = _state["applied"]
+            if (
+                app is not None
+                and applied is not None
+                and applied.contrast == "System"
+                and applied.mode != "Native"
+                and is_high_contrast(applied, app) != _state["high_contrast"]
+            ):
+                apply(app, applied)
+        return False
+
+
 def apply(app: QtWidgets.QApplication, appearance: Appearance) -> None:
     """Apply ``appearance`` to the application and its open windows.
 
@@ -590,6 +849,8 @@ def apply(app: QtWidgets.QApplication, appearance: Appearance) -> None:
     )
     _state["applied"] = appearance
     dark = is_dark(appearance, app)
+    high_contrast = is_high_contrast(appearance, app)
+    _state["high_contrast"] = high_contrast
     if appearance.mode == "Native":
         if was_themed:
             style = QtWidgets.QStyleFactory.create(original["style"])
@@ -603,10 +864,10 @@ def apply(app: QtWidgets.QApplication, appearance: Appearance) -> None:
             original["stylesheet"] + stylesheet(appearance, dark)
         )
     else:
-        app.setStyle(_PicassoStyle(appearance.density))
-        app.setPalette(build_palette(appearance, dark))
+        app.setStyle(_PicassoStyle(appearance.density, high_contrast))
+        app.setPalette(build_palette(appearance, dark, high_contrast))
         app.setFont(_scaled_font(original["font"], appearance.font_scale))
-        app.setStyleSheet(stylesheet(appearance, dark))
+        app.setStyleSheet(stylesheet(appearance, dark, high_contrast))
     _show_menu_icons(app, appearance.menu_icons)
     for window in app.topLevelWidgets():
         for toolbar in window.findChildren(QtWidgets.QToolBar):
@@ -636,15 +897,57 @@ def _show_menu_icons(app: QtWidgets.QApplication, show: bool) -> None:
 
 
 def _listen(app: QtWidgets.QApplication) -> None:
-    """Follow changes of the operating system's appearance."""
+    """Follow changes of the operating system's appearance and
+    contrast."""
     if not _state["listening"]:
         app.styleHints().colorSchemeChanged.connect(_on_color_scheme_changed)
+        app.installEventFilter(_ContrastWatcher(app))
         _state["listening"] = True
 
 
 def applied() -> Appearance | None:
     """The appearance applied last, or None if none was applied."""
     return _state["applied"]
+
+
+#: Depth of nested ``unscaled_text`` contexts.
+_unscaled_depth = 0
+
+
+def text_scale() -> float:
+    """Factor of the text that Picasso draws itself on screen (charts,
+    and the scale bar and legend on rendered images): the font size of
+    the applied appearance (1 in the "Native" mode, before any
+    appearance is applied and inside ``unscaled_text``).
+
+    Returns
+    -------
+    scale : float
+        E.g., 1.5 for a font size of 150 %.
+    """
+    appearance = _state["applied"]
+    if _unscaled_depth or appearance is None or appearance.mode == "Native":
+        return 1.0
+    return appearance.font_scale / 100
+
+
+def scaled_text_size(size: float) -> int:
+    """``size`` (e.g., in pixels) times ``text_scale``, rounded; at
+    least 1."""
+    return max(1, round(size * text_scale()))
+
+
+@contextlib.contextmanager
+def unscaled_text():
+    """Context in which ``text_scale`` is 1, to draw saved and exported
+    images and charts with the text sizes they always had, whatever the
+    font size of the windows."""
+    global _unscaled_depth
+    _unscaled_depth += 1
+    try:
+        yield
+    finally:
+        _unscaled_depth -= 1
 
 
 class _TintedIconEngine(QtGui.QIconEngine):
@@ -875,8 +1178,11 @@ def _stripped(text: str) -> str:
 def set_button_state(
     button: QtWidgets.QPushButton, state: str | None = None
 ) -> None:
-    """Show ``button`` in the color of a state, e.g., green once the
-    file it loads was loaded.
+    """Show ``button`` in the color and with the icon of a state, e.g.,
+    green with a check mark once the file it loads was loaded. The icon
+    (``BUTTON_STATE_ICONS``) replaces the button's own icon, which comes
+    back with the normal look, so that the state does not rely on color
+    alone; screen readers read the state out.
 
     Parameters
     ----------
@@ -891,12 +1197,40 @@ def set_button_state(
             f"Unknown button state {state!r}, expected one of "
             f"{tuple(BUTTON_STATES)} or None."
         )
+    own_icon = button.property(_ICON_WITHOUT_STATE)
+    if state is None:
+        if own_icon is not None:
+            button.setIcon(own_icon)
+            button.setProperty(_ICON_WITHOUT_STATE, None)
+        button.setAccessibleDescription("")
+    else:
+        if own_icon is None:
+            button.setProperty(_ICON_WITHOUT_STATE, button.icon())
+        name, description = BUTTON_STATE_ICONS[state]
+        button.setIcon(icon(name))
+        button.setAccessibleDescription(description)
     button.setProperty("state", state or "")
     # dynamic properties are matched when the widget is polished
     style = button.style()
     style.unpolish(button)
     style.polish(button)
     button.update()
+
+
+def set_button_compact(button: QtWidgets.QPushButton) -> None:
+    """Give ``button`` less horizontal padding, e.g., for buttons in
+    the rows of a table. The "Native" mode keeps the platform look.
+
+    Parameters
+    ----------
+    button : QtWidgets.QPushButton
+        The button.
+    """
+    button.setProperty("compact", True)
+    # dynamic properties are matched when the widget is polished
+    style = button.style()
+    style.unpolish(button)
+    style.polish(button)
 
 
 def current() -> Appearance:
@@ -952,7 +1286,7 @@ def show_dialog(
         The dialog.
     """
     global _dialog
-    if _dialog is None:
+    if _dialog is None or sip.isdeleted(_dialog):
         _dialog = AppearanceDialog(current())
         # an open dialog must not keep the app running after the last
         # main window closed
@@ -1028,6 +1362,7 @@ class AppearanceDialog(lib.Dialog):
 
         super().__init__(parent)
         self.setWindowTitle("Appearance")
+        self.setWindowIcon(QtGui.QIcon(os.path.join(ICONS_DIR, "picasso.ico")))
         self._timer = QtCore.QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.setInterval(self.DELAY)
@@ -1051,6 +1386,19 @@ class AppearanceDialog(lib.Dialog):
             QtCore.Qt.ItemDataRole.ToolTipRole,
         )
         self.form.addRow("Theme:", self.mode)
+        self.contrast = QtWidgets.QComboBox()
+        self.contrast.addItems(CONTRASTS)
+        self.contrast.setItemData(
+            0,
+            "High if the operating system asks for it (macOS: Increase "
+            "contrast; Windows: a contrast theme)",
+            QtCore.Qt.ItemDataRole.ToolTipRole,
+        )
+        self.contrast.setToolTip(
+            "High: black and white text and backgrounds, and frames in\n"
+            "the color of the text around buttons and input fields."
+        )
+        self.form.addRow("Contrast:", self.contrast)
         self.accent = ColorComboBox(presets=ACCENTS)
         self.accent.setToolTip(
             "Color of selections, checked and default buttons, sliders "
@@ -1062,7 +1410,9 @@ class AppearanceDialog(lib.Dialog):
         self.font_scale.setSingleStep(5)
         self.font_scale.setSuffix(" %")
         self.font_scale.setToolTip(
-            "Size of the text in percent of the system's.\n"
+            "Size of the text in percent of the system's, also of the\n"
+            "charts and of the scale bar and legend on rendered images.\n"
+            "Saved charts and exported images keep their usual sizes.\n"
             "Open windows keep their size; reopen them to fit."
         )
         self.form.addRow("Font size:", self.font_scale)
@@ -1114,6 +1464,7 @@ class AppearanceDialog(lib.Dialog):
         self.set_appearance(appearance, notify=False)
         self.set_window(None)
         self.mode.currentIndexChanged.connect(self._on_mode_changed)
+        self.contrast.currentIndexChanged.connect(self._timer.start)
         self.accent.colorChanged.connect(self._timer.start)
         self.font_scale.valueChanged.connect(self._timer.start)
         self.density.currentIndexChanged.connect(self._timer.start)
@@ -1160,7 +1511,12 @@ class AppearanceDialog(lib.Dialog):
     def _update_visibility(self) -> None:
         """Show only the settings that the selected mode uses."""
         themed = self.mode.currentText() != "Native"
-        for widget in (self.accent, self.font_scale, self.density):
+        for widget in (
+            self.contrast,
+            self.accent,
+            self.font_scale,
+            self.density,
+        ):
             self.form.setRowVisible(widget, themed)
 
     def appearance(self) -> Appearance:
@@ -1168,6 +1524,7 @@ class AppearanceDialog(lib.Dialog):
         accent = self.accent.value()
         return Appearance(
             mode=self.mode.currentText(),
+            contrast=self.contrast.currentText(),
             accent=ACCENTS.get(accent, accent),
             font_scale=self.font_scale.value(),
             density=self.density.currentText(),
@@ -1190,6 +1547,7 @@ class AppearanceDialog(lib.Dialog):
             Default True.
         """
         self.mode.setCurrentText(appearance.mode)
+        self.contrast.setCurrentText(appearance.contrast)
         names = {code.upper(): name for name, code in ACCENTS.items()}
         accent = names.get(appearance.accent.upper(), appearance.accent)
         if not self.accent.set_value(accent):

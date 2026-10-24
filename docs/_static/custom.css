@@ -39,15 +39,6 @@ html[data-theme="dark"] {
   color: var(--pst-color-text-muted);
 }
 
-/* Shown in place of the logo until the logo image exists. */
-.hero .hero-name {
-  font-size: 3.5rem;
-  font-weight: 700;
-  letter-spacing: -0.02em;
-  margin-bottom: 0.5rem;
-  color: var(--pst-color-primary);
-}
-
 /* The landing page uses its title only for the browser tab; the hero
    shows the logo instead. */
 section:has(> .hero) > h1 {

@@ -6,8 +6,7 @@ Picasso
 .. raw:: html
 
    <div class="hero">
-     <img class="only-light" src="_static/picasso-logo.png" alt="Picasso"
-          onerror="this.outerHTML='&lt;p class=&quot;hero-name&quot;&gt;Picasso&lt;/p&gt;'">
+     <img class="only-light" src="_static/picasso-logo.png" alt="Picasso">
      <img class="only-dark" src="_static/picasso-logo-dark.png" alt="Picasso">
      <p class="tagline">
        A collection of tools for painting super-resolution images, covering
@@ -45,9 +44,19 @@ Picasso
 
       Python API
 
+Picasso started as the analysis software for DNA-PAINT. While it remains our
+focus, most of Picasso can be used in other SMLM modalities, such as (d)STORM
+or PALM, see :ref:`faq-other-smlm`.
+
 Picasso is complemented by our `Nature Protocols publication
 <https://doi.org/10.1038/nprot.2017.024>`__. This documentation covers all
 updates since then.
+
+.. tip::
+
+   **Updating from an earlier version?** Your files keep working: Picasso 1.0
+   reads every file written by earlier versions. Scripts and command lines
+   may need changes, see :doc:`migration`.
 
 Modules
 -------
@@ -241,5 +250,6 @@ Citing Picasso
    Getting started <getting-started>
    User guide <user-guide>
    Reference <reference>
+   FAQ <faq>
    Release notes <changelog>
    Contributing <development>

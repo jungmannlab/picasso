@@ -14,6 +14,8 @@ strokes and the undo of the last one.
 
 from __future__ import annotations
 
+import os
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -32,10 +34,10 @@ def _locs(n: int = 2000, seed: int = 0) -> pd.DataFrame:
     return pd.DataFrame(
         {
             "frame": rng.integers(0, 1000, size=n).astype(np.int32),
-            "x": rng.uniform(0.0, WIDTH, size=n),
-            "y": rng.uniform(0.0, HEIGHT, size=n),
-            "lpx": np.full(n, 0.1),
-            "lpy": np.full(n, 0.1),
+            "x": rng.uniform(0.0, WIDTH, size=n) * PIXELSIZE,
+            "y": rng.uniform(0.0, HEIGHT, size=n) * PIXELSIZE,
+            "lpx": np.full(n, 0.1 * PIXELSIZE),
+            "lpy": np.full(n, 0.1 * PIXELSIZE),
             "photons": np.full(n, 1000.0),
         }
     )
@@ -58,7 +60,10 @@ def window(qt_offscreen, tmp_path):
     window = gui_render.Window(plugins_loaded=True)
     path = str(tmp_path / "locs.hdf5")
     window.view.add(path, _locs(), _info(), render_=False)
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [
+        (0.0, 0.0),
+        (HEIGHT * PIXELSIZE, WIDTH * PIXELSIZE),
+    ]
     window.view.resize(256, 256)
     return window
 
@@ -207,7 +212,7 @@ class TestBoxPickTool:
         path = str(tmp_path / "picks.yaml")
         box_view.save_picks(path)
 
-        regions = yaml.full_load(open(path))
+        regions = yaml.safe_load(open(path))
         assert regions["Shape"] == "Box"
         assert "Corners" in regions
         # a box has no global size to store
@@ -330,6 +335,85 @@ class TestLoaderUsesTheStoredIndex:
         assert spatial_index.validate_render_index(render_index, locs, info)
 
 
+class TestLoaderProgress:
+    """The loader hands ``io.load_locs`` a progress tracker that forwards
+    ``(done, total)`` via ``subprogress`` and doubles as the mid-file
+    cancellation point."""
+
+    def test_reports_the_read_up_to_the_total(self, qt_offscreen, tmp_path):
+        path = str(tmp_path / "locs.hdf5")
+        io.save_locs(path, _locs(), _info())
+        worker = gui_render.LocsLoadWorker([(path, None)])
+        reports = []
+        worker.subprogress.connect(lambda *args: reports.append(args))
+        worker.run()
+        assert reports[-1] == (2000, 2000)
+        done = [value for value, _ in reports]
+        assert done == sorted(done)
+
+    def test_canceled_tracker_aborts_the_read(self, qt_offscreen):
+        worker = gui_render.LocsLoadWorker([])
+        progress = gui_render._LoadProgress(worker)
+        progress.setMaximum(10)
+        progress.set_value(3)  # not canceled yet
+        worker.cancel()
+        with pytest.raises(gui_render._LoadCanceledError):
+            progress.set_value(4)
+
+    def test_cancel_error_is_not_caught_by_io(self):
+        # io retries a page scan that raised a RuntimeError
+        assert not issubclass(gui_render._LoadCanceledError, RuntimeError)
+
+    def test_cancel_during_the_read_loads_nothing(
+        self, qt_offscreen, tmp_path
+    ):
+        path = str(tmp_path / "locs.hdf5")
+        io.save_locs(path, _locs(), _info())
+        worker = gui_render.LocsLoadWorker([(path, None)])
+        loaded, finished = [], []
+        worker.subprogress.connect(lambda *args: worker.cancel())
+        worker.loaded.connect(lambda *args: loaded.append(args))
+        worker.finished.connect(lambda: finished.append(True))
+        worker.run()
+        assert loaded == []
+        assert finished == [True]
+
+
+class TestLoaderSplitsPyMEChannels:
+    """A PyME file holds several channels (``probe`` column); the loader
+    emits each as its own channel."""
+
+    def test_two_channels(self, qt_offscreen, tmp_path):
+        from picasso import io
+
+        path = str(tmp_path / "two.hdf")
+        io.export_pyme_multi(
+            path, [_locs(seed=0), _locs(seed=1)], [_info(), _info()]
+        )
+        worker = gui_render.LocsLoadWorker([(path, None)])
+        results = []
+        worker.loaded.connect(lambda *args: results.append(args))
+        worker.failed.connect(lambda *args: pytest.fail(str(args)))
+        worker.run()
+        assert [os.path.basename(r[0]) for r in results] == [
+            "two_probe0.hdf",
+            "two_probe1.hdf",
+        ]
+
+        window = gui_render.Window(plugins_loaded=True)
+        for channel_path, locs, info, render_index in results:
+            window.view.add(
+                channel_path,
+                locs,
+                info,
+                render_index=render_index,
+                render_=False,
+            )
+        assert len(window.view.locs) == 2
+        assert all(len(locs) == 2000 for locs in window.view.locs)
+        assert window.view.infos[1][0]["Pixelsize"] == PIXELSIZE
+
+
 class TestCircularPicksUseThePyramid:
     """Circular picks query the render pyramid built at load, so no
     pick-size specific index blocks are built (that indexing sorted
@@ -340,7 +424,7 @@ class TestCircularPicksUseThePyramid:
         view = window.view
         view._pick_shape = "Circle"
         window.tools_settings_dialog.pick_diameter.setValue(6.0 * PIXELSIZE)
-        view._picks = [(20.0, 20.0), (40.0, 44.0), (58.0, 6.0)]
+        view._picks = [(2600.0, 2600.0), (5200.0, 5720.0), (7540.0, 780.0)]
         return view
 
     def test_no_index_blocks_are_built(self, circle_view, monkeypatch):
@@ -373,6 +457,20 @@ class TestCircularPicksUseThePyramid:
                 check_dtype=False,
             )
 
+    def test_progress_dialogs_are_closed(self, circle_view):
+        # functions never close a tracker passed in, so the view does
+        from picasso import lib_qt
+
+        view = circle_view
+        picked = view.picked_locs(0)
+        view.combine()
+        # one localization per non-empty pick
+        assert len(view.locs[0]) == sum(len(p) > 0 for p in picked)
+        assert not any(
+            isinstance(d, lib_qt.ProgressDialog) and d.parent() is view
+            for d in lib_qt._dialogs
+        )
+
     def test_pick_size_change_needs_no_reindexing(self, circle_view):
         view = circle_view
         before = view.picked_locs(0)
@@ -396,23 +494,35 @@ class TestPickRemovalAcrossShapes:
 
     def test_polygon_click_removes_only_the_one_clicked(self, window):
         # this used to clear every pick: remove_picks had no polygon arm
-        left = [(1.0, 1.0), (5.0, 1.0), (5.0, 5.0), (1.0, 5.0), (1.0, 1.0)]
+        left = [
+            (130.0, 130.0),
+            (650.0, 130.0),
+            (650.0, 650.0),
+            (130.0, 650.0),
+            (130.0, 130.0),
+        ]
         right = [
-            (20.0, 20.0),
-            (25.0, 20.0),
-            (25.0, 25.0),
-            (20.0, 25.0),
-            (20.0, 20.0),
+            (2600.0, 2600.0),
+            (3250.0, 2600.0),
+            (3250.0, 3250.0),
+            (2600.0, 3250.0),
+            (2600.0, 2600.0),
         ]
         view = self._polygon_view(window, [left, right])
-        view.remove_picks((3.0, 3.0))
+        view.remove_picks((390.0, 390.0))
         assert len(view._picks) == 1
         assert list(view._picks[0]) == right
 
     def test_polygon_click_outside_removes_nothing(self, window):
-        left = [(1.0, 1.0), (5.0, 1.0), (5.0, 5.0), (1.0, 5.0), (1.0, 1.0)]
+        left = [
+            (130.0, 130.0),
+            (650.0, 130.0),
+            (650.0, 650.0),
+            (130.0, 650.0),
+            (130.0, 130.0),
+        ]
         view = self._polygon_view(window, [left])
-        view.remove_picks((10.0, 10.0))
+        view.remove_picks((1300.0, 1300.0))
         assert len(view._picks) == 1
 
     def test_vertical_rectangle_survives_a_click_elsewhere(self, window):
@@ -421,17 +531,30 @@ class TestPickRemovalAcrossShapes:
         view = window.view
         window.tools_settings_dialog.pick_shape.setCurrentText("Rectangle")
         window.tools_settings_dialog.pick_width.setValue(2.0 * PIXELSIZE)
-        view._picks = [((5.0, 5.0), (5.0, 15.0))]
-        view.remove_picks((20.0, 20.0))
+        view._picks = [((650.0, 650.0), (650.0, 1950.0))]
+        view.remove_picks((2600.0, 2600.0))
         assert len(view._picks) == 1
 
     def test_vertical_rectangle_is_removed_from_inside(self, window):
         view = window.view
         window.tools_settings_dialog.pick_shape.setCurrentText("Rectangle")
         window.tools_settings_dialog.pick_width.setValue(2.0 * PIXELSIZE)
-        view._picks = [((5.0, 5.0), (5.0, 15.0))]
-        view.remove_picks((5.5, 10.0))
+        view._picks = [((650.0, 650.0), (650.0, 1950.0))]
+        view.remove_picks((715.0, 1300.0))
         assert view._picks == []
+
+    def test_subtract_picks_of_a_file(self, window, tmp_path):
+        view = window.view
+        window.tools_settings_dialog.pick_shape.setCurrentText("Circle")
+        view._picks = [(650.0, 650.0), (2600.0, 2600.0)]
+        path = tmp_path / "subtract.yaml"
+        path.write_text(
+            f"{io.FORMAT_VERSION_ATTR}: '{io.FORMAT_VERSION}'\n"
+            "Shape: Circle\nDiameter (nm): 260.0\n"
+            "Centers: [[663.0, 650.0]]\n"
+        )
+        view.subtract_picks(str(path))
+        assert [tuple(pick) for pick in view._picks] == [(2600.0, 2600.0)]
 
 
 class TestRotationWindowShapes:
@@ -488,8 +611,8 @@ class TestFilterPicksAcrossShapes:
         view = window.view
         window.tools_settings_dialog.pick_shape.setCurrentText("Box")
         view._picks = [
-            ((4.0, 4.0), (10.0, 10.0)),
-            ((20.0, 20.0), (24.0, 22.0)),
+            ((520.0, 520.0), (1300.0, 1300.0)),
+            ((2600.0, 2600.0), (3120.0, 2860.0)),
         ]
         counts = view._count_locs_in_picks(0)
         expected = [len(_) for _ in view.picked_locs(0, add_group=False)]
@@ -500,15 +623,15 @@ class TestFilterPicksAcrossShapes:
         view = window.view
         window.tools_settings_dialog.pick_shape.setCurrentText("Polygon")
         closed = [
-            (4.0, 4.0),
-            (10.0, 4.0),
-            (10.0, 10.0),
-            (4.0, 10.0),
-            (4.0, 4.0),
+            (520.0, 520.0),
+            (1300.0, 520.0),
+            (1300.0, 1300.0),
+            (520.0, 1300.0),
+            (520.0, 520.0),
         ]
         # picked_locs skips the open one, so the counts would otherwise
         # be misaligned with the picks
-        view._picks = [closed, [(20.0, 20.0), (24.0, 20.0)], closed]
+        view._picks = [closed, [(2600.0, 2600.0), (3120.0, 2600.0)], closed]
         counts = view._count_locs_in_picks(0)
         assert len(counts) == 3
         assert counts[1] == 0
@@ -546,9 +669,7 @@ class TestBrushPickTool:
 
     def test_brush_width_follows_the_spin_box(self, brush_view, window):
         window.tools_settings_dialog.brush_width.setValue(260.0)
-        assert brush_view._brush_width == pytest.approx(
-            260.0 / brush_view.pixelsize
-        )
+        assert brush_view._brush_width == pytest.approx(260.0)
 
     def test_one_stroke_makes_one_pick(self, brush_view):
         _paint(brush_view, STROKE_A)
@@ -590,24 +711,36 @@ class TestBrushPickTool:
             brush_view.map_to_movie(QtCore.QPoint(*BRIDGE[0]))
         )
 
-    def test_right_click_undoes_the_last_stroke(self, brush_view):
+    def test_right_click_removes_the_pick_under_the_cursor(self, brush_view):
+        _paint(brush_view, STROKE_A)
+        _paint(brush_view, STROKE_B)
+        brush_view.mouseReleaseEvent(
+            _Event(*STROKE_B[1], QtCore.Qt.MouseButton.RightButton)
+        )
+        assert len(brush_view._picks) == 1
+        first_point = brush_view._picks[0][0][1][0]
+        assert first_point == pytest.approx(
+            brush_view.map_to_movie(QtCore.QPoint(*STROKE_A[0]))
+        )
+
+    def test_right_click_outside_the_picks_keeps_them(self, brush_view):
         _paint(brush_view, STROKE_A)
         _paint(brush_view, STROKE_B)
         brush_view.mouseReleaseEvent(
             _Event(300, 300, QtCore.Qt.MouseButton.RightButton)
         )
-        assert len(brush_view._picks) == 1
+        assert len(brush_view._picks) == 2
 
-    def test_undoing_a_bridge_splits_the_pick_again(self, brush_view):
+    def test_right_click_removes_all_merged_strokes(self, brush_view):
         _paint(brush_view, STROKE_A)
         _paint(brush_view, STROKE_B)
         _paint(brush_view, BRIDGE)
         assert len(brush_view._picks) == 1
-        # the position of the right click does not matter for the brush
+        # a click on one stroke removes the whole painted region
         brush_view.mouseReleaseEvent(
-            _Event(500, 500, QtCore.Qt.MouseButton.RightButton)
+            _Event(*STROKE_A[0], QtCore.Qt.MouseButton.RightButton)
         )
-        assert len(brush_view._picks) == 2
+        assert brush_view._picks == []
 
     def test_right_click_with_no_picks_is_harmless(self, brush_view):
         brush_view.mouseReleaseEvent(
@@ -672,7 +805,7 @@ class TestBrushPickTool:
         path = str(tmp_path / "picks.yaml")
         brush_view.save_picks(path)
 
-        regions = yaml.full_load(open(path))
+        regions = yaml.safe_load(open(path))
         assert regions["Shape"] == "Brush"
         # a flat, ordered stroke list, each with its own width
         assert len(regions["Strokes"]) == 3
@@ -731,13 +864,19 @@ class TestMultiChannelSavesKeepAllLocs:
     alone would fill the missing column with NaN, and ``io.save_locs``
     would then drop all of that channel's localizations."""
 
-    LEFT = [(1.0, 1.0), (12.0, 1.0), (12.0, 12.0), (1.0, 12.0), (1.0, 1.0)]
+    LEFT = [
+        (130.0, 130.0),
+        (1560.0, 130.0),
+        (1560.0, 1560.0),
+        (130.0, 1560.0),
+        (130.0, 130.0),
+    ]
     RIGHT = [
-        (18.0, 18.0),
-        (30.0, 18.0),
-        (30.0, 30.0),
-        (18.0, 30.0),
-        (18.0, 18.0),
+        (2340.0, 2340.0),
+        (3900.0, 2340.0),
+        (3900.0, 3900.0),
+        (2340.0, 3900.0),
+        (2340.0, 2340.0),
     ]
 
     @pytest.fixture

@@ -10,15 +10,16 @@ Image processing functions
 
 from __future__ import annotations
 
-from typing import Callable
+from typing import Literal
 
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from scipy.optimize import curve_fit
-from tqdm import tqdm
 
 from . import lib, render, localize, postprocess
+
+__all__ = ["find_fiducials", "get_image_shift", "rcc"]
 
 
 plt.style.use("ggplot")
@@ -160,11 +161,11 @@ def get_image_shift(
 def rcc(
     segments: list[lib.FloatArray2D],
     max_shift: float | None = None,
-    callback: Callable[[int], None] | None = None,
-) -> tuple[lib.FloatArray2D, lib.FloatArray2D]:
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
     """Compute RCC, see Wang, Schnitzbauer, et al. Optics Express,
-    2014. Return the shifts in x and y directions for each pair of
-    segments.
+    2014. Return the shift of each segment in y and x relative to the
+    first segment.
 
     Parameters
     ----------
@@ -172,61 +173,66 @@ def rcc(
         List of image segments to be correlated. Each segment should be
         a 2D numpy array representing an image.
     max_shift : float, optional
-        Maximum allowed shift in pixels. If None, the default value is
-        set to 5 pixels.
-    callback : Callable[[int], None], optional
-        A callback function that takes an integer argument and is called
-        after processing each pair of segments. This can be used to
-        update a progress bar or perform other actions during the
-        computation.
+        Maximum allowed shift in pixels. If None (default), the shift
+        is not limited.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Correlating image pairs" over
+        the ``n_segments * (n_segments - 1) / 2`` segment pairs. Default
+        is None.
 
     Returns
     -------
-    shifts_x, shifts_y : lib.FloatArray2D
-        2D numpy arrays containing the shifts in x and y directions for
-        each pair of segments. The shape of the arrays is
-        (n_segments, n_segments), where n_segments is the number of
-        segments provided.
+    shift_y, shift_x : lib.FloatArray1D
+        Shifts of each segment in y and x (in pixels of the segment
+        images), shape (n_segments,), found by least-squares
+        minimization of the pairwise shifts (see
+        ``lib.minimize_shifts``). The first segment is the reference,
+        i.e., ``shift_y[0] == shift_x[0] == 0``.
     """
     n_segments = len(segments)
     shifts_x = np.zeros((n_segments, n_segments))
     shifts_y = np.zeros((n_segments, n_segments))
-    n_pairs = int(n_segments * (n_segments - 1) / 2)
-    flag = 0
-    if callback is None:
-        with tqdm(
-            total=n_pairs, desc="Correlating image pairs", unit="pairs"
-        ) as progress_bar:
-            for i in range(n_segments - 1):
-                for j in range(i + 1, n_segments):
-                    progress_bar.update()
-                    shifts_y[i, j], shifts_x[i, j] = get_image_shift(
-                        segments[i], segments[j], 5, max_shift
-                    )
-                    flag += 1
-    else:
-        callback(0)
+    n_pairs = n_segments * (n_segments - 1) // 2
+    with lib.tracked_progress(
+        progress, "Correlating image pairs", unit="pair"
+    ) as progress:
+        lib.start_phase(
+            progress, "Correlating image pairs", n_pairs, unit="pair"
+        )
+        progress.set_value(0)
+        n_done = 0
         for i in range(n_segments - 1):
             for j in range(i + 1, n_segments):
                 shifts_y[i, j], shifts_x[i, j] = get_image_shift(
                     segments[i], segments[j], 5, max_shift
                 )
-                flag += 1
-                callback(flag)
+                n_done += 1
+                progress.set_value(n_done)
+        progress.set_value(n_pairs)
 
     return lib.minimize_shifts(shifts_x, shifts_y)
+
+
+#: Pixel size (nm) of the image rendered by :func:`find_fiducials`.
+FIDUCIAL_RENDER_PIXEL_SIZE = 100.0
+#: Approximate side length (nm) of the box used to identify fiducials.
+FIDUCIAL_BOX_SIZE = 900.0
 
 
 def find_fiducials(
     locs: pd.DataFrame,
     info: list[dict],
-) -> tuple[list[tuple[int, int]], int]:
+) -> tuple[list[tuple[float, float]], float]:
     """Find the xy coordinates of regions with high density of
     localizations, likely originating from fiducial markers.
 
-    Uses ``picasso.localize.identify_in_image`` with threshold set to
-    99th percentile of the image histogram. The image is rendered using
-    one-pixel-blur, see picasso.render.render.
+    Renders the localizations at a pixel size of 100 nm (one-pixel
+    blur, see ``picasso.render.render``) and uses
+    ``picasso.localize.identify_in_image`` with the threshold set to the
+    99th percentile of the image histogram. The identified image pixels
+    are mapped back to nm (pixel centers).
 
     Parameters
     ----------
@@ -238,34 +244,35 @@ def find_fiducials(
     Returns
     -------
     picks : list of (2,) tuples
-        Coordinates of fiducial markers. Each list element corresponds
-        to (x, y) coordinates of one fiducial marker.
-    box : int
-        Size of the box used for the fiducial marker identification.
-        Can be set as the pick diameter in pixels for undrifting.
+        Coordinates of fiducial markers in nm. Each list element
+        corresponds to (x, y) coordinates of one fiducial marker.
+    box : float
+        Side length (nm) of the box used for the fiducial marker
+        identification (about 900 nm). Can be used as the pick diameter
+        for undrifting.
     """
-    # render at one display pixel per camera pixel (oversampling = 1) so
-    # that the pick coordinates returned by ``identify_in_image`` are in
-    # camera pixels and the box (computed in camera pixels) matches the
-    # image resolution
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", default=130)
+    disp_px_size = FIDUCIAL_RENDER_PIXEL_SIZE
     image = render.render(
         locs=locs,
         info=info,
-        disp_px_size=pixelsize,
+        disp_px_size=disp_px_size,
         viewport=None,
         blur_method="smooth",
     )[1]
-    # hist = np.histogram(image.flatten(), bins=256)
     threshold = np.percentile(image.flatten(), 99)
-    # box size should be an odd number, corresponding to approximately
-    # 900 nm
-    box = int(np.round(900 / pixelsize))
-    box = box + 1 if box % 2 == 0 else box
+    # box size (rendered pixels) should be an odd number, corresponding
+    # to approximately 900 nm
+    box_px = int(np.round(FIDUCIAL_BOX_SIZE / disp_px_size))
+    box_px = box_px + 1 if box_px % 2 == 0 else box_px
+    box = box_px * disp_px_size
 
-    # find the local maxima and translate to pick coordinates
-    y, x, _ = localize.identify_in_image(image, threshold, box=box)
-    picks = [(xi, yi) for xi, yi in zip(x, y)]
+    # find the local maxima and translate to pick coordinates (nm); the
+    # image starts at the origin of the field of view
+    y, x, _ = localize.identify_in_image(image, threshold, box=box_px)
+    picks = [
+        ((xi + 0.5) * disp_px_size, (yi + 0.5) * disp_px_size)
+        for xi, yi in zip(x, y)
+    ]
 
     # select the picks with appropriate number of localizations
     n_frames = lib.get_from_metadata(info, "Frames", default=0)
@@ -273,9 +280,9 @@ def find_fiducials(
     picked_locs = postprocess.picked_locs(
         locs,
         info,
-        picks,
-        "Circle",
-        pick_size=box / 2,
+        picks=picks,
+        pick_shape="Circle",
+        pick_size=box,
         add_group=False,
     )
     picks = [
@@ -325,13 +332,11 @@ def quick_fiducials_check(
     if len(locs) == 0:
         return 0
     n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-    bin_px = region_size / pixelsize
 
     x = np.asarray(locs["x"])
     y = np.asarray(locs["y"])
-    n_bins_x = max(1, int(np.ceil((x.max() - x.min()) / bin_px)))
-    n_bins_y = max(1, int(np.ceil((y.max() - y.min()) / bin_px)))
+    n_bins_x = max(1, int(np.ceil((x.max() - x.min()) / region_size)))
+    n_bins_y = max(1, int(np.ceil((y.max() - y.min()) / region_size)))
 
     hist, _, _ = np.histogram2d(x, y, bins=[n_bins_x, n_bins_y])
     return int(np.count_nonzero(hist > fraction * n_frames))

@@ -9,7 +9,8 @@ Generated from: /Users/kowalewski/Desktop/files/MPI/Picasso_Develop/picasso/test
 Number of molecules: 4230
 Size (GB): 0.00036719441413879395
 Threshold value: 0.00036769
-x_max: 512.0
-x_min: 0
-y_max: 512.0
-y_min: 0
+picasso_format: '1.0'
+x_max: 66560.0
+x_min: 0.0
+y_max: 66560.0
+y_min: 0.0

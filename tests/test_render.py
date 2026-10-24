@@ -6,6 +6,7 @@ picasso.masking.
 """
 
 import logging
+import sys
 
 import numpy as np
 import pandas as pd
@@ -15,11 +16,22 @@ from scipy.spatial.transform import Rotation
 
 from picasso import io, lib, masking, render
 
+from tests._progress_tracking import (
+    CancelingProgress,
+    RecordingProgress,
+    assert_phases_complete,
+)
 from tests.conftest import PIXELSIZE
 
-# parameters reused across tests
-VIEWPORT = ((15, 15), (16, 16))
-FULL_VIEWPORT = ((0, 0), (32, 32))
+# parameters reused across tests; the test data covers 32 x 32 camera
+# pixels of PIXELSIZE nm and every length (coordinates, viewports,
+# precisions, blur widths) is in nm
+FOV_NM = 32 * PIXELSIZE
+VIEWPORT = (
+    (15 * PIXELSIZE, 15 * PIXELSIZE),
+    (16 * PIXELSIZE, 16 * PIXELSIZE),
+)
+FULL_VIEWPORT = ((0, 0), (FOV_NM, FOV_NM))
 BLUR_METHODS = ["gaussian", "gaussian_iso", "smooth", "convolve"]
 LINEAR_BLUR_METHODS = ["smooth", "convolve"]  # preserve total mass
 MASKING_METHODS = [
@@ -121,7 +133,7 @@ class TestRender:
         assert n > 0, "Test data should have locs in viewport"
 
     def test_viewport_exact_shape(self, locs, info):
-        """Image shape is exactly oversampling * viewport size."""
+        """Image shape is exactly viewport size / display pixel size."""
         n, im = render.render(
             locs, info, disp_px_size=PIXELSIZE / 130, viewport=VIEWPORT
         )
@@ -187,7 +199,7 @@ class TestRender:
             disp_px_size=PIXELSIZE / 5,
             viewport=FULL_VIEWPORT,
             blur_method="gaussian",
-            min_blur_width=2.0,
+            min_blur_width=2.0 * PIXELSIZE,
         )
         assert im_wide.max() < im_narrow.max()
 
@@ -255,9 +267,11 @@ class TestRender:
 
     def test_gaussian_angle_zero_matches_unrotated(self):
         """An 'angle' column of 0 reproduces the axis-aligned render."""
+        # a 2000 x 2000 nm field of view; coordinates and precisions
+        # in nm (as in all the synthetic tests below)
         info = {"Pixelsize": 100.0, "Height": 20, "Width": 20}
         base = pd.DataFrame(
-            {"x": [10.0], "y": [10.0], "lpx": [0.6], "lpy": [0.2]}
+            {"x": [1000.0], "y": [1000.0], "lpx": [60.0], "lpy": [20.0]}
         )
         _, im_plain = render.render(
             base, info, disp_px_size=25.0, blur_method="gaussian"
@@ -275,15 +289,15 @@ class TestRender:
         info = {"Pixelsize": 100.0, "Height": 20, "Width": 20}
         rotated = pd.DataFrame(
             {
-                "x": [10.0],
-                "y": [10.0],
-                "lpx": [0.6],
-                "lpy": [0.2],
+                "x": [1000.0],
+                "y": [1000.0],
+                "lpx": [60.0],
+                "lpy": [20.0],
                 "angle": [90.0],
             }
         )
         swapped = pd.DataFrame(
-            {"x": [10.0], "y": [10.0], "lpx": [0.2], "lpy": [0.6]}
+            {"x": [1000.0], "y": [1000.0], "lpx": [20.0], "lpy": [60.0]}
         )
         _, im_rot = render.render(
             rotated, info, disp_px_size=25.0, blur_method="gaussian"
@@ -297,7 +311,7 @@ class TestRender:
         """A non-zero rotation tilts the ellipse while conserving mass."""
         info = {"Pixelsize": 100.0, "Height": 20, "Width": 20}
         base = pd.DataFrame(
-            {"x": [10.0], "y": [10.0], "lpx": [0.6], "lpy": [0.2]}
+            {"x": [1000.0], "y": [1000.0], "lpx": [60.0], "lpy": [20.0]}
         )
         _, im0 = render.render(
             base.assign(angle=[0.0]),
@@ -319,7 +333,7 @@ class TestRender:
         info = {"Pixelsize": 100.0, "Height": 20, "Width": 20}
         empty = (
             pd.DataFrame(
-                {"x": [10.0], "y": [10.0], "lpx": [0.6], "lpy": [0.2]}
+                {"x": [1000.0], "y": [1000.0], "lpx": [60.0], "lpy": [20.0]}
             )
             .assign(angle=[0.0])
             .iloc[:0]
@@ -335,12 +349,12 @@ class TestRender:
         info = {"Pixelsize": 100.0, "Height": 20, "Width": 20}
         base = pd.DataFrame(
             {
-                "x": [10.0],
-                "y": [10.0],
+                "x": [1000.0],
+                "y": [1000.0],
                 "z": [0.0],
-                "lpx": [0.6],
-                "lpy": [0.2],
-                "lpz": [0.4],
+                "lpx": [60.0],
+                "lpy": [20.0],
+                "lpz": [40.0],
             }
         )
         ang = (0.3, 0.2, 0.1)
@@ -369,12 +383,12 @@ class TestRender:
         info = {"Pixelsize": 100.0, "Height": 20, "Width": 20}
         base = pd.DataFrame(
             {
-                "x": [10.0],
-                "y": [10.0],
+                "x": [1000.0],
+                "y": [1000.0],
                 "z": [0.0],
-                "lpx": [0.6],
-                "lpy": [0.2],
-                "lpz": [0.4],
+                "lpx": [60.0],
+                "lpy": [20.0],
+                "lpz": [40.0],
                 "angle": [40.0],
             }
         )
@@ -392,7 +406,7 @@ class TestRender:
 
 
 # ---------------------------------------------------------------------------
-# render_hist_numba
+# render_hist
 # ---------------------------------------------------------------------------
 
 
@@ -401,8 +415,8 @@ class TestRenderHistNumba:
         """Integration check on the real test dataset."""
         x = locs["x"].to_numpy().astype(np.float32)
         y = locs["y"].to_numpy().astype(np.float32)
-        n, im = render.render_hist_numba(
-            x, y, oversampling=4.0, t_min=0.0, t_max=32.0
+        n, im = render.render_hist(
+            x, y, oversampling=4.0 / PIXELSIZE, t_min=0.0, t_max=FOV_NM
         )
         assert im.shape == (128, 128)
         assert im.dtype == np.float32
@@ -413,7 +427,7 @@ class TestRenderHistNumba:
         x = np.array([0.5, 1.5, 2.5], dtype=np.float32)
         y = np.array([0.5, 1.5, 2.5], dtype=np.float32)
 
-        n, im = render.render_hist_numba(
+        n, im = render.render_hist(
             x, y, oversampling=1.0, t_min=0.0, t_max=3.0
         )
 
@@ -426,9 +440,7 @@ class TestRenderHistNumba:
         x = np.array([0.5, 5.5], dtype=np.float32)
         y = np.array([0.5, 5.5], dtype=np.float32)
 
-        n, _ = render.render_hist_numba(
-            x, y, oversampling=1.0, t_min=0.0, t_max=3.0
-        )
+        n, _ = render.render_hist(x, y, oversampling=1.0, t_min=0.0, t_max=3.0)
 
         assert n == 1
 
@@ -436,8 +448,8 @@ class TestRenderHistNumba:
         x = np.array([0.5], dtype=np.float32)
         y = np.array([0.5], dtype=np.float32)
 
-        _, im1 = render.render_hist_numba(x, y, 1.0, 0.0, 1.0)
-        _, im2 = render.render_hist_numba(x, y, 2.0, 0.0, 1.0)
+        _, im1 = render.render_hist(x, y, 1.0, 0.0, 1.0)
+        _, im2 = render.render_hist(x, y, 2.0, 0.0, 1.0)
 
         assert im1.shape == (1, 1)
         assert im2.shape == (2, 2)
@@ -446,7 +458,7 @@ class TestRenderHistNumba:
         x = np.array([], dtype=np.float32)
         y = np.array([], dtype=np.float32)
 
-        n, im = render.render_hist_numba(
+        n, im = render.render_hist(
             x, y, oversampling=1.0, t_min=0.0, t_max=3.0
         )
 
@@ -465,14 +477,13 @@ class TestRenderHist3D:
             locs_3d["x"].to_numpy(),
             locs_3d["y"].to_numpy(),
             locs_3d["z"].to_numpy(),
-            oversampling=2,
+            oversampling=2 / PIXELSIZE,
             y_min=0,
             x_min=0,
-            y_max=32,
-            x_max=32,
+            y_max=FOV_NM,
+            x_max=FOV_NM,
             z_min=-100,
             z_max=100,
-            pixelsize=PIXELSIZE,
         )
         assert im.ndim == 3
         assert im.dtype == np.float32
@@ -486,47 +497,46 @@ class TestRenderHist3D:
         y = locs_3d["y"].to_numpy()
         in_view = (
             (x > 0)
-            & (x < 32)
+            & (x < FOV_NM)
             & (y > 0)
-            & (y < 32)
-            & (z / PIXELSIZE > z_min / PIXELSIZE)
-            & (z / PIXELSIZE < z_max / PIXELSIZE)
+            & (y < FOV_NM)
+            & (z > z_min)
+            & (z < z_max)
         )
         expected = int(in_view.sum())
         n, _ = render.render_hist3d(
             x,
             y,
             z,
-            oversampling=2,
+            oversampling=2 / PIXELSIZE,
             y_min=0,
             x_min=0,
-            y_max=32,
-            x_max=32,
+            y_max=FOV_NM,
+            x_max=FOV_NM,
             z_min=z_min,
             z_max=z_max,
-            pixelsize=PIXELSIZE,
         )
         assert n == expected
 
     def test_anisotropic_axes(self, locs_3d):
-        """Different oversampling per axis produces matching axis sizes."""
+        """Different pixel sizes per axis produce matching axis sizes."""
         n, im = render.render_hist3d_anisotropic(
             locs_3d["x"].to_numpy(),
             locs_3d["y"].to_numpy(),
             locs_3d["z"].to_numpy(),
-            oversampling_x=2.0,
-            oversampling_y=4.0,
-            oversampling_z=1.0,
+            oversampling_x=2.0 / PIXELSIZE,
+            oversampling_y=4.0 / PIXELSIZE,
+            oversampling_z=1.0 / PIXELSIZE,
             y_min=0,
             x_min=0,
-            y_max=32,
-            x_max=32,
+            y_max=FOV_NM,
+            x_max=FOV_NM,
             z_min=-100,
             z_max=100,
-            pixelsize=PIXELSIZE,
         )
+        # rendered pixels of 130 / 2, 130 / 4 and 130 nm:
         # n_pixel_y = ceil(4 * 32) = 128, n_pixel_x = ceil(2 * 32) = 64
-        # n_pixel_z = ceil(1 * (100/130 - (-100/130))) = ceil(1.539) = 2
+        # n_pixel_z = ceil(200 / 130) = ceil(1.539) = 2
         assert im.shape == (128, 64, 2)
         assert im.sum() == n
 
@@ -650,8 +660,8 @@ class TestRotation:
         assert np.allclose(out, [0.0, 1.0, 0.0], atol=1e-6)
 
     def test_locs_rotation_zero_angle_preserves_coords(self, locs_3d):
-        x_min, x_max, y_min, y_max = 0.0, 32.0, 0.0, 32.0
-        oversampling = 5.0
+        x_min, x_max, y_min, y_max = 0.0, FOV_NM, 0.0, FOV_NM
+        oversampling = 5.0 / PIXELSIZE  # rendered pixels per nm
         x_in = locs_3d["x"].to_numpy()
         y_in = locs_3d["y"].to_numpy()
         in_view_expected = (
@@ -668,7 +678,7 @@ class TestRotation:
 
     def test_locs_rotation_in_view_consistency(self, locs_3d):
         x_out, y_out, in_view, z_out = render.locs_rotation(
-            locs_3d, 5.0, 0.0, 32.0, 0.0, 32.0, (0.1, 0.2, 0.3)
+            locs_3d, 5.0 / PIXELSIZE, 0.0, FOV_NM, 0.0, FOV_NM, (0.1, 0.2, 0.3)
         )
         n_in_view = int(in_view.sum())
         assert len(x_out) == n_in_view
@@ -690,11 +700,10 @@ class TestRotation:
 
     def test_locs_rotation_accepts_rotation_object(self, locs_3d):
         ang = (0.1, 0.2, 0.3)
-        out_tuple = render.locs_rotation(
-            locs_3d, 5.0, 0.0, 32.0, 0.0, 32.0, ang
-        )
+        args = (locs_3d, 5.0 / PIXELSIZE, 0.0, FOV_NM, 0.0, FOV_NM)
+        out_tuple = render.locs_rotation(*args, ang)
         out_rotation = render.locs_rotation(
-            locs_3d, 5.0, 0.0, 32.0, 0.0, 32.0, render.rotation_matrix(*ang)
+            *args, render.rotation_matrix(*ang)
         )
         for a, b in zip(out_tuple, out_rotation):
             assert np.allclose(a, b)
@@ -921,20 +930,6 @@ class TestImageProcessing:
         out = render.apply_colormap(im, cmap)
         assert out.shape == (16, 16, 3)
         assert out.dtype == np.uint8
-
-    def test_scale_intensities_default_no_op(self):
-        images = np.ones((3, 5, 5), dtype=np.float32)
-        out = render.scale_intensities(images.copy())
-        assert np.array_equal(out, images)
-
-    def test_scale_intensities_relative(self):
-        images = np.ones((3, 5, 5), dtype=np.float32)
-        out = render.scale_intensities(
-            images.copy(), relative_intensities=[0.5, 1.0, 2.0]
-        )
-        assert np.allclose(out[0], 0.5)
-        assert np.allclose(out[1], 1.0)
-        assert np.allclose(out[2], 2.0)
 
 
 # ---------------------------------------------------------------------------
@@ -1276,17 +1271,25 @@ class TestSplitLocs:
 
 class TestOptimalScalebar:
     @pytest.mark.parametrize(
-        "pixelsize, width, expected",
+        "width_nm, expected",
         [
-            (130, 32, 500),  # 130*32/8 = 520 → nearest 100 = 500
-            (130, 320, 5000),  # 130*320/8 = 5200 → nearest 1000 = 5000
-            (130, 8000, 10000),  # > 10_000
-            (1, 240, 30),  # 240/8 = 30 → nearest 10 = 30
-            (1, 50, 6),  # 50/8 = 6.25 → 6
+            (130 * 32, 500),  # 4160/8 = 520 → nearest 100 = 500
+            (130 * 320, 5000),  # 41600/8 = 5200 → nearest 1000 = 5000
+            (130 * 8000, 10000),  # > 10_000
+            (240, 30),  # 240/8 = 30 → nearest 10 = 30
+            (50, 6),  # 50/8 = 6.25 → 6
         ],
     )
-    def test_known_answers(self, pixelsize, width, expected):
-        assert render.optimal_scalebar_length(pixelsize, width) == expected
+    def test_known_answers(self, width_nm, expected):
+        assert render.optimal_scalebar_length(width_nm) == expected
+
+    def test_fraction(self):
+        # a tenth of the width, as the automatic grid spacing uses it
+        assert render.optimal_scalebar_length(4160, fraction=0.1) == 400
+        # the camera pixel size is gone: the old (pixelsize, width)
+        # call is rejected instead of being misread
+        with pytest.raises(TypeError):
+            render.optimal_scalebar_length(130, 32)
 
 
 # ---------------------------------------------------------------------------
@@ -1672,7 +1675,7 @@ class TestDrawing:
         canvas = _fresh_canvas()
         before = _qimage_to_array(canvas)
         out = render.draw_points(
-            canvas, ((0, 0), (32, 32)), [(8, 8), (24, 24)], pixelsize=PIXELSIZE
+            canvas, ((0, 0), (32, 32)), [(8, 8), (24, 24)]
         )
         assert isinstance(out, QtGui.QImage)
         assert not np.array_equal(before, _qimage_to_array(out))
@@ -1681,13 +1684,23 @@ class TestDrawing:
         canvas = _fresh_canvas()
         before = _qimage_to_array(canvas)
         out = render.draw_scalebar(
-            canvas,
-            ((0, 0), (32, 32)),
-            scalebar_length_nm=500,
-            pixelsize=PIXELSIZE,
+            canvas, FULL_VIEWPORT, scalebar_length_nm=500
         )
         assert isinstance(out, QtGui.QImage)
         assert not np.array_equal(before, _qimage_to_array(out))
+
+    def test_draw_scalebar_length_follows_the_viewport(self):
+        # 120 display pixels show FOV_NM = 4160 nm, so a bar of 1040 nm
+        # is 30 display pixels long, whatever the camera pixel size
+        out = render.draw_scalebar(
+            _fresh_canvas(),
+            FULL_VIEWPORT,
+            scalebar_length_nm=1040,
+            display_length=False,
+        )
+        lit = _qimage_to_array(out)[..., :3].any(axis=-1)
+        assert lit[95].sum() == 30  # a row through the bar
+        assert lit.any(axis=1).sum() == 10  # the bar's thickness
 
     def test_draw_legend(self):
         canvas = _fresh_canvas()
@@ -1703,8 +1716,12 @@ class TestDrawing:
     def test_draw_minimap(self):
         canvas = _fresh_canvas()
         before = _qimage_to_array(canvas)
+        zoomed = (
+            (10 * PIXELSIZE, 10 * PIXELSIZE),
+            (20 * PIXELSIZE, 20 * PIXELSIZE),
+        )
         out = render.draw_minimap(
-            canvas, ((10, 10), (20, 20)), max_viewport_size=(32, 32)
+            canvas, zoomed, max_viewport_size=(FOV_NM, FOV_NM)
         )
         assert isinstance(out, QtGui.QImage)
         assert not np.array_equal(before, _qimage_to_array(out))
@@ -1728,7 +1745,9 @@ class TestDrawing:
 # Appearance of the tool overlays (OverlayStyle)
 # ---------------------------------------------------------------------------
 
-# 32 camera pixels drawn onto the 120 display pixels of ``_fresh_canvas``
+# a field of view of 32 nm drawn onto the 120 display pixels of
+# ``_fresh_canvas``, 3.75 display pixels per nm (the overlays depend on
+# the ratio only)
 FOV_32 = ((0, 0), (32, 32))
 
 
@@ -1870,7 +1889,6 @@ class TestOverlayStyle:
                 _fresh_canvas(),
                 FOV_32,
                 points,
-                pixelsize=PIXELSIZE,
                 style=style,
             )
             return _lit(out)
@@ -1888,15 +1906,12 @@ class TestOverlayStyle:
                 _fresh_canvas(),
                 FOV_32,
                 [(4, 4), (8, 4)],
-                pixelsize=PIXELSIZE,
                 style=render.OverlayStyle(font_size=font_size),
             )
             return _lit(out).sum()
 
         assert lit(30) > lit(10)
-        default = render.draw_points(
-            _fresh_canvas(), FOV_32, [(4, 4), (8, 4)], pixelsize=PIXELSIZE
-        )
+        default = render.draw_points(_fresh_canvas(), FOV_32, [(4, 4), (8, 4)])
         assert _lit(default).sum() == lit(20)
 
     @pytest.mark.parametrize(
@@ -2374,7 +2389,7 @@ class TestAnimationSequence:
         assert np.allclose(viewports[-1], vp2)
 
     def test_normalize_legacy_positions_raise(self):
-        """Legacy Euler positions were removed in v0.12.0; the error
+        """Legacy Euler positions were removed in v1.0.0; the error
         names the replacement."""
         legacy = [(0.1, 0.2, 0.3, FULL_VIEWPORT)]
         with pytest.raises(ValueError, match="rotation_matrix"):
@@ -2417,7 +2432,9 @@ class TestBuildAnimation:
             (Rotation.identity(), FULL_VIEWPORT),
             (Rotation.from_rotvec([0.1, 0.0, 0.0]), FULL_VIEWPORT),
         ]
-        frames = []
+        # regression: a tracker object (e.g. a ProgressDialog) used to fail
+        # an assertion that demanded a callable
+        tracker = RecordingProgress()
         completed = render.build_animation(
             str(out_path),
             locs_3d,
@@ -2427,20 +2444,70 @@ class TestBuildAnimation:
             disp_px_size=PIXELSIZE,
             image_size=(64, 64),
             fps=3,
-            progress_callback=frames.append,
+            progress=tracker,
         )
         assert completed is True
-        assert frames == [0, 1, 2, 3]  # each frame, then the total
+        assert_phases_complete(tracker, ["Building animation"])
+        # the frames rendered so far, counted after each frame
+        assert tracker.phases[0]["maximum"] == 3
+        assert tracker.phases[0]["values"] == [0, 1, 2, 3]
+        assert tracker.phases[0]["unit"] == "frame"
+
+    def test_progress_none_is_silent_and_console_works(
+        self, locs_3d, info, tmp_path, capsys
+    ):
+        kwargs = dict(
+            positions=[
+                (Rotation.identity(), FULL_VIEWPORT),
+                (Rotation.from_rotvec([0.1, 0.0, 0.0]), FULL_VIEWPORT),
+            ],
+            durations=[1.0],
+            disp_px_size=PIXELSIZE,
+            image_size=(64, 64),
+            fps=2,
+        )
+        out_path = str(tmp_path / "anim.mp4")
+        render.build_animation(out_path, locs_3d, info, **kwargs)
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        render.build_animation(
+            out_path, locs_3d, info, progress="console", **kwargs
+        )
+        assert "Building animation" in capsys.readouterr().err
+
+    def test_canceled_tracker_leaves_no_partial_output(
+        self, locs_3d, info, tmp_path
+    ):
+        """A GUI tracker raising ``OperationCanceled`` part-way removes the
+        incomplete video, and the cancellation propagates."""
+        out_path = tmp_path / "anim.mp4"
+        with pytest.raises(lib.OperationCanceled):
+            render.build_animation(
+                str(out_path),
+                locs_3d,
+                info,
+                positions=[
+                    (Rotation.identity(), FULL_VIEWPORT),
+                    (Rotation.from_rotvec([0.1, 0.0, 0.0]), FULL_VIEWPORT),
+                ],
+                durations=[2.0],
+                disp_px_size=PIXELSIZE,
+                image_size=(64, 64),
+                fps=5,
+                progress=CancelingProgress(after=3),
+            )
+        assert not out_path.exists()
+        assert not out_path.with_suffix(".yaml").exists()
 
     def test_cancel_leaves_no_partial_output(self, locs_3d, info, tmp_path):
-        """A build cancelled part-way removes the incomplete video and
+        """A build canceled part-way removes the incomplete video and
         never writes the sidecar, and reports that it did not finish."""
         out_path = tmp_path / "anim.mp4"
         positions = [
             (Rotation.identity(), FULL_VIEWPORT),
             (Rotation.from_rotvec([0.1, 0.0, 0.0]), FULL_VIEWPORT),
         ]
-        rendered = []
+        tracker = RecordingProgress()
         completed = render.build_animation(
             str(out_path),
             locs_3d,
@@ -2450,11 +2517,11 @@ class TestBuildAnimation:
             disp_px_size=PIXELSIZE,
             image_size=(64, 64),
             fps=5,
-            progress_callback=rendered.append,
-            cancel=lambda: len(rendered) >= 3,
+            progress=tracker,
+            cancel=lambda: len(tracker.phases[0]["values"]) >= 3,
         )
         assert completed is False
-        assert len(rendered) < 10  # stopped early
+        assert tracker.phases[0]["values"][-1] < 10  # stopped early
         assert not out_path.exists()
         assert not out_path.with_suffix(".yaml").exists()
 
@@ -2498,13 +2565,60 @@ class TestMasking:
 
     def test_mask_locs_partitions_input(self, locs, info, image):
         mask, _ = masking.mask_image(image, method="otsu")
-        locs_in, locs_out = masking.mask_locs(locs, info, mask)
+        locs_in, _, locs_out, _ = masking.mask_locs(locs, info, mask=mask)
         assert len(locs_in) + len(locs_out) == len(locs)
         # in / out are disjoint
         assert set(locs_in.index).isdisjoint(set(locs_out.index))
         # both partitions only contain valid loc indices
         all_idx = set(locs_in.index) | set(locs_out.index)
         assert all_idx == set(locs.index)
+
+    def test_mask_locs_records_the_areas(self):
+        # the left half of a 10 x 4 um field of view
+        info = [{"Width": 100, "Height": 40, "Pixelsize": 100.0}]
+        locs = pd.DataFrame(
+            {
+                "frame": np.arange(2, dtype=np.uint32),
+                "x": np.array([1000.0, 9000.0], dtype=np.float32),
+                "y": np.array([2000.0, 2000.0], dtype=np.float32),
+            }
+        )
+        mask = np.zeros((4, 10), dtype=bool)
+        mask[:, :5] = True
+        locs_in, info_in, locs_out, info_out = masking.mask_locs(
+            locs, info, mask=mask, mask_info={"Blur (nm)": 50.0}
+        )
+        assert locs_in["x"].tolist() == [1000.0]
+        assert locs_out["x"].tolist() == [9000.0]
+        assert info_in[:-1] == info and info_out[:-1] == info
+        assert info_in[-1]["Step"] == "Mask in"
+        assert info_out[-1]["Step"] == "Mask out"
+        assert info_in[-1]["Blur (nm)"] == info_out[-1]["Blur (nm)"] == 50.0
+        assert info_in[-1]["Area (um^2)"] == pytest.approx(20.0)
+        assert info_out[-1]["Area (um^2)"] == pytest.approx(20.0)
+        # the area of picked localizations is the total
+        picked = info + [{"Area (um^2)": 30.0}]
+        *_, info_out = masking.mask_locs(locs, picked, mask=mask)
+        assert info_out[-1]["Area (um^2)"] == pytest.approx(10.0)
+
+    def test_mask_locs_beyond_the_mask_are_outside(self):
+        """Localizations of a larger field of view (e.g., another
+        channel) than the mask spans are outside it rather than
+        indexing past the mask."""
+        info = [{"Width": 200, "Height": 40, "Pixelsize": 100.0}]
+        locs = pd.DataFrame(
+            {
+                "frame": np.arange(2, dtype=np.uint32),
+                "x": np.array([1000.0, 15000.0], dtype=np.float32),
+                "y": np.array([2000.0, 2000.0], dtype=np.float32),
+            }
+        )
+        mask = np.ones((4, 10), dtype=bool)
+        locs_in, _, locs_out, _ = masking.mask_locs(
+            locs, info, mask=mask, field_of_view=(10000.0, 4000.0)
+        )
+        assert locs_in["x"].tolist() == [1000.0]
+        assert locs_out["x"].tolist() == [15000.0]
 
 
 # ---------------------------------------------------------------------------
@@ -2532,8 +2646,8 @@ class TestRenderPurity:
     """Rendering must never mutate its inputs, so calling it twice with
     the same data gives bit-identical images.
 
-    Before the in-place ``z /= pixelsize`` was removed from
-    ``_render_setup3d(_anisotropic)``, this held for the 3D histogram
+    Before Picasso 1.0, ``_render_setup3d(_anisotropic)`` divided z by
+    the camera pixel size in place, so this held for the 3D histogram
     renderers only if every caller defensively copied its z array.
     """
 
@@ -2571,7 +2685,7 @@ class TestRenderPurity:
         y = locs_3d["y"].to_numpy()
         z = locs_3d["z"].to_numpy()
         before = (x.copy(), y.copy(), z.copy())
-        args = (10, 0, 0, 32, 32, -100.0, 100.0, PIXELSIZE)
+        args = (10 / PIXELSIZE, 0, 0, FOV_NM, FOV_NM, -100.0, 100.0)
         n1, image1 = render.render_hist3d(x, y, z, *args)
         n2, image2 = render.render_hist3d(x, y, z, *args)
         for arr, orig in zip((x, y, z), before):
@@ -2584,7 +2698,8 @@ class TestRenderPurity:
         y = locs_3d["y"].to_numpy()
         z = locs_3d["z"].to_numpy()
         before = (x.copy(), y.copy(), z.copy())
-        args = (10, 10, 5, 0, 0, 32, 32, -100.0, 100.0, PIXELSIZE)
+        oversampling = (10 / PIXELSIZE, 10 / PIXELSIZE, 5 / PIXELSIZE)
+        args = (*oversampling, 0, 0, FOV_NM, FOV_NM, -100.0, 100.0)
         n1, image1 = render.render_hist3d_anisotropic(x, y, z, *args)
         n2, image2 = render.render_hist3d_anisotropic(x, y, z, *args)
         for arr, orig in zip((x, y, z), before):
@@ -2914,7 +3029,10 @@ class TestSplatBackend:
         """'convolve' blurs with the caller's global precision, else with
         the median precision of the rows rendered (not of those in
         view), so the blur is the same at every zoom and rotation."""
-        zoomed = ((8.0, 8.0), (20.0, 20.0))
+        zoomed = (
+            (8.0 * PIXELSIZE, 8.0 * PIXELSIZE),
+            (20.0 * PIXELSIZE, 20.0 * PIXELSIZE),
+        )
         kwargs = dict(disp_px_size=PIXELSIZE / 4, blur_method="convolve")
         n, default = render.render(locs, info, viewport=zoomed, **kwargs)
         medians = (
@@ -2925,13 +3043,16 @@ class TestSplatBackend:
             locs, info, viewport=zoomed, global_precision=medians, **kwargs
         )
         np.testing.assert_array_equal(default, explicit)
-        # an explicit blur is honored: wider blurs are flatter, and the
-        # intensity is conserved
+        # an explicit blur (nm, far wider than the data's precision) is
+        # honored: wider blurs are flatter, and the intensity is
+        # conserved
+        half_px = (0.5 * PIXELSIZE, 0.5 * PIXELSIZE)
+        two_px = (2.0 * PIXELSIZE, 2.0 * PIXELSIZE)
         _, narrow = render.render(
-            locs, info, viewport=zoomed, global_precision=(0.5, 0.5), **kwargs
+            locs, info, viewport=zoomed, global_precision=half_px, **kwargs
         )
         _, wide = render.render(
-            locs, info, viewport=zoomed, global_precision=(2.0, 2.0), **kwargs
+            locs, info, viewport=zoomed, global_precision=two_px, **kwargs
         )
         assert wide.max() < narrow.max() < default.max()
         # a wider blur spills a little more intensity over the border
@@ -2941,7 +3062,7 @@ class TestSplatBackend:
             [locs, locs],
             [info, info],
             viewport=zoomed,
-            global_precision=[(0.5, 0.5), (2.0, 2.0)],
+            global_precision=[half_px, two_px],
             return_raw_image=True,
             **kwargs,
         )
@@ -2975,7 +3096,7 @@ class TestSplatBackend:
         assert n * lib.RENDER_ROTATED_COST_FACTOR >= lib.RENDER_GPU_MIN_LOCS
         kwargs = dict(
             disp_px_size=PIXELSIZE / 4,
-            viewport=((0.0, 0.0), (32.0, 32.0)),
+            viewport=FULL_VIEWPORT,
             blur_method="gaussian",
             min_blur_width=0.0,
         )
@@ -3000,6 +3121,11 @@ class TestSplatBackend:
             return real_import(name, *args, **kwargs)
 
         monkeypatch.setattr(builtins, "__import__", no_wgpu)
+        # Once another test imported the GPU backend, the import above is
+        # served from the module cache and never sees the hook; a None entry
+        # makes a cached module raise ImportError as well.
+        for name in ("picasso.render.gpu", "wgpu"):
+            monkeypatch.setitem(sys.modules, name, None)
         monkeypatch.setattr(render.backend, "_gpu_singleton", None)
         monkeypatch.setattr(render.backend, "_gpu_unavailable", False)
         monkeypatch.setattr(render.backend, "_gpu_adapter", None)
@@ -3092,13 +3218,13 @@ class TestIndexedRender:
 
     def test_max_blur_width_applies_to_the_selection(self, locs, selection):
         whaled = locs.copy()
-        whaled.loc[whaled.index[selection[:10]], "lpx"] = 50.0
+        whaled.loc[whaled.index[selection[:10]], "lpx"] = 500.0  # nm
         columns = render._extract_render_columns(
-            whaled, "gaussian", None, max_blur_width=5.0, indices=selection
+            whaled, "gaussian", None, max_blur_width=50.0, indices=selection
         )
         assert len(columns) == len(selection) - 10
-        assert columns.lpx.max() > 5.0  # the columns stay whole...
-        assert columns.materialize().lpx.max() <= 5.0  # ...the rows do not
+        assert columns.lpx.max() > 50.0  # the columns stay whole...
+        assert columns.materialize().lpx.max() <= 50.0  # ...the rows do not
 
     def test_render_scene_takes_per_channel_indices(
         self, locs, info, selection
@@ -3152,14 +3278,14 @@ class TestMaxBlurWidth:
         min_blur_width=0.0,
         ang=None,
     )
-    LIMIT = 5.0  # camera pixels
+    LIMIT = 50.0  # nm, far above the data's precision
     N_WHALES = 8
 
     @pytest.fixture
     def whaled(self, locs):
         whaled = locs.copy()
-        whaled.loc[whaled.index[:5], "lpx"] = 50.0
-        whaled.loc[whaled.index[5:8], "lpy"] = 50.0
+        whaled.loc[whaled.index[:5], "lpx"] = 500.0
+        whaled.loc[whaled.index[5:8], "lpy"] = 500.0
         return whaled
 
     @pytest.mark.parametrize("blur", ["gaussian", "gaussian_iso"])
@@ -3231,17 +3357,30 @@ class TestMaxBlurWidth:
 
 
 def _legacy_multi_lut(
-    raw, luts, contrast, relative_intensities, background_color, invert
+    raw, luts, contrast, channel_contrast, background_color, invert
 ):
     """The pre-fusion numpy post-processing chain, kept as the reference
     the fused kernels are compared against (built from the public
     helpers plus the removed inline steps)."""
     vmin, vmax = contrast if contrast is not None else (None, None)
-    images = render.scale_contrast(
-        raw.copy(), vmin, vmax, autoscale=contrast is None
+    _, (vmin, vmax) = render.scale_contrast(
+        raw.copy(),
+        vmin,
+        vmax,
+        autoscale=contrast is None,
+        return_contrast_limits=True,
     )
-    images = render.scale_intensities(
-        images, relative_intensities=relative_intensities
+    # each channel's window placed on the global contrast limits
+    if channel_contrast is None:
+        channel_contrast = [(0.0, 1.0)] * raw.shape[0]
+    span = vmax - vmin
+    images = np.array(
+        [
+            render.scale_contrast(
+                image.copy(), vmin + low * span, vmin + high * span
+            )
+            for image, (low, high) in zip(raw, channel_contrast)
+        ]
     )
     colors_arr = np.asarray(luts, dtype=np.float32)
     images_f32 = np.ascontiguousarray(images, dtype=np.float32)
@@ -3293,20 +3432,26 @@ class TestFusedCompose:
         return [render.solid_to_lut(rgb) for rgb in lib.get_colors(3)]
 
     @pytest.mark.parametrize(
-        "contrast,rel,bg,invert",
+        "contrast,windows,bg,invert",
         [
             ((0.0, 5.0), None, None, False),
-            ((0.0, 5.0), [1.0, 0.7, 1.3], None, False),
+            ((0.0, 5.0), [(0.0, 1.0), (0.1, 1.4), (0.0, 0.8)], None, False),
             ((0.0, 5.0), None, (0.08, 0.08, 0.12), False),
-            ((0.5, 3.0), [1.0, 0.7, 1.3], (0.1, 0.0, 0.2), True),
+            (
+                (0.5, 3.0),
+                [(0.0, 1.0), (0.1, 1.4), (0.0, 0.8)],
+                (0.1, 0.0, 0.2),
+                True,
+            ),
             (None, None, None, False),  # autoscale
+            (None, [(0.2, 0.5), (0.0, 1.0), (0.0, 3.0)], None, False),
         ],
     )
     def test_multi_lut_matches_legacy(
-        self, raw_stack, luts, info, contrast, rel, bg, invert
+        self, raw_stack, luts, info, contrast, windows, bg, invert
     ):
         expected = _legacy_multi_lut(
-            raw_stack, luts, contrast, rel, bg, invert
+            raw_stack, luts, contrast, windows, bg, invert
         )
         _, rgb, _, _ = render._render_multi_channel(
             [None] * 3,
@@ -3314,7 +3459,7 @@ class TestFusedCompose:
             disp_px_size=10.0,
             colors=luts,
             contrast=contrast,
-            relative_intensities=rel,
+            channel_contrast=windows,
             invert_colors=invert,
             background_color=bg,
             raw_image_cache=raw_stack,
@@ -3362,6 +3507,186 @@ class TestFusedCompose:
             )
 
 
+class TestChannelContrast:
+    """Per-channel contrast windows relative to the global contrast."""
+
+    @pytest.fixture(scope="class")
+    def raw_stack(self):
+        rng = np.random.default_rng(11)
+        raw = rng.exponential(2.0, size=(3, 40, 50)).astype(np.float32)
+        raw[:, ::7, ::5] = 0.0
+        return raw
+
+    def _render(self, raw, info, colors, **kwargs):
+        _, rgb, limits, _ = render._render_multi_channel(
+            [None] * raw.shape[0],
+            [info] * raw.shape[0],
+            disp_px_size=10.0,
+            colors=colors,
+            raw_image_cache=raw,
+            **kwargs,
+        )
+        return rgb, limits
+
+    @pytest.mark.parametrize("lut", [True, False])
+    @pytest.mark.parametrize("contrast", [(0.5, 5.0), None])
+    def test_global_window_is_unchanged(self, raw_stack, info, lut, contrast):
+        colors = lib.get_colors(3)
+        if lut:
+            colors = [render.solid_to_lut(c) for c in colors]
+        expected, expected_limits = self._render(
+            raw_stack, info, colors, contrast=contrast
+        )
+        rgb, limits = self._render(
+            raw_stack,
+            info,
+            colors,
+            contrast=contrast,
+            channel_contrast=[(0.0, 1.0)] * 3,
+        )
+        np.testing.assert_array_equal(rgb, expected)
+        # the global limits are returned, not the per-channel ones
+        assert limits == expected_limits
+
+    @pytest.mark.parametrize("lut", [True, False])
+    def test_window_maps_onto_global_limits(self, raw_stack, info, lut):
+        """A channel's window equals rendering it alone with the
+        absolute limits vmin + (low, high) * (vmax - vmin)."""
+        colors = lib.get_colors(3)
+        black = (0.0, 0.0, 0.0)
+        if lut:
+            colors = [render.solid_to_lut(c) for c in colors]
+            black = np.zeros((256, 3), dtype=np.float32)
+        vmin, vmax = 1.0, 5.0
+        low, high = 0.25, 1.5
+        only_first = [colors[0], black, black]
+        rgb, _ = self._render(
+            raw_stack,
+            info,
+            only_first,
+            contrast=(vmin, vmax),
+            channel_contrast=[(low, high), (0.0, 1.0), (0.0, 1.0)],
+        )
+        span = vmax - vmin
+        expected, _ = self._render(
+            raw_stack,
+            info,
+            only_first,
+            contrast=(vmin + low * span, vmin + high * span),
+        )
+        diff = np.abs(rgb.astype(np.int16) - expected.astype(np.int16))
+        assert diff.max() <= 1
+        # low > 0 hides the channel's faintest pixels
+        faint = raw_stack[0] < vmin + low * span
+        assert not rgb[faint].any()
+
+    def test_follows_autoscale(self, raw_stack, info):
+        colors = [render.solid_to_lut(c) for c in lib.get_colors(3)]
+        auto, limits = self._render(raw_stack, info, colors, contrast=None)
+        rgb, auto_limits = self._render(
+            raw_stack,
+            info,
+            colors,
+            contrast=None,
+            channel_contrast=[(0.0, 0.5)] * 3,
+        )
+        assert auto_limits == limits
+        halved, _ = self._render(
+            raw_stack,
+            info,
+            colors,
+            contrast=(limits[0], limits[0] + 0.5 * (limits[1] - limits[0])),
+        )
+        diff = np.abs(rgb.astype(np.int16) - halved.astype(np.int16))
+        assert diff.max() <= 1
+        assert not np.array_equal(rgb, auto)
+
+    @pytest.mark.parametrize(
+        "channel_contrast",
+        [
+            [(0.0, 1.0)] * 2,  # wrong number of channels
+            [(0.5, 0.5)] * 3,  # empty window
+            [(-0.1, 1.0)] * 3,  # negative lower limit
+        ],
+    )
+    def test_invalid_windows_raise(self, raw_stack, info, channel_contrast):
+        colors = [render.solid_to_lut(c) for c in lib.get_colors(3)]
+        with pytest.raises(AssertionError):
+            self._render(
+                raw_stack,
+                info,
+                colors,
+                contrast=(0.0, 1.0),
+                channel_contrast=channel_contrast,
+            )
+
+    def test_render_scene_and_color_range(self, locs, info):
+        colors = [render.solid_to_lut(c) for c in lib.get_colors(2)]
+        kwargs = dict(
+            disp_px_size=PIXELSIZE / 4,
+            colors=colors,
+            return_raw_image=True,
+        )
+        raw = render.render_scene([locs, locs], [info, info], **kwargs)[2]
+        # unsaturated, so that brightening a channel shows
+        kwargs["contrast"] = (0.0, float(raw.max()))
+        default = render.render_scene([locs, locs], [info, info], **kwargs)
+        brighter = render.render_scene(
+            [locs, locs],
+            [info, info],
+            channel_contrast=[(0.0, 0.2), (0.0, 1.0)],
+            **kwargs,
+        )
+        np.testing.assert_array_equal(default[2], brighter[2])
+        assert default[0] != brighter[0]
+        # the full color is renormalized by its maximum, so dim only
+        # the first channel (red), next to the second one (cyan)
+        empty, full = render.color_range(
+            2, colors=colors, channel_contrast=[(0.0, 2.0), (0.0, 1.0)]
+        )
+        empty_ref, full_ref = render.color_range(2, colors=colors)
+        np.testing.assert_array_equal(empty, empty_ref)
+        assert full[0] < full_ref[0]
+        np.testing.assert_array_equal(full[1:], full_ref[1:])
+        # a single channel ignores it
+        single = render.render_scene(
+            locs, info, **kwargs, channel_contrast=[(0.0, 0.2)]
+        )
+        reference = render.render_scene(locs, info, **kwargs)
+        assert single[0] == reference[0]
+
+    def test_build_animation_validates(self, locs_3d, info, tmp_path):
+        positions = [
+            (Rotation.identity(), FULL_VIEWPORT),
+            (Rotation.from_rotvec([0.1, 0.0, 0.0]), FULL_VIEWPORT),
+        ]
+        kwargs = dict(
+            positions=positions,
+            durations=[1.0],
+            disp_px_size=PIXELSIZE,
+            image_size=(32, 32),
+            fps=2,
+            contrast=(0.0, 1.0),
+        )
+        out_path = tmp_path / "anim.mp4"
+        assert render.build_animation(
+            str(out_path),
+            [locs_3d, locs_3d],
+            [info, info],
+            channel_contrast=[(0.0, 0.5), (0.1, 2.0)],
+            **kwargs,
+        )
+        assert out_path.exists()
+        with pytest.raises(AssertionError):
+            render.build_animation(
+                str(tmp_path / "bad.mp4"),
+                [locs_3d, locs_3d],
+                [info, info],
+                channel_contrast=[(0.0, 0.5)],
+                **kwargs,
+            )
+
+
 class TestChunkMemory:
     """The chunked CPU path bounds its memory: chunk images are summed
     as they arrive (at most one per worker plus one alive) and the
@@ -3369,17 +3694,22 @@ class TestChunkMemory:
 
     def _locs(self, n=400_000, seed=0):
         rng = np.random.default_rng(seed)
+        # 64 x 64 camera pixels, coordinates and precisions in nm
         return pd.DataFrame(
             {
-                "x": rng.uniform(0, 64, n),
-                "y": rng.uniform(0, 64, n),
-                "lpx": rng.uniform(0.05, 0.2, n),
-                "lpy": rng.uniform(0.05, 0.2, n),
+                "x": rng.uniform(0, 64 * PIXELSIZE, n),
+                "y": rng.uniform(0, 64 * PIXELSIZE, n),
+                "lpx": rng.uniform(0.05 * PIXELSIZE, 0.2 * PIXELSIZE, n),
+                "lpy": rng.uniform(0.05 * PIXELSIZE, 0.2 * PIXELSIZE, n),
             }
         )
 
+    FOV = ((0, 0), (64 * PIXELSIZE, 64 * PIXELSIZE))
+
     def _info(self):
-        return [{"Width": 64, "Height": 64, "Frames": 1, "Pixelsize": 130.0}]
+        return [
+            {"Width": 64, "Height": 64, "Frames": 1, "Pixelsize": PIXELSIZE}
+        ]
 
     def test_streamed_sum_equals_the_sequential_render(self, monkeypatch):
         from picasso.render import splat
@@ -3387,8 +3717,8 @@ class TestChunkMemory:
         locs = self._locs()
         info = self._info()
         kwargs = dict(
-            disp_px_size=130 / 4,
-            viewport=((0, 0), (64, 64)),
+            disp_px_size=PIXELSIZE / 4,
+            viewport=self.FOV,
             blur_method="gaussian",
         )
         monkeypatch.setattr(splat, "_render_worker_budget", lambda: 1)
@@ -3438,8 +3768,8 @@ class TestChunkMemory:
         render.render_scene(
             self._locs(300_000),  # 6 chunks for 3 workers
             self._info(),
-            disp_px_size=130 / 4,
-            viewport=((0, 0), (64, 64)),
+            disp_px_size=PIXELSIZE / 4,
+            viewport=self.FOV,
             blur_method="gaussian",
         )
         # never all kept: two in flight per worker, one being summed,
@@ -3477,8 +3807,8 @@ class TestChunkMemory:
         n, raw = render.render_scene(
             self._locs(),
             self._info(),
-            disp_px_size=130 / 4,
-            viewport=((0, 0), (64, 64)),
+            disp_px_size=PIXELSIZE / 4,
+            viewport=self.FOV,
             blur_method="gaussian",
             return_raw_image=True,
         )[1:]
@@ -3514,12 +3844,13 @@ class TestFallbackNote:
         monkeypatch.setattr(backend, "_get_backend", lambda *a, **k: fake)
         backend.note_fallback(None)
         rng = np.random.default_rng(0)
+        fov = 8 * PIXELSIZE  # 8 x 8 camera pixels, in nm
         locs = pd.DataFrame(
-            {"x": rng.uniform(0, 8, 500), "y": rng.uniform(0, 8, 500)}
+            {"x": rng.uniform(0, fov, 500), "y": rng.uniform(0, fov, 500)}
         )
-        info = [{"Width": 8, "Height": 8, "Frames": 1, "Pixelsize": 130.0}]
+        info = [{"Width": 8, "Height": 8, "Frames": 1, "Pixelsize": PIXELSIZE}]
         render.render_scene(
-            locs, info, disp_px_size=65, viewport=((0, 0), (8, 8))
+            locs, info, disp_px_size=65, viewport=((0, 0), (fov, fov))
         )
         assert backend.last_fallback() == "channel exceeds the limit"
         assert backend.describe_active() == (
@@ -3527,7 +3858,7 @@ class TestFallbackNote:
         )
         fake.fail = False
         render.render_scene(
-            locs, info, disp_px_size=65, viewport=((0, 0), (8, 8))
+            locs, info, disp_px_size=65, viewport=((0, 0), (fov, fov))
         )
         assert backend.last_fallback() is None
         assert backend.describe_active() == "GPU (Fake GPU)"

@@ -33,7 +33,9 @@ from picasso import localize
 BOX = 7
 MIN_NG = 5000
 CAMERA_INFO = {"Baseline": 0, "Sensitivity": 1, "Gain": 1, "Pixelsize": 130}
-PARAMS = {"Min. Net Gradient": MIN_NG, "Box Size": BOX}
+PARAMS = localize.IdentificationParameters(
+    method=localize.NetGradient(MIN_NG), box=BOX
+)
 
 
 def _assert_locs_equal(a: pd.DataFrame, b: pd.DataFrame) -> None:
@@ -78,12 +80,12 @@ def test_matches_batch_localize(movie, movie_info, fitting_method):
         identification_parameters=PARAMS,
         movie_info=movie_info,
         fitting_method=fitting_method,
-        threaded=True,
+        parallel=True,
     )
     out = localize.localize_frames(
         np.asarray(movie),
         list(movie_info) + [CAMERA_INFO],
-        PARAMS,
+        identification_parameters=PARAMS,
         fitting_method=fitting_method,
     )
     _assert_locs_equal(ref, out)
@@ -93,22 +95,29 @@ def test_camera_info_read_from_info(movie, movie_info):
     """The camera parameters are taken from the info list-of-dicts when no
     ``camera_info`` is passed (the streaming contract carries them there)."""
     explicit = localize.localize_frames(
-        np.asarray(movie), movie_info, PARAMS, camera_info=CAMERA_INFO
+        np.asarray(movie),
+        movie_info,
+        identification_parameters=PARAMS,
+        camera_info=CAMERA_INFO,
     )
     from_info = localize.localize_frames(
-        np.asarray(movie), list(movie_info) + [CAMERA_INFO], PARAMS
+        np.asarray(movie),
+        list(movie_info) + [CAMERA_INFO],
+        identification_parameters=PARAMS,
     )
     _assert_locs_equal(explicit, from_info)
 
 
 def test_does_not_mutate_camera_info(movie, movie_info):
-    """A caller-supplied camera_info is not mutated (fit fills a missing
-    "Pixelsize" in place; the wrapper copies first so a dict reused across
-    streaming batches is left untouched)."""
-    camera_info = {"Baseline": 0, "Sensitivity": 1, "Gain": 1}
+    """A caller-supplied camera_info is not mutated (the wrapper copies
+    first so a dict reused across streaming batches is left untouched)."""
+    camera_info = dict(CAMERA_INFO)
     before = dict(camera_info)
     localize.localize_frames(
-        np.asarray(movie), movie_info, PARAMS, camera_info=camera_info
+        np.asarray(movie),
+        movie_info,
+        identification_parameters=PARAMS,
+        camera_info=camera_info,
     )
     assert camera_info == before
 
@@ -117,10 +126,16 @@ def test_accepts_loaded_movie_unchanged(movie, movie_info):
     """Passing an already-loaded movie (a memmap) is used as-is and matches
     passing the same data as a plain ndarray."""
     as_array = localize.localize_frames(
-        np.asarray(movie), movie_info, PARAMS, camera_info=CAMERA_INFO
+        np.asarray(movie),
+        movie_info,
+        identification_parameters=PARAMS,
+        camera_info=CAMERA_INFO,
     )
     as_movie = localize.localize_frames(
-        movie, movie_info, PARAMS, camera_info=CAMERA_INFO
+        movie,
+        movie_info,
+        identification_parameters=PARAMS,
+        camera_info=CAMERA_INFO,
     )
     _assert_locs_equal(as_array, as_movie)
 
@@ -139,7 +154,11 @@ def _run_in_batches(frames, boundaries, **kwargs):
         if len(chunk):
             parts.append(
                 localize.localize_frames(
-                    chunk, None, PARAMS, start_frame=start, **kwargs
+                    chunk,
+                    None,
+                    identification_parameters=PARAMS,
+                    start_frame=start,
+                    **kwargs,
                 )
             )
         start = end
@@ -151,7 +170,7 @@ def test_batch_boundaries_are_invariant(movie):
     frames = np.asarray(movie)
     n = len(frames)
     full = localize.localize_frames(
-        frames, None, PARAMS, camera_info=CAMERA_INFO
+        frames, None, identification_parameters=PARAMS, camera_info=CAMERA_INFO
     )
     one = _run_in_batches(
         frames, list(range(1, n + 1)), camera_info=CAMERA_INFO
@@ -168,10 +187,14 @@ def test_start_frame_offsets_indices(movie):
     the column dtype (so a batch starting at 0 is unchanged)."""
     frames = np.asarray(movie)
     base = localize.localize_frames(
-        frames, None, PARAMS, camera_info=CAMERA_INFO
+        frames, None, identification_parameters=PARAMS, camera_info=CAMERA_INFO
     )
     shifted = localize.localize_frames(
-        frames, None, PARAMS, camera_info=CAMERA_INFO, start_frame=1000
+        frames,
+        None,
+        identification_parameters=PARAMS,
+        camera_info=CAMERA_INFO,
+        start_frame=1000,
     )
     assert base["frame"].dtype == shifted["frame"].dtype
     np.testing.assert_array_equal(
@@ -179,7 +202,11 @@ def test_start_frame_offsets_indices(movie):
     )
     # start_frame=0 is a no-op on the frame column.
     zero = localize.localize_frames(
-        frames, None, PARAMS, camera_info=CAMERA_INFO, start_frame=0
+        frames,
+        None,
+        identification_parameters=PARAMS,
+        camera_info=CAMERA_INFO,
+        start_frame=0,
     )
     np.testing.assert_array_equal(
         zero["frame"].to_numpy(), base["frame"].to_numpy()
@@ -219,26 +246,31 @@ def test_recovers_known_positions():
         bg=5.0,
         seed=42,
     )
-    params = {"Min. Net Gradient": 2000, "Box Size": 7}
+    params = localize.IdentificationParameters(
+        method=localize.NetGradient(2000), box=7
+    )
     locs = localize.localize_frames(
         frames,
         None,
-        params,
+        identification_parameters=params,
         camera_info=camera_info,
         fitting_method="gaussmle",
     )
     # Every frame yields all emitters (bright, well separated).
     assert set(locs["frame"].unique()) == set(range(20))
+    # The coordinates are in nm; the emitters sit on the camera pixel grid.
+    x = locs["x"].to_numpy() / camera_info["Pixelsize"]
+    y = locs["y"].to_numpy() / camera_info["Pixelsize"]
     # Each ground-truth emitter has a nearby recovered localization.
     for x0, y0 in positions:
-        d = np.hypot(locs["x"].to_numpy() - x0, locs["y"].to_numpy() - y0)
+        d = np.hypot(x - x0, y - y0)
         best = d.min()
         assert best < 0.3, f"emitter ({x0},{y0}) recovered {best:.3f} px off"
     # Averaged over frames the bias is well below a tenth of a pixel.
     for x0, y0 in positions:
-        near = locs[np.hypot(locs["x"] - x0, locs["y"] - y0) < 1.0]
-        assert abs(near["x"].mean() - x0) < 0.1
-        assert abs(near["y"].mean() - y0) < 0.1
+        near = np.hypot(x - x0, y - y0) < 1.0
+        assert abs(x[near].mean() - x0) < 0.1
+        assert abs(y[near].mean() - y0) < 0.1
 
 
 # ---------------------------------------------------------------------------
@@ -246,7 +278,7 @@ def test_recovers_known_positions():
 # ---------------------------------------------------------------------------
 
 
-def test_no_qt_on_call_path():
+def test_no_qt_on_call_path(tmp_path):
     """A fresh interpreter can import and run localize_frames without Qt.
 
     Run in a subprocess with no ``DISPLAY`` and ``QT_QPA_PLATFORM`` cleared so
@@ -261,9 +293,14 @@ def test_no_qt_on_call_path():
 
         frames = np.zeros((3, 16, 16), dtype=np.uint16)
         frames[:, 8, 8] = 500
-        camera_info = {"Baseline": 0, "Sensitivity": 1, "Gain": 1}
-        params = {"Min. Net Gradient": 10, "Box Size": 7}
-        locs = localize.localize_frames(frames, None, params,
+        camera_info = {
+            "Baseline": 0, "Sensitivity": 1, "Gain": 1, "Pixelsize": 130
+        }
+        params = localize.IdentificationParameters(
+            method=localize.NetGradient(10), box=7
+        )
+        locs = localize.localize_frames(frames, None,
+                                        identification_parameters=params,
                                         camera_info=camera_info)
         assert "frame" in locs.columns
 
@@ -278,6 +315,9 @@ def test_no_qt_on_call_path():
         for k, v in __import__("os").environ.items()
         if k not in ("DISPLAY", "QT_QPA_PLATFORM")
     }
+    # the fresh interpreter saves the default settings it reads, so it
+    # must not see the developer's ~/.picasso
+    env["HOME"] = env["USERPROFILE"] = str(tmp_path)
     result = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,

@@ -3,9 +3,7 @@
 # create_macos_dmg.sh
 # Builds a macOS DMG installer for Picasso
 # Requirements: conda, create-dmg >= 1.3.0 (brew install create-dmg)
-# Usage: bash create_macos_dmg.sh, from an environment in which
-#        "import picasso" works (the version is read before the build
-#        environment exists)
+# Usage: bash create_macos_dmg.sh, from this folder
 # =============================================================================
 
 set -e  # Exit immediately on any error
@@ -14,9 +12,12 @@ set -e  # Exit immediately on any error
 eval "$(conda shell.bash hook)"
 
 APP_NAME="Picasso"
-VERSION=$(python3 -c "from picasso.version import __version__; print(__version__)")
+# read without importing picasso, as the build environment does not exist yet
+VERSION=$(python3 -c "exec(open('../../picasso/version.py').read()); print(__version__)")
 MAIN_BUNDLE_NAME="Picasso.app"
 DMG_NAME="Picasso-v$VERSION-macOS-Apple-Silicon"
+# the DMG with readme.txt, for the GitHub release
+ZIP_NAME="Picasso-Apple-Silicon-$VERSION"
 PYINSTALLER_FILE="../pyinstaller/picasso_pyinstaller.py"
 DIST_DIR="../pyinstaller/dist"
 BUILD_DIR="../pyinstaller/build"
@@ -75,7 +76,7 @@ pyinstaller "$PYINSTALLER_FILE" \
     --copy-metadata imageio \
     --collect-submodules matplotlib.backends \
     --name picasso \
-    --icon ../logos/localize.icns \
+    --icon ../logos/picasso.icns \
     --osx-bundle-identifier org.jungmannlab.picasso \
     --distpath "$DIST_DIR" \
     --workpath "$BUILD_DIR" \
@@ -141,7 +142,19 @@ if [ -d "$H5PY_DYLIBS" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# Step 1c: Re-sign the main bundle (ad-hoc). PyInstaller signs the bundle
+# Step 1c: Third-party license notices. The app redistributes Python,
+# PyQt6/Qt and every other bundled library, whose licenses require shipping
+# their notices with it. Collected while the build environment is still
+# active so the list matches the frozen packages, and written before the
+# re-signing below, which seals the bundle's resources. A copy also goes
+# next to the apps in the DMG (Step 3).
+# ---------------------------------------------------------------------------
+LICENSES_FILE="$MAIN_RESOURCES/THIRD-PARTY-LICENSES.txt"
+echo ">>> Collecting third-party licenses..."
+python ../collect_third_party_licenses.py "$LICENSES_FILE"
+
+# ---------------------------------------------------------------------------
+# Step 1d: Re-sign the main bundle (ad-hoc). PyInstaller signs the bundle
 # when it builds, but the HDF5 dylib swap above invalidates that signature.
 # An invalid signature on Apple Silicon triggers PAC/codesigning faults at
 # load time, including crashes inside CoreFoundation. --deep --force resigns
@@ -149,6 +162,17 @@ fi
 # ---------------------------------------------------------------------------
 echo ">>> Re-signing $MAIN_APP_PATH (ad-hoc)..."
 codesign --force --deep --sign - "$MAIN_APP_PATH"
+
+# ---------------------------------------------------------------------------
+# Step 1e: Test the app before packaging it (../smoke_test.py): a short
+# analysis on the command line and every GUI opened offscreen. A failure
+# stops the build (set -e), so a broken app never goes into a DMG. Set
+# PICASSO_SKIP_SMOKE_TEST=1 to skip the test.
+# ---------------------------------------------------------------------------
+if [ -z "$PICASSO_SKIP_SMOKE_TEST" ]; then
+    echo ">>> Testing $MAIN_APP_PATH..."
+    python ../smoke_test.py --frozen "$MAIN_EXECUTABLE"
+fi
 
 # -----------------------------------------------------------------------------
 # Step 2: Create separate .app bundles for each tool
@@ -260,15 +284,22 @@ echo ">>> Staging DMG contents..."
 rm -rf "$STAGING_DIR"
 mkdir -p "$STAGING_DIR"
 
-# Copy the main .app bundle
-cp -r "$MAIN_APP_PATH" "$STAGING_DIR/$MAIN_BUNDLE_NAME"
+# Copy the main .app bundle. ditto keeps the bundle's symlinks (PyInstaller
+# links Contents/Resources to Contents/Frameworks, and each Qt .framework
+# links its Versions/Current), its extended attributes and its signature;
+# macOS's "cp -r" is "cp -RL", which copies every linked file again and
+# made the app twice as large (1.6 GB instead of ~0.8 GB).
+ditto "$MAIN_APP_PATH" "$STAGING_DIR/$MAIN_BUNDLE_NAME"
 
 # Copy all tool-specific .app bundles
 for tool_def in "${TOOLS[@]}"; do
     IFS=':' read -r display_name argument icon_name <<< "$tool_def"
     app_name="Picasso ${display_name}.app"
-    cp -r "$DIST_DIR/$app_name" "$STAGING_DIR/$app_name"
+    ditto "$DIST_DIR/$app_name" "$STAGING_DIR/$app_name"
 done
+
+# Third-party licenses, visible without opening the bundle
+cp "$LICENSES_FILE" "$STAGING_DIR/THIRD-PARTY-LICENSES.txt"
 
 # Note: Applications symlink is created automatically by create-dmg via --app-drop-link
 
@@ -285,13 +316,13 @@ rm -f "${DMG_NAME}.dmg" rw.*."${DMG_NAME}.dmg"
 # Note: With multiple apps, we'll let create-dmg handle the layout automatically
 # or you can manually position each icon if you prefer more control.
 # create-dmg lays the window out through a Finder AppleScript after
-# mounting the image; with an image of this size (~1.7 GB) Finder has not
+# mounting the image; with an image of this size (~0.8 GB) Finder has not
 # registered the volume within the tool's default 2 s wait and the script
 # died with "Can't get disk (-1728)" on macOS 26, hence the longer wait
 # (create-dmg >= 1.3.0) and the hdiutil retries.
 create-dmg \
     --volname "$APP_NAME $VERSION" \
-    --volicon "../logos/localize.icns" \
+    --volicon "../logos/picasso.icns" \
     --window-pos 200 120 \
     --window-size 800 500 \
     --icon-size 80 \
@@ -304,6 +335,13 @@ create-dmg \
     "$STAGING_DIR"
 
 # -----------------------------------------------------------------------------
+# Step 4b: Zip the DMG with readme.txt, for the GitHub release
+# -----------------------------------------------------------------------------
+echo ">>> Zipping ${DMG_NAME}.dmg with readme.txt..."
+rm -f "${ZIP_NAME}.zip"
+zip "${ZIP_NAME}.zip" "${DMG_NAME}.dmg" readme.txt
+
+# -----------------------------------------------------------------------------
 # Step 5: Cleanup staging directory
 # -----------------------------------------------------------------------------
 echo ">>> Cleaning up staging directory..."
@@ -313,6 +351,7 @@ echo ""
 echo "============================================="
 echo " Build complete!"
 echo " Output: ${DMG_NAME}.dmg"
+echo "         ${ZIP_NAME}.zip (with readme.txt, for the GitHub release)"
 echo ""
 echo " The DMG contains:"
 echo "   - Picasso.app (main bundle)"

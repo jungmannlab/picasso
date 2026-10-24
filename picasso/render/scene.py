@@ -197,7 +197,7 @@ def render_scene(
     invert_colors: bool = False,
     single_channel_colormap: str | lib.FloatArray2D = "magma",
     colors: list | None = None,
-    relative_intensities: list[float] | None = None,
+    channel_contrast: list[tuple[float, float]] | None = None,
     background_color: tuple[float, float, float] | None = None,
     raw_image_cache: lib.FloatArray2D | lib.FloatArray3D | None = None,
     return_contrast_limits: bool = False,
@@ -249,9 +249,9 @@ def render_scene(
     disp_px_size : float, optional
         Display pixel size in nm. Default is 100.0.
     viewport : tuple, optional
-        Field of view to be rendered (in camera pixels). The input is
-        ``((y_min, x_min), (y_max, x_max))``. If None, all localizations
-        are rendered.
+        Field of view to be rendered in nm,
+        ``((y_min, x_min), (y_max, x_max))``. If None, the whole field
+        of view is rendered (see ``lib.field_of_view``).
     blur_method : {"gaussian", "gaussian_iso", "smooth", "convolve"} or None, \
             optional
         Defines localizations' blur. The string has to be one of
@@ -263,10 +263,10 @@ def render_scene(
         pixel blur. 'convolve' applies the same blur to all
         localizations which is the median localization precision.
     min_blur_width : float, optional
-        Minimum size of blur (camera pixels).
+        Minimum size of blur (nm).
     max_blur_width : float, optional
-        Localizations whose ``lpx`` or ``lpy`` exceeds this (camera
-        pixels) are not rendered by 'gaussian' and 'gaussian_iso'.
+        Localizations whose ``lpx`` or ``lpy`` exceeds this (nm) are
+        not rendered by 'gaussian' and 'gaussian_iso'.
         If None (default), all localizations are rendered.
     ang : tuple or scipy.spatial.transform.Rotation, optional
         Rotation of locs; either a scipy Rotation (e.g. built from a
@@ -280,7 +280,7 @@ def render_scene(
         (default), all rows of every channel are rendered.
     global_precision : list of tuple or tuple, optional
         For each channel (a single ``(lpx, lpy)`` for a single ``locs``
-        DataFrame), the blur of the 'convolve' method in camera pixels
+        DataFrame), the blur of the 'convolve' method in nm
         (see ``render``); None entries use the median precision of the
         rows rendered.
     quadtree_capacity : int, optional
@@ -318,10 +318,16 @@ def render_scene(
         blended additively. Only needs to be specified for
         multi-channel data. Default is None, in which case colors are
         taken from ``lib.get_colors``.
-    relative_intensities : list of float, optional
-        List of relative intensities for each channel. Only needs to be
-        specified for multi-channel data. Default is None, in which
-        case all channels are rendered with the same intensity.
+    channel_contrast : list of tuple of float, optional
+        Contrast window of each channel relative to the global contrast
+        limits ``(vmin, vmax)`` (given by `contrast` or found
+        automatically), one ``(low, high)`` pair per channel with
+        ``0 <= low < high``. A channel is scaled between
+        ``vmin + low * (vmax - vmin)`` and ``vmin + high * (vmax -
+        vmin)``, so ``(0, 1)`` uses the global limits, ``high < 1``
+        brightens the channel and ``high > 1`` dims it. Only used for
+        multi-channel data. Default is None, in which case all channels
+        use the global limits.
     background_color : tuple of float, optional
         ``(r, g, b)`` background color with values between 0 and 1 that
         the additively-blended channels are composited over (multi-channel
@@ -351,7 +357,8 @@ def render_scene(
     n_locs : int
         Total number of localizations rendered.
     contrast_limits : tuple of float, optional
-        The contrast limits used for scaling. Only returned if
+        The (global) contrast limits used for scaling, before
+        `channel_contrast` is applied. Only returned if
         return_contrast_limits is True.
     raw_image : FloatArray2D or FloatArray3D, optional
         Raw grayscale image of localizations (2D array for single-channel
@@ -412,7 +419,7 @@ def render_scene(
             triangulation_jitter=triangulation_jitter,
             render_index=render_index,
             contrast=contrast,
-            relative_intensities=relative_intensities,
+            channel_contrast=channel_contrast,
             invert_colors=invert_colors,
             background_color=background_color,
             raw_image_cache=raw_image_cache,
@@ -467,15 +474,15 @@ def _render_channels(
     disp_px_size : float
         Display pixel size in nm, see ``render``.
     viewport : tuple or None
-        Field of view ``((y_min, x_min), (y_max, x_max))`` in camera
-        pixels, see ``render``.
+        Field of view ``((y_min, x_min), (y_max, x_max))`` in nm, see
+        ``render``.
     blur_method : {"gaussian", "gaussian_iso", "smooth", "convolve"} or None
         Blur method, see ``render``.
     min_blur_width : float
-        Minimum size of blur (camera pixels), see ``render``.
+        Minimum size of blur (nm), see ``render``.
     max_blur_width : float, optional
         Maximum localization precision rendered by the Gaussian
-        methods (camera pixels), see ``render``. Default is None.
+        methods (nm), see ``render``. Default is None.
     ang : tuple or scipy.spatial.transform.Rotation or None
         Rotation of the localizations, see ``render``.
     indices : list of lib.IntArray1D or None, optional
@@ -582,6 +589,54 @@ def _contrast_limits(
     return vmin, vmax
 
 
+def _channel_limits(
+    contrast_limits: tuple[float, float],
+    channel_contrast: list[tuple[float, float]] | None,
+    n_channels: int,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
+    """Per-channel lower contrast limits and contrast ranges.
+
+    Each channel's ``(low, high)`` window from ``channel_contrast`` is
+    placed on the global limits ``(vmin, vmax)``: the channel is scaled
+    between ``vmin + low * (vmax - vmin)`` and ``vmin + high * (vmax -
+    vmin)``. With ``(0, 1)`` the global limits are returned unchanged
+    (bit for bit).
+
+    Parameters
+    ----------
+    contrast_limits : tuple of float
+        The global ``(vmin, vmax)``.
+    channel_contrast : list of tuple of float or None
+        One ``(low, high)`` pair per channel with ``0 <= low < high``;
+        None uses the global limits for every channel.
+    n_channels : int
+        Number of channels.
+
+    Returns
+    -------
+    vmins : FloatArray1D
+        Lower contrast limit of each channel.
+    ranges : FloatArray1D
+        Contrast range (``vmax - vmin``) of each channel.
+    """
+    vmin, vmax = contrast_limits
+    if channel_contrast is None:
+        windows = np.tile([0.0, 1.0], (n_channels, 1))
+    else:
+        windows = np.asarray(channel_contrast, dtype=np.float64)
+        n_pairs = (n_channels, 2)
+        assert (
+            windows.shape == n_pairs
+        ), "channel_contrast must have one (low, high) pair per channel."
+        assert np.all(windows[:, 0] >= 0) and np.all(
+            windows[:, 0] < windows[:, 1]
+        ), "Each channel_contrast pair must satisfy 0 <= low < high."
+    span = float(vmax) - float(vmin)
+    vmins = float(vmin) + windows[:, 0] * span
+    ranges = (windows[:, 1] - windows[:, 0]) * span
+    return vmins, ranges
+
+
 def _resolve_cmap(colormap: str | lib.FloatArray2D) -> lib.IntArray2D:
     """The 256-entry uint8 RGB table that ``apply_colormap`` would use
     for ``colormap`` (built identically, alpha dropped)."""
@@ -612,7 +667,7 @@ def _render_multi_channel(
     triangulation_jitter: float | None = None,
     render_index: list | None = None,
     contrast: tuple[float, float] | None = None,
-    relative_intensities: list[float] | None = None,
+    channel_contrast: list[tuple[float, float]] | None = None,
     invert_colors: bool = False,
     background_color: tuple[float, float, float] | None = None,
     raw_image_cache: lib.FloatArray3D | None = None,
@@ -659,18 +714,13 @@ def _render_multi_channel(
 
     if colors_arr.ndim == 3:
         # LUT path (the GUI's path): one fused kernel does contrast ->
-        # intensities -> LUT gather -> blend -> background -> 8 bit in
+        # LUT gather -> blend -> background -> 8 bit in
         # two passes over the stack instead of the ~10-pass numpy chain
         n_channels = raw_image.shape[0]
         contrast_limits = _contrast_limits(raw_image, vmin, vmax, autoscale)
-        if relative_intensities is None:
-            rel = np.ones(n_channels, dtype=np.float32)
-        else:
-            assert len(relative_intensities) == n_channels, (
-                "Length of relative_intensities must match number of "
-                "channels in images."
-            )
-            rel = np.asarray(relative_intensities, dtype=np.float32)
+        vmins, ranges = _channel_limits(
+            contrast_limits, channel_contrast, n_channels
+        )
         has_bg = background_color is not None and any(
             c > 0 for c in background_color
         )
@@ -680,9 +730,8 @@ def _render_multi_channel(
         rgb32, max_value = _compose_multi_lut(
             np.ascontiguousarray(raw_image, dtype=np.float32),
             np.ascontiguousarray(colors_arr),
-            contrast_limits[0],
-            contrast_limits[1],
-            rel,
+            vmins.astype(np.float32),
+            ranges.astype(np.float32),
             bg,
             has_bg,
         )
@@ -691,16 +740,21 @@ def _render_multi_channel(
         # legacy solid-color path: each channel is a single (r, g, b),
         # rendered as intensity x rgb through the numpy reference chain
         # (kept as-is for public-API compatibility)
-        images, contrast_limits = scale_contrast(
-            raw_image,
-            vmin,
-            vmax,
-            autoscale=autoscale,
-            return_contrast_limits=True,
+        contrast_limits = _contrast_limits(raw_image, vmin, vmax, autoscale)
+        vmins, ranges = _channel_limits(
+            contrast_limits, channel_contrast, raw_image.shape[0]
         )
-        images = scale_intensities(
-            images, relative_intensities=relative_intensities
+        # as in scale_contrast, with each channel's own limits
+        images = np.array(
+            [
+                (image - lo) / rng
+                for image, lo, rng in zip(
+                    raw_image, vmins.tolist(), ranges.tolist()
+                )
+            ]
         )
+        images[~np.isfinite(images)] = 0.0
+        images = np.clip(images, 0.0, 1.0)
         images_f32 = np.ascontiguousarray(images, dtype=np.float32)
         rgb = np.tensordot(images_f32, colors_arr, axes=([0], [0]))
         # clip to max value of 1 (preserves relative brightness)
@@ -801,10 +855,10 @@ def _render_single_channel(
 def color_range(
     n_channels: int | None,
     colors: list | None = None,
-    relative_intensities: list[float] | None = None,
     invert_colors: bool = False,
     background_color: tuple[float, float, float] | None = None,
     single_channel_colormap: str | lib.FloatArray2D = "magma",
+    channel_contrast: list[tuple[float, float]] | None = None,
 ) -> tuple[lib.IntArray1D, lib.IntArray1D]:
     """Find the background and maximum-contrast colors of a rendering.
 
@@ -824,9 +878,6 @@ def color_range(
     colors : list of tuples or list of lib.FloatArray2D, optional
         Colors of the channels, as in ``render_scene``. Default is
         None.
-    relative_intensities : list of float, optional
-        Relative intensity of each channel, as in ``render_scene``.
-        Default is None.
     invert_colors : bool, optional
         If True, colors are inverted, as in ``render_scene``. Default
         is False.
@@ -836,6 +887,9 @@ def color_range(
     single_channel_colormap : str or lib.FloatArray2D, optional
         Colormap of single-channel data, as in ``render_scene``.
         Default is 'magma'.
+    channel_contrast : list of tuple of float, optional
+        Contrast window of each channel relative to the global contrast
+        limits, as in ``render_scene``. Default is None.
 
     Returns
     -------
@@ -846,12 +900,15 @@ def color_range(
         RGB color (uint8) of shape ``(3,)`` of pixels at the maximum
         contrast.
     """
+    # a two-pixel raw image (an empty and a full pixel) is colored
+    # like a rendering; nothing is rendered, so the display pixel size
+    # (required by the signature) is not used and any value will do
     if n_channels is None:
         raw = np.array([[0.0, 1.0]], dtype=np.float32)
         _, rgb, _, _ = _render_single_channel(
             None,
             None,
-            disp_px_size=1.0,
+            disp_px_size=1.0,  # unused, see above
             contrast=(0.0, 1.0),
             invert_colors=invert_colors,
             single_channel_colormap=single_channel_colormap,
@@ -866,10 +923,10 @@ def color_range(
         _, rgb, _, _ = _render_multi_channel(
             None,
             None,
-            disp_px_size=1.0,
+            disp_px_size=1.0,  # unused, see above
             colors=colors,
             contrast=(0.0, 1.0),
-            relative_intensities=relative_intensities,
+            channel_contrast=channel_contrast,
             invert_colors=invert_colors,
             background_color=background_color,
             raw_image_cache=raw,
@@ -924,35 +981,6 @@ def scale_contrast(
     if return_contrast_limits:
         return scaled_image, (vmin, vmax)
     return scaled_image
-
-
-def scale_intensities(
-    images: lib.FloatArray3D,
-    relative_intensities: list[float] | None = None,
-) -> lib.FloatArray3D:
-    """Scale intensities across images.
-
-    Parameters
-    ----------
-    images : FloatArray3D
-        Images to be intensity scaled, one per channel. Scaled in place.
-    relative_intensities : list of float, optional
-        List of relative intensities for each channel. If None, all
-        channels are rendered with the same intensity. Default is None.
-
-    Returns
-    -------
-    scaled_images : FloatArray3D
-        Intensity scaled images.
-    """
-    if relative_intensities is not None:
-        assert len(relative_intensities) == images.shape[0], (
-            "Length of relative_intensities must match number of channels "
-            "in images."
-        )
-        for i in range(images.shape[0]):
-            images[i] *= relative_intensities[i]
-    return images
 
 
 def to_8bit(

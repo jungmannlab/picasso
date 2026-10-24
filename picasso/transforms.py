@@ -214,9 +214,11 @@ class Transform:
     """Base class for the 2D transform models.
 
     A transform maps ``(n, 2)`` source coordinates to ``(n, 2)`` destination
-    coordinates in the same units (camera pixels, throughout Picasso).
-    Instances are immutable; every method that would change one returns a new
-    transform.
+    coordinates in the same units: nm for the lateral corrections of
+    localizations, camera pixels for the channel registrations that place
+    fitting boxes on the raw images. :meth:`rescaled` converts between the
+    two. Instances are immutable; every method that would change one
+    returns a new transform.
 
     Attributes
     ----------
@@ -308,6 +310,29 @@ class Transform:
         """
         raise NotImplementedError
 
+    def rescaled(self, factor: float) -> "Transform":
+        """The same mapping expressed in coordinates scaled by ``factor``.
+
+        If this transform maps ``p`` to ``T(p)`` in one unit, the result
+        maps ``factor * p`` to ``factor * T(p)``, i.e., it is the
+        conjugation ``S T S^-1`` with the scaling ``S``. Used to express
+        a lateral correction fitted in camera pixels in nm
+        (``factor`` = camera pixel size) and vice versa.
+
+        Parameters
+        ----------
+        factor : float
+            Ratio of the new unit's coordinates to the current ones, e.g.,
+            the camera pixel size in nm to go from camera pixels to nm.
+
+        Returns
+        -------
+        transform : Transform
+            A new transform of the same model, with :attr:`domain` scaled
+            as well if it was set.
+        """
+        raise NotImplementedError
+
     def to_dict(self) -> dict:
         """A JSON- and YAML-serializable description.
 
@@ -339,7 +364,7 @@ class Transform:
             return 0.5 * (self.domain[0] + self.domain[1])
         return np.zeros(2, dtype=np.float64)
 
-    def decompose(self, pixelsize: float | None = None, at=None) -> dict:
+    def decompose(self, at=None, unit: Literal["nm", "px"] = "nm") -> dict:
         """Human-readable decomposition of the transform at one point.
 
         The linear part is the local Jacobian at ``at`` (the center of
@@ -356,18 +381,22 @@ class Transform:
           its mirror seed from these two fields.
         * by QR into ``scale_x``, ``scale_y`` and ``shear_deg``.
 
-        The translation is the transform's displacement at ``at``, reported in
-        pixels as ``tx_px``/``ty_px`` and, when ``pixelsize`` is given, in
-        nanometres as ``tx_nm``/``ty_nm``.
+        The translation is the transform's displacement at ``at``, in the
+        transform's own unit: a lateral correction (applied to
+        localizations) is in nm and reports ``tx_nm``/``ty_nm``; a channel
+        registration or split-FOV transform (detector geometry, applied
+        to camera pixel positions while fitting) is in camera pixels and
+        reports ``tx_px``/``ty_px`` with ``unit="px"``. ``at`` is in the
+        same unit.
 
         Parameters
         ----------
-        pixelsize : float, optional
-            Camera pixel size (nm). If given, the translation is additionally
-            reported in nanometres.
         at : array, optional
             ``(2,)`` point to linearize about. Defaults to the center of
             :attr:`domain`, or the origin if the transform has no domain.
+        unit : {"nm", "px"}, optional
+            The unit of the transform's coordinates, which names the
+            translation keys. Default is "nm".
 
         Returns
         -------
@@ -383,11 +412,13 @@ class Transform:
             * ``flip_axis`` ({"x", "y"} or None) - the flip axis removed from
               ``rotation_deg``; None unless ``mirror``.
             * ``scale_x``, ``scale_y``, ``shear_deg`` (float) - the QR split.
-            * ``tx_px``, ``ty_px`` (float) - displacement at ``at``, in
-              pixels.
-            * ``tx_nm``, ``ty_nm`` (float) - the same in nanometres; present
-              only when ``pixelsize`` is given.
+            * ``tx_nm``, ``ty_nm`` (float) - displacement at ``at`` in nm
+              (``unit="nm"``), or ``tx_px``, ``ty_px`` (float) - in camera
+              pixels (``unit="px"``).
+            * ``unit`` (str) - the ``unit`` the translation is given in.
         """
+        if unit not in ("nm", "px"):
+            raise ValueError(f"unit must be 'nm' or 'px', got {unit!r}.")
         point = self._at(at)
         A = self.jacobian(point[None, :])[0]
         shift = self.apply(point[None, :])[0] - point
@@ -424,12 +455,10 @@ class Transform:
             "scale_x": float(Rq[0, 0]),
             "scale_y": float(Rq[1, 1]),
             "shear_deg": float(np.degrees(np.arctan2(Rq[0, 1], Rq[1, 1]))),
-            "tx_px": float(shift[0]),
-            "ty_px": float(shift[1]),
+            f"tx_{unit}": float(shift[0]),
+            f"ty_{unit}": float(shift[1]),
+            "unit": unit,
         }
-        if pixelsize is not None:
-            out["tx_nm"] = float(shift[0]) * pixelsize
-            out["ty_nm"] = float(shift[1]) * pixelsize
         return out
 
     def is_identity(self, tol: float = 1e-12) -> bool:
@@ -564,6 +593,14 @@ class AffineTransform(Transform):
 
     def _params_close(self, other, tol: float) -> bool:
         return bool(np.allclose(self.matrix, other.matrix, atol=tol, rtol=0.0))
+
+    def rescaled(self, factor: float):
+        # S A S^-1 keeps the linear part and scales the translation
+        factor = float(factor)
+        matrix = self.matrix.copy()
+        matrix[:2, 2] *= factor
+        domain = None if self.domain is None else self.domain * factor
+        return replace(self, matrix=matrix, domain=domain)
 
     def to_dict(self) -> dict:
         return {
@@ -772,6 +809,15 @@ class ProjectiveTransform(Transform):
             )
         )
 
+    def rescaled(self, factor: float):
+        # S H S^-1: the translation scales up, the perspective row down
+        factor = float(factor)
+        matrix = self.matrix.copy()
+        matrix[:2, 2] *= factor
+        matrix[2, :2] /= factor
+        domain = None if self.domain is None else self.domain * factor
+        return ProjectiveTransform(matrix=matrix, domain=domain)
+
     def to_dict(self) -> dict:
         return {
             "model": "projective",
@@ -961,6 +1007,23 @@ class PolynomialTransform(Transform):
             np.allclose(
                 self.apply(probe), other.apply(probe), atol=tol, rtol=0.0
             )
+        )
+
+    def rescaled(self, factor: float):
+        # u = (p - center) * scale is unchanged when p, center scale up and
+        # scale scales down; the raw-unit output scales up with its
+        # coefficients. Both branches follow the same rule.
+        factor = float(factor)
+        return replace(
+            self,
+            forward=self.forward * factor,
+            center=self.center * factor,
+            scale=self.scale / factor,
+            reverse=self.reverse * factor,
+            reverse_center=self.reverse_center * factor,
+            reverse_scale=self.reverse_scale / factor,
+            roundtrip_rms_px=self.roundtrip_rms_px * factor,
+            domain=None if self.domain is None else self.domain * factor,
         )
 
     def to_dict(self) -> dict:

@@ -52,7 +52,7 @@ time. The budget is set in the user settings file ``~/.picasso/settings.yaml``
    - ``0`` or ``off`` disables previews so every frame renders at full
      quality.
 ``max_blur_width`` (nm)
-   Applies to the two blur methods that use each localization's own precision
+   Applies to the two render methods that use each localization's own precision
    (*Individual loc. prec.* and its isotropic variant): localizations whose
    ``lpx`` or ``lpy`` exceeds this value are **not rendered** at all.
 
@@ -89,9 +89,8 @@ the GPU once and every view afterwards is computed there, typically several
 times faster than the CPU worker threads, with the sharp image arriving where
 the CPU path shows a preview.
 
-It works on any recent graphics card through the ``wgpu`` package, which the
-one-click installers include; for ``pip`` installations, see
-:doc:`/getting-started/installation`.
+It works on any recent graphics card through the ``wgpu`` package, which is
+installed with Picasso (both the one-click installers and ``pip``).
 
 The rendering is controlled by the ``gpu`` section of the ``Render`` settings
 shown above:
@@ -149,8 +148,7 @@ Requirements
   vendor's Vulkan driver installed). Unlike other GPU functionalities in Picasso, GPU
   rendering does not strictly require an NVIDIA card or CUDA. Integrated graphics work
   as well, but dedicated cards are faster.
-- The ``wgpu`` package: the one-click installers ship it, pip users install
-  ``picassosr[wgpu]``.
+- The ``wgpu`` package, which is installed with Picasso.
 
 .. _render-gpu-troubleshooting:
 
@@ -164,8 +162,9 @@ When ``View > Show info`` says CPU, check in this order:
 2. The dataset is not too small: renders of fewer than 20,000 localizations
    (1,000 in the 3D view) always use the CPU, and the info dialog reports the renderer of the last
    render.
-3. ``wgpu`` is installed in the environment that runs Picasso
-   (``pip install picassosr[wgpu]``); the one-click installers include it.
+3. ``wgpu`` is installed in the environment that runs Picasso. It is a
+   dependency of Picasso, so check this only in a custom environment, e.g.,
+   with ``python -c "import wgpu"``.
 4. Set ``enabled: on``, restart Picasso, open the data again and read
    the :ref:`error log <error-log>`: the line *GPU rendering unavailable* names
    the reason (no adapter found, a driver too old for Direct3D 12 or Vulkan, a
@@ -178,7 +177,7 @@ When ``View > Show info`` says CPU, check in this order:
 How the GPU path compares to the CPU
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-- All blur methods render on the GPU, in 2D and in the 3D view, except the
+- All render methods run on the GPU, in 2D and in the 3D view, except the
   :ref:`adaptive histogram and the jittered triangulation <render-blur>`,
   which always render on the CPU.
 - Zoomed-in views use the same spatial index as the CPU path: once the field

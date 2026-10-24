@@ -6,10 +6,14 @@ calibration from beads and from the experimental blinking signal.
 import numpy as np
 import pytest
 
-from picasso import io, registration, wavelet
+from picasso import io, localize, registration, wavelet
 from picasso import transforms as tform
+from tests._progress_tracking import RecordingProgress, assert_phases_complete
 
 BOX = 7
+# the bead and the blinking-signal detection thresholds
+BEAD_NG = localize.NetGradient(2000.0)
+SIGNAL_NG = localize.NetGradient(800.0)
 
 
 def _matrix(entry) -> np.ndarray:
@@ -98,7 +102,7 @@ class TestBeadRegistration:
         ]
 
         calibration = registration.calibrate_channel_registration_from_beads(
-            movies, box=BOX, minimum_ng=2000.0
+            movies, box=BOX, identification_method=BEAD_NG
         )
 
         assert calibration["model"] == registration.REGISTRATION_MODEL
@@ -120,7 +124,7 @@ class TestBeadRegistration:
         ]
 
         calibration = registration.calibrate_channel_registration_from_beads(
-            movies, box=BOX, minimum_ng=2000.0
+            movies, box=BOX, identification_method=BEAD_NG
         )
 
         np.testing.assert_allclose(
@@ -139,7 +143,7 @@ class TestBeadRegistration:
         ]
 
         calibration = registration.calibrate_channel_registration_from_beads(
-            movies, box=BOX, minimum_ng=2000.0
+            movies, box=BOX, identification_method=BEAD_NG
         )
 
         mapped = tform.from_dict(calibration["channel_transforms"][1]).apply(
@@ -159,7 +163,7 @@ class TestBeadRegistration:
         ]
 
         calibration = registration.calibrate_channel_registration_from_beads(
-            movies, box=BOX, minimum_ng=2000.0, model="translation"
+            movies, box=BOX, identification_method=BEAD_NG, model="translation"
         )
 
         transform = tform.from_dict(calibration["channel_transforms"][1])
@@ -172,7 +176,9 @@ class TestBeadRegistration:
     def test_rejects_a_single_channel(self):
         with pytest.raises(ValueError, match="at least 2 channels"):
             registration.calibrate_channel_registration_from_beads(
-                [_bead_image(_bead_grid())], box=BOX, minimum_ng=2000.0
+                [_bead_image(_bead_grid())],
+                box=BOX,
+                identification_method=BEAD_NG,
             )
 
     def test_reports_too_few_bead_pairs(self):
@@ -184,7 +190,7 @@ class TestBeadRegistration:
         ]
         with pytest.raises(ValueError, match="matched bead pair"):
             registration.calibrate_channel_registration_from_beads(
-                movies, box=BOX, minimum_ng=2000.0
+                movies, box=BOX, identification_method=BEAD_NG
             )
 
 
@@ -198,7 +204,7 @@ class TestSignalRegistration:
         movies = _blinking_movies([truth])
 
         calibration = registration.calibrate_channel_registration_from_signal(
-            movies, box=BOX, minimum_ng=800.0
+            movies, box=BOX, identification_method=SIGNAL_NG
         )
 
         assert calibration["source"] == "signal"
@@ -218,7 +224,10 @@ class TestSignalRegistration:
         ]
 
         calibration = registration.calibrate_channel_registration_from_signal(
-            movies, box=BOX, minimum_ng=800.0, seed_transforms=seeds
+            movies,
+            box=BOX,
+            identification_method=SIGNAL_NG,
+            seed_transforms=seeds,
         )
 
         fitted = _matrix(calibration["channel_transforms"][1])
@@ -230,9 +239,17 @@ class TestSignalRegistration:
         truth = [_rotation(0.02, 4.0, -3.0), _rotation(-0.015, -5.0, 2.0)]
         movies = _blinking_movies(truth)
 
+        tracker = RecordingProgress()
         calibration = registration.calibrate_channel_registration_from_signal(
-            movies, box=BOX, minimum_ng=800.0
+            movies, box=BOX, identification_method=SIGNAL_NG, progress=tracker
         )
+
+        # the detection is reported too, not just the registration
+        assert_phases_complete(
+            tracker, ["Detecting spots", "Registering channels"]
+        )
+        assert [phase["maximum"] for phase in tracker.phases] == [3, 2]
+        assert tracker.phases[1]["values"] == [0, 1, 2]
 
         assert calibration["n_channels"] == 3
         for c, matrix in enumerate(truth, start=1):
@@ -249,7 +266,7 @@ class TestSignalRegistration:
         calibration = registration.calibrate_channel_registration_from_signal(
             movies,
             box=BOX,
-            minimum_ng=800.0,
+            identification_method=SIGNAL_NG,
             frame_bounds=[[0, 39]],
             max_frames=20,
         )
@@ -299,7 +316,10 @@ class TestSignalRegistration:
         movies = _blinking_movies([_rotation(0.0, 2.0, 0.0)], n_frames=10)
         with pytest.raises(ValueError, match="No frames"):
             registration.calibrate_channel_registration_from_signal(
-                movies, box=BOX, minimum_ng=800.0, frame_bounds=[[50, 60]]
+                movies,
+                box=BOX,
+                identification_method=SIGNAL_NG,
+                frame_bounds=[[50, 60]],
             )
 
     def test_reports_the_channel_that_could_not_be_registered(self):
@@ -311,7 +331,7 @@ class TestSignalRegistration:
         )
         with pytest.raises(ValueError, match="Channel 1"):
             registration.calibrate_channel_registration_from_signal(
-                movies, box=BOX, minimum_ng=800.0
+                movies, box=BOX, identification_method=SIGNAL_NG
             )
 
 
@@ -328,7 +348,7 @@ class TestCalibrationFile:
         path = str(tmp_path / "channel_registration.yaml")
 
         saved = registration.calibrate_channel_registration_from_beads(
-            movies, box=BOX, minimum_ng=2000.0, path=path
+            movies, box=BOX, identification_method=BEAD_NG, path=path
         )
         loaded = io.load_any_calibration(path)
 
@@ -353,7 +373,7 @@ class TestCalibrationFile:
             _bead_image(_apply(grid, truth), seed=2),
         ]
         calibration = registration.calibrate_channel_registration_from_beads(
-            movies, box=BOX, minimum_ng=2000.0
+            movies, box=BOX, identification_method=BEAD_NG
         )
 
         ids = pd.DataFrame(
@@ -415,7 +435,7 @@ class TestSplitFovRegistration:
         calibration = registration.calibrate_channel_registration_from_beads(
             [self._bead_movie()],
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=BEAD_NG,
             regions=self.REGIONS,
         )
 
@@ -426,13 +446,20 @@ class TestSplitFovRegistration:
         assert dy == pytest.approx(self.FY, abs=0.15)
 
     def test_signal_recovers_the_fine_offset(self):
+        tracker = RecordingProgress()
         calibration = registration.calibrate_channel_registration_from_signal(
             [self._blinking_movie()],
             box=BOX,
-            minimum_ng=800.0,
+            identification_method=SIGNAL_NG,
             regions=self.REGIONS,
+            progress=tracker,
         )
 
+        # the single movie is detected once
+        assert_phases_complete(
+            tracker, ["Detecting spots", "Registering channels"]
+        )
+        assert [phase["maximum"] for phase in tracker.phases] == [1, 1]
         assert calibration["split_fov"] is True
         dx, dy = self._local_shift(calibration)
         # `identify` reports a centroid, so a sub-pixel bias remains - as for
@@ -440,11 +467,27 @@ class TestSplitFovRegistration:
         assert dx == pytest.approx(self.FX, abs=0.35)
         assert dy == pytest.approx(self.FY, abs=0.35)
 
+    def test_progress_none_is_silent_and_console_works(self, capsys):
+        kwargs = dict(
+            box=BOX, identification_method=SIGNAL_NG, regions=self.REGIONS
+        )
+        movies = [self._blinking_movie()]
+        registration.calibrate_channel_registration_from_signal(
+            movies, **kwargs
+        )
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        registration.calibrate_channel_registration_from_signal(
+            movies, progress="console", **kwargs
+        )
+        err = capsys.readouterr().err
+        assert "Detecting spots" in err and "Registering channels" in err
+
     def test_the_registration_stores_the_region_layout(self):
         calibration = registration.calibrate_channel_registration_from_beads(
             [self._bead_movie()],
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=BEAD_NG,
             regions=self.REGIONS,
         )
 
@@ -461,12 +504,10 @@ class TestSplitFovRegistration:
     def test_the_channels_can_be_replaced_at_redrawn_rois(self):
         """The stored registration is ROI-agnostic, so moving the ROIs moves
         the channels with them."""
-        from picasso import localize
-
         calibration = registration.calibrate_channel_registration_from_beads(
             [self._bead_movie()],
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=BEAD_NG,
             regions=self.REGIONS,
         )
         moved = [[[0, 0], [64, 64]], [[0, 70], [64, 134]]]
@@ -482,7 +523,7 @@ class TestSplitFovRegistration:
             registration.calibrate_channel_registration_from_beads(
                 [movie, movie],
                 box=BOX,
-                minimum_ng=2000.0,
+                identification_method=BEAD_NG,
                 regions=self.REGIONS,
             )
 
@@ -492,7 +533,7 @@ class TestSplitFovRegistration:
             registration.calibrate_channel_registration_from_signal(
                 [movie, movie],
                 box=BOX,
-                minimum_ng=800.0,
+                identification_method=SIGNAL_NG,
                 regions=self.REGIONS,
             )
 
@@ -549,7 +590,10 @@ class TestSplitFovFlips:
         movie = self._movie(lambda x, y: map_fn(self, x, y))
 
         calibration = registration.calibrate_channel_registration_from_beads(
-            [movie], box=BOX, minimum_ng=2000.0, regions=self.REGIONS
+            [movie],
+            box=BOX,
+            identification_method=BEAD_NG,
+            regions=self.REGIONS,
         )
 
         matrix = _matrix(calibration["channel_registration"][1])
@@ -571,7 +615,10 @@ class TestSplitFovFlips:
         movie = self._movie(lambda x, y: map_fn(self, x, y))
 
         calibration = registration.calibrate_channel_registration_from_beads(
-            [movie], box=BOX, minimum_ng=2000.0, regions=self.REGIONS
+            [movie],
+            box=BOX,
+            identification_method=BEAD_NG,
+            regions=self.REGIONS,
         )
 
         transform = tform.from_dict(calibration["channel_transforms"][1])
@@ -597,7 +644,10 @@ class TestSplitFovFlips:
         movie = rng.poisson(np.maximum(movie, 0) + 100).astype(np.uint16)
 
         calibration = registration.calibrate_channel_registration_from_signal(
-            [movie], box=BOX, minimum_ng=800.0, regions=self.REGIONS
+            [movie],
+            box=BOX,
+            identification_method=SIGNAL_NG,
+            regions=self.REGIONS,
         )
 
         matrix = _matrix(calibration["channel_registration"][1])
@@ -640,7 +690,7 @@ class TestMultiFovBeads:
         return registration.calibrate_channel_registration_from_beads(
             [movie],
             box=BOX,
-            minimum_ng=2000.0,
+            identification_method=BEAD_NG,
             regions=self.REGIONS,
             multi_fov=multi_fov,
         )
@@ -688,40 +738,46 @@ class TestWaveletDetection:
         ]
 
         calibration = registration.calibrate_channel_registration_from_beads(
-            movies, box=BOX, minimum_ng=None, wavelet=self.WAVELET
+            movies, box=BOX, identification_method=self.WAVELET
         )
 
         np.testing.assert_allclose(
             _matrix(calibration["channel_transforms"][1]), truth, atol=0.15
         )
-        assert calibration["identification_method"] == "wavelet"
-        assert calibration["wavelet"] == self.WAVELET.to_dict()
-        assert "minimum_ng" not in calibration
+        identification = calibration["Identification"]
+        assert identification["Identification Method"] == "wavelet"
+        assert localize.IdentificationParameters.from_info(
+            identification
+        ) == localize.IdentificationParameters(method=self.WAVELET, box=BOX)
+        assert "Min. Net Gradient" not in identification
 
     def test_signal(self):
         truth = _rotation(0.02, 4.0, -3.0)
         movies = _blinking_movies([truth])
 
         calibration = registration.calibrate_channel_registration_from_signal(
-            movies, box=BOX, minimum_ng=None, wavelet=self.WAVELET
+            movies, box=BOX, identification_method=self.WAVELET
         )
 
         np.testing.assert_allclose(
             _matrix(calibration["channel_transforms"][1]), truth, atol=0.35
         )
-        assert calibration["identification_method"] == "wavelet"
+        identification = calibration["Identification"]
+        assert identification["Identification Method"] == "wavelet"
 
-    def test_net_gradient_is_recorded_as_before(self):
+    def test_net_gradient_is_recorded(self):
         grid = _bead_grid()
         movies = [_bead_image(grid, seed=1), _bead_image(grid, seed=2)]
 
         calibration = registration.calibrate_channel_registration_from_beads(
-            movies, box=BOX, minimum_ng=2000.0
+            movies, box=BOX, identification_method=BEAD_NG
         )
 
-        assert calibration["identification_method"] == "net gradient"
-        assert calibration["minimum_ng"] == 2000.0
-        assert "wavelet" not in calibration
+        identification = calibration["Identification"]
+        assert identification["Identification Method"] == "net gradient"
+        assert identification["Min. Net Gradient"] == 2000.0
+        assert identification["Box Size"] == BOX
+        assert "Wavelet Threshold" not in identification
 
     def test_the_calibration_file_is_plain_yaml(self, tmp_path):
         grid = _bead_grid()
@@ -731,26 +787,78 @@ class TestWaveletDetection:
         registration.calibrate_channel_registration_from_beads(
             movies,
             box=BOX,
-            minimum_ng=None,
+            identification_method=self.WAVELET,
             path=path,
-            wavelet=self.WAVELET,
         )
 
         with open(path) as f:
             text = f.read()
         assert "!!python" not in text
-        assert io.load_any_calibration(path)["wavelet"] == (
-            self.WAVELET.to_dict()
-        )
+        loaded = io.load_any_calibration(path)["Identification"]
+        assert localize.IdentificationParameters.from_info(
+            loaded
+        ) == localize.IdentificationParameters(method=self.WAVELET, box=BOX)
 
     def test_detections_by_frame(self):
         truth = _rotation(0.0, 0.0, 0.0)
         movie = _blinking_movies([truth], n_frames=6)[0]
 
         by_frame = registration.detections_by_frame(
-            movie, None, BOX, np.arange(6), wavelet=self.WAVELET
+            movie, self.WAVELET, BOX, np.arange(6)
         )
 
         assert sorted(by_frame) == list(range(6))
         for xy in by_frame.values():
             assert xy.shape[1] == 2 and len(xy) >= 4
+
+
+class TestIdentificationMethod:
+    """The detection settings are one identification method, shared by the
+    channels or one per channel."""
+
+    def test_per_channel_thresholds_are_recorded_as_a_list(self):
+        grid = _bead_grid()
+        movies = [_bead_image(grid, seed=1), _bead_image(grid, seed=2)]
+
+        calibration = registration.calibrate_channel_registration_from_beads(
+            movies,
+            box=BOX,
+            identification_method=[BEAD_NG, localize.NetGradient(1500.0)],
+        )
+
+        identification = calibration["Identification"]
+        assert identification["Identification Method"] == "net gradient"
+        assert identification["Min. Net Gradient"] == [2000.0, 1500.0]
+        assert "Wavelet Threshold" not in identification
+
+    def test_a_shared_threshold_is_recorded_once(self):
+        grid = _bead_grid()
+        movies = [_bead_image(grid, seed=1), _bead_image(grid, seed=2)]
+
+        calibration = registration.calibrate_channel_registration_from_beads(
+            movies, box=BOX, identification_method=[BEAD_NG, BEAD_NG]
+        )
+
+        assert calibration["Identification"]["Min. Net Gradient"] == 2000.0
+
+    @pytest.mark.parametrize(
+        "calibrate",
+        [
+            registration.calibrate_channel_registration_from_beads,
+            registration.calibrate_channel_registration_from_signal,
+        ],
+        ids=["beads", "signal"],
+    )
+    def test_a_bare_number_is_rejected(self, calibrate):
+        movie = _bead_image(_bead_grid())
+
+        with pytest.raises(TypeError, match="NetGradient"):
+            calibrate([movie, movie], box=BOX, identification_method=2000.0)
+
+    def test_one_method_per_channel_is_required(self):
+        movie = _bead_image(_bead_grid())
+
+        with pytest.raises(ValueError, match="one per ROI"):
+            registration.calibrate_channel_registration_from_beads(
+                [movie, movie], box=BOX, identification_method=[BEAD_NG] * 3
+            )

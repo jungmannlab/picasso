@@ -46,11 +46,11 @@ def _render_setup(
         x and y coordinates of the localizations to be rendered (1D
         arrays).
     oversampling : float
-        Number of super-resolution pixels per camera pixel.
+        Number of rendered pixels per nm.
     y_min, x_min : float
-        Minimum y and x coordinates to be rendered (camera pixels).
+        Minimum y and x coordinates to be rendered (nm).
     y_max, x_max : float
-        Maximum y and x coordinates to be rendered (camera pixels).
+        Maximum y and x coordinates to be rendered (nm).
 
     Returns
     -------
@@ -105,11 +105,11 @@ def _render_setup_anisotropic(  # used in Average
         x and y coordinates of the localizations to be rendered (1D
         arrays).
     oversampling_x, oversampling_y : float
-        Number of super-resolution pixels per camera pixel in x and y.
+        Number of rendered pixels per nm in x and y.
     y_min, x_min : float
-        Minimum y and x coordinates to be rendered (camera pixels).
+        Minimum y and x coordinates to be rendered (nm).
     y_max, x_max : float
-        Maximum y and x coordinates to be rendered (camera pixels).
+        Maximum y and x coordinates to be rendered (nm).
 
     Returns
     -------
@@ -149,7 +149,6 @@ def _render_setup3d(
     x_max: float,
     z_min: float,
     z_max: float,
-    pixelsize: float,
 ) -> tuple[
     lib.FloatArray3D,
     int,
@@ -167,19 +166,17 @@ def _render_setup3d(
     ----------
     x, y, z : lib.FloatArray1D
         x, y and z coordinates of the localizations to be rendered (1D
-        arrays).
+        arrays, nm).
     oversampling : float
-        Number of super-resolution pixels per camera pixel.
+        Number of rendered pixels per nm.
     y_min, x_min : float
-        Minimum y and x coordinate to be rendered (camera pixels).
+        Minimum y and x coordinate to be rendered (nm).
     y_max, x_max : float
-        Maximum y and x coordinate to be rendered (camera pixels).
+        Maximum y and x coordinate to be rendered (nm).
     z_min : float
         Minimum z coordinate to be rendered (nm).
     z_max : float
         Maximum z coordinate to be rendered (nm).
-    pixelsize : float
-        Camera pixel size, used for converting z coordinates.
 
     Returns
     -------
@@ -195,10 +192,6 @@ def _render_setup3d(
     n_pixel_y = int(np.ceil(oversampling * (y_max - y_min)))
     n_pixel_x = int(np.ceil(oversampling * (x_max - x_min)))
     n_pixel_z = int(np.ceil(oversampling * (z_max - z_min)))
-    # divide on a copy -- rendering must never mutate the caller's arrays
-    # (see TestRenderPurity in test_render.py)
-    z = z.copy()
-    z /= pixelsize
     in_view = (
         (x > x_min)
         & (y > y_min)
@@ -231,7 +224,6 @@ def _render_setup3d_anisotropic(
     x_max: float,
     z_min: float,
     z_max: float,
-    pixelsize: float,
 ) -> tuple[
     lib.FloatArray3D,
     int,
@@ -252,18 +244,16 @@ def _render_setup3d_anisotropic(
         x, y and z coordinates of the localizations to be rendered (1D
         arrays).
     oversampling_x, oversampling_y, oversampling_z : float
-        Number of super-resolution pixels per camera pixel in x, y and
+        Number of rendered pixels per nm in x, y and
         z.
     y_min, x_min : float
-        Minimum y and x coordinate to be rendered (camera pixels).
+        Minimum y and x coordinate to be rendered (nm).
     y_max, x_max : float
-        Maximum y and x coordinate to be rendered (camera pixels).
+        Maximum y and x coordinate to be rendered (nm).
     z_min : float
         Minimum z coordinate to be rendered (nm).
     z_max : float
         Maximum z coordinate to be rendered (nm).
-    pixelsize : float
-        Camera pixel size, used for converting z coordinates.
 
     Returns
     -------
@@ -279,10 +269,6 @@ def _render_setup3d_anisotropic(
     n_pixel_y = int(np.ceil(oversampling_y * (y_max - y_min)))
     n_pixel_x = int(np.ceil(oversampling_x * (x_max - x_min)))
     n_pixel_z = int(np.ceil(oversampling_z * (z_max - z_min)))
-    # divide on a copy -- rendering must never mutate the caller's arrays
-    # (see TestRenderPurity in test_render.py)
-    z = z.copy()
-    z /= pixelsize
     in_view = (
         (x > x_min)
         & (y > y_min)
@@ -832,22 +818,24 @@ def determinant_3x3(a: lib.Array3x3) -> np.float32:
 
 
 @numba.jit(nopython=True, nogil=True)
-def render_hist_numba(
+def render_hist(
     x: lib.FloatArray1D,
     y: lib.FloatArray1D,
     oversampling: float,
     t_min: float,
     t_max: float,
 ) -> tuple[int, lib.FloatArray2D]:
-    """Calculate 2D histogram of xy coordinates. Similar to
-    ``_render_hist`` but modified to work with numba.
+    """Calculate 2D histogram of xy coordinates in the square field
+    ``[t_min, t_max]`` in x and y.
+
+    Array analogue of ``_render_hist``, usable in numba-compiled code.
 
     Parameters
     ----------
     x, y : lib.FloatArray1D
         1D arrays of xy coordinates.
     oversampling : float
-        Number of histogram pixels per camera pixel.
+        Number of histogram pixels per nm.
     t_min, t_max : float
         Minimum and maximum bounds of the histogram.
 
@@ -876,12 +864,12 @@ def _lut_pixel_rgb(
     i: int,
     j: int,
     n_channels: int,
-    vmin32: np.float32,
-    rng32: np.float32,
-    rel: lib.FloatArray1D,
+    vmin32: lib.FloatArray1D,
+    rng32: lib.FloatArray1D,
 ) -> tuple[np.float32, np.float32, np.float32, np.float32]:
     """Additive RGB (and total coverage) of pixel ``(i, j)`` over all
-    channels: contrast scale, clip, LUT gather, blend."""
+    channels: contrast scale (with each channel's own limits), clip,
+    LUT gather, blend."""
     one = np.float32(1.0)
     zero = np.float32(0.0)
     r = zero
@@ -889,14 +877,13 @@ def _lut_pixel_rgb(
     b = zero
     coverage = zero
     for c in range(n_channels):
-        v = (raw[c, i, j] - vmin32) / rng32
+        v = (raw[c, i, j] - vmin32[c]) / rng32[c]
         if not np.isfinite(v):
             v = zero
         if v < zero:
             v = zero
         elif v > one:
             v = one
-        v = v * rel[c]
         idx = np.int32(v * np.float32(255.0))
         if idx < 0:
             idx = 0
@@ -948,15 +935,18 @@ def _composite_bg(
 def _compose_multi_lut(
     raw: lib.FloatArray3D,
     luts: lib.FloatArray3D,
-    vmin: float,
-    vmax: float,
-    rel: lib.FloatArray1D,
+    vmin32: lib.FloatArray1D,
+    rng32: lib.FloatArray1D,
     bg: lib.FloatArray1D,
     has_bg: bool,
 ) -> tuple[lib.FloatArray3D, np.float32]:
     """Fused replacement for the multi-channel numpy post-processing
-    chain (contrast scale -> intensity scale -> LUT gather -> additive
-    blend -> background compositing), reading the raw stack once.
+    chain (contrast scale -> LUT gather -> additive blend -> background
+    compositing), reading the raw stack once.
+
+    ``vmin32`` and ``rng32`` hold each channel's lower contrast limit
+    and contrast range (``vmax - vmin``) as float32 arrays of shape
+    ``(n_channels,)``.
 
     Reproduces the chain's float32 arithmetic step for step (subtract
     then divide, non-finite to zero, clip, truncating int cast for the
@@ -965,15 +955,13 @@ def _compose_multi_lut(
     which ``_quantize_rgb`` needs for ``to_8bit``'s renormalization.
     """
     n_channels, n_y, n_x = raw.shape
-    vmin32 = np.float32(vmin)
-    rng32 = np.float32(vmax - vmin)
     zero = np.float32(0.0)
     rgb = np.empty((n_y, n_x, 3), dtype=np.float32)
     max_value = zero
     for i in range(n_y):
         for j in range(n_x):
             r, g, b, coverage = _lut_pixel_rgb(
-                raw, luts, i, j, n_channels, vmin32, rng32, rel
+                raw, luts, i, j, n_channels, vmin32, rng32
             )
             if has_bg:
                 r, g, b = _composite_bg(r, g, b, coverage, bg)
@@ -1052,7 +1040,6 @@ def _compose_single(
 def _quadtree_spread_leaf(
     image: lib.FloatArray2D,
     count: int,
-    side: float,
     x0: float,
     y0: float,
     x1: float,
@@ -1064,9 +1051,12 @@ def _quadtree_spread_leaf(
     n_px: int,
     n_py: int,
 ) -> None:
-    """Spread a leaf's count over the display pixels its cell overlaps,
-    in proportion to the pixel/cell overlap area."""
-    rho = count / (side * side)
+    """Spread a leaf's count uniformly over the rectangle ``x0``-``x1``,
+    ``y0``-``y1`` (its cell within the field), i.e., over the display
+    pixels the rectangle overlaps in proportion to the overlap area."""
+    if x1 <= x0 or y1 <= y0:
+        return
+    rho = count / ((x1 - x0) * (y1 - y0))
     j0 = max(int(np.floor((x0 - x_min) * oversampling)), 0)
     j1 = min(int(np.floor((x1 - x_min) * oversampling)), n_px - 1)
     i0 = max(int(np.floor((y0 - y_min) * oversampling)), 0)
@@ -1200,6 +1190,8 @@ def _quadtree_fill(
     root_px: float,
     total_bits: int,
     capacity: int,
+    field_width: float,
+    field_height: float,
 ) -> None:
     """Paint the quad-tree adaptive histogram (Baddeley, Cannell &
     Soeller 2010) of the viewport into ``image``.
@@ -1217,6 +1209,13 @@ def _quadtree_fill(
     wider than a pixel (or at the finest cell) bins its rows one by
     one, exactly as ``_fill`` does, so a capacity of 0 gives the
     histogram.
+
+    The root square is a power of two of base blocks, so it reaches
+    beyond the field (``field_width`` x ``field_height``, from the
+    origin, in the units of ``x`` and ``y``) where no rows can lie: a
+    leaf's density is its count over the part of its cell within the
+    field, so that the counts of the leaves along the field's right
+    and bottom edges are not spread into the empty margin.
     """
     n = perm.shape[0]
     n_py, n_px = image.shape
@@ -1273,14 +1272,14 @@ def _quadtree_fill(
             )
         elif side > px:
             # a leaf wider than a pixel: its density over its area
+            # within the field
             _quadtree_spread_leaf(
                 image,
                 count,
-                side,
                 x0,
                 y0,
-                x1,
-                y1,
+                min(x1, field_width),
+                min(y1, field_height),
                 x_min,
                 y_min,
                 oversampling,

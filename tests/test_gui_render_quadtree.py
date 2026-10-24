@@ -18,7 +18,13 @@ from picasso import lib, render, spatial_index
 from picasso.gui import render as gui_render
 from picasso.gui.render_worker import subsample_request
 
-from tests.test_gui_render_async import HEIGHT, WIDTH, _info, _locs
+from tests.test_gui_render_async import (
+    HEIGHT_NM,
+    PIXELSIZE,
+    WIDTH_NM,
+    _info,
+    _locs,
+)
 
 
 def _select(dialog, method):
@@ -34,7 +40,7 @@ def window(qt_offscreen, tmp_path):
     window = gui_render.Window(plugins_loaded=True)
     path = str(tmp_path / "locs.hdf5")
     window.view.add(path, _locs(), _info(), render_=False)
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [(0.0, 0.0), (HEIGHT_NM, WIDTH_NM)]
     window.view.resize(128, 128)
     window.view.async_rendering = False
     _select(window.display_settings_dlg, "quadtree")
@@ -96,7 +102,11 @@ def test_dialog_offers_the_method_with_its_capacity(window):
 
 def test_request_carries_whole_channels_and_their_index(window):
     view = window.view
-    view.viewport = [(8.0, 8.0), (16.0, 16.0)]  # zoomed in: pyramid slices
+    # zoomed in (camera pixels 8 to 16): pyramid slices
+    view.viewport = [
+        (8.0 * PIXELSIZE, 8.0 * PIXELSIZE),
+        (16.0 * PIXELSIZE, 16.0 * PIXELSIZE),
+    ]
     request, _ = view._build_render_request()
     assert request["blur_method"] == "quadtree"
     assert request["indices"] is None
@@ -137,8 +147,8 @@ def test_3d_window_renders_the_quadtree_too(window, monkeypatch):
     window.display_settings_dlg.quadtree_capacity.setValue(7)
     view.locs[0] = view.locs[0].assign(z=np.zeros(len(view.locs[0])))
     view._pick_shape = "Circle"
-    window.tools_settings_dialog.pick_diameter.setValue(12.0 * 130.0)
-    view._picks = [(32.0, 32.0)]
+    window.tools_settings_dialog.pick_diameter.setValue(12.0 * PIXELSIZE)
+    view._picks = [(32.0 * PIXELSIZE, 32.0 * PIXELSIZE)]
     window.open_3d_view()
     rot = window.window_rot
     dialog = rot.display_settings_dlg

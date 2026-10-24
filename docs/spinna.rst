@@ -206,13 +206,13 @@ Within the *Fitting* box:
    :icon: code
    :class-container: api-example
 
-   The experimental molecules are given in nm. ``generate_N_structures``
-   builds the search space of stoichiometries, ``fit_stoichiometry`` tests
-   them; ``bootstrap=True`` adds the uncertainty of the result.
+   The experimental molecules are given in nm, as they are in the
+   localization file. ``generate_N_structures`` builds the search space of
+   stoichiometries, ``fit_stoichiometry`` tests them; ``bootstrap=True`` adds
+   the uncertainty of the result.
 
    .. code-block:: python
 
-      PIXELSIZE = 130      # camera pixel size, nm
       LABEL_UNC = 6.0      # label uncertainty, nm
       LE = 0.375           # labeling efficiency
       ROI = 10_000         # simulated region of interest, nm
@@ -220,7 +220,7 @@ Within the *Fitting* box:
       N_SIM = 30           # simulations per tested stoichiometry
 
       egfr_mols, info = io.load_locs("egfr_mols.hdf5")
-      egfr_coords = egfr_mols[["x", "y"]].to_numpy() * PIXELSIZE
+      egfr_coords = egfr_mols[["x", "y"]].to_numpy()     # nm
       n_egfr = int(egfr_coords.shape[0] / LE)     # number of molecules to simulate
 
       mixer = spinna.StructureMixer(
@@ -240,15 +240,15 @@ Within the *Fitting* box:
       best_proportions, best_score = spinner.fit_stoichiometry(
           N_structures=search_space,
           fitting_mode="bayesian",    # or "coarse-to-fine", "brute-force"
-          asynch=True,
-          callback="console",
+          parallel=True,
+          progress="console",
       )
       best_N_structures = mixer.convert_props_to_counts(best_proportions, n_egfr)
       print(f"Best proportions (m/d/t): {best_proportions}")
 
       # Fit uncertainty
       (props_mean, props_sd), (score, score_sd) = spinner.fit_stoichiometry(
-          N_structures=search_space, asynch=True, callback="console", bootstrap=True
+          N_structures=search_space, parallel=True, progress="console", bootstrap=True
       )
 
 .. _spinna-compare-models:
@@ -319,7 +319,8 @@ Clicking *Fit labeling efficiency* opens a small dialog with three sections:
    used (entered in the *Distance (nm)* field; by default the distance in a
    loaded heterodimer structure, otherwise 10 nm).
 3. **Save fit scores** (checkbox) - when checked, the user selects a folder
-   where SPINNA saves the fit scores for every candidate.
+   where SPINNA saves the fit scores for every candidate. Without a folder,
+   the fit does not run.
 
 The dialog also displays a live "Estimated SPINNA rounds" preview that updates
 as the spin boxes change, so the user can gauge how long the fit will take
@@ -509,7 +510,8 @@ the heterogeneous density distribution present in the experimental data.
    value (off by default). The value is pre-filled with the Otsu threshold
    (`Otsu, IEEE Transactions on Systems, Man, and Cybernetics, 1979
    <https://doi.org/10.1109/TSMC.1979.4310076>`__) after *Generate mask*. With the mask type
-   *Binary*, the thresholded mask contains only 0 and 1.
+   *Binary*, the thresholded mask contains only 0 and 1. The threshold stays
+   below the highest probability, so the mask is never empty.
 6. To explore the mask:
 
    - scroll (or pinch on a trackpad) over the preview to zoom at the cursor,
@@ -579,9 +581,9 @@ script directly.
 
          * - Argument
            - Effect
-         * - ``-a``, ``--asynch``
-           - Switches off the multiprocessing mode. If not specified,
-             multiprocessing is used.
+         * - ``-a``, ``--no-parallel``
+           - Fits in this process instead of a pool of worker processes,
+             which is used if not specified.
          * - ``-v``, ``--verbose``
            - Switches on the verbose mode, i.e., a progress bar for each row is
              displayed. If not specified, the verbose mode is off.

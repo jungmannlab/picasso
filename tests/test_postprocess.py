@@ -8,28 +8,29 @@ Most fixtures (``locs``, ``info``) live in ``tests/conftest.py``.
 
 from __future__ import annotations
 
+import copy
+import warnings
+
 import numpy as np
 import pandas as pd
 import pytest
 
-from picasso import clusterer, io, lib, postprocess
+from picasso import io, lib, postprocess
 
+from tests.conftest import PIXELSIZE
+from tests.test_postprocess_progress import RecordingProgress, assert_phases
+
+# nm per camera pixel of the bundled test data; the test geometry was
+# designed in camera pixels and is expressed in nm through it
+PX = PIXELSIZE
 
 # Reused parameters
-PICK_SIZE = 1.5  # camera pixels
+PICK_SIZE = 1.5 * PX  # nm
 
 
-# 9-pick grid covering each origami in the bundled test movie
+# 9-pick grid covering each origami in the bundled test movie (nm)
 ORIGAMI_PICKS = [
-    [5.5, 5.5],
-    [5.5, 15.5],
-    [5.5, 25.5],
-    [15.5, 5.5],
-    [15.5, 15.5],
-    [15.5, 25.5],
-    [25.5, 5.5],
-    [25.5, 15.5],
-    [25.5, 25.5],
+    [x * PX, y * PX] for x in (5.5, 15.5, 25.5) for y in (5.5, 15.5, 25.5)
 ]
 
 
@@ -63,14 +64,18 @@ class TestPyramidAsPickIndex:
 
         pyramid = spatial_index.build_render_index(locs, info)
         via_blocks = postprocess.picked_locs(
-            locs, info, origami_picks, "Circle", pick_size=PICK_SIZE / 2
+            locs,
+            info,
+            picks=origami_picks,
+            pick_shape="Circle",
+            pick_size=PICK_SIZE / 2,
         )
         via_pyramid = postprocess.picked_locs(
             locs,
             info,
-            origami_picks,
-            "Circle",
-            pick_size=PICK_SIZE / 2,
+            picks=origami_picks,
+            pick_shape="Circle",
+            pick_size=PICK_SIZE,
             index_blocks=pyramid,
         )
         assert sum(len(_) for _ in via_pyramid) > 0
@@ -133,18 +138,19 @@ class TestIndexBlocks:
         assert len(ib_locs) == len(locs)
 
     def test_index_blocks_shape_matches_field_of_view(self, info):
-        size = 2.0
+        size = 2.0 * PX
         n_y, n_x = postprocess._index_blocks_shape(info, size)
-        assert n_y == int(np.ceil(info[0]["Height"] / size))
-        assert n_x == int(np.ceil(info[0]["Width"] / size))
+        width, height = lib.field_of_view(info)
+        assert n_y == int(np.ceil(height / size))
+        assert n_x == int(np.ceil(width / size))
 
     def test_get_block_locs_at_returns_some_locs(self, locs, info):
         r = PICK_SIZE / 2
         index_blocks = postprocess.get_index_blocks(locs, info, r)
         locs_sorted, size, _, _, block_starts, block_ends, K, L = index_blocks
         locs_xy = locs_sorted[["x", "y"]].to_numpy().T
-        x, y = 15.5, 15.5
-        locs_at = postprocess.get_block_locs_at_numba(
+        x, y = 15.5 * PX, 15.5 * PX
+        locs_at = postprocess.get_block_locs_at(
             int(x / r), int(y / r), locs_xy, block_starts, block_ends, K, L
         )
         assert locs_at.shape[1] > 0
@@ -153,7 +159,7 @@ class TestIndexBlocks:
         assert (d < 2 * PICK_SIZE).all()
 
     def test_n_block_locs_at_matches_get_block_locs_at(self, locs, info):
-        ib = postprocess.get_index_blocks(locs, info, 1.0)
+        ib = postprocess.get_index_blocks(locs, info, 1.0 * PX)
         _, _, _, _, b_starts, b_ends, K, L = ib
         # Pick a populated cell (away from boundary, where n_block_locs_at
         # uses strict inequality and skips the edges)
@@ -186,9 +192,9 @@ class TestPickedLocs:
         picked = postprocess.picked_locs(
             locs,
             info,
-            origami_picks,
+            picks=origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         assert len(picked) == len(origami_picks)
         # Each pick has at least one loc (the test data has 9 origamis,
@@ -200,9 +206,9 @@ class TestPickedLocs:
         picked = postprocess.picked_locs(
             locs,
             info,
-            origami_picks,
+            picks=origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         radius = PICK_SIZE / 2
         for (cx, cy), p in zip(origami_picks, picked):
@@ -213,9 +219,9 @@ class TestPickedLocs:
         picked = postprocess.picked_locs(
             locs,
             info,
-            origami_picks,
+            picks=origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         for i, p in enumerate(picked):
             assert (p["group"] == i).all()
@@ -224,9 +230,9 @@ class TestPickedLocs:
         picked = postprocess.picked_locs(
             locs,
             info,
-            origami_picks,
+            picks=origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
             add_group=False,
         )
         assert "group" not in picked[0].columns
@@ -235,9 +241,9 @@ class TestPickedLocs:
         picked = postprocess.picked_locs(
             locs,
             info,
-            origami_picks,
+            picks=origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         for p in picked:
             f = p["frame"].to_numpy()
@@ -247,9 +253,9 @@ class TestPickedLocs:
         out = postprocess.picked_locs(
             locs,
             info,
-            [],
+            picks=[],
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         assert out == []
 
@@ -258,7 +264,7 @@ class TestPickedLocs:
             postprocess.picked_locs(
                 locs,
                 info,
-                origami_picks,
+                picks=origami_picks,
                 pick_shape="Hexagon",
                 pick_size=PICK_SIZE,
             )
@@ -266,23 +272,23 @@ class TestPickedLocs:
     def test_precomputed_index_blocks_matches_internal(
         self, locs, info, origami_picks
     ):
-        # ``_picked_circular_locs`` uses ``pick_size`` as the index-block
+        # ``_picked_circular_locs`` uses the pick radius as the index-block
         # size, so the precomputed index_blocks must use the same size for
         # the two paths to be equivalent.
         ib = postprocess.get_index_blocks(locs, info, PICK_SIZE / 2)
         a = postprocess.picked_locs(
             locs,
             info,
-            origami_picks,
+            picks=origami_picks,
             pick_shape="Circle",
             pick_size=PICK_SIZE,
         )
         b = postprocess.picked_locs(
             locs,
             info,
-            origami_picks,
+            picks=origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
             index_blocks=ib,
         )
         assert len(a) == len(b)
@@ -290,12 +296,12 @@ class TestPickedLocs:
             assert len(pa) == len(pb)
 
     def test_square_pick_within_bounds(self, locs, info):
-        side = 2.0
-        cx, cy = 15.5, 15.5
+        side = 2.0 * PX
+        cx, cy = 15.5 * PX, 15.5 * PX
         out = postprocess.picked_locs(
             locs,
             info,
-            [(cx, cy)],
+            picks=[(cx, cy)],
             pick_shape="Square",
             pick_size=side,
         )[0]
@@ -306,13 +312,14 @@ class TestPickedLocs:
         assert (out["y"] < cy + side / 2).all()
 
     def test_rectangle_pick_returns_locs(self, locs, info):
-        # A rectangle with width 2.0 around the line from (5,5) to (8,5)
+        # A rectangle 2 camera pixels wide around the line from (5, 5)
+        # to (8, 5) camera pixels
         out = postprocess.picked_locs(
             locs,
             info,
-            [((5.0, 5.0), (8.0, 5.0))],
+            picks=[((5.0 * PX, 5.0 * PX), (8.0 * PX, 5.0 * PX))],
             pick_shape="Rectangle",
-            pick_size=2.0,
+            pick_size=2.0 * PX,
         )[0]
         assert len(out) > 0
         # rotation columns added by the rectangular helper
@@ -321,120 +328,126 @@ class TestPickedLocs:
 
     def test_polygon_pick_returns_locs(self, locs, info):
         # Closed polygon (first vertex repeated) around (15.5, 15.5)
+        # camera pixels
         polygon = [
-            (14.5, 14.5),
-            (16.5, 14.5),
-            (16.5, 16.5),
-            (14.5, 16.5),
-            (14.5, 14.5),
+            (14.5 * PX, 14.5 * PX),
+            (16.5 * PX, 14.5 * PX),
+            (16.5 * PX, 16.5 * PX),
+            (14.5 * PX, 16.5 * PX),
+            (14.5 * PX, 14.5 * PX),
         ]
         out = postprocess.picked_locs(
             locs,
             info,
-            [polygon],
+            picks=[polygon],
             pick_shape="Polygon",
         )[0]
         assert len(out) > 0
-        assert (out["x"] > 14.5).all() and (out["x"] < 16.5).all()
-        assert (out["y"] > 14.5).all() and (out["y"] < 16.5).all()
+        assert (out["x"] > 14.5 * PX).all() and (out["x"] < 16.5 * PX).all()
+        assert (out["y"] > 14.5 * PX).all() and (out["y"] < 16.5 * PX).all()
 
     def test_box_pick_within_bounds(self, locs, info):
         # 3 wide, 1 high, so a square test would give a different answer
-        pick = ((14.0, 15.0), (17.0, 16.0))
+        pick = ((14.0 * PX, 15.0 * PX), (17.0 * PX, 16.0 * PX))
         out = postprocess.picked_locs(
             locs,
             info,
-            [pick],
+            picks=[pick],
             pick_shape="Box",
         )[0]
         assert len(out) > 0
-        assert (out["x"] > 14.0).all() and (out["x"] < 17.0).all()
-        assert (out["y"] > 15.0).all() and (out["y"] < 16.0).all()
+        assert (out["x"] > 14.0 * PX).all() and (out["x"] < 17.0 * PX).all()
+        assert (out["y"] > 15.0 * PX).all() and (out["y"] < 16.0 * PX).all()
 
     def test_box_pick_ignores_corner_order(self, locs, info):
+        corners = ((14.0 * PX, 15.0 * PX), (17.0 * PX, 16.0 * PX))
         ordered = postprocess.picked_locs(
-            locs, info, [((14.0, 15.0), (17.0, 16.0))], pick_shape="Box"
+            locs, info, picks=[corners], pick_shape="Box"
         )[0]
         reversed_ = postprocess.picked_locs(
-            locs, info, [((17.0, 16.0), (14.0, 15.0))], pick_shape="Box"
+            locs, info, picks=[corners[::-1]], pick_shape="Box"
         )[0]
         assert len(ordered) == len(reversed_)
 
     def test_box_pick_ignores_pick_size(self, locs, info):
-        pick = ((14.0, 15.0), (17.0, 16.0))
+        pick = ((14.0 * PX, 15.0 * PX), (17.0 * PX, 16.0 * PX))
         with_size = postprocess.picked_locs(
-            locs, info, [pick], pick_shape="Box", pick_size=99.0
+            locs, info, picks=[pick], pick_shape="Box", pick_size=99.0
         )[0]
         without = postprocess.picked_locs(
-            locs, info, [pick], pick_shape="Box"
+            locs, info, picks=[pick], pick_shape="Box"
         )[0]
         assert len(with_size) == len(without)
 
     def test_brush_pick_within_the_painted_region(self, locs, info):
-        stroke = (1.0, [(14.0, 15.5), (17.0, 15.5)])
+        stroke = (1.0 * PX, [(14.0 * PX, 15.5 * PX), (17.0 * PX, 15.5 * PX)])
         out = postprocess.picked_locs(
-            locs, info, [[stroke]], pick_shape="Brush"
+            locs, info, picks=[[stroke]], pick_shape="Brush"
         )[0]
         assert len(out) > 0
         # every loc is within half the stroke width of the path
-        assert (np.abs(out["y"] - 15.5) <= 0.5 + 1e-9).all()
-        assert (out["x"] > 13.5).all() and (out["x"] < 17.5).all()
+        assert (np.abs(out["y"] - 15.5 * PX) <= 0.5 * PX + 1e-6).all()
+        assert (out["x"] > 13.5 * PX).all() and (out["x"] < 17.5 * PX).all()
 
     def test_brush_pick_width_changes_what_is_picked(self, locs, info):
-        path = [(14.0, 15.5), (17.0, 15.5)]
+        path = [(14.0 * PX, 15.5 * PX), (17.0 * PX, 15.5 * PX)]
         wide = postprocess.picked_locs(
-            locs, info, [[(2.0, path)]], pick_shape="Brush"
+            locs, info, picks=[[(2.0 * PX, path)]], pick_shape="Brush"
         )[0]
         narrow = postprocess.picked_locs(
-            locs, info, [[(0.2, path)]], pick_shape="Brush"
+            locs, info, picks=[[(0.2 * PX, path)]], pick_shape="Brush"
         )[0]
         assert len(wide) > len(narrow) > 0
 
     def test_brush_pick_unions_its_strokes(self, locs, info):
-        a = (1.0, [(5.0, 5.5), (6.0, 5.5)])
-        b = (1.0, [(15.0, 15.5), (16.0, 15.5)])
+        a = (1.0 * PX, [(5.0 * PX, 5.5 * PX), (6.0 * PX, 5.5 * PX)])
+        b = (1.0 * PX, [(15.0 * PX, 15.5 * PX), (16.0 * PX, 15.5 * PX)])
         separate = postprocess.picked_locs(
-            locs, info, [[a], [b]], pick_shape="Brush"
+            locs, info, picks=[[a], [b]], pick_shape="Brush"
         )
         together = postprocess.picked_locs(
-            locs, info, [[a, b]], pick_shape="Brush"
+            locs, info, picks=[[a, b]], pick_shape="Brush"
         )
         assert len(together) == 1
         assert len(together[0]) == len(separate[0]) + len(separate[1])
 
     def test_brush_pick_ignores_pick_size(self, locs, info):
-        pick = [(1.0, [(14.0, 15.5), (17.0, 15.5)])]
+        pick = [(1.0 * PX, [(14.0 * PX, 15.5 * PX), (17.0 * PX, 15.5 * PX)])]
         with_size = postprocess.picked_locs(
-            locs, info, [pick], pick_shape="Brush", pick_size=99.0
+            locs, info, picks=[pick], pick_shape="Brush", pick_size=99.0
         )[0]
         without = postprocess.picked_locs(
-            locs, info, [pick], pick_shape="Brush"
+            locs, info, picks=[pick], pick_shape="Brush"
         )[0]
         assert len(with_size) == len(without)
 
     def test_brush_pick_adds_group(self, locs, info):
         picks = [
-            [(1.0, [(5.0, 5.5), (6.0, 5.5)])],
-            [(1.0, [(15.0, 15.5), (16.0, 15.5)])],
+            [(1.0 * PX, [(5.0 * PX, 5.5 * PX), (6.0 * PX, 5.5 * PX)])],
+            [(1.0 * PX, [(15.0 * PX, 15.5 * PX), (16.0 * PX, 15.5 * PX)])],
         ]
-        out = postprocess.picked_locs(locs, info, picks, pick_shape="Brush")
+        out = postprocess.picked_locs(
+            locs, info, picks=picks, pick_shape="Brush"
+        )
         assert out[0]["group"].unique().tolist() == [0]
         assert out[1]["group"].unique().tolist() == [1]
 
     def test_box_pick_adds_group(self, locs, info):
         picks = [
-            ((5.0, 5.0), (6.0, 6.0)),
-            ((15.0, 15.0), (16.0, 16.0)),
+            ((5.0 * PX, 5.0 * PX), (6.0 * PX, 6.0 * PX)),
+            ((15.0 * PX, 15.0 * PX), (16.0 * PX, 16.0 * PX)),
         ]
-        out = postprocess.picked_locs(locs, info, picks, pick_shape="Box")
+        out = postprocess.picked_locs(
+            locs, info, picks=picks, pick_shape="Box"
+        )
         assert len(out) == 2
         assert out[0]["group"].unique().tolist() == [0]
         assert out[1]["group"].unique().tolist() == [1]
 
 
-def _matches_origamis(new_picks, tolerance=0.5):
+def _matches_origamis(new_picks, tolerance=0.5 * PX):
     """Return True if the found picks map one-to-one onto the known
-    origami positions."""
+    origami positions (within ``tolerance`` nm)."""
     if len(new_picks) != len(ORIGAMI_PICKS):
         return False
     found = np.array([(_[0], _[1]) for _ in new_picks])
@@ -450,53 +463,71 @@ def _matches_origamis(new_picks, tolerance=0.5):
     )
 
 
-# Circular pick_similar output for the bundled test data, recorded
-# before the function was extended to squares and rectangles. Guards
-# against the refactoring silently changing the circular path.
-CIRCULAR_PICK_SIMILAR = np.array(
-    [
-        [5.5, 5.5],
-        [5.5, 15.5],
-        [5.471064897017046, 25.492258522727273],
-        [15.521154952375856, 5.451117946677012],
-        [15.500356998083726, 15.521690512603184],
-        [15.524771372477213, 25.543294270833332],
-        [25.496572921525186, 5.510046660010494],
-        [25.468092395413308, 15.52528824344758],
-        [25.53900722287736, 25.427370467275942],
-    ]
+# Circular pick_similar output for the bundled test data (camera pixels,
+# scaled to nm below), recorded before the function was extended to
+# squares and rectangles. Guards against the refactoring silently
+# changing the circular path.
+CIRCULAR_PICK_SIMILAR = (
+    np.array(
+        [
+            [5.5, 5.5],
+            [5.5, 15.5],
+            [5.471064897017046, 25.492258522727273],
+            [15.521154952375856, 5.451117946677012],
+            [15.500356998083726, 15.521690512603184],
+            [15.524771372477213, 25.543294270833332],
+            [25.496572921525186, 5.510046660010494],
+            [25.468092395413308, 15.52528824344758],
+            [25.53900722287736, 25.427370467275942],
+        ]
+    )
+    * PX
 )
 
 
 class TestPickSimilar:
     def test_finds_remaining_origamis(self, locs, info):
-        seed_picks = [[5.5, 5.5], [5.5, 15.5]]
+        seed_picks = ORIGAMI_PICKS[:2]
         new_picks = postprocess.pick_similar(
-            locs, info, seed_picks, "Circle", PICK_SIZE, std_range=123.0
+            locs,
+            info,
+            picks=seed_picks,
+            pick_shape="Circle",
+            pick_size=PICK_SIZE,
+            std_range=123.0,
         )
         assert _matches_origamis(new_picks)
 
     def test_circular_result_unchanged(self, locs, info):
-        seed_picks = [[5.5, 5.5], [5.5, 15.5]]
+        seed_picks = ORIGAMI_PICKS[:2]
         new_picks = postprocess.pick_similar(
-            locs, info, seed_picks, "Circle", PICK_SIZE, std_range=123.0
+            locs,
+            info,
+            picks=seed_picks,
+            pick_shape="Circle",
+            pick_size=PICK_SIZE,
+            std_range=123.0,
         )
         # the pick centers are centers of mass of float32 coordinates, so
-        # the last digits depend on the platform's summation order; the
-        # tolerance is still orders of magnitude below any real change
+        # the last digits depend on the platform's summation order and
+        # the iterations stop within PICK_CONVERGENCE; the tolerance is
+        # still orders of magnitude below any real change
         np.testing.assert_allclose(
-            np.array(new_picks), CIRCULAR_PICK_SIMILAR, rtol=1e-6, atol=1e-6
+            np.array(new_picks),
+            CIRCULAR_PICK_SIMILAR,
+            rtol=0,
+            atol=2 * postprocess.PICK_CONVERGENCE,
         )
 
     def test_precomputed_index_blocks_path(self, locs, info):
-        seed_picks = [[5.5, 5.5], [5.5, 15.5]]
+        seed_picks = ORIGAMI_PICKS[:2]
         ib = postprocess.get_index_blocks(locs, info, PICK_SIZE / 2)
         new_picks = postprocess.pick_similar(
             locs,
             info,
-            seed_picks,
-            "Circle",
-            PICK_SIZE,
+            picks=seed_picks,
+            pick_shape="Circle",
+            pick_size=PICK_SIZE,
             std_range=123.0,
             index_blocks=ib,
         )
@@ -505,14 +536,19 @@ class TestPickSimilar:
     def test_empty_picks_returns_empty(self, locs, info):
         for shape in ("Circle", "Square", "Rectangle"):
             assert (
-                postprocess.pick_similar(locs, info, [], shape, PICK_SIZE)
+                postprocess.pick_similar(
+                    locs, info, picks=[], pick_shape=shape, pick_size=PICK_SIZE
+                )
                 == []
             )
 
     def test_polygon_is_rejected(self, locs, info):
         with pytest.raises(AssertionError):
             postprocess.pick_similar(
-                locs, info, [[(1.0, 1.0), (2.0, 2.0)]], "Polygon"
+                locs,
+                info,
+                picks=[[(1.0 * PX, 1.0 * PX), (2.0 * PX, 2.0 * PX)]],
+                pick_shape="Polygon",
             )
 
     def test_grid_spacing_only_for_rectangles(self, locs, info):
@@ -520,25 +556,35 @@ class TestPickSimilar:
             postprocess.pick_similar(
                 locs,
                 info,
-                [[5.5, 5.5], [5.5, 15.5]],
-                "Circle",
-                PICK_SIZE,
-                grid_spacing=1.0,
+                picks=ORIGAMI_PICKS[:2],
+                pick_shape="Circle",
+                pick_size=PICK_SIZE,
+                grid_spacing=1.0 * PX,
             )
 
 
 class TestPickSimilarSquare:
     def test_finds_remaining_origamis(self, locs, info):
-        seed_picks = [[5.5, 5.5], [5.5, 15.5]]
+        seed_picks = ORIGAMI_PICKS[:2]
         new_picks = postprocess.pick_similar(
-            locs, info, seed_picks, "Square", PICK_SIZE, std_range=123.0
+            locs,
+            info,
+            picks=seed_picks,
+            pick_shape="Square",
+            pick_size=PICK_SIZE,
+            std_range=123.0,
         )
         assert _matches_origamis(new_picks)
 
     def test_found_squares_do_not_overlap(self, locs, info):
-        seed_picks = [[5.5, 5.5], [5.5, 15.5]]
+        seed_picks = ORIGAMI_PICKS[:2]
         new_picks = postprocess.pick_similar(
-            locs, info, seed_picks, "Square", PICK_SIZE, std_range=123.0
+            locs,
+            info,
+            picks=seed_picks,
+            pick_shape="Square",
+            pick_size=PICK_SIZE,
+            std_range=123.0,
         )
         found = np.array(new_picks)
         for i, (x, y) in enumerate(found):
@@ -551,28 +597,28 @@ class TestPickSimilarSquare:
     def test_precomputed_index_blocks_path(self, locs, info):
         # circular index blocks of diameter a are valid for squares of
         # side a: both reach at most a / 2 in x and y
-        seed_picks = [[5.5, 5.5], [5.5, 15.5]]
+        seed_picks = ORIGAMI_PICKS[:2]
         ib = postprocess.get_index_blocks(locs, info, PICK_SIZE / 2)
         new_picks = postprocess.pick_similar(
             locs,
             info,
-            seed_picks,
-            "Square",
-            PICK_SIZE,
+            picks=seed_picks,
+            pick_shape="Square",
+            pick_size=PICK_SIZE,
             std_range=123.0,
             index_blocks=ib,
         )
         assert _matches_origamis(new_picks)
 
     def test_wrong_sized_index_blocks_are_rebuilt(self, locs, info):
-        seed_picks = [[5.5, 5.5], [5.5, 15.5]]
-        wrong = postprocess.get_index_blocks(locs, info, 5.0)
+        seed_picks = ORIGAMI_PICKS[:2]
+        wrong = postprocess.get_index_blocks(locs, info, 5.0 * PX)
         new_picks = postprocess.pick_similar(
             locs,
             info,
-            seed_picks,
-            "Square",
-            PICK_SIZE,
+            picks=seed_picks,
+            pick_shape="Square",
+            pick_size=PICK_SIZE,
             std_range=123.0,
             index_blocks=wrong,
         )
@@ -599,25 +645,30 @@ def _box_centers(picks):
 class TestPickSimilarBox:
     def test_finds_remaining_origamis(self, locs, info):
         seed_picks = [
-            _box(5.5, 5.5, PICK_SIZE, PICK_SIZE),
-            _box(5.5, 15.5, PICK_SIZE, PICK_SIZE),
+            _box(5.5 * PX, 5.5 * PX, PICK_SIZE, PICK_SIZE),
+            _box(5.5 * PX, 15.5 * PX, PICK_SIZE, PICK_SIZE),
         ]
         new_picks = postprocess.pick_similar(
-            locs, info, seed_picks, "Box", std_range=123.0
+            locs, info, picks=seed_picks, pick_shape="Box", std_range=123.0
         )
         assert _matches_origamis(_box_centers(new_picks))
 
     def test_matches_square_of_the_same_side(self, locs, info):
         # a box of equal sides must behave exactly like a square
-        centers = [[5.5, 5.5], [5.5, 15.5]]
+        centers = ORIGAMI_PICKS[:2]
         squares = postprocess.pick_similar(
-            locs, info, centers, "Square", PICK_SIZE, std_range=123.0
+            locs,
+            info,
+            picks=centers,
+            pick_shape="Square",
+            pick_size=PICK_SIZE,
+            std_range=123.0,
         )
         boxes = postprocess.pick_similar(
             locs,
             info,
-            [_box(x, y, PICK_SIZE, PICK_SIZE) for x, y in centers],
-            "Box",
+            picks=[_box(x, y, PICK_SIZE, PICK_SIZE) for x, y in centers],
+            pick_shape="Box",
             std_range=123.0,
         )
         np.testing.assert_allclose(
@@ -628,11 +679,11 @@ class TestPickSimilarBox:
 
     def test_found_boxes_do_not_overlap(self, locs, info):
         seed_picks = [
-            _box(5.5, 5.5, PICK_SIZE, PICK_SIZE),
-            _box(5.5, 15.5, PICK_SIZE, PICK_SIZE),
+            _box(5.5 * PX, 5.5 * PX, PICK_SIZE, PICK_SIZE),
+            _box(5.5 * PX, 15.5 * PX, PICK_SIZE, PICK_SIZE),
         ]
         new_picks = postprocess.pick_similar(
-            locs, info, seed_picks, "Box", std_range=123.0
+            locs, info, picks=seed_picks, pick_shape="Box", std_range=123.0
         )
         found = _box_centers(new_picks)
         for i, (x, y) in enumerate(found):
@@ -645,51 +696,57 @@ class TestPickSimilarBox:
     def test_new_picks_take_the_median_size(self, locs, info):
         # a 2:1 aspect ratio must survive into every found pick
         seed_picks = [
-            _box(5.5, 5.5, 2.0, 1.0),
-            _box(5.5, 15.5, 2.0, 1.0),
+            _box(5.5 * PX, 5.5 * PX, 2.0 * PX, 1.0 * PX),
+            _box(5.5 * PX, 15.5 * PX, 2.0 * PX, 1.0 * PX),
         ]
         new_picks = postprocess.pick_similar(
-            locs, info, seed_picks, "Box", std_range=123.0
+            locs, info, picks=seed_picks, pick_shape="Box", std_range=123.0
         )
         assert len(new_picks) > len(seed_picks)
         for (x0, y0), (x1, y1) in new_picks[len(seed_picks) :]:
-            assert x1 - x0 == pytest.approx(2.0)
-            assert y1 - y0 == pytest.approx(1.0)
+            assert x1 - x0 == pytest.approx(2.0 * PX)
+            assert y1 - y0 == pytest.approx(1.0 * PX)
 
     def test_seed_picks_are_returned_as_drawn(self, locs, info):
         seed_picks = [
-            _box(5.5, 5.5, 3.0, 1.0),  # deliberately larger than the rest
-            _box(5.5, 15.5, 1.0, 1.0),
+            # deliberately larger than the rest
+            _box(5.5 * PX, 5.5 * PX, 3.0 * PX, 1.0 * PX),
+            _box(5.5 * PX, 15.5 * PX, 1.0 * PX, 1.0 * PX),
         ]
         new_picks = postprocess.pick_similar(
-            locs, info, seed_picks, "Box", std_range=123.0
+            locs, info, picks=seed_picks, pick_shape="Box", std_range=123.0
         )
         assert list(new_picks[: len(seed_picks)]) == seed_picks
 
     def test_wrong_sized_index_blocks_are_rebuilt(self, locs, info):
         seed_picks = [
-            _box(5.5, 5.5, PICK_SIZE, PICK_SIZE),
-            _box(5.5, 15.5, PICK_SIZE, PICK_SIZE),
+            _box(5.5 * PX, 5.5 * PX, PICK_SIZE, PICK_SIZE),
+            _box(5.5 * PX, 15.5 * PX, PICK_SIZE, PICK_SIZE),
         ]
-        wrong = postprocess.get_index_blocks(locs, info, 5.0)
+        wrong = postprocess.get_index_blocks(locs, info, 5.0 * PX)
         new_picks = postprocess.pick_similar(
             locs,
             info,
-            seed_picks,
-            "Box",
+            picks=seed_picks,
+            pick_shape="Box",
             std_range=123.0,
             index_blocks=wrong,
         )
         assert _matches_origamis(_box_centers(new_picks))
 
     def test_empty_picks(self, locs, info):
-        assert postprocess.pick_similar(locs, info, [], "Box") == []
+        assert (
+            postprocess.pick_similar(locs, info, picks=[], pick_shape="Box")
+            == []
+        )
 
     def test_brush_is_rejected(self, locs, info):
         # a painted region has no size or canonical form to replicate
-        pick = [(1.0, [(5.0, 5.5), (6.0, 5.5)])]
+        pick = [(1.0 * PX, [(5.0 * PX, 5.5 * PX), (6.0 * PX, 5.5 * PX)])]
         with pytest.raises(AssertionError):
-            postprocess.pick_similar(locs, info, [pick], "Brush")
+            postprocess.pick_similar(
+                locs, info, picks=[pick], pick_shape="Brush"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -699,19 +756,19 @@ class TestPickSimilarBox:
 # The bundled test data has no elongated structures, so the rectangular
 # path is tested against synthetic line segments.
 LINE_ANGLES_DEG = [0, 15, 30, 45, 60, 75, 89, -89, -75, -60, -45, -30]
-LINE_LENGTH = 8.0
-LINE_WIDTH = 0.6
+LINE_LENGTH = 8.0 * PX  # nm
+LINE_WIDTH = 0.6 * PX  # nm
 
 
 def _make_line_locs():
     """Return ``(locs, info, centers)`` for 12 line segments at
-    different angles on a 64x64 px field of view, plus uniform
-    background."""
+    different angles on a 64x64 camera pixel field of view (nm), plus
+    uniform background."""
     rng = np.random.default_rng(42)
     centers = [
         (
-            8.0 + 16.0 * i + rng.uniform(-2, 2),
-            8.0 + 16.0 * j + rng.uniform(-2, 2),
+            (8.0 + 16.0 * i + rng.uniform(-2, 2)) * PX,
+            (8.0 + 16.0 * j + rng.uniform(-2, 2)) * PX,
         )
         for i in range(4)
         for j in range(3)
@@ -721,11 +778,11 @@ def _make_line_locs():
     for (cx, cy), angle in zip(centers, LINE_ANGLES_DEG):
         theta = np.deg2rad(angle)
         along = rng.uniform(-LINE_LENGTH / 2, LINE_LENGTH / 2, 150)
-        across = rng.normal(0, 0.15, 150)
+        across = rng.normal(0, 0.15 * PX, 150)
         xs.append(cx + along * np.cos(theta) - across * np.sin(theta))
         ys.append(cy + along * np.sin(theta) + across * np.cos(theta))
-    xs.append(rng.uniform(0, 64, 200))
-    ys.append(rng.uniform(0, 64, 200))
+    xs.append(rng.uniform(0, 64 * PX, 200))
+    ys.append(rng.uniform(0, 64 * PX, 200))
     x = np.concatenate(xs)
     y = np.concatenate(ys)
     locs = pd.DataFrame(
@@ -734,8 +791,8 @@ def _make_line_locs():
             "x": x.astype(np.float32),
             "y": y.astype(np.float32),
             "photons": np.full(len(x), 1000.0, dtype=np.float32),
-            "lpx": np.full(len(x), 0.1, dtype=np.float32),
-            "lpy": np.full(len(x), 0.1, dtype=np.float32),
+            "lpx": np.full(len(x), 0.1 * PX, dtype=np.float32),
+            "lpy": np.full(len(x), 0.1 * PX, dtype=np.float32),
         }
     )
     info = [
@@ -743,6 +800,7 @@ def _make_line_locs():
             "Width": 64,
             "Height": 64,
             "Frames": len(x),
+            "Pixelsize": PX,
             "Generated by": "tests.test_postprocess",
         }
     ]
@@ -794,7 +852,12 @@ class TestPickSimilarRectangle:
         picks = [_line_pick(centers, i) for i in self.SEEDS]
         kwargs.setdefault("std_range", self.STD_RANGE)
         return postprocess.pick_similar(
-            locs, info, picks, "Rectangle", LINE_WIDTH, **kwargs
+            locs,
+            info,
+            picks=picks,
+            pick_shape="Rectangle",
+            pick_size=LINE_WIDTH,
+            **kwargs,
         )
 
     def test_recovers_all_segments(self, line_data):
@@ -805,7 +868,7 @@ class TestPickSimilarRectangle:
         for (cx, cy), angle in zip(centers, LINE_ANGLES_DEG):
             distances = [np.hypot(cx - f[0], cy - f[1]) for f in found]
             nearest = found[int(np.argmin(distances))]
-            assert min(distances) < 1.0
+            assert min(distances) < 1.0 * PX
             # the pick axis is a director, so compare modulo 180 deg
             d_angle = (nearest[2] - angle + 90) % 180 - 90
             assert abs(d_angle) < 5.0
@@ -818,7 +881,7 @@ class TestPickSimilarRectangle:
         for index in (6, 7):
             cx, cy = centers[index]
             matches = [
-                f for f in found if np.hypot(cx - f[0], cy - f[1]) < 1.0
+                f for f in found if np.hypot(cx - f[0], cy - f[1]) < 1.0 * PX
             ]
             assert len(matches) == 1
 
@@ -870,11 +933,15 @@ class TestPickSimilarRectangle:
         decoy = pd.DataFrame(
             {
                 "frame": np.arange(n_decoy, dtype=np.int32) + 10**6,
-                "x": rng.normal(40.0, 0.7, n_decoy).astype(np.float32),
-                "y": rng.normal(55.0, 0.7, n_decoy).astype(np.float32),
+                "x": rng.normal(40.0 * PX, 0.7 * PX, n_decoy).astype(
+                    np.float32
+                ),
+                "y": rng.normal(55.0 * PX, 0.7 * PX, n_decoy).astype(
+                    np.float32
+                ),
                 "photons": np.full(n_decoy, 1000.0, dtype=np.float32),
-                "lpx": np.full(n_decoy, 0.1, dtype=np.float32),
-                "lpy": np.full(n_decoy, 0.1, dtype=np.float32),
+                "lpx": np.full(n_decoy, 0.1 * PX, dtype=np.float32),
+                "lpy": np.full(n_decoy, 0.1 * PX, dtype=np.float32),
             }
         )
         with_decoy = pd.concat([locs, decoy], ignore_index=True)
@@ -882,23 +949,23 @@ class TestPickSimilarRectangle:
         new_picks = postprocess.pick_similar(
             with_decoy,
             info,
-            picks,
-            "Rectangle",
-            LINE_WIDTH,
+            picks=picks,
+            pick_shape="Rectangle",
+            pick_size=LINE_WIDTH,
             std_range=self.STD_RANGE,
         )
         assert len(new_picks) == len(LINE_ANGLES_DEG)
         for cx, cy, _, _ in _as_center_angle(new_picks):
-            assert np.hypot(cx - 40.0, cy - 55.0) > 3.0
+            assert np.hypot(cx - 40.0 * PX, cy - 55.0 * PX) > 3.0 * PX
 
     def test_single_seed_does_not_crash(self, line_data):
         locs, info, centers = line_data
         new_picks = postprocess.pick_similar(
             locs,
             info,
-            [_line_pick(centers, 0)],
-            "Rectangle",
-            LINE_WIDTH,
+            picks=[_line_pick(centers, 0)],
+            pick_shape="Rectangle",
+            pick_size=LINE_WIDTH,
             std_range=2.0,
         )
         assert np.isfinite(np.array(new_picks, dtype=float)).all()
@@ -911,47 +978,52 @@ class TestPickSimilarRectangle:
                 postprocess.pick_similar(
                     locs,
                     info,
-                    [((62.0, 62.0), (63.0, 63.0))],
-                    "Rectangle",
-                    0.01,
+                    picks=[((62.0 * PX, 62.0 * PX), (63.0 * PX, 63.0 * PX))],
+                    pick_shape="Rectangle",
+                    pick_size=0.01 * PX,
                 )
 
 
 class TestRemoveLocsInPicks:
     def test_locs_in_pick_removed(self, locs, info):
-        picks = [(15.5, 15.5)]
+        picks = [(15.5 * PX, 15.5 * PX)]
         # Reference: how many locs lie inside this pick?
         picked = postprocess.picked_locs(
             locs,
             info,
-            picks,
+            picks=picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )[0]
         n_inside = len(picked)
-        out = postprocess.remove_locs_in_picks(
-            locs.copy(),
+        locs_in = locs.copy()
+        out, new_info = postprocess.remove_locs_in_picks(
+            locs_in,
             info,
             picks=picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         assert len(out) == len(locs) - n_inside
+        # the input is not modified; the step is recorded
+        pd.testing.assert_frame_equal(locs_in, locs)
+        assert len(new_info) == len(info) + 1
+        assert new_info[-1]["Step"] == "Remove picked localizations"
         # No remaining loc lies inside the pick
-        d = np.hypot(out["x"] - 15.5, out["y"] - 15.5)
+        d = np.hypot(out["x"] - 15.5 * PX, out["y"] - 15.5 * PX)
         assert (d > PICK_SIZE / 2 - 1e-6).all()
 
     def test_polygon_pick_size_ignored(self, locs, info):
         polygon = [
-            (14.5, 14.5),
-            (16.5, 14.5),
-            (16.5, 16.5),
-            (14.5, 16.5),
-            (14.5, 14.5),
+            (14.5 * PX, 14.5 * PX),
+            (16.5 * PX, 14.5 * PX),
+            (16.5 * PX, 16.5 * PX),
+            (14.5 * PX, 16.5 * PX),
+            (14.5 * PX, 14.5 * PX),
         ]
         # pick_size is asserted only for non-polygon shapes — not needed
         # here but must not raise
-        out = postprocess.remove_locs_in_picks(
+        out, _ = postprocess.remove_locs_in_picks(
             locs.copy(),
             info,
             picks=[polygon],
@@ -960,13 +1032,14 @@ class TestRemoveLocsInPicks:
         assert len(out) < len(locs)
 
     def test_box_pick_size_ignored(self, locs, info):
-        box = ((14.5, 14.5), (16.5, 16.5))
-        n_inside = len(
-            postprocess.picked_locs(locs, info, [box], pick_shape="Box")[0]
+        box = ((14.5 * PX, 14.5 * PX), (16.5 * PX, 16.5 * PX))
+        picked = postprocess.picked_locs(
+            locs, info, picks=[box], pick_shape="Box"
         )
+        n_inside = len(picked[0])
         assert n_inside > 0
         # a box carries its own extent, so pick_size is not required
-        out = postprocess.remove_locs_in_picks(
+        out, _ = postprocess.remove_locs_in_picks(
             locs.copy(),
             info,
             picks=[box],
@@ -975,13 +1048,15 @@ class TestRemoveLocsInPicks:
         assert len(out) == len(locs) - n_inside
 
     def test_brush_pick_size_ignored(self, locs, info):
-        pick = [(1.5, [(14.5, 15.5), (16.5, 15.5)])]
+        pick = [(1.5 * PX, [(14.5 * PX, 15.5 * PX), (16.5 * PX, 15.5 * PX)])]
         n_inside = len(
-            postprocess.picked_locs(locs, info, [pick], pick_shape="Brush")[0]
+            postprocess.picked_locs(
+                locs, info, picks=[pick], pick_shape="Brush"
+            )[0]
         )
         assert n_inside > 0
         # a brush stroke carries its own width, so no pick_size
-        out = postprocess.remove_locs_in_picks(
+        out, _ = postprocess.remove_locs_in_picks(
             locs.copy(),
             info,
             picks=[pick],
@@ -994,7 +1069,7 @@ class TestRemoveLocsInPicks:
             postprocess.remove_locs_in_picks(
                 locs.copy(),
                 info,
-                picks=[(15.5, 15.5)],
+                picks=[(15.5 * PX, 15.5 * PX)],
                 pick_shape="Hexagon",
                 pick_size=1.0,
             )
@@ -1008,24 +1083,24 @@ class TestRemoveLocsInPicks:
 class TestDistanceHistogram:
     def test_shape_and_dtype(self, locs, info):
         dh = postprocess.distance_histogram(
-            locs, info, bin_size=0.1, r_max=1.0
+            locs, info, bin_size=10.0, r_max=100.0
         )
-        # 10 bins for r_max=1.0 / bin_size=0.1
+        # 10 bins for r_max=100 nm / bin_size=10 nm
         assert dh.shape == (10,)
         assert (dh >= 0).all()
 
     def test_total_count_is_finite_and_positive(self, locs, info):
         dh = postprocess.distance_histogram(
-            locs, info, bin_size=0.1, r_max=1.0
+            locs, info, bin_size=10.0, r_max=100.0
         )
         assert dh.sum() > 0
 
     def test_count_grows_with_r_max(self, locs, info):
         small = postprocess.distance_histogram(
-            locs, info, bin_size=0.1, r_max=0.5
+            locs, info, bin_size=10.0, r_max=50.0
         )
         large = postprocess.distance_histogram(
-            locs, info, bin_size=0.1, r_max=1.5
+            locs, info, bin_size=10.0, r_max=150.0
         )
         # The large-r histogram must contain all bins of the small-r one
         # (same bin edges) plus more — sum is monotone in r_max.
@@ -1036,8 +1111,9 @@ class TestNena:
     def test_returns_positive_resolution(self, locs, info):
         _, nena = postprocess.nena(locs, info)
         assert nena > 0
-        # NeNA in pixels is sub-pixel for DNA-PAINT data
-        assert nena < 5
+        # NeNA (nm) of DNA-PAINT data is a few nm, far below a camera
+        # pixel
+        assert nena < 20
 
     def test_result_keys(self, locs, info):
         res, _ = postprocess.nena(locs, info)
@@ -1057,26 +1133,33 @@ class TestNena:
 class TestNextFrameNeighborDistanceHistogram:
     def test_shape_and_non_negative(self, locs):
         bin_centers, dnfl = (
-            postprocess._next_frame_neighbor_distance_histogram(locs.copy())
+            postprocess._next_frame_neighbor_distance_histogram(
+                locs.copy(), lib.MockProgress()
+            )
         )
         assert bin_centers.shape == dnfl.shape
         assert (dnfl >= 0).all()
-        # bin centers are evenly spaced
+        # 0.2 nm bins up to 200 nm, evenly spaced
         diffs = np.diff(bin_centers)
-        assert np.allclose(diffs, diffs[0])
+        assert np.allclose(diffs, 0.2)
+        assert len(bin_centers) == 1000
 
     def test_some_neighbors_present(self, locs):
         _, dnfl = postprocess._next_frame_neighbor_distance_histogram(
-            locs.copy()
+            locs.copy(), lib.MockProgress()
         )
         # Bundled DNA-PAINT data has many on-events lasting >1 frame, so
         # there should be at least some next-frame neighbors recorded.
         assert dnfl.sum() > 0
 
 
+# one camera pixel around the center of the test data
+FRC_VIEWPORT = ((15 * PX, 15 * PX), (16 * PX, 16 * PX))
+
+
 class TestFrc:
     def test_resolution_keys(self, locs, info):
-        viewport = ((15, 15), (16, 16))
+        viewport = ((15 * PX, 15 * PX), (16 * PX, 16 * PX))
         frc_res = postprocess.frc(locs, info, viewport=viewport)
         for key in [
             "frequencies",
@@ -1090,12 +1173,12 @@ class TestFrc:
 
     def test_frc_curve_starts_near_one(self, locs, info):
         """At low frequency, the FRC curve should be close to 1."""
-        viewport = ((15, 15), (16, 16))
+        viewport = ((15 * PX, 15 * PX), (16 * PX, 16 * PX))
         frc_res = postprocess.frc(locs, info, viewport=viewport)
         assert frc_res["frc_curve"][0] > 0.7
 
     def test_frc_curve_and_freq_same_length(self, locs, info):
-        viewport = ((15, 15), (16, 16))
+        viewport = ((15 * PX, 15 * PX), (16 * PX, 16 * PX))
         frc_res = postprocess.frc(locs, info, viewport=viewport)
         assert frc_res["frc_curve"].shape == frc_res["frequencies"].shape
         assert (
@@ -1103,7 +1186,7 @@ class TestFrc:
         )
 
     def test_two_images_returned(self, locs, info):
-        viewport = ((15, 15), (16, 16))
+        viewport = ((15 * PX, 15 * PX), (16 * PX, 16 * PX))
         frc_res = postprocess.frc(locs, info, viewport=viewport)
         images = frc_res["images"]
         assert len(images) == 2
@@ -1115,12 +1198,13 @@ class TestFrc:
 
     def test_rectangular_viewport_squared_internally(self, locs, info):
         """A non-square viewport must still yield a square image."""
-        viewport = ((15, 13), (16, 17))  # width 4, height 1
+        # 4 camera pixels wide, 1 high
+        viewport = ((15 * PX, 13 * PX), (16 * PX, 17 * PX))
         frc_res = postprocess.frc(locs, info, viewport=viewport)
         assert frc_res["images"][0].shape[0] == frc_res["images"][0].shape[1]
 
     def test_given_lp_skips_nena(self, locs, info, monkeypatch):
-        viewport = ((15, 15), (16, 16))
+        viewport = ((15 * PX, 15 * PX), (16 * PX, 16 * PX))
         expected = postprocess.frc(locs, info, viewport=viewport)
         lp = postprocess.nena(locs, info)[1]
 
@@ -1133,11 +1217,11 @@ class TestFrc:
 
     def test_does_not_modify_locs(self, locs, info):
         ref = locs.copy()
-        postprocess.frc(locs, info, viewport=((15, 15), (16, 16)))
+        postprocess.frc(locs, info, viewport=FRC_VIEWPORT)
         pd.testing.assert_frame_equal(locs, ref)
 
     def test_plot_without_resolution(self, locs, info):
-        frc_res = postprocess.frc(locs, info, viewport=((15, 15), (16, 16)))
+        frc_res = postprocess.frc(locs, info, viewport=FRC_VIEWPORT)
         frc_res["resolution"] = None
         fig = postprocess.plot_frc(frc_res)
         assert "n/a" in fig.axes[0].get_title()
@@ -1145,17 +1229,17 @@ class TestFrc:
 
 class TestFrcRois:
     def test_results_per_roi(self, locs, info):
-        viewport = ((10, 10), (20, 20))
+        viewport = ((10 * PX, 10 * PX), (20 * PX, 20 * PX))
         ref = locs.copy()
-        progress = []
+        tracker = RecordingProgress()
         result = postprocess.frc_rois(
             locs,
             info,
-            viewport,
+            viewport=viewport,
             n_rois=4,
             roi_size=260,  # 2 camera pixels
             min_locs=20,
-            callback=progress.append,
+            progress=tracker,
         )
         n = len(result["rois"])
         assert 0 < n <= 4
@@ -1163,30 +1247,33 @@ class TestFrcRois:
         assert result["resolutions"].shape == (n,)
         assert (result["n_locs"] >= 20).all()
         assert all("images" not in _ for _ in result["frc_results"])
-        assert progress[-1] == n
+        assert_phases(tracker, ["Calculating NeNA", "Calculating FRC"])
+        assert tracker.phases[1].maximum == n
         pd.testing.assert_frame_equal(locs, ref)
 
 
 class TestPairCorrelation:
     def test_shape(self, locs, info):
         bins_lower, pc = postprocess.pair_correlation(
-            locs, info, bin_size=0.1, r_max=1.0
+            locs, info, bin_size=10.0, r_max=100.0
         )
         assert bins_lower.shape == pc.shape
         assert bins_lower.shape[0] == 10
 
     def test_pc_finite_and_non_negative(self, locs, info):
         _, pc = postprocess.pair_correlation(
-            locs, info, bin_size=0.1, r_max=1.0
+            locs, info, bin_size=10.0, r_max=100.0
         )
         assert np.all(np.isfinite(pc))
         assert (pc >= 0).all()
 
-    def test_normalisation_against_distance_histogram(self, locs, info):
-        bin_size, r_max = 0.1, 1.0
-        dh = postprocess.distance_histogram(locs, info, bin_size, r_max)
+    def test_normalization_against_distance_histogram(self, locs, info):
+        bin_size, r_max = 10.0, 100.0
+        dh = postprocess.distance_histogram(
+            locs, info, bin_size=bin_size, r_max=r_max
+        )
         bins_lower, pc = postprocess.pair_correlation(
-            locs, info, bin_size, r_max
+            locs, info, bin_size=bin_size, r_max=r_max
         )
         # pc = dh / (pi * bin_size * (2 * bins_lower + bin_size))
         expected = dh / (np.pi * bin_size * (2 * bins_lower + bin_size))
@@ -1195,7 +1282,7 @@ class TestPairCorrelation:
 
 class TestLocalDensity:
     def test_density_column_added_with_proper_dtype(self, locs, info):
-        out = postprocess.compute_local_density(
+        out, _ = postprocess.compute_local_density(
             locs.copy(), info, radius=PICK_SIZE / 2
         )
         assert "density" in out.columns
@@ -1204,7 +1291,7 @@ class TestLocalDensity:
         assert (out["density"] >= 1).all()
 
     def test_dense_radius_picks_up_origami_clusters(self, locs, info):
-        out = postprocess.compute_local_density(
+        out, _ = postprocess.compute_local_density(
             locs.copy(), info, radius=PICK_SIZE / 2
         )
         unique_densities, _ = np.unique(out["density"], return_counts=True)
@@ -1212,10 +1299,10 @@ class TestLocalDensity:
         assert len(unique_densities) < len(locs) // 5
 
     def test_density_increases_with_radius(self, locs, info):
-        small = postprocess.compute_local_density(
+        small, _ = postprocess.compute_local_density(
             locs.copy(), info, radius=PICK_SIZE / 4
         )
-        large = postprocess.compute_local_density(
+        large, _ = postprocess.compute_local_density(
             locs.copy(), info, radius=PICK_SIZE
         )
         # A larger radius can only see at least as many neighbors.
@@ -1229,26 +1316,36 @@ class TestLocalDensity:
 
 class TestLinking:
     def test_columns_added(self, locs, info):
-        linked = postprocess.link(locs.copy(), info)
+        info_in = copy.deepcopy(info)
+        linked, new_info = postprocess.link(locs.copy(), info_in)
         for col in ["len", "n", "photon_rate"]:
             assert col in linked.columns
+        # the step is appended to a copy of the input metadata
+        assert info_in == info
+        assert new_info[:-1] == info
+        assert new_info[-1]["Step"] == "Link"
 
     def test_length_invariants(self, locs, info):
         """Linked length is <= original (events merge); the sum of the
         ``n`` (locs per linked event) column equals the original count."""
-        linked = postprocess.link(locs.copy(), info)
+        linked, _ = postprocess.link(locs.copy(), info)
         assert len(linked) <= len(locs)
         assert linked["n"].sum() == len(locs)
 
     def test_len_within_movie_frame_span(self, locs, info):
-        linked = postprocess.link(locs.copy(), info)
+        linked, _ = postprocess.link(locs.copy(), info)
         n_frames = info[0]["Frames"]
         assert linked["len"].max() <= n_frames
 
     def test_compute_dark_times_adds_dark_column(self, locs, info):
-        linked = postprocess.link(locs.copy(), info)
-        with_dark = postprocess.compute_dark_times(linked)
+        linked, linked_info = postprocess.link(locs.copy(), info)
+        with_dark, dark_info = postprocess.compute_dark_times(
+            linked, linked_info
+        )
         assert "dark" in with_dark.columns
+        # the input is not modified
+        assert "dark" not in linked.columns
+        assert dark_info[-1]["Step"] == "Dark"
 
     def test_compute_dark_times_requires_link(self, locs):
         with pytest.raises(AttributeError):
@@ -1256,14 +1353,28 @@ class TestLinking:
 
     def test_link_empty_locs_returns_empty_with_columns(self, locs, info):
         empty = locs.iloc[0:0].copy()
-        out = postprocess.link(empty, info)
+        out, _ = postprocess.link(empty, info)
         assert len(out) == 0
         for col in ["len", "n", "photon_rate"]:
             assert col in out.columns
 
-    def test_link_refit_not_implemented(self, locs, info):
-        with pytest.raises(NotImplementedError):
-            postprocess.link(locs.copy(), info, combine_mode="refit")
+    def test_link_removes_events_at_movie_edges(self):
+        # three events far apart: one starting in the first frame, one in
+        # the middle and one ending in the last frame of a 10-frame movie
+        locs = pd.DataFrame(
+            {
+                "frame": np.array([0, 1, 4, 5, 8, 9], dtype=np.int32),
+                "x": np.array([0, 0, 500, 500, 1000, 1000], dtype=np.float32),
+                "y": np.zeros(6, dtype=np.float32),
+                "lpx": np.full(6, 5.0, dtype=np.float32),
+                "lpy": np.full(6, 5.0, dtype=np.float32),
+            }
+        )
+        info = [{"Frames": 10, "Width": 1000, "Height": 1000}]
+        linked, _ = postprocess.link(locs, info)
+        assert linked["frame"].tolist() == [4]
+        kept, _ = postprocess.link(locs, info, remove_ambiguous_lengths=False)
+        assert kept["frame"].tolist() == [0, 4, 8]
 
     def test_link_groups_consistent_with_link(self, locs, info):
         # The number of unique non-(-1) link groups must equal the
@@ -1273,7 +1384,7 @@ class TestLinking:
         x = sl["x"].to_numpy()
         y = sl["y"].to_numpy()
         group = np.zeros(len(sl), dtype=np.int32)
-        lg = postprocess._get_link_groups(frame, x, y, 0.05, 3, group)
+        lg = postprocess._get_link_groups(frame, x, y, 10.0, 3, group)
         assert len(lg) == len(locs)
         # All locs must be assigned to a real link group (>= 0)
         assert (lg >= 0).all()
@@ -1292,36 +1403,70 @@ class TestLinking:
 
 class TestBindingEventCores:
     def test_drops_border_locs_of_each_event(self):
-        # Two binding events at distinct positions: one 4 frames long,
-        # one 2 frames long (too short to have a core).
+        # Two binding events 500 nm apart, their localizations scattered
+        # by a few nm like real ones: one 4 frames long, one 2 frames
+        # long (too short to have a core).
         locs = pd.DataFrame(
             {
                 "frame": np.array([0, 1, 2, 3, 0, 1], dtype=np.int32),
-                "x": np.array([1, 1, 1, 1, 50, 50], dtype=np.float32),
-                "y": np.array([1, 1, 1, 1, 50, 50], dtype=np.float32),
+                "x": np.array(
+                    [1000, 1003, 998, 1004, 1500, 1502], dtype=np.float32
+                ),
+                "y": np.array(
+                    [1000, 997, 1002, 1001, 1500, 1499], dtype=np.float32
+                ),
             }
         )
-        out = postprocess.select_binding_event_cores(locs, r_max=0.05)
+        out, _ = postprocess.select_binding_event_cores(locs)
         # only frames 1 and 2 of the first event survive
         assert out["frame"].tolist() == [1, 2]
+        assert out["x"].tolist() == [1003, 998]
         assert out["group"].tolist() == [0, 0]
+
+    def test_default_r_max_is_10_nm(self):
+        # Localizations 9 nm apart in consecutive frames form one event,
+        # 11 nm apart they do not (the documented default is 10 nm).
+        locs = pd.DataFrame(
+            {
+                "frame": np.array([0, 1, 2, 0, 1, 2], dtype=np.int32),
+                "x": np.array(
+                    [1000, 1009, 1000, 3000, 3011, 3022], dtype=np.float32
+                ),
+                "y": np.full(6, 1000, dtype=np.float32),
+            }
+        )
+        out, _ = postprocess.select_binding_event_cores(locs)
+        assert out["x"].tolist() == [1009]
 
     def test_min_n_locs_discards_short_events(self):
         locs = pd.DataFrame(
             {
                 "frame": np.array([0, 1, 2, 3], dtype=np.int32),
-                "x": np.ones(4, dtype=np.float32),
-                "y": np.ones(4, dtype=np.float32),
+                "x": np.full(4, 1000, dtype=np.float32),
+                "y": np.full(4, 1000, dtype=np.float32),
             }
         )
-        out = postprocess.select_binding_event_cores(
-            locs, r_max=0.05, min_n_locs=5
-        )
+        out, _ = postprocess.select_binding_event_cores(locs, min_n_locs=4)
+        assert out["frame"].tolist() == [1, 2]
+        out, _ = postprocess.select_binding_event_cores(locs, min_n_locs=5)
         assert len(out) == 0
 
+    def test_matches_link_on_test_data(self, locs, info):
+        # The events are those of link with the same distance and dark
+        # time: each event of n >= min_n_locs (3) localizations keeps
+        # its n - 2 inner ones.
+        out, _ = postprocess.select_binding_event_cores(locs.copy())
+        linked, _ = postprocess.link(
+            locs.copy(), info, r_max=10, max_dark_time=0
+        )
+        n = linked["n"].to_numpy()
+        assert (n >= 3).sum() > 0
+        assert len(out) == (n[n >= 3] - 2).sum()
+        assert out["group"].nunique() == (n >= 3).sum()
+
     def test_groups_are_consecutive(self, locs):
-        out = postprocess.select_binding_event_cores(locs.copy())
-        assert len(out) < len(locs)
+        out, _ = postprocess.select_binding_event_cores(locs.copy())
+        assert 0 < len(out) < len(locs)
         groups = np.unique(out["group"].to_numpy())
         assert (groups == np.arange(len(groups))).all()
         assert "group_input" not in out.columns
@@ -1332,21 +1477,21 @@ class TestBindingEventCores:
         sub["group"] = (sub["x"].to_numpy() > sub["x"].median()).astype(
             np.int32
         )
-        out = postprocess.select_binding_event_cores(sub)
+        out, _ = postprocess.select_binding_event_cores(sub)
         assert "group_input" in out.columns
-        assert set(np.unique(out["group_input"].to_numpy())) <= {0, 1}
+        assert set(np.unique(out["group_input"].to_numpy())) == {0, 1}
         # binding events must not span two input groups
         assert (out.groupby("group")["group_input"].nunique() == 1).all()
 
     def test_empty_locs(self, locs):
-        out = postprocess.select_binding_event_cores(locs.iloc[0:0].copy())
+        out, _ = postprocess.select_binding_event_cores(locs.iloc[0:0].copy())
         assert len(out) == 0
         assert "group" in out.columns
 
 
 class TestDarkTimes:
     def test_dark_times_min_positive(self, locs, info):
-        linked = postprocess.link(locs.copy(), info)
+        linked, _ = postprocess.link(locs.copy(), info)
         dt = postprocess.dark_times(linked)
         assert dt.shape == (len(linked),)
         # -1 sentinel for events not preceded by another in the group;
@@ -1380,11 +1525,11 @@ class TestDarkTimes:
         locs = pd.DataFrame(
             {"frame": np.array([3, 6], dtype=np.uint32), "len": [2, 1]}
         )
-        out = postprocess.compute_dark_times(locs)
+        out, _ = postprocess.compute_dark_times(locs)
         assert out["dark"].tolist() == [1]
 
     def test_dark_times_with_explicit_group(self, locs, info):
-        linked = postprocess.link(locs.copy(), info)
+        linked, _ = postprocess.link(locs.copy(), info)
         # Two halves marked as different groups should not see each other
         # as dark-time neighbors; both get all -1 if singletons in group.
         n = len(linked)
@@ -1407,9 +1552,9 @@ class TestEvaluatePicks:
         pl = postprocess.picked_locs(
             locs,
             info,
-            origami_picks,
+            picks=origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         N, n_events, rmsd, rmsd_z, length, dark, new_locs = (
             postprocess.evaluate_picks(pl, info, max_dark_time=3)
@@ -1432,12 +1577,12 @@ class TestEvaluatePicks:
 
 class TestCombineLocsInPicks:
     def test_combines_into_one_loc_per_pick(self, locs, info, origami_picks):
-        combined = postprocess.combine_locs_in_picks(
+        combined, _ = postprocess.combine_locs_in_picks(
             locs.copy(),
             info,
             picks=origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         # Each origami collapses to a single linked event
         assert len(combined) == len(origami_picks)
@@ -1446,18 +1591,18 @@ class TestCombineLocsInPicks:
         picked = postprocess.picked_locs(
             locs,
             info,
-            origami_picks,
+            picks=origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         assert combined["n"].sum() == sum(len(p) for p in picked)
 
     def test_brush_picks_need_no_size(self, locs, info, origami_picks):
         picks = [
-            [(PICK_SIZE, [(x - 0.2, y), (x + 0.2, y)])]
+            [(PICK_SIZE, [(x - 0.2 * PX, y), (x + 0.2 * PX, y)])]
             for x, y in origami_picks
         ]
-        combined = postprocess.combine_locs_in_picks(
+        combined, _ = postprocess.combine_locs_in_picks(
             locs.copy(),
             info,
             picks=picks,
@@ -1473,7 +1618,7 @@ class TestCombineLocsInPicks:
             )
             for x, y in origami_picks
         ]
-        combined = postprocess.combine_locs_in_picks(
+        combined, _ = postprocess.combine_locs_in_picks(
             locs.copy(),
             info,
             picks=boxes,
@@ -1487,9 +1632,9 @@ class TestPickKinetics:
         pl = postprocess.picked_locs(
             locs,
             info,
-            origami_picks,
+            picks=origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         length, dark, no_locs, out_locs, kept = postprocess.pick_kinetics(
             pl, info, max_dark_time=3
@@ -1564,11 +1709,10 @@ class TestSegmentation:
         n_seg = postprocess.n_segments(info, segmentation)
         bounds, segs = postprocess.segment(locs.copy(), info, segmentation)
         assert bounds.shape == (n_seg + 1,)
-        from picasso import lib
-
-        oversampling = 1
-        n_pixel_y = int(np.ceil(oversampling * info[0]["Height"]))
-        n_pixel_x = int(np.ceil(oversampling * info[0]["Width"]))
+        width, height = lib.field_of_view(info)
+        oversampling = 1 / postprocess.UNDRIFT_PIXEL_SIZE
+        n_pixel_y = int(np.ceil(oversampling * height))
+        n_pixel_x = int(np.ceil(oversampling * width))
         assert segs.shape == (n_seg, n_pixel_y, n_pixel_x)
         # bounds are strictly increasing and span the movie
         assert (np.diff(bounds) > 0).all()
@@ -1578,7 +1722,7 @@ class TestSegmentation:
 
 class TestUndrift:
     def test_drift_has_one_row_per_frame(self, locs, info):
-        drift, undrifted = postprocess.undrift(
+        undrifted, new_info, drift = postprocess.undrift(
             locs.copy(),
             info,
             segmentation=200,
@@ -1589,6 +1733,9 @@ class TestUndrift:
         assert drift.shape == (n_frames, 2)
         assert {"x", "y"}.issubset(drift.columns)
         assert len(undrifted) == len(locs)
+        assert new_info[:-1] == info
+        assert new_info[-1]["Step"] == "Undrift"
+        assert new_info[-1]["Segmentation"] == 200
 
     def test_undrift_from_picked_returns_drift(
         self, locs, info, origami_picks
@@ -1598,9 +1745,9 @@ class TestUndrift:
         pl = postprocess.picked_locs(
             locs,
             info,
-            origami_picks,
+            picks=origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
             add_group=False,
         )
         drift = postprocess.undrift_from_picked(pl, info)
@@ -1618,7 +1765,7 @@ class TestUndrift:
             locs.copy(),
             info,
             picks=origami_picks,
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
             undrift_z=False,
         )
         assert len(out_locs) == len(locs)
@@ -1637,18 +1784,19 @@ class TestUndrift:
             postprocess.undrift_from_fiducials(
                 locs.copy(),
                 info,
-                picks=[(5.5, 5.5)],
+                picks=ORIGAMI_PICKS[:1],
                 pick_size=None,
             )
 
-    def test_undrift_from_fiducials_honours_pick_shape(
+    def test_undrift_from_fiducials_honors_pick_shape(
         self, locs, info, origami_picks
     ):
         # a box pick must be picked as a box, not silently as a circle:
         # a wide, flat box and a circle over the same center enclose
         # different localizations, so the drift they report differs
         boxes = [
-            ((x - 1.0, y - 0.2), (x + 1.0, y + 0.2)) for x, y in origami_picks
+            ((x - 1.0 * PX, y - 0.2 * PX), (x + 1.0 * PX, y + 0.2 * PX))
+            for x, y in origami_picks
         ]
         _, new_info, box_drift = postprocess.undrift_from_fiducials(
             locs.copy(),
@@ -1658,14 +1806,14 @@ class TestUndrift:
             undrift_z=False,
         )
         assert new_info[-1]["Pick shape"] == "Box"
-        # boxes carry their own extent, so no radius is reported
-        assert "Pick radius (nm)" not in new_info[-1]
+        # boxes carry their own extent, so no diameter is reported
+        assert "Pick diameter (nm)" not in new_info[-1]
 
         _, _, circle_drift = postprocess.undrift_from_fiducials(
             locs.copy(),
             info,
             picks=origami_picks,
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
             undrift_z=False,
         )
         assert not np.allclose(
@@ -1676,7 +1824,7 @@ class TestUndrift:
         self, locs, info, origami_picks
     ):
         boxes = [
-            ((x - 0.75, y - 0.75), (x + 0.75, y + 0.75))
+            ((x - 0.75 * PX, y - 0.75 * PX), (x + 0.75 * PX, y + 0.75 * PX))
             for x, y in origami_picks
         ]
         _, _, drift = postprocess.undrift_from_fiducials(
@@ -1700,17 +1848,17 @@ class TestApplyDrift:
                 "y": np.full(n_frames, dy),
             }
         )
-        out = postprocess.apply_drift(locs.copy(), info, drift=drift)
+        out, _ = postprocess.apply_drift(locs.copy(), info, drift=drift)
         assert out["y"].mean() == pytest.approx(
             locs["y"].mean() - dy, abs=1e-3
         )
-        assert out["x"].mean() == pytest.approx(locs["x"].mean(), abs=1e-6)
+        assert out["x"].mean() == pytest.approx(locs["x"].mean(), abs=1e-3)
 
     def test_apply_drift_ndarray_2d(self, locs, info):
         n_frames = info[0]["Frames"]
         drift = np.zeros((n_frames, 2), dtype=np.float64)
         drift[:, 0] = 0.25
-        out = postprocess.apply_drift(locs.copy(), info, drift=drift)
+        out, _ = postprocess.apply_drift(locs.copy(), info, drift=drift)
         assert out["x"].mean() == pytest.approx(
             locs["x"].mean() - 0.25, abs=1e-3
         )
@@ -1743,59 +1891,116 @@ class TestApplyDrift:
 
 class TestAlign:
     def test_channels_aligned_after_known_shift(self, locs_copy, info):
-        """Apply a known +5 px shift to a copy and check that align()
-        brings the channels back together (residual <0.5 px)."""
+        """Apply a known shift of 5 camera pixels to a copy and check
+        that align() brings the channels back together (residual below
+        half a camera pixel)."""
         a = locs_copy
         b = a.copy()
-        b["x"] += 5.0
-        aligned = postprocess.align([a, b], [info, info])
+        b["x"] += 5.0 * PX
+        aligned, new_infos = postprocess.align([a, b], [info, info])
         assert len(aligned) == 2
+        assert [_[-1]["Step"] for _ in new_infos] == ["Align", "Align"]
         residual = aligned[1]["x"].mean() - aligned[0]["x"].mean()
-        assert abs(residual) < 0.5
+        assert abs(residual) < 0.5 * PX
 
     def test_no_shift_is_no_op_within_tolerance(self, locs_copy, info):
         """If channels start aligned, alignment shouldn't drift them."""
         a = locs_copy
         b = a.copy()
-        aligned = postprocess.align([a, b], [info, info])
+        aligned, _ = postprocess.align([a, b], [info, info])
         residual = aligned[1]["x"].mean() - aligned[0]["x"].mean()
-        assert abs(residual) < 0.1
+        assert abs(residual) < 0.1 * PX
 
-    def test_apply_shifts_false_does_not_modify_locs(self, locs_copy, info):
+    def test_align_does_not_modify_locs(self, locs_copy, info):
         a = locs_copy
         b = a.copy()
-        b["x"] += 3.0
+        b["x"] += 3.0 * PX
         x_before_a = a["x"].copy()
         x_before_b = b["x"].copy()
-        out, shifts = postprocess.align(
-            [a, b],
-            [info, info],
-            apply_shifts=False,
-            return_shifts=True,
+        out, _, shifts = postprocess.align(
+            [a, b], [info, info], return_shifts=True
         )
-        # No mutation when apply_shifts is False
-        np.testing.assert_array_equal(out[0]["x"].to_numpy(), x_before_a)
-        np.testing.assert_array_equal(out[1]["x"].to_numpy(), x_before_b)
-        # Shifts is a 2-tuple of arrays of length n_channels
+        np.testing.assert_array_equal(a["x"].to_numpy(), x_before_a)
+        np.testing.assert_array_equal(b["x"].to_numpy(), x_before_b)
+        # shifts is (shift_x, shift_y), one value per channel, and the
+        # returned locs are the inputs minus the shifts
         shift_x, shift_y = shifts
         assert len(shift_x) == 2
         assert len(shift_y) == 2
+        np.testing.assert_allclose(
+            out[1]["x"].to_numpy(), x_before_b.to_numpy() - shift_x[1]
+        )
+        assert abs((shift_x[1] - shift_x[0]) - 3.0 * PX) < 0.05 * PX
+
+    def test_align_picked_matches_align_from_picked(
+        self, locs_copy, info, origami_picks
+    ):
+        """method="picked" gives the result of align_from_picked."""
+        a = locs_copy
+        b = a.copy()
+        b["x"] += 0.1 * PX
+        kwargs = dict(
+            picks=origami_picks, pick_shape="Circle", pick_size=PICK_SIZE
+        )
+        aligned, _, shifts = postprocess.align(
+            [a, b], [info, info], method="picked", return_shifts=True, **kwargs
+        )
+        expected, _, expected_shifts = postprocess.align_from_picked(
+            [a, b], [info, info], return_shifts=True, **kwargs
+        )
+        for out, exp in zip(aligned, expected):
+            pd.testing.assert_frame_equal(out, exp)
+        for shift, exp in zip(shifts, expected_shifts, strict=True):
+            np.testing.assert_array_equal(shift, exp)
+        assert abs(shifts[0][1] - 0.1 * PX) < 0.05 * PX
+
+    def test_align_invalid_arguments_raise(
+        self, locs_copy, info, origami_picks
+    ):
+        locs = [locs_copy, locs_copy.copy()]
+        infos = [info, info]
+        with pytest.raises(ValueError, match="Unknown alignment method"):
+            postprocess.align(locs, infos, method="affine")
+        with pytest.raises(ValueError, match="requires picks"):
+            postprocess.align(locs, infos, method="picked")
+        with pytest.raises(ValueError, match="only used with"):
+            postprocess.align(locs, infos, picks=origami_picks)
 
     def test_align_rcc_converges(self, locs_copy, info):
         a = locs_copy
         b = a.copy()
-        b["x"] += 2.0
-        aligned = postprocess.align_rcc([a, b], [info, info])
+        b["x"] += 2.0 * PX
+        aligned, _, (shift_x, shift_y) = postprocess.align_rcc(
+            [a, b], [info, info], return_shifts=True
+        )
         residual = aligned[1]["x"].mean() - aligned[0]["x"].mean()
-        assert abs(residual) < 0.05
+        assert abs(residual) < 0.05 * PX
+        # the returned shifts are the per-channel totals over all
+        # iterations
+        assert len(shift_x) == len(shift_y) == 2
+        assert abs((shift_x[1] - shift_x[0]) - 2.0 * PX) < 0.05 * PX
+
+    def test_align_rcc_channels_with_different_canvases(self, locs_copy, info):
+        """Channels whose canvases differ (e.g., one was moved in Render
+        and lib.fit_canvas enlarged only its Width/Height) are rendered
+        on one canvas instead of failing with mismatched image shapes."""
+        a = locs_copy
+        b = a.copy()
+        b["x"] += 2.0 * PX
+        info_b = copy.deepcopy(info)
+        info_b[0]["Height"] = 2 * info[0]["Height"]
+        info_b[0]["Width"] = info[0]["Width"] + 3
+        aligned, _ = postprocess.align_rcc([a, b], [info, info_b])
+        residual = aligned[1]["x"].mean() - aligned[0]["x"].mean()
+        assert abs(residual) < 0.05 * PX
 
     def test_align_from_picked_recovers_known_shift(
         self, locs_copy, info, origami_picks
     ):
         a = locs_copy
         b = a.copy()
-        b["x"] += 0.1
-        aligned, shifts = postprocess.align_from_picked(
+        b["x"] += 0.1 * PX
+        aligned, _, shifts = postprocess.align_from_picked(
             [a, b],
             [info, info],
             picks=origami_picks,
@@ -1803,20 +2008,21 @@ class TestAlign:
             pick_size=PICK_SIZE,
             return_shifts=True,
         )
-        # shifts is (shift_y, shift_x) where each is per-channel
-        # The second channel should have ~0.1 in the x-shift slot
+        # shifts is (shift_x, shift_y), one value per channel. The
+        # second channel should have ~0.1 camera pixels in the x shift
         # (sign convention: shift to subtract from x).
-        assert abs(shifts[1][1] - 0.1) < 0.05
+        shift_x, shift_y = shifts
+        assert abs(shift_x[1] - 0.1 * PX) < 0.05 * PX
         # First channel is the reference: ~0 shift
-        assert abs(shifts[0][0]) < 1e-6
-        assert abs(shifts[1][0]) < 1e-6
+        assert abs(shift_x[0]) < 1e-6
+        assert abs(shift_y[0]) < 1e-6
 
     def test_align_from_picked_box_recovers_known_shift(
         self, locs_copy, info, origami_picks
     ):
         a = locs_copy
         b = a.copy()
-        b["x"] += 0.1
+        b["x"] += 0.1 * PX
         boxes = [
             (
                 (x - PICK_SIZE / 2, y - PICK_SIZE / 2),
@@ -1824,33 +2030,33 @@ class TestAlign:
             )
             for x, y in origami_picks
         ]
-        _, shifts = postprocess.align_from_picked(
+        _, _, shifts = postprocess.align_from_picked(
             [a, b],
             [info, info],
             picks=boxes,
             pick_shape="Box",
             return_shifts=True,
         )
-        assert abs(shifts[1][1] - 0.1) < 0.05
+        assert abs(shifts[0][1] - 0.1 * PX) < 0.05 * PX  # x shift of channel 2
 
     def test_align_from_picked_brush_recovers_known_shift(
         self, locs_copy, info, origami_picks
     ):
         a = locs_copy
         b = a.copy()
-        b["x"] += 0.1
+        b["x"] += 0.1 * PX
         picks = [
-            [(PICK_SIZE, [(x - 0.2, y), (x + 0.2, y)])]
+            [(PICK_SIZE, [(x - 0.2 * PX, y), (x + 0.2 * PX, y)])]
             for x, y in origami_picks
         ]
-        _, shifts = postprocess.align_from_picked(
+        _, _, shifts = postprocess.align_from_picked(
             [a, b],
             [info, info],
             picks=picks,
             pick_shape="Brush",
             return_shifts=True,
         )
-        assert abs(shifts[1][1] - 0.1) < 0.05
+        assert abs(shifts[0][1] - 0.1 * PX) < 0.05 * PX  # x shift of channel 2
 
     def test_align_from_picked_invalid_shape_raises(
         self, locs_copy, info, origami_picks
@@ -1863,6 +2069,102 @@ class TestAlign:
                 pick_shape="Hexagon",
                 pick_size=1.0,
             )
+
+    @staticmethod
+    def _with_stray_locs(locs: pd.DataFrame, x: float) -> pd.DataFrame:
+        """``locs`` plus three localizations at ``x`` (nm), beyond the x
+        range of the test data (about 5 to 26 camera pixels)."""
+        stray = locs.iloc[:3].copy()
+        stray["x"] = x
+        return pd.concat([locs, stray], ignore_index=True)
+
+    @pytest.mark.parametrize("keep", [True, False])
+    def test_align_rcc_non_overlapping_locs(self, locs_copy, info, keep):
+        """Localizations of one channel that lie beyond the other
+        channel after alignment are kept by default and removed with
+        keep_non_overlapping=False."""
+        a = locs_copy
+        b = a.copy()
+        b["x"] += 2.0 * PX
+        b = self._with_stray_locs(b, 30.5 * PX)
+        aligned, _ = postprocess.align_rcc(
+            [a, b], [info, info], keep_non_overlapping=keep
+        )
+        if keep:
+            assert [len(_) for _ in aligned] == [len(a), len(b)]
+        else:
+            assert len(aligned[0]) <= len(a)
+            assert len(aligned[1]) <= len(b) - 3
+            assert aligned[1]["x"].max() <= aligned[0]["x"].max()
+            assert aligned[1].index.equals(pd.RangeIndex(len(aligned[1])))
+
+    @pytest.mark.parametrize("keep", [True, False])
+    def test_align_from_picked_non_overlapping_locs(
+        self, locs_copy, info, origami_picks, keep
+    ):
+        a = locs_copy
+        b = a.copy()
+        b["x"] += 0.1 * PX
+        b = self._with_stray_locs(b, 29.0 * PX)
+        n_a, n_b = len(a), len(b)
+        aligned, _ = postprocess.align_from_picked(
+            [a, b],
+            [info, info],
+            picks=origami_picks,
+            pick_shape="Circle",
+            pick_size=PICK_SIZE,
+            keep_non_overlapping=keep,
+        )
+        if keep:
+            assert [len(_) for _ in aligned] == [n_a, n_b]
+        else:
+            assert len(aligned[1]) <= n_b - 3
+            assert aligned[1]["x"].max() <= aligned[0]["x"].max()
+
+    def test_align_non_overlapping_locs(self, locs_copy, info):
+        a = locs_copy
+        b = self._with_stray_locs(a.copy(), 30.5 * PX)
+        n_b = len(b)
+        aligned, _ = postprocess.align(
+            [a, b], [info, info], keep_non_overlapping=False
+        )
+        assert len(aligned[1]) <= n_b - 3
+
+
+class TestOverlap:
+    @staticmethod
+    def _locs(x_min: float, x_max: float, y_min: float, y_max: float):
+        return pd.DataFrame(
+            {"x": [x_min, x_max, x_min], "y": [y_min, y_max, y_max]}
+        )
+
+    def test_overlap_region_is_the_intersection(self):
+        locs = [self._locs(0, 10, 0, 8), self._locs(5, 15, 2, 20)]
+        assert postprocess.overlap_region(locs) == ((5, 10), (2, 8))
+
+    def test_overlap_region_none_if_disjoint(self):
+        locs = [self._locs(0, 4, 0, 4), self._locs(5, 9, 0, 4)]
+        assert postprocess.overlap_region(locs) is None
+
+    def test_overlap_region_none_if_a_channel_is_empty(self):
+        locs = [self._locs(0, 4, 0, 4), self._locs(0, 4, 0, 4).iloc[:0]]
+        assert postprocess.overlap_region(locs) is None
+
+    def test_remove_non_overlapping_locs(self):
+        a = pd.DataFrame({"x": [0.0, 5.0, 10.0], "y": [0.0, 5.0, 10.0]})
+        b = pd.DataFrame({"x": [4.0, 6.0, 14.0], "y": [4.0, 6.0, 14.0]})
+        out = postprocess.remove_non_overlapping_locs([a, b])
+        # overlap is x, y in [4, 10] (borders included)
+        assert out[0]["x"].tolist() == [5.0, 10.0]
+        assert out[1]["x"].tolist() == [4.0, 6.0]
+        assert out[0].index.tolist() == [0, 1]
+        # the input is not modified
+        assert len(a) == 3 and len(b) == 3
+
+    def test_remove_non_overlapping_locs_raises_if_disjoint(self):
+        locs = [self._locs(0, 4, 0, 4), self._locs(5, 9, 0, 4)]
+        with pytest.raises(ValueError):
+            postprocess.remove_non_overlapping_locs(locs)
 
 
 # ---------------------------------------------------------------------------
@@ -1877,13 +2179,13 @@ class TestGroupprops:
         picked = postprocess.picked_locs(
             locs,
             info,
-            origami_picks,
+            picks=origami_picks,
             pick_shape="Circle",
-            pick_size=PICK_SIZE / 2,
+            pick_size=PICK_SIZE,
         )
         merged = pd.concat(picked, ignore_index=True)
-        merged = postprocess.link(merged, info)
-        return postprocess.compute_dark_times(merged)
+        merged, merged_info = postprocess.link(merged, info)
+        return postprocess.compute_dark_times(merged, merged_info)[0]
 
     def test_required_columns(self, grouped_locs):
         old_columns = grouped_locs.columns.tolist()
@@ -1919,71 +2221,6 @@ class TestGroupprops:
             finite["qpaint_idx"].to_numpy(),
             1.0 / finite["dark_mean"].to_numpy(),
             rtol=1e-5,
-        )
-
-
-# ---------------------------------------------------------------------------
-# Cluster combination
-# ---------------------------------------------------------------------------
-
-
-class TestClusterCombine:
-    @pytest.fixture
-    def clustered(self, locs):
-        """Run dbscan to assign per-loc cluster ids (in the 'cluster'
-        column) but lump every loc into a single group, so that
-        ``cluster_combine_dist`` can compute inter-cluster distances
-        within that group."""
-        out = clusterer.dbscan(locs, radius=2 / 130, min_samples=2)[0]
-        out = out.copy()
-        out["cluster"] = out["group"].to_numpy()
-        out["group"] = 0
-        return out
-
-    def test_cluster_combine_one_row_per_cluster(self, clustered):
-        combined = postprocess.cluster_combine(clustered)
-        n_clusters = len(np.unique(clustered["cluster"]))
-        assert len(combined) == n_clusters
-        for col in ("group", "cluster", "x", "y", "n", "lpx", "lpy"):
-            assert col in combined.columns
-        assert (combined["n"] > 0).all()
-        # Per-cluster ``n`` totals must equal the input row count
-        assert combined["n"].sum() == len(clustered)
-
-    def test_cluster_combine_dist_2d_min_dist(self, clustered):
-        combined = postprocess.cluster_combine(clustered)
-        if len(combined) < 2:
-            pytest.skip("Need at least 2 clusters in the group for cdist")
-        out = postprocess.cluster_combine_dist(combined)
-        assert "min_dist" in out.columns
-        assert (out["min_dist"] >= 0).all()
-        # Brute-force the nearest-neighbor distance per cluster and
-        # confirm it matches the function's output.
-        xy = combined[["x", "y"]].to_numpy()
-        for i in range(len(combined)):
-            others = np.delete(xy, i, axis=0)
-            expected = float(np.min(np.linalg.norm(others - xy[i], axis=1)))
-            assert out["min_dist"].iloc[i] == pytest.approx(expected, rel=1e-4)
-
-    def test_cluster_combine_dist_3d_min_dist_xy(self, clustered):
-        # Add a synthetic z column so the 3D branch is exercised. The
-        # 3D output also reports an xy nearest-neighbor distance under
-        # the (existing) 'mind_dist_xy' column name.
-        clustered = clustered.copy()
-        clustered["z"] = 0.0  # dummy z; xy distance is what we verify
-        combined = postprocess.cluster_combine(clustered)
-        if len(combined) < 2:
-            pytest.skip("Need at least 2 clusters in the group for cdist")
-        out = postprocess.cluster_combine_dist(combined)
-        assert "min_dist" in out.columns
-        assert "mind_dist_xy" in out.columns  # existing typo in the API
-        assert (out["min_dist"] >= 0).all()
-        assert (out["mind_dist_xy"] >= 0).all()
-        # With z=0 everywhere, 3D and xy distances must agree.
-        np.testing.assert_allclose(
-            out["min_dist"].to_numpy(),
-            out["mind_dist_xy"].to_numpy(),
-            rtol=1e-4,
         )
 
 
@@ -2054,6 +2291,247 @@ class TestNnAnalysis:
         with pytest.raises(ValueError):
             postprocess.nn_analysis(X, Y, nn_count=1)
 
+    def test_one_neighbor_in_another_set_is_a_column(self):
+        """``KDTree.query`` with k=1 returns a flat array."""
+        rng = np.random.default_rng(2)
+        X = rng.standard_normal((20, 2))
+        Y = rng.standard_normal((25, 2))
+        out = postprocess.nn_analysis(X, Y, nn_count=1)
+        assert out.shape == (20, 1)
+
+
+# ---------------------------------------------------------------------------
+# Coordinate-based colocalization (CBC)
+# ---------------------------------------------------------------------------
+
+
+def _cbc_locs(centers, n, seed, sigma=26.0, z=False):
+    """Localizations scattered around the given centers (nm)."""
+    rng = np.random.default_rng(seed)
+    xy = centers[rng.integers(len(centers), size=n)]
+    xy = xy + rng.normal(0.0, sigma, size=xy.shape)
+    locs = pd.DataFrame(
+        {
+            "frame": np.arange(n, dtype=np.uint32),
+            "x": xy[:, 0].astype(np.float32),
+            "y": xy[:, 1].astype(np.float32),
+        }
+    )
+    if z:
+        locs["z"] = rng.normal(0.0, 30.0, size=n).astype(np.float32)
+    return locs
+
+
+@pytest.mark.filterwarnings("ignore:.*not linked")
+class TestCbc:
+    INFO = [{"Pixelsize": 130.0}]
+
+    @pytest.fixture
+    def channels(self):
+        rng = np.random.default_rng(0)
+        centers = rng.uniform(0, 13_000, size=(100, 2))
+        a = _cbc_locs(centers, 4000, 1)
+        b = _cbc_locs(centers[:50], 2000, 2)  # half of a's clusters
+        c = _cbc_locs(rng.uniform(0, 13_000, size=(30, 2)), 1000, 3)
+        return a, b, c
+
+    def test_colocalized_above_uncorrelated(self, channels):
+        a, b, c = channels
+        out, _ = postprocess.cbc(
+            a, self.INFO, partner_locs=[b, c], partner_names=["b", "c"]
+        )
+        assert out["cbc_b"].mean() > out["cbc_c"].mean() + 0.2
+        assert abs(out["cbc_c"].median()) < 0.05
+        assert out["cbc_b"].dtype == np.float32
+        assert out["cbc_b"].between(-1, 1).all()
+
+    def test_not_symmetric(self, channels):
+        """b sits on half of a's clusters: every b localization is
+        colocalized with a, but only half of a's with b."""
+        a, b, _ = channels
+        ab, _ = postprocess.cbc(a, self.INFO, partner_locs=b)
+        ba, _ = postprocess.cbc(b, self.INFO, partner_locs=a)
+        assert ba["cbc"].median() > ab["cbc"].median() + 0.2
+
+    def test_returns_copy_and_metadata(self, channels):
+        a, b, _ = channels
+        info = list(self.INFO)
+        out, new_info = postprocess.cbc(
+            a, info, partner_locs=b, r_max=150, steps=50
+        )
+        assert "cbc" not in a.columns
+        assert list(out.columns) == list(a.columns) + ["cbc"]
+        assert len(info) == 1 and len(new_info) == 2
+        entry = new_info[-1]
+        assert entry["CBC columns"] == ["cbc"]
+        assert entry["Max. radius (nm)"] == 150
+        assert entry["Radius steps"] == 50
+        assert entry["Dimensions"] == 2
+
+    def test_default_columns_for_partner_list(self, channels):
+        a, b, c = channels
+        out, _ = postprocess.cbc(a, self.INFO, partner_locs=[b, c])
+        assert {"cbc_0", "cbc_1"} <= set(out.columns)
+
+    def test_partners_and_chunks_do_not_change_values(self, channels):
+        """Shared self-counts and chunking are only optimizations."""
+        a, b, c = channels
+        both, _ = postprocess.cbc(
+            a,
+            self.INFO,
+            partner_locs=[b, c],
+            partner_names=["b", "c"],
+            chunk_size=777,
+        )
+        single, _ = postprocess.cbc(a, self.INFO, partner_locs=c)
+        np.testing.assert_array_equal(both["cbc_c"], single["cbc"])
+
+    def test_3d_used_when_all_have_z(self):
+        rng = np.random.default_rng(4)
+        centers = rng.uniform(0, 6500, size=(40, 2))
+        a = _cbc_locs(centers, 1000, 5, z=True)
+        b = _cbc_locs(centers, 1000, 6, z=True)
+        _, info3 = postprocess.cbc(a, self.INFO, partner_locs=b)
+        assert info3[-1]["Dimensions"] == 3
+        _, info2 = postprocess.cbc(a, self.INFO, partner_locs=b, use_z=False)
+        assert info2[-1]["Dimensions"] == 2
+        with pytest.raises(ValueError):
+            postprocess.cbc(
+                a, self.INFO, partner_locs=b.drop(columns="z"), use_z=True
+            )
+
+    def test_partner_names_give_short_columns(self, channels):
+        a, b, c = channels
+        out, info = postprocess.cbc(
+            a,
+            self.INFO,
+            partner_locs=[b, c],
+            partner_names=["Cav2.1", "PSD 95"],
+        )
+        assert {"cbc_Cav2_1", "cbc_PSD_95"} <= set(out.columns)
+        assert info[-1]["CBC partner names"] == ["Cav2.1", "PSD 95"]
+        assert info[-1]["CBC columns"] == ["cbc_Cav2_1", "cbc_PSD_95"]
+
+    def test_cbc_column(self):
+        assert postprocess._cbc_column("Cav2.1") == "cbc_Cav2_1"
+        assert postprocess._cbc_column(" a--b ") == "cbc_a_b"
+        with pytest.raises(ValueError):
+            postprocess._cbc_column(".")
+
+    def test_all_pairs_matches_single_calls(self, channels):
+        """Both directions of every pair, identical to ``cbc``."""
+        a, b, c = channels
+        tracker = RecordingProgress()
+        out, infos = postprocess.cbc_all_pairs(
+            [a, b, c],
+            [self.INFO] * 3,
+            names=["A", "B", "C"],
+            undefined=-2.0,
+            progress=tracker,
+        )
+        assert len(out) == len(infos) == 3
+        assert set(out[0].columns) - set(a.columns) == {"cbc_B", "cbc_C"}
+        assert set(out[1].columns) - set(b.columns) == {"cbc_A", "cbc_C"}
+        assert infos[1][-1]["CBC name"] == "B"
+        assert infos[1][-1]["Undefined CBC value"] == -2.0
+        single, _ = postprocess.cbc(
+            b,
+            self.INFO,
+            partner_locs=[a, c],
+            partner_names=["A", "C"],
+            undefined=-2.0,
+        )
+        for column in ("cbc_A", "cbc_C"):
+            np.testing.assert_array_equal(out[1][column], single[column])
+        # both directions differ (not symmetric)
+        assert out[1]["cbc_A"].median() > out[0]["cbc_B"].median() + 0.2
+        # cumulative progress over all channels
+        assert_phases(tracker, ["Calculating CBC"])
+        assert tracker.phases[0].maximum == len(a) + len(b) + len(c)
+
+    def test_all_pairs_invalid_arguments(self, channels):
+        a, b, _ = channels
+        with pytest.raises(ValueError):
+            postprocess.cbc_all_pairs([a], [self.INFO])
+        with pytest.raises(ValueError):
+            postprocess.cbc_all_pairs([a, b], [self.INFO])
+        with pytest.raises(ValueError):
+            postprocess.cbc_all_pairs([a, b], [self.INFO] * 2, names=["x"])
+        with pytest.raises(ValueError):
+            postprocess.cbc_all_pairs(
+                [a, b], [self.INFO] * 2, names=["x", "x"]
+            )
+
+    def test_undefined_without_neighbors(self):
+        a = pd.DataFrame({"x": [0.0, 1.3, 6500.0], "y": [0.0, 0.0, 6500.0]})
+        b = pd.DataFrame({"x": [2.6, 3.9], "y": [0.0, 1.3]})
+        out, _ = postprocess.cbc(
+            a, self.INFO, partner_locs=b, undefined=np.nan
+        )
+        assert np.isnan(out["cbc"].iloc[2])  # isolated localization
+        assert np.isfinite(out["cbc"].iloc[:2]).all()
+        out, _ = postprocess.cbc(a, self.INFO, partner_locs=b.iloc[:0])
+        assert (out["cbc"] == 0).all()  # empty partner
+        out, _ = postprocess.cbc(a, self.INFO, partner_locs=b, undefined=-1.5)
+        assert out["cbc"].iloc[2] == -1.5
+
+    def test_remove_undefined(self):
+        a = pd.DataFrame(
+            {"x": [0.0, 1.3, 6500.0, 2.6], "y": [0.0, 0.0, 6500.0, 1.3]}
+        )
+        b = pd.DataFrame({"x": [2.6, 3.9], "y": [0.0, 1.3]})
+        c = pd.DataFrame({"x": [0.0], "y": [2.6]})
+        kept, info = postprocess.cbc(
+            a, self.INFO, partner_locs=b, remove_undefined=True
+        )
+        assert len(kept) == 3  # the isolated localization is removed
+        assert 6500.0 not in kept["x"].to_numpy()
+        assert list(kept.index) == [0, 1, 2]
+        assert info[-1]["Localizations without neighbors removed"] == 1
+        assert "Undefined CBC value" not in info[-1]
+        # removed if undefined against any partner
+        kept, _ = postprocess.cbc(
+            a, self.INFO, partner_locs=[b, c.iloc[:0]], remove_undefined=True
+        )
+        assert len(kept) == 0
+        all_locs, all_infos = postprocess.cbc_all_pairs(
+            [a, b, c], [self.INFO] * 3, remove_undefined=True
+        )
+        assert len(all_locs[0]) == 3
+        assert all_infos[0][-1]["Localizations without neighbors removed"] == 1
+
+    def test_warns_if_not_linked(self, channels):
+        a, b, _ = channels
+        with pytest.warns(UserWarning, match="not linked"):
+            postprocess.cbc(a, self.INFO, partner_locs=b)
+        linked_a = a.assign(len=np.ones(len(a), dtype=np.int32))
+        linked_b = b.assign(len=np.ones(len(b), dtype=np.int32))
+        with pytest.warns(UserWarning, match="not linked"):
+            # partner unlinked
+            postprocess.cbc(linked_a, self.INFO, partner_locs=b)
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            postprocess.cbc(linked_a, self.INFO, partner_locs=linked_b)
+        with pytest.warns(UserWarning, match="not linked"):
+            postprocess.cbc_all_pairs([linked_a, b], [self.INFO] * 2)
+
+    def test_invalid_arguments(self, channels):
+        a, b, c = channels
+        with pytest.raises(ValueError):
+            postprocess.cbc(
+                a, self.INFO, partner_locs=[b, c], partner_names=["x"]
+            )
+        with pytest.raises(ValueError):  # same column cbc_x_y
+            postprocess.cbc(
+                a, self.INFO, partner_locs=[b, c], partner_names=["x.y", "x y"]
+            )
+        with pytest.raises(ValueError):
+            postprocess.cbc(a, self.INFO, partner_locs=b, partner_names="...")
+        with pytest.raises(ValueError):
+            postprocess.cbc(a, self.INFO, partner_locs=b, steps=1)
+        with pytest.raises(ValueError):
+            postprocess.cbc(a, self.INFO, partner_locs=[])
+
 
 # ---------------------------------------------------------------------------
 # RESI
@@ -2065,7 +2543,7 @@ class TestResi:
         out, new_info = postprocess.resi(
             [locs.copy(), locs.copy()],
             [info, info],
-            radius_xy=2 / 130,
+            radius_xy=2.0,
             min_locs=2,
         )
         assert len(out) > 0
@@ -2093,7 +2571,7 @@ class TestResi:
             out, _ = postprocess.resi(
                 [locs.copy(), no_ng],
                 [info, info],
-                radius_xy=2 / 130,
+                radius_xy=2.0,
                 min_locs=2,
                 resi_path=path,
             )
@@ -2107,7 +2585,7 @@ class TestResi:
             postprocess.resi(
                 [locs.copy()],
                 [info],
-                radius_xy=2 / 130,
+                radius_xy=2.0,
                 min_locs=2,
             )
 
@@ -2116,13 +2594,912 @@ class TestResi:
             postprocess.resi(
                 [locs.copy(), locs.copy()],
                 [info, info],
-                radius_xy=[2 / 130],
+                radius_xy=[2.0],
                 min_locs=2,
             )
         with pytest.raises(ValueError):
             postprocess.resi(
                 [locs.copy(), locs.copy()],
                 [info, info],
-                radius_xy=2 / 130,
+                radius_xy=2.0,
                 min_locs=[2, 3, 4],
             )
+
+
+# ---------------------------------------------------------------------------
+# Ripley's H function
+# ---------------------------------------------------------------------------
+
+
+def _ripley_locs(x_nm, y_nm):
+    """Molecules at the given positions in nm."""
+    return pd.DataFrame(
+        {
+            "frame": np.zeros(len(x_nm), dtype=np.uint32),
+            "x": np.asarray(x_nm, dtype=np.float64),
+            "y": np.asarray(y_nm, dtype=np.float64),
+            "n_events": np.ones(len(x_nm), dtype=np.int32),
+        }
+    )
+
+
+class TestRipleyH:
+    SIZE = 10_000.0  # nm, field of view (100 camera pixels of 100 nm)
+    INFO = [{"Pixelsize": 100.0, "Width": 100, "Height": 100, "Frames": 1}]
+
+    @pytest.fixture
+    def random_locs(self):
+        rng = np.random.default_rng(0)
+        x, y = rng.uniform(0, self.SIZE, size=(2, 20_000))
+        return _ripley_locs(x, y)
+
+    @pytest.fixture
+    def clustered_locs(self):
+        """10 molecules within 50 nm of each of 200 random centers."""
+        rng = np.random.default_rng(1)
+        centers = rng.uniform(500, self.SIZE - 500, size=(200, 2))
+        r = 50 * np.sqrt(rng.uniform(0, 1, 2000))
+        angle = rng.uniform(0, 2 * np.pi, 2000)
+        x = np.repeat(centers[:, 0], 10) + r * np.cos(angle)
+        y = np.repeat(centers[:, 1], 10) + r * np.sin(angle)
+        return _ripley_locs(x, y)
+
+    def test_random_is_zero_within_envelope(self, random_locs):
+        result = postprocess.ripley_h(
+            random_locs, self.INFO, r_max=1000, steps=50, n_simulations=19
+        )
+        assert result["r"][0] == 20 and result["r"][-1] == 1000
+        assert np.abs(result["h_mean"]).max() < 5  # nm
+        # the envelope brackets 0 and is narrow for 20,000 points
+        assert (result["envelope_low"] < 0.5).all()
+        assert (result["envelope_high"] > -0.5).all()
+        assert (result["envelope_high"] - result["envelope_low"]).max() < 10
+
+    def test_edge_correction_removes_the_downward_bias(self, random_locs):
+        kwargs = dict(r_max=1000, steps=10, n_simulations=0)
+        corrected = postprocess.ripley_h(random_locs, self.INFO, **kwargs)
+        raw = postprocess.ripley_h(
+            random_locs, self.INFO, edge_correction=False, **kwargs
+        )
+        assert raw["h_mean"][-1] < -30
+        assert abs(corrected["h_mean"][-1]) < 5
+        assert corrected["edge_correction"] and not raw["edge_correction"]
+
+    def test_clusters_peak_between_radius_and_diameter(self, clustered_locs):
+        result = postprocess.ripley_h(
+            clustered_locs, self.INFO, r_max=500, steps=50, n_simulations=5
+        )
+        assert 50 <= result["r_h_max"][0] <= 100
+        assert result["h_mean"].max() > 100
+        assert (result["h_mean"][:10] > result["envelope_high"][:10]).all()
+
+    @pytest.mark.parametrize(
+        "picks, shape, size",
+        [
+            ([(5000, 5000), (3000, 3000)], "Circle", 4000),
+            ([(5000, 5000)], "Square", 4000),
+            ([((2000, 3000), (8000, 7000))], "Rectangle", 3000),
+            ([((1000, 2000), (6000, 9000))], "Box", None),
+            (
+                [
+                    [
+                        (1000, 1000),
+                        (9000, 1500),
+                        (6000, 5000),
+                        (8500, 9000),
+                        (1500, 8000),
+                        (1000, 1000),
+                    ]
+                ],
+                "Polygon",
+                None,
+            ),
+            (
+                [
+                    [
+                        (2000.0, [(2000, 2000), (5000, 6000), (8000, 3000)]),
+                        (1500.0, [(5000, 8000)]),
+                    ]
+                ],
+                "Brush",
+                None,
+            ),
+        ],
+    )
+    def test_random_is_zero_in_every_pick_shape(
+        self, random_locs, picks, shape, size
+    ):
+        result = postprocess.ripley_h(
+            random_locs,
+            self.INFO,
+            picks=picks,
+            pick_shape=shape,
+            pick_size=size,
+            r_max=1000,
+            steps=10,
+            n_simulations=0,
+        )
+        np.testing.assert_allclose(
+            result["areas"], lib.pick_areas(picks, shape, size), rtol=0.02
+        )
+        # the localizations counted are the picked ones
+        picked = postprocess.picked_locs(
+            random_locs,
+            self.INFO,
+            picks=picks,
+            pick_shape=shape,
+            pick_size=size,
+            add_group=False,
+        )
+        np.testing.assert_allclose(
+            result["n_locs"], [len(p) for p in picked], atol=2
+        )
+        assert np.abs(result["h_mean"]).max() < 10
+
+    def test_regions_without_locs_or_area_are_skipped(self, random_locs):
+        picks = [
+            [(1000, 1000), (4000, 1000), (4000, 4000), (1000, 1000)],
+            [(100, 100), (200, 200)],  # open polygon
+            [(2e4, 2e4), (2.1e4, 2e4), (2.1e4, 2.1e4), (2e4, 2e4)],  # outside
+        ]
+        result = postprocess.ripley_h(
+            random_locs,
+            self.INFO,
+            picks=picks,
+            pick_shape="Polygon",
+            n_simulations=2,
+        )
+        assert result["n_locs"][0] > 0
+        assert list(result["n_locs"][1:]) == [0, 0]
+        assert np.isnan(result["h"][1:]).all()
+        assert np.isnan(result["r_h_max"][1:]).all()
+        np.testing.assert_array_equal(result["h_mean"], result["h"][0])
+        with pytest.raises(ValueError, match="at least two"):
+            postprocess.ripley_h(
+                random_locs, self.INFO, picks=picks[1:], pick_shape="Polygon"
+            )
+
+    def test_mean_over_picks(self, random_locs):
+        picks = [(3000, 3000), (7000, 7000)]
+        result = postprocess.ripley_h(
+            random_locs,
+            self.INFO,
+            picks=picks,
+            pick_shape="Circle",
+            pick_size=3000,
+            n_simulations=0,
+        )
+        np.testing.assert_allclose(result["h_mean"], result["h"].mean(axis=0))
+        assert result["envelope_low"] is None
+        assert result["h"].shape == (2, 100)
+
+    def test_envelope_is_reproducible(self, clustered_locs):
+        kwargs = dict(r_max=300, steps=10, n_simulations=3)
+        a = postprocess.ripley_h(clustered_locs, self.INFO, **kwargs)
+        b = postprocess.ripley_h(clustered_locs, self.INFO, **kwargs)
+        c = postprocess.ripley_h(
+            clustered_locs, self.INFO, random_seed=1, **kwargs
+        )
+        np.testing.assert_array_equal(a["envelope_low"], b["envelope_low"])
+        assert not np.array_equal(a["envelope_low"], c["envelope_low"])
+
+    def test_polygon_edge_fraction_is_exact(self):
+        # unit square [0, 1000]^2, circle of radius 300 around a point
+        # 100 nm from the left edge: arccos(100 / 300) / pi outside
+        region = postprocess._polygon_region(
+            np.array([0, 1000, 1000, 0.0]), np.array([0, 0, 1000, 1000.0])
+        )
+        geometry = (region.kind, region.circle, region.segments)
+        fraction = postprocess._circle_fraction_inside(
+            100.0, 500.0, 300.0, *geometry
+        )
+        assert fraction == pytest.approx(1 - np.arccos(1 / 3) / np.pi)
+        # corner: a quarter of the circle inside
+        fraction = postprocess._circle_fraction_inside(
+            0.0, 0.0, 300.0, *geometry
+        )
+        assert fraction == pytest.approx(0.25)
+        assert postprocess._circle_fraction_inside(
+            500.0, 500.0, 300.0, *geometry
+        ) == pytest.approx(1.0)
+
+    def test_localizations_that_are_not_molecules_warn(self, random_locs):
+        locs = random_locs.drop(columns="n_events")
+        locs["len"] = 1  # linked localizations are still not molecules
+        with pytest.warns(UserWarning, match="not molecules"):
+            postprocess.ripley_h(locs, self.INFO, steps=5, n_simulations=0)
+        # cluster centers, G5M molecules and combined clusters pass
+        for column in ("n_events", "std_frame"):
+            locs = random_locs.drop(columns="n_events")
+            locs[column] = 1
+            with warnings.catch_warnings():
+                warnings.simplefilter("error")
+                postprocess.ripley_h(locs, self.INFO, steps=5, n_simulations=0)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            dict(r_max=0),
+            dict(steps=1),
+            dict(n_simulations=-1),
+            dict(picks=[(100, 100)], pick_shape="Hexagon"),
+            dict(picks=[(100, 100)], pick_shape="Circle"),  # no size
+        ],
+    )
+    def test_invalid_parameters(self, random_locs, kwargs):
+        with pytest.raises(ValueError):
+            postprocess.ripley_h(random_locs, self.INFO, **kwargs)
+
+    def test_plot_and_tables(self, clustered_locs):
+        picks = [(3000, 3000), (7000, 7000), (50_000, 50_000)]
+        result = postprocess.ripley_h(
+            clustered_locs,
+            self.INFO,
+            picks=picks,
+            pick_shape="Circle",
+            pick_size=4000,
+            r_max=300,
+            steps=30,
+            n_simulations=2,
+        )
+        fig = postprocess.plot_ripley_h(result)
+        ax = fig.axes[0]
+        assert ax.get_xlabel() == "r (nm)"
+        labels = ax.get_legend_handles_labels()[1]
+        assert "Regions (2)" in labels and "Mean" in labels
+        curves, regions = postprocess._ripley_h_tables(result)
+        assert list(curves.columns) == [
+            "r_nm",
+            "h_mean_nm",
+            "envelope_low_nm",
+            "envelope_high_nm",
+            "h_region_0_nm",
+            "h_region_1_nm",
+            "h_region_2_nm",
+        ]
+        assert len(curves) == 30
+        assert list(regions["n_locs"]) == list(result["n_locs"])
+        # 4 um diameter
+        assert regions["area_um2"].iloc[0] == pytest.approx(np.pi * 2**2)
+
+
+@pytest.mark.filterwarnings("ignore:r_max.*third of the z range")
+class TestRipleyH3D:
+    INFO = TestRipleyH.INFO
+    DEPTH = 1000.0  # nm
+
+    @pytest.fixture
+    def random_locs(self):
+        rng = np.random.default_rng(0)
+        x, y = rng.uniform(0, 10_000, size=(2, 20_000))
+        locs = _ripley_locs(x, y)
+        locs["z"] = rng.uniform(-self.DEPTH / 2, self.DEPTH / 2, len(locs))
+        return locs
+
+    def test_sphere_fraction_follows_archimedes(self):
+        region = postprocess._polygon_region(
+            np.array([0, 1e4, 1e4, 0.0]), np.array([0, 0, 1e4, 1e4])
+        )
+        geometry = (region.kind, region.circle, region.segments)
+        # between two planes 300 nm above and below: 300 / 400 inside
+        fraction = postprocess._sphere_fraction_inside(
+            5e3, 5e3, 0.0, 400.0, -300.0, 300.0, 5e3, *geometry
+        )
+        assert fraction == pytest.approx(0.75)
+        # corner of the box on the bottom plane: 1/4 in xy, 1/2 in z
+        fraction = postprocess._sphere_fraction_inside(
+            0.0, 0.0, -300.0, 200.0, -300.0, 300.0, 0.0, *geometry
+        )
+        assert fraction == pytest.approx(0.125)
+
+    def test_random_is_zero_and_needs_the_edge_correction(self, random_locs):
+        kwargs = dict(r_max=300, steps=30, use_z=True)
+        result = postprocess.ripley_h(
+            random_locs, self.INFO, n_simulations=5, **kwargs
+        )
+        # few pairs at the shortest radii, so they are noisier
+        assert np.abs(result["h_mean"][:3]).max() < 5
+        assert np.abs(result["h_mean"][3:]).max() < 1
+        assert result["use_z"] and result["simulated_z"] == "uniform"
+        z = random_locs["z"]
+        np.testing.assert_allclose(result["z_ranges"], [[z.min(), z.max()]])
+        np.testing.assert_allclose(
+            result["volumes"], result["areas"] * (z.max() - z.min())
+        )
+        raw = postprocess.ripley_h(
+            random_locs,
+            self.INFO,
+            n_simulations=0,
+            edge_correction=False,
+            **kwargs,
+        )
+        assert raw["h_mean"][-1] < -10
+
+    def test_3d_clusters_peak(self):
+        rng = np.random.default_rng(3)
+        centers = np.column_stack(
+            [
+                rng.uniform(500, 9500, size=(300, 2)),
+                rng.uniform(-300, 300, size=300),
+            ]
+        )
+        offsets = rng.normal(size=(3000, 3))
+        offsets *= (
+            50
+            * np.cbrt(rng.uniform(0, 1, 3000))
+            / np.linalg.norm(offsets, axis=1)
+        )[:, None]
+        xyz = np.repeat(centers, 10, axis=0) + offsets
+        locs = _ripley_locs(xyz[:, 0], xyz[:, 1])
+        locs["z"] = xyz[:, 2]
+        with pytest.warns(UserWarning, match="third of the z range"):
+            result = postprocess.ripley_h(
+                locs,
+                self.INFO,
+                r_max=300,
+                steps=30,
+                n_simulations=0,
+                use_z=True,
+            )
+        assert 50 <= result["r_h_max"][0] <= 100
+        # in 2D, the clusters are smeared out by the projection
+        flat = postprocess.ripley_h(
+            locs, self.INFO, r_max=300, steps=30, n_simulations=0
+        )
+        assert result["h_mean"].max() > flat["h_mean"].max()
+
+    @pytest.mark.parametrize("simulated_z", ["uniform", "observed"])
+    @pytest.mark.parametrize(
+        "picks, shape, size",
+        [
+            ([(5000, 5000), (3000, 3000)], "Circle", 4000),
+            ([((2000, 3000), (8000, 7000))], "Rectangle", 3000),
+            (
+                [
+                    [
+                        (1000, 1000),
+                        (9000, 1500),
+                        (6000, 5000),
+                        (8500, 9000),
+                        (1500, 8000),
+                        (1000, 1000),
+                    ]
+                ],
+                "Polygon",
+                None,
+            ),
+            (
+                [
+                    [
+                        (2000.0, [(2000, 2000), (5000, 6000), (8000, 3000)]),
+                        (1500.0, [(5000, 8000)]),
+                    ]
+                ],
+                "Brush",
+                None,
+            ),
+        ],
+    )
+    def test_random_is_zero_in_picks_with_a_manual_z_range(
+        self, random_locs, picks, shape, size, simulated_z
+    ):
+        result = postprocess.ripley_h(
+            random_locs,
+            self.INFO,
+            picks=picks,
+            pick_shape=shape,
+            pick_size=size,
+            r_max=300,
+            steps=10,
+            n_simulations=3,
+            use_z=True,
+            z_range=(-400, 400),
+            simulated_z=simulated_z,
+        )
+        np.testing.assert_array_equal(
+            result["z_ranges"], [[-400, 400]] * len(picks)
+        )
+        assert np.abs(result["h_mean"]).max() < 5
+        assert (result["envelope_low"] < result["envelope_high"]).all()
+
+    def test_manual_z_range_ignores_localizations_outside(self, random_locs):
+        result = postprocess.ripley_h(
+            random_locs,
+            self.INFO,
+            n_simulations=0,
+            steps=5,
+            use_z=True,
+            z_range=(0, 400),
+        )
+        z = random_locs["z"]
+        assert result["n_locs"][0] == ((z >= 0) & (z <= 400)).sum()
+
+    def test_tables_and_plot_in_3d(self, random_locs):
+        result = postprocess.ripley_h(
+            random_locs, self.INFO, n_simulations=0, steps=5, use_z=True
+        )
+        _, regions = postprocess._ripley_h_tables(result)
+        columns = {"z_min_nm", "z_max_nm", "volume_um3", "density_per_um3"}
+        assert columns <= set(regions.columns)
+        assert "density_per_um2" not in regions.columns
+        assert regions["density_per_um3"].iloc[0] == pytest.approx(
+            len(random_locs) / regions["volume_um3"].iloc[0]
+        )
+        title = postprocess.plot_ripley_h(result).axes[0].get_title()
+        assert title.endswith("(3D)")
+
+    def test_regions_without_depth_are_skipped(self, random_locs):
+        locs = random_locs.copy()
+        locs["z"] = 0.0
+        with pytest.raises(ValueError, match="different z"):
+            postprocess.ripley_h(locs, self.INFO, use_z=True)
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            dict(z_range=(100, 100)),
+            dict(simulated_z="gaussian"),
+        ],
+    )
+    def test_invalid_3d_parameters(self, random_locs, kwargs):
+        with pytest.raises(ValueError):
+            postprocess.ripley_h(random_locs, self.INFO, use_z=True, **kwargs)
+        with pytest.raises(ValueError, match="requires z"):
+            postprocess.ripley_h(
+                random_locs.drop(columns="z"), self.INFO, use_z=True
+            )
+
+
+@pytest.mark.filterwarnings("ignore:r_max.*third of the z range")
+class TestRdf:
+    INFO = TestRipleyH.INFO
+
+    @pytest.fixture
+    def random_locs(self):
+        rng = np.random.default_rng(0)
+        x, y = rng.uniform(0, 10_000, size=(2, 20_000))
+        locs = _ripley_locs(x, y)
+        locs["z"] = rng.uniform(-500, 500, len(locs))
+        return locs
+
+    def test_random_is_one(self, random_locs):
+        result = postprocess.rdf(random_locs, self.INFO, n_simulations=9)
+        # ring centers of 10 nm wide rings
+        np.testing.assert_allclose(result["r"][[0, -1]], [5, 495])
+        assert np.abs(result["g_mean"] - 1).max() < 0.05
+        assert (result["envelope_low"] < 1).all()
+        assert (result["envelope_high"] > 1).all()
+        raw = postprocess.rdf(
+            random_locs, self.INFO, n_simulations=0, edge_correction=False
+        )
+        assert raw["g_mean"][-1] < 0.96
+
+    def test_random_is_one_in_3d(self, random_locs):
+        result = postprocess.rdf(
+            random_locs,
+            self.INFO,
+            r_max=300,
+            steps=30,
+            n_simulations=0,
+            use_z=True,
+        )
+        assert np.abs(result["g_mean"][5:] - 1).max() < 0.05
+        assert result["use_z"] and result["volumes"] is not None
+
+    @pytest.mark.parametrize("use_z", [False, True])
+    def test_integrates_to_ripleys_k(self, random_locs, use_z):
+        kwargs = dict(r_max=300, steps=30, n_simulations=0, use_z=use_z)
+        h = postprocess.ripley_h(random_locs, self.INFO, **kwargs)["h"][0]
+        g = postprocess.rdf(random_locs, self.INFO, **kwargs)["g"][0]
+        edges = np.arange(31) * 10.0
+        if use_z:
+            k = np.cumsum(g * 4 / 3 * np.pi * np.diff(edges**3))
+            h_from_g = np.cbrt(3 * k / (4 * np.pi)) - edges[1:]
+        else:
+            k = np.cumsum(g * np.pi * np.diff(edges**2))
+            h_from_g = np.sqrt(k / np.pi) - edges[1:]
+        np.testing.assert_allclose(h_from_g, h, atol=1e-9)
+
+    def test_clusters_raise_g_at_short_distances(self):
+        rng = np.random.default_rng(1)
+        centers = rng.uniform(500, 9500, size=(200, 2))
+        r = 50 * np.sqrt(rng.uniform(0, 1, 2000))
+        angle = rng.uniform(0, 2 * np.pi, 2000)
+        x = np.repeat(centers[:, 0], 10) + r * np.cos(angle)
+        y = np.repeat(centers[:, 1], 10) + r * np.sin(angle)
+        result = postprocess.rdf(
+            _ripley_locs(x, y), self.INFO, n_simulations=3
+        )
+        # within the clusters (diameter 100 nm), far above random
+        assert (result["g_mean"][:5] > 10).all()
+        assert (result["g_mean"][:5] > result["envelope_high"][:5]).all()
+
+    def test_plot_and_tables(self, random_locs):
+        picks = [(3000, 3000), (7000, 7000)]
+        result = postprocess.rdf(
+            random_locs,
+            self.INFO,
+            picks=picks,
+            pick_shape="Circle",
+            pick_size=4000,
+            n_simulations=2,
+        )
+        ax = postprocess.plot_rdf(result).axes[0]
+        assert ax.get_ylabel() == "g(r)"
+        assert ax.get_xlim() == (0, 500)
+        curves, regions = postprocess._rdf_tables(result)
+        assert list(curves.columns) == [
+            "r_nm",
+            "g_mean",
+            "envelope_low",
+            "envelope_high",
+            "g_region_0",
+            "g_region_1",
+        ]
+        assert "h_max_nm" not in regions.columns
+        assert list(regions["n_locs"]) == list(result["n_locs"])
+
+
+class TestCrossPairStatistics:
+    INFO = TestRipleyH.INFO
+    SIZE = 10_000.0
+
+    def _random(self, n, seed, z=False):
+        rng = np.random.default_rng(seed)
+        locs = _ripley_locs(*rng.uniform(0, self.SIZE, size=(2, n)))
+        if z:
+            locs["z"] = rng.uniform(-500, 500, n)
+        return locs
+
+    def _clustered(self, seed):
+        """10 molecules within 50 nm of each of 300 random centers."""
+        rng = np.random.default_rng(seed)
+        centers = rng.uniform(0, self.SIZE, size=(300, 2))
+        r = 50 * np.sqrt(rng.uniform(0, 1, 3000))
+        angle = rng.uniform(0, 2 * np.pi, 3000)
+        x = np.repeat(centers[:, 0], 10) + r * np.cos(angle)
+        y = np.repeat(centers[:, 1], 10) + r * np.sin(angle)
+        inside = (x > 0) & (x < self.SIZE) & (y > 0) & (y < self.SIZE)
+        return _ripley_locs(x[inside], y[inside])
+
+    @pytest.mark.parametrize("cross_null", ["shift", "labels"])
+    def test_independent_random_channels(self, cross_null):
+        a, b = self._random(5000, 0), self._random(4000, 1)
+        h = postprocess.ripley_h(
+            a,
+            self.INFO,
+            partner_locs=b,
+            cross_null=cross_null,
+            steps=50,
+            n_simulations=9,
+        )
+        g = postprocess.rdf(a, self.INFO, partner_locs=b, n_simulations=0)
+        assert np.abs(h["h_mean"]).max() < 2
+        assert np.abs(g["g_mean"][5:] - 1).max() < 0.1
+        assert h["cross_null"] == cross_null
+        assert list(h["n_locs"]) == [5000]
+        assert list(h["n_locs_partner"]) == [4000]
+        assert h["simulated_z"] is None
+
+    def test_symmetric_in_the_channels(self):
+        a, b = self._random(3000, 0), self._random(2000, 1)
+        picks = [(3000, 3000), (7000, 7000)]
+        kwargs = dict(n_simulations=0, steps=20)
+        ab = postprocess.ripley_h(
+            a,
+            self.INFO,
+            picks=picks,
+            pick_shape="Circle",
+            pick_size=4000,
+            partner_locs=b,
+            **kwargs,
+        )
+        ba = postprocess.ripley_h(
+            b,
+            self.INFO,
+            picks=picks,
+            pick_shape="Circle",
+            pick_size=4000,
+            partner_locs=a,
+            **kwargs,
+        )
+        np.testing.assert_allclose(ab["h"], ba["h"], atol=1e-9)
+
+    def test_colocalized_channels(self):
+        rng = np.random.default_rng(2)
+        a = self._random(3000, 0)
+        b = a.copy()
+        b[["x", "y"]] += rng.normal(0, 10.0, size=(len(b), 2))  # nm
+        result = postprocess.rdf(
+            a, self.INFO, partner_locs=b, r_max=200, steps=20, n_simulations=5
+        )
+        assert result["g_mean"][0] > 10
+        assert (result["g_mean"][:2] > result["envelope_high"][:2]).all()
+
+    def test_null_models_of_independent_clustered_channels(self):
+        # independent, but each clustered: random shifts keep each
+        # channel's clusters, random labels pool them
+        a, b = self._clustered(1), self._clustered(2)
+        kwargs = dict(partner_locs=b, steps=25, n_simulations=19)
+        shift = postprocess.ripley_h(a, self.INFO, **kwargs)
+        inside = (shift["h_mean"] >= shift["envelope_low"]) & (
+            shift["h_mean"] <= shift["envelope_high"]
+        )
+        assert inside.mean() > 0.9
+        labels = postprocess.ripley_h(
+            a, self.INFO, cross_null="labels", **kwargs
+        )
+        assert (labels["h_mean"] < labels["envelope_low"]).all()
+
+    @pytest.mark.parametrize(
+        "pick, shape, size",
+        [
+            (((2000, 3000), (8000, 7000)), "Rectangle", 3000),
+            (((1000, 2000), (6000, 9000)), "Box", None),
+            ((5000, 5000), "Square", 4000),
+            ((5000, 5000), "Circle", 4000),
+            (
+                [
+                    (1000, 1000),
+                    (6000, 1000),
+                    (6000, 4000),
+                    (1000, 4000),
+                    (1000, 1000),
+                ],
+                "Polygon",
+                None,
+            ),
+        ],
+    )
+    def test_random_shift_stays_in_the_region(self, pick, shape, size):
+        region = postprocess._pick_region(pick, shape, size)
+        assert region.rectangle is not None or shape == "Circle"
+        rng = np.random.default_rng(0)
+        x, y = postprocess._uniform_in_region(500, region, rng)
+        z = rng.uniform(-100, 100, 500)
+        x2, y2, z2 = postprocess._random_shift(
+            x, y, z, region, (-100, 100), rng
+        )
+        geometry = (region.kind, region.circle, region.segments)
+        assert postprocess._in_region_many(x2, y2, *geometry).mean() > 0.99
+        assert z2.min() >= -100 and z2.max() <= 100
+        assert not np.allclose(x2, x)
+
+    def test_random_shift_needs_rectangles_or_circles(self):
+        a, b = self._random(2000, 0), self._random(2000, 1)
+        picks = [[(1000, 1000), (9000, 1500), (6000, 5000), (1000, 1000)]]
+        with pytest.raises(ValueError, match="cross_null='labels'"):
+            postprocess.ripley_h(
+                a, self.INFO, picks=picks, pick_shape="Polygon", partner_locs=b
+            )
+        result = postprocess.ripley_h(
+            a,
+            self.INFO,
+            picks=picks,
+            pick_shape="Polygon",
+            partner_locs=b,
+            cross_null="labels",
+            n_simulations=2,
+        )
+        assert result["envelope_low"] is not None
+
+    def test_cross_in_3d(self):
+        a = self._random(8000, 0, z=True)
+        b = self._random(8000, 1, z=True)
+        result = postprocess.rdf(
+            a,
+            self.INFO,
+            partner_locs=b,
+            use_z=True,
+            r_max=300,
+            steps=15,
+            n_simulations=3,
+        )
+        assert np.abs(result["g_mean"][2:] - 1).max() < 0.1
+        z = np.concatenate([a["z"], b["z"]])
+        np.testing.assert_allclose(result["z_ranges"], [[z.min(), z.max()]])
+        with pytest.raises(ValueError, match="requires z"):
+            postprocess.rdf(
+                a, self.INFO, partner_locs=b.drop(columns="z"), use_z=True
+            )
+
+    def test_regions_need_both_channels(self):
+        a, b = self._random(2000, 0), self._random(2000, 1)
+        b = b[b["x"] > 5000]  # the right half only
+        result = postprocess.ripley_h(
+            a,
+            self.INFO,
+            picks=[(2500, 5000), (7500, 5000)],
+            pick_shape="Circle",
+            pick_size=3000,
+            partner_locs=b,
+            n_simulations=0,
+        )
+        assert np.isnan(result["h"][0]).all()
+        assert not np.isnan(result["h"][1]).any()
+        assert result["n_locs_partner"][0] == 0
+
+    def test_partner_without_molecules_warns(self):
+        a, b = self._random(500, 0), self._random(500, 1)
+        with pytest.warns(UserWarning, match="partner are not molecules"):
+            postprocess.ripley_h(
+                a,
+                self.INFO,
+                partner_locs=b.drop(columns="n_events"),
+                steps=5,
+                n_simulations=0,
+            )
+
+    def test_plot_and_tables(self):
+        a, b = self._random(2000, 0), self._random(2000, 1)
+        result = postprocess.rdf(
+            a,
+            self.INFO,
+            partner_locs=b,
+            cross_null="labels",
+            n_simulations=2,
+        )
+        ax = postprocess.plot_rdf(result).axes[0]
+        assert ax.get_title() == "Cross radial distribution function"
+        labels = ax.get_legend_handles_labels()[1]
+        assert "Random labeling envelope (2 simulations)" in labels
+        _, regions = postprocess._rdf_tables(result)
+        assert {"n_locs_partner", "partner_density_per_um2"} <= set(
+            regions.columns
+        )
+        h = postprocess.ripley_h(a, self.INFO, partner_locs=b, n_simulations=2)
+        ax = postprocess.plot_ripley_h(h).axes[0]
+        assert ax.get_title() == "Ripley's cross H function"
+        assert "Independence envelope (2 random shifts)" in (
+            ax.get_legend_handles_labels()[1]
+        )
+
+    def test_invalid_cross_null(self):
+        a, b = self._random(500, 0), self._random(500, 1)
+        with pytest.raises(ValueError, match="cross_null"):
+            postprocess.ripley_h(
+                a, self.INFO, partner_locs=b, cross_null="toroidal"
+            )
+
+
+class TestNndDistributions:
+    INFO = TestRipleyH.INFO
+    SIZE = 10_000.0
+
+    def _random(self, n, seed, z=False):
+        rng = np.random.default_rng(seed)
+        locs = _ripley_locs(*rng.uniform(0, self.SIZE, size=(2, n)))
+        if z:
+            locs["z"] = rng.uniform(-400, 400, n)
+        return locs
+
+    def test_random_channel_matches_the_csr_distribution(self):
+        locs = self._random(10_000, 0)
+        result = postprocess.nnd_distributions(
+            locs, self.INFO, n_simulations=5
+        )
+        assert result["histograms"].shape == (1, 1, 40)
+        assert result["names"] == ["0"] and result["cross_null"] is None
+        # P(r_1 < NND <= r_2) = exp(-pi lambda r_1^2) - exp(-pi lambda r_2^2)
+        density = 10_000 / self.SIZE**2
+        edges = result["edges"]
+        expected = np.exp(-np.pi * density * edges[:-1] ** 2) - np.exp(
+            -np.pi * density * edges[1:] ** 2
+        )
+        np.testing.assert_allclose(
+            result["histograms"][0, 0], expected, atol=0.01
+        )
+        np.testing.assert_allclose(
+            result["simulated_mean"][0, 0], expected, atol=0.005
+        )
+        assert result["medians"][0, 0] == pytest.approx(
+            np.sqrt(np.log(2) / (np.pi * density)), rel=0.05
+        )
+
+    @pytest.mark.parametrize("cross_null", ["shift", "labels"])
+    def test_independent_channels_match_the_simulations(self, cross_null):
+        a, b = self._random(5000, 0), self._random(3000, 1)
+        result = postprocess.nnd_distributions(
+            [a, b],
+            self.INFO,
+            names=["A", "B"],
+            n_simulations=19,
+            cross_null=cross_null,
+        )
+        assert result["histograms"].shape == (2, 2, 40)
+        np.testing.assert_array_equal(
+            result["n_molecules"], [[5000, 5000], [3000, 3000]]
+        )
+        np.testing.assert_allclose(
+            result["medians"], result["simulated_medians"], rtol=0.05
+        )
+        inside = (result["histograms"] >= result["envelope_low"]) & (
+            result["histograms"] <= result["envelope_high"]
+        )
+        assert inside.mean() > 0.8
+
+    def test_colocalized_channels_have_short_cross_nnds(self):
+        rng = np.random.default_rng(2)
+        a = self._random(3000, 0)
+        b = a.copy()
+        b[["x", "y"]] += rng.normal(0, 10.0, size=(len(b), 2))  # nm
+        result = postprocess.nnd_distributions(
+            [a, b], self.INFO, n_simulations=3
+        )
+        assert result["medians"][0, 1] < 20
+        assert result["simulated_medians"][0, 1] > 50
+        assert result["histograms"][0, 1, :3].sum() > 0.5
+
+    def test_nnds_are_within_regions(self):
+        a, b = self._random(4000, 0), self._random(4000, 1)
+        b = b[b["x"] > 5000]  # the right half only
+        picks = [(2500, 5000), (7500, 5000)]
+        result = postprocess.nnd_distributions(
+            [a, b],
+            self.INFO,
+            picks=picks,
+            pick_shape="Circle",
+            pick_size=3000,
+            n_simulations=0,
+        )
+        n_a = postprocess.picked_locs(
+            a, self.INFO, picks=picks, pick_shape="Circle", pick_size=3000
+        )
+        # molecules of a in the left pick have no b to point to
+        assert result["n_molecules"][0, 1] == len(n_a[1])
+        assert result["n_molecules"][0, 0] == len(n_a[0]) + len(n_a[1])
+        assert result["simulated_mean"] is None
+
+    def test_3d(self):
+        a, b = self._random(8000, 0, z=True), self._random(8000, 1, z=True)
+        result = postprocess.nnd_distributions(
+            [a, b], self.INFO, use_z=True, n_simulations=5
+        )
+        np.testing.assert_allclose(
+            result["medians"], result["simulated_medians"], rtol=0.05
+        )
+        flat = postprocess.nnd_distributions(
+            [a, b], self.INFO, n_simulations=0
+        )
+        assert (result["medians"] > flat["medians"]).all()
+        with pytest.raises(ValueError, match="requires z"):
+            postprocess.nnd_distributions(
+                [a, b.drop(columns="z")], self.INFO, use_z=True
+            )
+
+    def test_random_shifts_need_rectangles_or_circles(self):
+        a, b = self._random(1000, 0), self._random(1000, 1)
+        picks = [[(1000, 1000), (9000, 1500), (6000, 5000), (1000, 1000)]]
+        with pytest.raises(ValueError, match="cross_null='labels'"):
+            postprocess.nnd_distributions(
+                [a, b], self.INFO, picks=picks, pick_shape="Polygon"
+            )
+        # one channel needs no shifts
+        postprocess.nnd_distributions(
+            a, self.INFO, picks=picks, pick_shape="Polygon"
+        )
+
+    def test_plot_and_tables(self):
+        a, b = self._random(2000, 0), self._random(2000, 1)
+        result = postprocess.nnd_distributions(
+            [a, b], self.INFO, names=["A", "B"], n_simulations=2
+        )
+        fig = postprocess.plot_nnd_distributions(result)
+        assert len(fig.axes) == 4
+        assert fig.axes[1].get_title() == "A → B"
+        curves, summary = postprocess._nnd_tables(result)
+        assert {"A_to_B", "A_to_B_simulated_mean"} <= set(curves.columns)
+        assert len(curves) == 40
+        assert list(summary["from"]) == ["A", "A", "B", "B"]
+        assert list(summary["to"]) == ["A", "B", "A", "B"]
+
+    def test_invalid_parameters(self):
+        a = self._random(500, 0)
+        with pytest.raises(ValueError, match="names"):
+            postprocess.nnd_distributions([a, a], self.INFO, names=["A"])
+        with pytest.raises(ValueError, match="cross_null"):
+            postprocess.nnd_distributions(
+                [a, a], self.INFO, cross_null="toroidal"
+            )
+        with pytest.raises(ValueError, match="r_max"):
+            postprocess.nnd_distributions(a, self.INFO, r_max=0)

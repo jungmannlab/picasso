@@ -42,6 +42,11 @@ POLYGON_POINTER_SIZE = 16  # must be even
 BRUSH_FILL_ALPHA = 70
 # line styles of the tool overlays, see ``OverlayStyle``
 LINE_STYLES = ("Solid", "Dashed", "Dotted", "Dash-dot")
+# default pixel sizes of the text of the scale bar, the legend and the
+# rotation angles (the GUIs scale them with the font size on screen)
+SCALEBAR_FONT_SIZE = 20
+LEGEND_FONT_SIZE = 16
+ROTATION_ANGLES_FONT_SIZE = 12
 
 
 @dataclass(frozen=True)
@@ -334,9 +339,9 @@ def get_rectangle_pick_polygon(
 
 def _draw_picks_circle(
     image: QtGui.QImage,
-    viewport: list[tuple[float, float], tuple[float, float]],  # cam. px
-    picks: list[tuple],  # pick coords in camera pixels
-    pick_size: float,  # diameter in camera pixels
+    viewport: list[tuple[float, float], tuple[float, float]],  # nm
+    picks: list[tuple],  # pick coords in nm
+    pick_size: float,  # diameter in nm
     point_picks: bool = False,
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
@@ -349,7 +354,7 @@ def _draw_picks_circle(
     if point_picks:  # draw circular picks as points
         painter.setBrush(QtGui.QBrush(style.qcolor()))
         for i, pick in enumerate(picks):
-            # convert from camera units to display units
+            # convert from nm to display pixels
             cx, cy = map_to_view(*pick, image.size(), viewport)
             painter.drawEllipse(QtCore.QPoint(cx, cy), 3, 3)
             if annotate_picks:
@@ -370,7 +375,7 @@ def _draw_picks_circle(
             ):
                 continue
 
-            # convert from camera units to display units
+            # convert from nm to display pixels
             cx, cy = map_to_view(*pick, image.size(), viewport)
             painter.drawEllipse(int(cx - d / 2), int(cy - d / 2), d, d)
             if annotate_picks:
@@ -381,9 +386,9 @@ def _draw_picks_circle(
 
 def _draw_picks_rectangle(
     image: QtGui.QImage,
-    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
-    picks: list[tuple],  # picks in camera pixels
-    pick_size: float,  # width in camera pixels
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # nm
+    picks: list[tuple],  # picks in nm
+    pick_size: float,  # width in nm
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
     style: OverlayStyle | None = None,
@@ -397,7 +402,7 @@ def _draw_picks_rectangle(
     if fill is not None:
         painter.setBrush(fill)
     for i, pick in enumerate(picks):
-        # convert from camera units to display units
+        # convert from nm to display pixels
         start_x, start_y = map_to_view(*pick[0], image.size(), viewport)
         end_x, end_y = map_to_view(*pick[1], image.size(), viewport)
         # draw a rectangle
@@ -416,8 +421,8 @@ def _draw_picks_rectangle(
 
 def _draw_picks_polygon(
     image: QtGui.QImage,
-    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
-    picks: list[tuple],  # picks in camera pixels
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # nm
+    picks: list[tuple],  # picks in nm
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
     style: OverlayStyle | None = None,
@@ -465,9 +470,9 @@ def _draw_picks_polygon(
 
 def _draw_picks_square(
     image: QtGui.QImage,
-    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
-    picks: list[tuple],  # picks in camera pixels
-    pick_size: float,  # side length in camera pixels
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # nm
+    picks: list[tuple],  # picks in nm
+    pick_size: float,  # side length in nm
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
     style: OverlayStyle | None = None,
@@ -489,7 +494,7 @@ def _draw_picks_square(
         ):
             continue
 
-        # convert from camera units to display units
+        # convert from nm to display pixels
         cx, cy = map_to_view(*pick, image.size(), viewport)
         painter.drawRect(int(cx - w / 2), int(cy - w / 2), w, w)
 
@@ -504,8 +509,8 @@ def _draw_picks_square(
 
 def _draw_picks_box(
     image: QtGui.QImage,
-    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
-    picks: list[tuple],  # picks in camera pixels
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # nm
+    picks: list[tuple],  # picks in nm
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
     style: OverlayStyle | None = None,
@@ -529,7 +534,7 @@ def _draw_picks_box(
         ):
             continue
 
-        # convert from camera units to display units
+        # convert from nm to display pixels
         x0, y0 = map_to_view(min(X), min(Y), image.size(), viewport)
         x1, y1 = map_to_view(max(X), max(Y), image.size(), viewport)
         painter.drawRect(x0, y0, x1 - x0, y1 - y0)
@@ -544,7 +549,7 @@ def _draw_picks_box(
 def brush_pick_path(
     pick: list[tuple[float, list[tuple[float, float]]]],
     image_size: QtCore.QSize,
-    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # nm
 ) -> QtGui.QPainterPath:
     """Return the painted outline of a brush pick in display units.
 
@@ -559,11 +564,11 @@ def brush_pick_path(
     ----------
     pick : list of tuples
         One brush pick, i.e., a list of ``(width, path)`` strokes in
-        camera pixels.
+        nm.
     image_size : QSize
         Size of the image the pick is drawn onto.
     viewport : tuple
-        Current field of view in camera pixels, ``((y_min, x_min),
+        Current field of view in nm, ``((y_min, x_min),
         (y_max, x_max))``.
 
     Returns
@@ -599,8 +604,8 @@ def brush_pick_path(
 
 def _draw_picks_brush(
     image: QtGui.QImage,
-    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
-    picks: list[tuple],  # picks in camera pixels
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # nm
+    picks: list[tuple],  # picks in nm
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
     style: OverlayStyle | None = None,
@@ -644,12 +649,12 @@ def _draw_picks_brush(
 @adjust_viewport_decorator
 def draw_picks(
     image: QtGui.QImage,
-    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # nm
     pick_shape: Literal[
         "Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"
     ],
-    picks: list[tuple],  # pick coords in camera pixels
-    pick_size: float | None,  # diameter in camera pixels
+    picks: list[tuple],  # pick coords in nm
+    pick_size: float | None,  # diameter in nm
     point_picks: bool = False,
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
@@ -663,7 +668,7 @@ def draw_picks(
     image : QImage
         Image containing rendered localizations.
     viewport : tuple
-        Current field of view in camera pixels, ``((y_min, x_min),
+        Current field of view in nm, ``((y_min, x_min),
         (y_max, x_max))``.
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"}
         Shape of the picks to be drawn.
@@ -672,7 +677,7 @@ def draw_picks(
         coordinates. Note: this must match the format of the given pick
         shape.
     pick_size : float or None
-        Size of the picks in camera pixels. For "Circle", this is the
+        Size of the picks in nm. For "Circle", this is the
         diameter; for "Rectangle", this is the width; for "Square", this
         is the side length. This parameter is ignored for "Polygon",
         "Box" and "Brush" picks, which carry their own extent.
@@ -766,12 +771,11 @@ def draw_picks(
 @adjust_viewport_decorator
 def draw_points(
     image: QtGui.QImage,
-    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
-    points: list[tuple],  # points in camera pixels,
-    pixelsize: int | float,  # camera pixel size in nm
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # nm
+    points: list[tuple],  # points in nm
     color: QtGui.QColor | None = None,  # default: yellow
     mark_width: int = 20,  # width of the drawn crosses in display pixels
-    cursor: tuple | None = None,  # live cursor position in camera pixels
+    cursor: tuple | None = None,  # live cursor position in nm
     style: OverlayStyle | None = None,
 ) -> QtGui.QImage:
     """Draw points, lines and distances between them onto image.
@@ -781,20 +785,18 @@ def draw_points(
     image : QImage
         Image containing rendered localizations.
     viewport : tuple
-        Current field of view in camera pixels, ``((y_min, x_min),
+        Current field of view in nm, ``((y_min, x_min),
         (y_max, x_max))``.
     points : list of tuples
         List of points, where each point is a tuple specifying the point
-        coordinates in camera pixels.
-    pixelsize : int or float
-        Camera pixel size in nm.
+        coordinates in nm.
     color : QtGui.QColor, optional
         Color of the points, lines and text; overrides the color of
         ``style``. Default is yellow.
     mark_width : int, optional
         Width of the drawn crosses in display pixels. Default is 20.
     cursor : tuple or None, optional
-        Current cursor position in camera pixels. If given, it is drawn
+        Current cursor position in nm. If given, it is drawn
         as a cross and, when at least one point exists, a line with the
         live distance to the last point is shown. Default is None.
     style : OverlayStyle, optional
@@ -828,17 +830,8 @@ def draw_points(
         """Draw a line and the distance label between two points."""
         painter.setPen(line_pen)
         painter.drawLine(x1, y1, x2, y2)
-        # get distance with 2 decimal places
-        distance = (
-            float(
-                int(
-                    np.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
-                    * pixelsize
-                    * 100
-                )
-            )
-            / 100
-        )
+        # the distance in nm, truncated to 2 decimal places
+        distance = int(np.hypot(p1[0] - p2[0], p1[1] - p2[1]) * 100) / 100
         painter.drawText(
             int((x1 + x2) / 2 + mark_width),
             int((y1 + y2) / 2 + mark_width),
@@ -882,13 +875,12 @@ def draw_scalebar(
     image: QtGui.QImage,
     viewport: tuple[tuple[float, float], tuple[float, float]],
     scalebar_length_nm: int | float,
-    pixelsize: int | float,
     display_length: bool = True,
     color: QtGui.QColor | None = None,  # default: white
     display_height: int = 10,
     margin: tuple[int, int] = (35, 20),
     text_spacer: int = 40,
-    text_fontsize: int = 20,
+    text_fontsize: int = SCALEBAR_FONT_SIZE,
 ) -> QtGui.QImage:
     """Draw a scalebar into rendered localizations (QImage).
 
@@ -897,12 +889,10 @@ def draw_scalebar(
     image : QImage
         Image containing rendered localizations.
     viewport : tuple
-        Current field of view in camera pixels, ``((y_min, x_min),
+        Current field of view in nm, ``((y_min, x_min),
         (y_max, x_max))``.
     scalebar_length_nm : int or float
         Scale bar length in nm.
-    pixelsize : int or float
-        Camera pixel size in nm.
     display_length : bool, optional
         Whether to display scalebar length in nm. Default is True.
     color : QColor, optional
@@ -931,9 +921,9 @@ def draw_scalebar(
     painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
     painter.setBrush(QtGui.QBrush(color))
 
-    length_camerapxl = scalebar_length_nm / pixelsize
+    # the viewport's width (nm) spans the image's width (display pixels)
     length_displaypxl = int(
-        round(image.width() * length_camerapxl / viewport_width(viewport))
+        round(image.width() * scalebar_length_nm / viewport_width(viewport))
     )
 
     # draw a rectangle
@@ -941,22 +931,30 @@ def draw_scalebar(
     y = image.height() - display_height - margin[1]
     painter.drawRect(x, y, length_displaypxl, display_height)
 
-    # display scalebar's length
+    # display scalebar's length, centered above the bar; the offsets
+    # are for the default font size and grow with larger text
     if display_length:
         font = painter.font()
         font.setPixelSize(text_fontsize)
         painter.setFont(font)
         painter.setPen(color)
-        text_width = length_displaypxl + 2 * text_spacer
-        text_height = text_spacer
-        painter.drawText(
-            x - text_spacer,
-            y - 25,
-            text_width,
-            text_height,
-            QtCore.Qt.AlignmentFlag.AlignHCenter,
-            f"{str(scalebar_length_nm)} nm",
+        text = f"{str(scalebar_length_nm)} nm"
+        ratio = text_fontsize / SCALEBAR_FONT_SIZE
+        text_advance = QtGui.QFontMetrics(font).horizontalAdvance(text)
+        text_width = max(length_displaypxl + 2 * text_spacer, text_advance)
+        # keep long text inside the right edge of the image
+        center = min(
+            x + length_displaypxl / 2, image.width() - 2 - text_advance / 2
         )
+        painter.drawText(
+            int(round(center - text_width / 2)),
+            y - int(round(25 * ratio)),
+            text_width,
+            int(round(text_spacer * ratio)),
+            QtCore.Qt.AlignmentFlag.AlignHCenter,
+            text,
+        )
+    painter.end()
     return image
 
 
@@ -964,10 +962,10 @@ def draw_legend(
     image: QtGui.QImage,
     channel_names: list[str],
     channel_colors: list[tuple[int, int, int]],
-    init_pos: tuple[int, int] = (12, 26),
-    dy: int = 24,
+    init_pos: tuple[int, int] | None = None,
+    dy: int | None = None,
     padding: int = 4,
-    text_fontsize: int = 16,
+    text_fontsize: int = LEGEND_FONT_SIZE,
 ) -> QtGui.QImage:
     """Draw a legend for multichannel data in the top left corner over
     rendered localizations (QImage).
@@ -981,11 +979,13 @@ def draw_legend(
     channel_colors : list of tuples
         List of RGB tuples corresponding to the colors of the channels.
         Must range between 0 and 255.
-    init_pos : tuple of int, optional
+    init_pos : tuple of int or None, optional
         Initial position (x, y) of the first channel name in display
-        pixels. Default is (12, 26).
-    dy : int, optional
-        Space between channel names in display pixels. Default is 24.
+        pixels. Default None: (12, 26) for the default font size, y
+        growing with larger text.
+    dy : int or None, optional
+        Space between channel names in display pixels. Default None:
+        24 for the default font size, growing with larger text.
     padding : int, optional
         Padding around the text in display pixels. Default is 4.
     text_fontsize : int, optional
@@ -1000,6 +1000,11 @@ def draw_legend(
         "Length of channel_names must match number of channels in " "dataset."
     )
     n_channels = len(channel_names)
+    ratio = text_fontsize / LEGEND_FONT_SIZE
+    if init_pos is None:
+        init_pos = (12, int(round(26 * ratio)))
+    if dy is None:
+        dy = int(round(24 * ratio))
     painter = QtGui.QPainter(image)
     # initial positions
     x, y = init_pos
@@ -1026,6 +1031,7 @@ def draw_legend(
         painter.setPen(QtGui.QPen(color))
         painter.drawText(QtCore.QPoint(x, y), text)
         y += dy
+    painter.end()
     return image
 
 
@@ -1448,8 +1454,8 @@ def save_colorbar(path: str, **kwargs) -> None:
 @adjust_viewport_decorator
 def draw_minimap(
     image: QtGui.QImage,
-    viewport: tuple[tuple[float, float], tuple[float, float]],  # cam. px
-    max_viewport_size: tuple[float, float],  # in camera pixels,
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # nm
+    max_viewport_size: tuple[float, float],  # (height, width) in nm
     color_main: QtGui.QColor | None = None,  # default: yellow
     color_frame: QtGui.QColor | None = None,  # default: white
     length_minimap: int = 100,
@@ -1462,11 +1468,11 @@ def draw_minimap(
     image : QImage
         Image containing rendered localizations.
     viewport : tuple
-        Current field of view in camera pixels, ``((y_min, x_min),
+        Current field of view in nm, ``((y_min, x_min),
         (y_max, x_max))``.
     max_viewport_size : tuple
-        Maximum viewport size in camera pixels, i.e., the acquired
-        movie size (height, width).
+        Maximum viewport size in nm, i.e., the whole field of view
+        ``(height, width)``, see ``lib.field_of_view``.
     color_main, color_frame : QColor, optional
         Colors of the viewport and the minimap frame. Default is yellow
         and white, respectively.
@@ -1597,6 +1603,7 @@ def draw_rotation_angles(
     image: QtGui.QImage,
     ang: tuple[float, float, float],
     color: QtGui.QColor | None = None,  # default: white
+    text_fontsize: int = ROTATION_ANGLES_FONT_SIZE,
 ) -> QtGui.QImage:
     """Draw rotation angles (numbers in degrees) on the image.
 
@@ -1609,6 +1616,8 @@ def draw_rotation_angles(
         and z axes in radians, used only for the displayed text.
     color : QColor, optional
         Color of the text. Default is white.
+    text_fontsize : int, optional
+        Pixel size of the text. Default ``ROTATION_ANGLES_FONT_SIZE``.
 
     Returns
     -------
@@ -1619,14 +1628,16 @@ def draw_rotation_angles(
         color = QtGui.QColor("white")
     angx, angy, angz = [int(np.round(_ * 180 / np.pi, 0)) for _ in ang]
     text = f"{angx} {angy} {angz}"
-    x = image.width() - len(text) * 8 - 10
-    y = image.height() - 20
     painter = QtGui.QPainter(image)
     font = painter.font()
-    font.setPixelSize(12)
+    font.setPixelSize(text_fontsize)
     painter.setFont(font)
+    width = painter.fontMetrics().horizontalAdvance(text)
+    x = image.width() - width - 10
+    y = image.height() - 20
     painter.setPen(color)
     painter.drawText(QtCore.QPoint(x, y), text)
+    painter.end()
     return image
 
 
@@ -1665,24 +1676,28 @@ def rgb_to_qimage(
     return qimage
 
 
-def optimal_scalebar_length(pixelsize: int | float, width: int | float) -> int:
-    """Calculate optimal scale bar length in nm based on the image
-    width.
+def optimal_scalebar_length(
+    width_nm: int | float,
+    *,
+    fraction: float = 1 / 8,
+) -> int:
+    """Calculate the optimal scale bar length in nm based on the width
+    of the field of view.
 
     Parameters
     ----------
-    pixelsize : int or float
-        Camera pixel size in nm.
-    width : int or float
-        Image width in camera pixels.
+    width_nm : int or float
+        Width of the field of view (viewport) in nm.
+    fraction : float, optional
+        Approximate length relative to the width, before rounding to a
+        round number. Default is 1/8.
 
     Returns
     -------
     scalebar : int
         Suggested scale bar length in nm.
     """
-    width_nm = width * pixelsize
-    optimal_scalebar = width_nm / 8
+    optimal_scalebar = width_nm * fraction
     # approximate to the nearest thousands, hundreds, tens or ones
     if optimal_scalebar > 10_000:
         scalebar = 10_000

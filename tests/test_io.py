@@ -7,8 +7,8 @@ are reused for round-trip checks against real Picasso data.
 TIFF loading (``load_tif`` / ``TiffMap`` / ``TiffMultiMap``) is covered
 with synthetic ``tifffile``-written stacks generated per test.
 
-Skipped functions (need fixtures we don't have bundled): ``load_ims*``,
-``load_nd2``, ``load_stk``.
+Skipped functions (need fixtures we don't have bundled): ``load_ims_all``,
+``load_nd2``, ``load_stk``. ``load_ims`` is covered in ``test_bitplane.py``.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -51,6 +51,45 @@ class TestNoMetadataFileError:
     def test_inherits_from_filenotfounderror(self):
         # Many call sites rely on this for graceful fallback.
         assert issubclass(io.NoMetadataFileError, FileNotFoundError)
+
+
+class TestLoadErrorsSayWhatIsWrong:
+    """The loaders raise errors whose messages name the file and the
+    problem, print nothing and open no dialog: a GUI shows the message
+    (``lib_qt.show_load_error``)."""
+
+    def test_no_metadata(self, tmp_path, capsys):
+        path = str(tmp_path / "movie_locs.hdf5")
+        with h5py.File(path, "w") as f:
+            f.create_dataset(
+                "locs", data=np.zeros(3, dtype=[("frame", "u4"), ("x", "f4")])
+            )
+        with pytest.raises(io.NoMetadataFileError) as error:
+            io.load_locs(path)
+        assert path in str(error.value)
+        assert "neither the metadata file" in str(error.value)
+        assert capsys.readouterr().out == ""
+
+    def test_no_localizations(self, tmp_path, capsys):
+        path = str(tmp_path / "other.hdf5")
+        with h5py.File(path, "w") as f:
+            f.create_dataset("groups", data=np.zeros(3))
+        with pytest.raises(KeyError, match="does not contain a 'locs'"):
+            io.load_locs(path)
+        assert capsys.readouterr().out == ""
+
+    def test_no_identifications(self, tmp_path, capsys):
+        path = str(tmp_path / "ids.hdf5")
+        pd.DataFrame({"x": [1.0]}).to_hdf(path, key="spots")
+        with pytest.raises(KeyError, match="'identifications' dataset"):
+            io.load_identifications(path)
+        assert capsys.readouterr().out == ""
+
+    def test_progress_is_keyword_only(self, tmp_path):
+        # an old load_locs(path, window) call fails instead of passing
+        # the window on as the progress callback
+        with pytest.raises(TypeError):
+            io.load_locs(str(tmp_path / "f.hdf5"), object())
 
 
 # ---------------------------------------------------------------------------
@@ -204,7 +243,7 @@ class TestSaveLoadLocs:
         with h5py.File(path, "r") as f:
             assert isinstance(f["locs"], h5py.Group)
 
-        loaded = io._read_locs_dataset(str(path))
+        loaded = io._read_locs_dataset(str(path), lib.MockProgress())
 
         assert len(loaded) == len(locs)
         assert set(loaded.columns) == set(locs.columns)
@@ -687,38 +726,46 @@ class TestCameraCalibrationRoundtrip:
 
 
 class TestLoadPicks:
+    # files written since Picasso 1.0 carry the format marker and hold
+    # positions and sizes in nm
+    CURRENT = {io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION}
+
     def test_circle_picks(self, tmp_path):
         regions = {
             "Shape": "Circle",
-            "Centers": [[5.0, 5.0], [10.0, 10.0]],
+            "Centers": [[650.0, 650.0], [1300.0, 1300.0]],
             "Diameter (nm)": 130.0,
+            **self.CURRENT,
         }
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
             yaml.dump(regions, f)
 
-        picks, shape, size = io.load_picks(str(path), pixelsize=130.0)
+        picks, shape, size = io.load_picks(str(path))
         assert shape == "Circle"
-        assert picks == [[5.0, 5.0], [10.0, 10.0]]
-        assert size == pytest.approx(1.0)
+        assert picks == [[650.0, 650.0], [1300.0, 1300.0]]
+        assert size == pytest.approx(130.0)
 
     def test_rectangle_picks(self, tmp_path):
         regions = {
             "Shape": "Rectangle",
-            "Center-Axis-Points": [[[0.0, 0.0], [10.0, 0.0]]],
-            "Width": 2.0,
+            "Center-Axis-Points": [[[0.0, 0.0], [1000.0, 0.0]]],
+            "Width (nm)": 200.0,
+            **self.CURRENT,
         }
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
             yaml.dump(regions, f)
         picks, shape, size = io.load_picks(str(path))
         assert shape == "Rectangle"
-        assert size == 2.0
+        assert picks == [[[0.0, 0.0], [1000.0, 0.0]]]
+        assert size == 200.0
 
     def test_polygon_picks(self, tmp_path):
         regions = {
             "Shape": "Polygon",
             "Vertices": [[[0.0, 0.0], [10.0, 0.0], [10.0, 10.0], [0.0, 0.0]]],
+            **self.CURRENT,
         }
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
@@ -727,8 +774,26 @@ class TestLoadPicks:
         assert shape == "Polygon"
         assert size is None
 
+    def test_legacy_files_need_the_pixel_size(self, tmp_path):
+        # before Picasso 1.0 the positions were in camera pixels (and
+        # the sizes in nm since 0.6); the file has no format marker
+        regions = {
+            "Shape": "Circle",
+            "Centers": [[5.0, 5.0], [10.0, 10.0]],
+            "Diameter (nm)": 130.0,
+        }
+        path = tmp_path / "picks.yaml"
+        with open(path, "w") as f:
+            yaml.dump(regions, f)
+        with pytest.raises(io.MissingPixelsizeError):
+            io.load_picks(str(path))
+        picks, shape, size = io.load_picks(str(path), pixelsize=130.0)
+        assert picks == [[650.0, 650.0], [1300.0, 1300.0]]
+        assert size == pytest.approx(130.0)
+
     def test_legacy_circle_format(self, tmp_path):
-        # Old Picasso versions wrote {Centers, Diameter} without "Shape"
+        # Picasso before 0.6 wrote {Centers, Diameter} without "Shape",
+        # all in camera pixels
         regions = {
             "Centers": [[5.0, 5.0]],
             "Diameter": 1.5,
@@ -736,9 +801,10 @@ class TestLoadPicks:
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
             yaml.dump(regions, f)
-        picks, shape, size = io.load_picks(str(path))
+        picks, shape, size = io.load_picks(str(path), pixelsize=100.0)
         assert shape == "Circle"
-        assert size == 1.5
+        assert picks == [[500.0, 500.0]]
+        assert size == 150.0
 
     def test_box_picks(self, tmp_path):
         regions = {
@@ -747,11 +813,12 @@ class TestLoadPicks:
                 [[1.0, 2.0], [4.0, 6.0]],
                 [[10.0, 10.0], [12.0, 11.0]],
             ],
+            **self.CURRENT,
         }
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
             yaml.dump(regions, f)
-        picks, shape, size = io.load_picks(str(path), pixelsize=130.0)
+        picks, shape, size = io.load_picks(str(path))
         assert shape == "Box"
         assert picks == regions["Corners"]
         # each box carries its own extent
@@ -761,37 +828,61 @@ class TestLoadPicks:
         regions = {
             "Shape": "Brush",
             "Strokes": [
-                {"Width (nm)": 130.0, "Path": [[1.0, 1.0], [5.0, 1.0]]},
-                {"Width (nm)": 260.0, "Path": [[20.0, 20.0]]},
+                {
+                    "Width (nm)": 130.0,
+                    "Path": [[130.0, 130.0], [650.0, 130.0]],
+                },
+                {"Width (nm)": 260.0, "Path": [[2600.0, 2600.0]]},
             ],
+            **self.CURRENT,
         }
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
             yaml.dump(regions, f)
-        picks, shape, size = io.load_picks(str(path), pixelsize=130.0)
+        picks, shape, size = io.load_picks(str(path))
         assert shape == "Brush"
         # each stroke carries its own width, so there is no pick size
         assert size is None
         assert len(picks) == 2  # the two strokes do not touch
-        assert picks[0][0][0] == pytest.approx(1.0)  # 130 nm -> 1 px
-        assert picks[1][0][0] == pytest.approx(2.0)
-        assert picks[0][0][1] == [[1.0, 1.0], [5.0, 1.0]]
+        assert picks[0][0][0] == pytest.approx(130.0)
+        assert picks[1][0][0] == pytest.approx(260.0)
+        assert picks[0][0][1] == [[130.0, 130.0], [650.0, 130.0]]
 
     def test_brush_overlapping_strokes_load_as_one_pick(self, tmp_path):
         # the file stores a flat stroke list; the grouping is re-derived
         regions = {
             "Shape": "Brush",
             "Strokes": [
-                {"Width (nm)": 130.0, "Path": [[1.0, 1.0], [5.0, 1.0]]},
-                {"Width (nm)": 130.0, "Path": [[4.0, 1.0], [9.0, 1.0]]},
+                {
+                    "Width (nm)": 130.0,
+                    "Path": [[130.0, 130.0], [650.0, 130.0]],
+                },
+                {
+                    "Width (nm)": 130.0,
+                    "Path": [[520.0, 130.0], [1170.0, 130.0]],
+                },
             ],
+            **self.CURRENT,
         }
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
             yaml.dump(regions, f)
-        picks, _, _ = io.load_picks(str(path), pixelsize=130.0)
+        picks, _, _ = io.load_picks(str(path))
         assert len(picks) == 1
         assert len(picks[0]) == 2
+
+    def test_save_picks_round_trip(self, tmp_path):
+        path = str(tmp_path / "picks.yaml")
+        io.save_picks(path, [(650.0, 650.0)], "Circle", size=100.0)
+        regions = io.load_yaml(path)
+        assert regions[io.FORMAT_VERSION_ATTR] == io.FORMAT_VERSION
+        assert regions["Diameter (nm)"] == 100.0
+        picks, shape, size = io.load_picks(path)
+        assert (picks, shape, size) == ([[650.0, 650.0]], "Circle", 100.0)
+        with pytest.raises(ValueError, match="need a size"):
+            io.picks_dict([(1.0, 1.0)], "Circle")
+        with pytest.raises(ValueError, match="Unrecognized pick shape"):
+            io.picks_dict([], "Hexagon")
 
     def test_unrecognized_format_raises(self, tmp_path):
         path = tmp_path / "picks.yaml"
@@ -803,7 +894,10 @@ class TestLoadPicks:
     def test_unrecognized_shape_raises(self, tmp_path):
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
-            yaml.dump({"Shape": "Hexagon", "Centers": [[1.0, 1.0]]}, f)
+            yaml.dump(
+                {"Shape": "Hexagon", "Centers": [[1.0, 1.0]], **self.CURRENT},
+                f,
+            )
         with pytest.raises(ValueError, match="Unrecognized pick shape"):
             io.load_picks(str(path))
 
@@ -811,7 +905,10 @@ class TestLoadPicks:
         # neither "Side Length (nm)" nor a legacy bare key is present
         path = tmp_path / "picks.yaml"
         with open(path, "w") as f:
-            yaml.dump({"Shape": "Square", "Centers": [[1.0, 1.0]]}, f)
+            yaml.dump(
+                {"Shape": "Square", "Centers": [[1.0, 1.0]], **self.CURRENT},
+                f,
+            )
         with pytest.raises(ValueError, match="missing the pick size"):
             io.load_picks(str(path))
 
@@ -978,19 +1075,20 @@ class TestThunderstormRoundtrip:
 
 class TestSMAPRoundtrip:
     def _locs_2d(self):
+        # in nm
         return pd.DataFrame(
             {
                 "frame": np.array([0, 1, 2], dtype=np.uint32),
-                "x": np.array([5.0, 10.0, 15.0], dtype=np.float32),
-                "y": np.array([6.0, 11.0, 16.0], dtype=np.float32),
-                "sx": np.array([1.1, 1.2, 1.3], dtype=np.float32),
-                "sy": np.array([1.4, 1.5, 1.6], dtype=np.float32),
+                "x": np.array([650.0, 1300.0, 1950.0], dtype=np.float32),
+                "y": np.array([780.0, 1430.0, 2080.0], dtype=np.float32),
+                "sx": np.array([143.0, 156.0, 169.0], dtype=np.float32),
+                "sy": np.array([182.0, 195.0, 208.0], dtype=np.float32),
                 "photons": np.array(
                     [1000.0, 2000.0, 3000.0], dtype=np.float32
                 ),
                 "bg": np.array([10.0, 20.0, 30.0], dtype=np.float32),
-                "lpx": np.array([0.05, 0.06, 0.07], dtype=np.float32),
-                "lpy": np.array([0.07, 0.08, 0.09], dtype=np.float32),
+                "lpx": np.array([6.5, 7.8, 9.1], dtype=np.float32),
+                "lpy": np.array([9.1, 10.4, 11.7], dtype=np.float32),
             }
         )
 
@@ -1128,13 +1226,353 @@ class TestSMAPRoundtrip:
         assert "numberInGroup" in locs.columns
         # SMAP frames are 1-based; import re-zeroes them.
         assert int(locs["frame"].min()) == 0
+        # SMAP stores nm, as Picasso does
         np.testing.assert_allclose(
-            locs["x"].to_numpy(),
-            np.linspace(130, 1300, n) / PIXELSIZE,
-            atol=1e-3,
+            locs["x"].to_numpy(), np.linspace(130, 1300, n), atol=1e-3
+        )
+        np.testing.assert_allclose(locs["lpx"].to_numpy(), 13.0, atol=1e-3)
+        # the canvas in camera pixels holds the coordinates
+        assert info[0]["Width"] == 11 and info[0]["Height"] == 21
+
+
+# ---------------------------------------------------------------------------
+# PyME (python-microscopy) round-trip
+# ---------------------------------------------------------------------------
+
+
+def _write_pyme_file(path, table_name, records, metadata=None):
+    """Write a localization table and ``/MetaData`` the way PyME does
+    (PyTables, metadata as attributes of nested groups)."""
+    import tables
+
+    with tables.open_file(str(path), "w") as h5file:
+        h5file.create_table("/", table_name, obj=records)
+        h5file.create_group("/", "MetaData")
+        for key, value in (metadata or {}).items():
+            *groups, name = key.split(".")
+            where = "/MetaData"
+            for group in groups:
+                if f"{where}/{group}" not in h5file:
+                    h5file.create_group(where, group)
+                where = f"{where}/{group}"
+            h5file.get_node(where)._f_setattr(name, value)
+
+
+class TestPyMERoundtrip:
+    def _locs_2d(self):
+        # in nm
+        return pd.DataFrame(
+            {
+                "frame": np.array([0, 1, 2], dtype=np.uint32),
+                "x": np.array([650.0, 1300.0, 1950.0], dtype=np.float32),
+                "y": np.array([780.0, 1430.0, 2080.0], dtype=np.float32),
+                "sx": np.array([143.0, 156.0, 169.0], dtype=np.float32),
+                "sy": np.array([182.0, 195.0, 208.0], dtype=np.float32),
+                "photons": np.array(
+                    [1000.0, 2000.0, 3000.0], dtype=np.float32
+                ),
+                "bg": np.array([10.0, 20.0, 30.0], dtype=np.float32),
+                "lpx": np.array([6.5, 7.8, 9.1], dtype=np.float32),
+                "lpy": np.array([9.1, 10.4, 11.7], dtype=np.float32),
+            }
+        )
+
+    def _info(self):
+        return [
+            {"Pixelsize": PIXELSIZE, "Width": 64, "Height": 64, "Frames": 3}
+        ]
+
+    def test_export_import_2d(self, tmp_path):
+        locs = self._locs_2d()
+        # the .hdf extension is enforced, PyME does not open .hdf5
+        io.export_pyme(str(tmp_path / "data.hdf5"), locs, self._info())
+        path = tmp_path / "data.hdf"
+        assert path.exists()
+        assert io.is_pyme_file(str(path))
+        assert not io.is_pyme_file(str(tmp_path / "data.hdf5"))
+        assert io.pyme_pixelsize(str(path)) == pytest.approx(PIXELSIZE)
+
+        out_locs, out_info = io.import_pyme(str(path))
+        for column in locs.columns:
+            np.testing.assert_allclose(
+                out_locs[column].to_numpy(),
+                locs[column].to_numpy(),
+                rtol=1e-5,
+                err_msg=column,
+            )
+        assert "z" not in out_locs.columns
+        # the Picasso metadata is restored
+        assert out_info[0]["Width"] == 64
+        assert out_info[0]["Height"] == 64
+        assert out_info[0]["Frames"] == 3
+        assert lib.get_from_metadata(out_info, "Pixelsize") == PIXELSIZE
+
+    def test_file_structure(self, tmp_path):
+        import tables
+
+        locs = self._locs_2d()
+        locs["group"] = np.array([0, 0, 1], dtype=np.int32)
+        path = tmp_path / "data.hdf"
+        io.export_pyme(str(path), locs, self._info())
+        with tables.open_file(str(path)) as h5file:
+            table = h5file.root.Localizations
+            names = set(table.colnames)
+            x = table.col("x")
+            error_x = table.col("error_x")
+            voxelsize = h5file.root.MetaData.voxelsize._v_attrs
+            camera = h5file.root.MetaData.Camera._v_attrs
+            assert voxelsize.x == pytest.approx(PIXELSIZE / 1000)
+            assert camera.ROIWidth == 64
+        assert {"x", "y", "t", "error_x", "nPhotons", "probe"} <= names
+        assert "group" in names
+        # avoided, PYMEVisualize filters by them by default
+        assert "sig" not in names and "A" not in names
+        # nm in both PyME and Picasso
+        np.testing.assert_allclose(x, locs["x"], rtol=1e-5)
+        np.testing.assert_allclose(error_x, locs["lpx"], rtol=1e-5)
+
+    def test_export_import_3d(self, tmp_path):
+        locs = self._locs_2d()
+        locs["z"] = np.array([-100.0, 0.0, 100.0], dtype=np.float32)
+        locs["lpz"] = np.array([3.0, 4.0, 5.0], dtype=np.float32)
+        path = tmp_path / "data3d.hdf"
+        io.export_pyme(str(path), locs, self._info())
+
+        out_locs, _ = io.import_pyme(str(path))
+        np.testing.assert_allclose(
+            out_locs["z"].to_numpy(), locs["z"].to_numpy(), atol=1e-3
         )
         np.testing.assert_allclose(
-            locs["lpx"].to_numpy(), 13.0 / PIXELSIZE, atol=1e-3
+            out_locs["lpz"].to_numpy(), locs["lpz"].to_numpy(), atol=1e-3
+        )
+
+    def test_multichannel_split(self, tmp_path):
+        locs_a = self._locs_2d()
+        locs_a["group"] = np.array([0, 0, 1], dtype=np.int32)
+        locs_b = self._locs_2d().iloc[:2].copy()
+        locs_b["x"] += 1
+        info_a = self._info() + [{"Channel tag": "a"}]
+        info_b = self._info() + [{"Channel tag": "b"}]
+        path = tmp_path / "two.hdf"
+        io.export_pyme_multi(
+            str(path),
+            [locs_a, locs_b],
+            [info_a, info_b],
+            channel_names=["a", "b"],
+        )
+
+        locs, info = io.import_pyme(str(path))
+        assert len(locs) == 5
+        assert sorted(np.unique(locs["probe"])) == [0, 1]
+        # only the columns present in all channels are exported
+        assert "group" not in locs.columns
+
+        channels = io.split_pyme_channels(str(path), locs, info)
+        assert [os.path.basename(p) for p, _, _ in channels] == [
+            "two_probe0.hdf",
+            "two_probe1.hdf",
+        ]
+        for (_, channel_locs, channel_info), original, tag in zip(
+            channels, [locs_a, locs_b], ["a", "b"]
+        ):
+            assert "probe" not in channel_locs.columns
+            np.testing.assert_allclose(
+                np.sort(channel_locs["x"].to_numpy()),
+                np.sort(original["x"].to_numpy()),
+                rtol=1e-5,
+            )
+            assert lib.get_from_metadata(channel_info, "Channel tag") == tag
+            assert channel_info[0]["Width"] == 64
+
+    def test_single_channel_split_drops_probe(self, tmp_path):
+        path = tmp_path / "one.hdf"
+        io.export_pyme(str(path), self._locs_2d(), self._info())
+        locs, info = io.import_pyme(str(path))
+        channels = io.split_pyme_channels(str(path), locs, info)
+        assert len(channels) == 1
+        assert channels[0][0] == str(path)
+        assert "probe" not in channels[0][1].columns
+
+    def test_different_pixelsizes_raise(self, tmp_path):
+        info_b = [dict(self._info()[0], Pixelsize=PIXELSIZE + 10)]
+        with pytest.raises(ValueError, match="pixel size"):
+            io.export_pyme_multi(
+                str(tmp_path / "bad.hdf"),
+                [self._locs_2d(), self._locs_2d()],
+                [self._info(), info_b],
+            )
+
+    def test_canvas_offset(self, tmp_path):
+        # a localization left of the camera image (e.g., after drift
+        # correction) and one exactly at an integer maximum are kept
+        n = 3
+        records = np.zeros(n, dtype=[("x", "<f4"), ("y", "<f4"), ("t", "<f4")])
+        records["x"] = [-150.0, 100.0, 1000.0]
+        records["y"] = [100.0, 200.0, 300.0]
+        records["t"] = [0, 1, 2]
+        path = tmp_path / "offset.hdf"
+        _write_pyme_file(path, "Localizations", records, {"voxelsize.x": 0.1})
+
+        locs, info = io.import_pyme(str(path))
+        assert len(lib.ensure_sanity(locs, info)) == n
+        # two camera pixels of 100 nm, in nm
+        assert lib.get_from_metadata(info, lib.CANVAS_OFFSET_KEYS[0]) == 200
+
+        # exported coordinates refer to the camera image again
+        out = tmp_path / "offset_export.hdf"
+        io.export_pyme(str(out), locs, info)
+        out_locs, out_info = io.import_pyme(str(out))
+        np.testing.assert_allclose(
+            np.sort(out_locs["x"].to_numpy()), np.sort(locs["x"].to_numpy())
+        )
+        import tables
+
+        with tables.open_file(str(out)) as h5file:
+            x = np.sort(h5file.root.Localizations.col("x"))
+        np.testing.assert_allclose(x, np.sort(records["x"]), rtol=1e-5)
+
+    def test_import_pyme_hdf(self, tmp_path):
+        # as saved by PYMEVisualize: flat columns in nm, z = 0 for 2D
+        # data, an empty /MetaData group
+        n = 4
+        records = np.zeros(
+            n,
+            dtype=[
+                ("x", "<f4"),
+                ("y", "<f4"),
+                ("t", "<f4"),
+                ("A", "<f4"),
+                ("sig", "<f4"),
+                ("error_x", "<f4"),
+                ("z", "<f4"),
+                ("clumpIndex", "<i4"),
+            ],
+        )
+        records["x"] = np.linspace(130, 1300, n)
+        records["y"] = np.linspace(260, 2600, n)
+        records["t"] = [3, 1, 2, 0]
+        records["A"] = 100.0
+        records["sig"] = 130.0
+        records["error_x"] = 13.0
+        records["clumpIndex"] = [1, 2, 3, 4]
+        path = tmp_path / "pyme.hdf"
+        _write_pyme_file(path, "Localizations", records)
+
+        assert io.pyme_pixelsize(str(path)) is None
+        with pytest.raises(ValueError, match="pixel size"):
+            io.import_pyme(str(path))
+
+        locs, info = io.import_pyme(str(path), pixelsize=PIXELSIZE)
+        assert len(locs) == n
+        assert info[0]["Pixelsize"] == PIXELSIZE
+        # sorted by frame
+        np.testing.assert_array_equal(locs["frame"], [0, 1, 2, 3])
+        # all-zero z means 2D data
+        assert "z" not in locs.columns
+        np.testing.assert_allclose(locs["lpx"], 13.0, rtol=1e-5)
+        np.testing.assert_allclose(locs["lpy"], 13.0, rtol=1e-5)
+        np.testing.assert_allclose(locs["sx"], 130.0, rtol=1e-5)
+        # no camera conversion: integrated Gaussian in camera counts,
+        # with the widths in camera pixels (130 nm = 1 px)
+        np.testing.assert_allclose(
+            locs["photons"], 100.0 * 2 * np.pi, rtol=1e-5
+        )
+        assert "A" in locs.columns
+        assert "clumpIndex" in locs.columns
+
+    def test_import_h5r(self, tmp_path):
+        # raw fit results of PyME's LatGaussFitFR: nested fields
+        fit_fields = [
+            ("A", "<f4"),
+            ("x0", "<f4"),
+            ("y0", "<f4"),
+            ("sigma", "<f4"),
+            ("background", "<f4"),
+            ("bx", "<f4"),
+            ("by", "<f4"),
+        ]
+        slice_fields = [("start", "<i4"), ("stop", "<i4"), ("step", "<i4")]
+        dtype = [
+            ("tIndex", "<i4"),
+            ("fitResults", fit_fields),
+            ("fitError", fit_fields),
+            ("resultCode", "<i4"),
+            ("slicesUsed", [(a, slice_fields) for a in "xyz"]),
+            ("subtractedBackground", "<f4"),
+            ("nchi2", "<f4"),
+        ]
+        n = 3
+        records = np.zeros(n, dtype=dtype)
+        records["tIndex"] = [0, 5, 9]
+        records["fitResults"]["A"] = 50.0
+        records["fitResults"]["x0"] = [200.0, 400.0, 600.0]
+        records["fitResults"]["y0"] = [300.0, 500.0, 700.0]
+        records["fitResults"]["sigma"] = 200.0
+        records["fitResults"]["background"] = 1.0
+        records["fitError"]["x0"] = 10.0
+        records["fitError"]["y0"] = 20.0
+        records["subtractedBackground"] = 4.0
+        path = tmp_path / "raw.h5r"
+        _write_pyme_file(
+            path,
+            "FitResults",
+            records,
+            {
+                "voxelsize.x": 0.1,
+                "voxelsize.y": 0.1,
+                "Camera.ElectronsPerCount": 2.0,
+                "Camera.TrueEMGain": 10.0,
+                "Camera.ROIWidth": 64,
+                "Camera.ROIHeight": 32,
+                "Analysis.FitModule": "LatGaussFitFR",
+            },
+        )
+
+        # the pixel size stored in the file is used
+        locs, info = io.import_pyme(str(path), pixelsize=PIXELSIZE)
+        assert info[0]["Pixelsize"] == pytest.approx(100.0)
+        assert info[0]["Width"] == 64
+        assert info[0]["Height"] == 32
+        assert info[0]["Frames"] == 10
+        pyme_metadata = info[0]["PyME metadata"]
+        assert pyme_metadata["Analysis.FitModule"] == "LatGaussFitFR"
+        # nm, as PyME stores them
+        np.testing.assert_allclose(locs["x"], [200.0, 400.0, 600.0], rtol=1e-5)
+        np.testing.assert_allclose(locs["lpx"], 10.0, rtol=1e-5)
+        np.testing.assert_allclose(locs["lpy"], 20.0, rtol=1e-5)
+        np.testing.assert_allclose(locs["sx"], 200.0, rtol=1e-5)
+        per_count = 2.0 / 10.0
+        # the amplitude is per camera pixel: widths of 2 px of 100 nm
+        np.testing.assert_allclose(
+            locs["photons"],
+            50.0 * 2 * np.pi * 2.0 * 2.0 * per_count,
+            rtol=1e-5,
+        )
+        np.testing.assert_allclose(locs["bg"], 5.0 * per_count, rtol=1e-5)
+        assert "resultCode" in locs.columns
+        assert "nchi2" in locs.columns
+        assert not any(c.startswith("slicesUsed") for c in locs.columns)
+
+    def test_no_localizations_raises(self, tmp_path):
+        records = np.zeros(2, dtype=[("EventName", "S32"), ("Time", "<f8")])
+        path = tmp_path / "events.hdf"
+        _write_pyme_file(path, "Events", records, {"voxelsize.x": 0.1})
+        with pytest.raises(ValueError, match="localizations"):
+            io.import_pyme(str(path))
+
+    def test_cli(self, tmp_path):
+        from picasso.__main__ import _hdf2pyme, _pyme2hdf
+
+        locs_path = tmp_path / "data_locs.hdf5"
+        io.save_locs(str(locs_path), self._locs_2d(), self._info())
+        _hdf2pyme(str(locs_path))
+        pyme_path = tmp_path / "data_locs.hdf"
+        assert pyme_path.exists()
+
+        _pyme2hdf(str(pyme_path))
+        locs, info = io.load_locs(str(tmp_path / "data_locs_locs.hdf5"))
+        np.testing.assert_allclose(
+            locs["x"].to_numpy(), self._locs_2d()["x"].to_numpy(), rtol=1e-5
         )
 
 
@@ -1629,6 +2067,33 @@ class TestConcatenatedTiffMovies:
         finally:
             movie.close()
 
+    def test_negative_indices_count_from_the_end(self, tmp_path):
+        rng = np.random.default_rng(33)
+        parts = [
+            rng.integers(0, 60000, size=(n, 8, 8), dtype="<u2") for n in (3, 2)
+        ]
+        paths = [
+            self._write_movie(tmp_path / f"run_{i}", "movie.tif", part)
+            for i, part in enumerate(parts)
+        ]
+        expected = np.concatenate(parts)
+
+        movie, _ = io.load_tif_concatenated(paths)
+        try:
+            np.testing.assert_array_equal(movie[-1], expected[-1])
+            # -3 is the last frame of the first file.
+            np.testing.assert_array_equal(movie[-3], expected[-3])
+            np.testing.assert_array_equal(movie[-5], expected[0])
+            np.testing.assert_array_equal(
+                movie[-2, 1:4, 2:6], expected[-2, 1:4, 2:6]
+            )
+            with pytest.raises(IndexError, match="out of range"):
+                movie[-6]
+            with pytest.raises(IndexError, match="out of range"):
+                movie[5]
+        finally:
+            movie.close()
+
     def test_order_follows_the_given_list(self, tmp_path):
         rng = np.random.default_rng(31)
         parts = [
@@ -1767,6 +2232,38 @@ class TestConcatenatedTiffMovies:
             "acq.ome.tif",
             "other.tif",
         ]
+
+
+class TestSTKMultiMovieIndexing:
+    """``tifffile`` cannot write STK files, so the per-file
+    ``STKMovie`` maps are stood in for by in-memory arrays; only the
+    dispatch across files is under test."""
+
+    def _movie(self, parts):
+        movie = io.STKMultiMovie.__new__(io.STKMultiMovie)
+        movie.maps = parts
+        movie.n_maps = len(parts)
+        movie.n_frames = sum(len(_) for _ in parts)
+        movie.cum_n_frames = np.insert(
+            np.cumsum([len(_) for _ in parts]), 0, 0
+        )
+        return movie
+
+    def test_negative_indices_count_from_the_end(self):
+        rng = np.random.default_rng(34)
+        parts = [
+            rng.integers(0, 60000, size=(n, 4, 4), dtype="<u2") for n in (2, 3)
+        ]
+        expected = np.concatenate(parts)
+        movie = self._movie(parts)
+
+        for index in range(-5, 5):
+            np.testing.assert_array_equal(
+                movie.get_frame(index), expected[index]
+            )
+        for index in (-6, 5):
+            with pytest.raises(IndexError, match="out of range"):
+                movie.get_frame(index)
 
 
 # ---------------------------------------------------------------------------
@@ -2208,3 +2705,932 @@ class TestCZILIFAvailabilityAndDispatch:
             assert isinstance(movie, io.LIFMovie)
         finally:
             movie.close()
+
+
+class TestSpilledFrame:
+    """Tables moved to disk while a GUI is idle (``io.SpilledFrame``)
+    come back exactly as they were, and nothing is left behind."""
+
+    @staticmethod
+    def _frame(n: int = 1000) -> pd.DataFrame:
+        rng = np.random.default_rng(0)
+        frame = pd.DataFrame(
+            {
+                "x": rng.random(n).astype(np.float32),
+                "photons": rng.random(n),
+                "frame": np.arange(n, dtype=np.uint32),
+                "group": rng.integers(0, 5, n),
+                "keep": rng.random(n) > 0.5,
+            }
+        )
+        frame.attrs["source"] = "test"
+        return frame
+
+    def test_round_trip(self, tmp_path):
+        frame = self._frame()
+        spilled = io.SpilledFrame(frame, directory=str(tmp_path))
+        assert spilled.n_rows == len(frame)
+        assert spilled.nbytes == sum(
+            frame[c].to_numpy().nbytes for c in frame.columns
+        )
+        assert os.path.basename(spilled.path).startswith(f"{os.getpid()}-")
+        restored = spilled.load()
+        pd.testing.assert_frame_equal(restored, frame)
+        assert restored.attrs == {"source": "test"}
+        spilled.discard()
+        assert os.listdir(tmp_path) == []
+
+    def test_index_and_repeated_names_are_kept(self, tmp_path):
+        frame = self._frame(10)
+        frame.index = pd.Index(np.arange(10, 30, 2), name="id")
+        frame.columns = ["x", "x", "frame", "group", "keep"]
+        spilled = io.SpilledFrame(frame, directory=str(tmp_path))
+        pd.testing.assert_frame_equal(spilled.load(), frame)
+        spilled.discard()
+
+    def test_text_columns_are_refused(self, tmp_path):
+        frame = self._frame(10)
+        frame["name"] = "spot"
+        with pytest.raises(io.SpillError):
+            io.SpilledFrame(frame, directory=str(tmp_path))
+        assert os.listdir(tmp_path) == []
+
+    def test_a_full_disk_is_refused(self, tmp_path, monkeypatch):
+        usage = types.SimpleNamespace(total=0, used=0, free=2**20)
+        monkeypatch.setattr(io.shutil, "disk_usage", lambda path: usage)
+        with pytest.raises(io.SpillError, match="do not fit"):
+            io.SpilledFrame(self._frame(), directory=str(tmp_path))
+        assert os.listdir(tmp_path) == []
+
+    def test_a_failed_write_leaves_nothing(self, tmp_path, monkeypatch):
+        save = np.save
+        calls = []
+
+        def failing_save(path, array, **kwargs):
+            calls.append(path)
+            if len(calls) == 3:
+                raise OSError("disk unplugged")
+            save(path, array, **kwargs)
+
+        monkeypatch.setattr(io.np, "save", failing_save)
+        with pytest.raises(io.SpillError, match="disk unplugged"):
+            io.SpilledFrame(self._frame(), directory=str(tmp_path))
+        assert os.listdir(tmp_path) == []
+
+    def test_a_deleted_folder_is_reported(self, tmp_path):
+        spilled = io.SpilledFrame(self._frame(), directory=str(tmp_path))
+        spilled.discard()
+        with pytest.raises(io.SpillError):
+            spilled.load()
+
+    def test_loading_again_returns_the_table_in_use(self, tmp_path):
+        # holders of a shared table, reading it back one after the
+        # other, share it again
+        spilled = io.SpilledFrame(self._frame(), directory=str(tmp_path))
+        first = spilled.load()
+        assert spilled.load() is first and spilled.loaded() is first
+        del first
+        assert spilled.loaded() is None
+        spilled.discard()
+
+    def test_the_folder_goes_with_the_last_reference(self, tmp_path):
+        import gc
+
+        spilled = io.SpilledFrame(self._frame(), directory=str(tmp_path))
+        assert len(os.listdir(tmp_path)) == 1
+        del spilled
+        gc.collect()
+        assert os.listdir(tmp_path) == []
+
+    def test_only_folders_of_ended_processes_are_removed(self, tmp_path):
+        own = tmp_path / f"{os.getpid()}-abc"
+        ended = tmp_path / "999999999-abc"  # no such process
+        other = tmp_path / "notes"
+        for folder in (own, ended, other):
+            folder.mkdir()
+        io.remove_stale_spills(str(tmp_path))
+        assert sorted(p.name for p in tmp_path.iterdir()) == sorted(
+            [own.name, other.name]
+        )
+
+
+# ---------------------------------------------------------------------------
+# Progress reporting (see picasso.lib.Progress)
+# ---------------------------------------------------------------------------
+
+
+class _PhaseRecorder(lib.MockProgress):
+    """Progress tracker recording the phases it is driven through."""
+
+    def __init__(self, cancel_at=None):
+        super().__init__()
+        self.phases = []  # dicts with "label", "maximum" and "values"
+        self.cancel_at = cancel_at
+
+    def zero_progress(self, description=None, *args, **kwargs):
+        super().zero_progress(description)
+        self.phases.append({"label": description, "maximum": 0, "values": []})
+
+    def setMaximum(self, maximum, *args, **kwargs):
+        super().setMaximum(maximum)
+        assert self.phases, "setMaximum before the first phase"
+        self.phases[-1]["maximum"] = maximum
+
+    def set_value(self, value, *args, **kwargs):
+        assert self.phases, "set_value before the first phase"
+        self.phases[-1]["values"].append(value)
+        if self.cancel_at is not None and value >= self.cancel_at:
+            raise lib.OperationCanceled
+
+    def labels(self):
+        return [phase["label"] for phase in self.phases]
+
+
+def _assert_phases_end_at_maximum(recorder, phases=None):
+    """Every phase (or those given) reports monotone values from 0 on
+    and ends at its maximum."""
+    for phase in recorder.phases if phases is None else phases:
+        values = phase["values"]
+        assert values, f"{phase['label']!r} reported nothing"
+        assert values[0] >= 0
+        assert values == sorted(values), phase
+        assert values[-1] == phase["maximum"], phase
+
+
+class TestProgress:
+    def _locs_file(self, tmp_path, locs, info):
+        path = str(tmp_path / "progress_locs.hdf5")
+        io.save_locs(path, locs.iloc[:10], info)
+        return path
+
+    def _tif(self, path, n_frames=5):
+        data = np.arange(n_frames * 8 * 8, dtype="<u2").reshape(n_frames, 8, 8)
+        _write_tif_stack(path, data)
+        return str(path)
+
+    def test_load_locs_reports_blocks(self, tmp_path, locs, info, monkeypatch):
+        path = self._locs_file(tmp_path, locs, info)
+        monkeypatch.setattr(io, "LOCS_BLOCK_SIZE", 3)
+        recorder = _PhaseRecorder()
+        loaded, _ = io.load_locs(path, progress=recorder)
+        assert len(loaded) == 10
+        assert recorder.labels() == ["Loading localizations"]
+        assert recorder.phases[0]["maximum"] == 10
+        assert recorder.phases[0]["values"] == [3, 6, 9, 10]
+
+    def test_load_locs_none_is_silent_and_console_works(
+        self, tmp_path, locs, info, capsys
+    ):
+        path = self._locs_file(tmp_path, locs, info)
+        io.load_locs(path)
+        io.load_locs(path, progress=None)
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        loaded, _ = io.load_locs(path, progress="console")
+        assert len(loaded) == 10
+        assert "Loading localizations" in capsys.readouterr().err
+
+    def test_load_locs_cancel_propagates(self, tmp_path, locs, info):
+        path = self._locs_file(tmp_path, locs, info)
+        with pytest.raises(lib.OperationCanceled):
+            io.load_locs(path, progress=_PhaseRecorder(cancel_at=0))
+
+    def test_load_locs_rejects_callables(self, tmp_path, locs, info):
+        # the pre-1.0 progress(done, total) callables are not trackers
+        path = self._locs_file(tmp_path, locs, info)
+        with pytest.raises(TypeError, match="Progress interface"):
+            io.load_locs(path, progress=lambda done, total: None)
+
+    def test_pandas_fallback_ends_at_maximum(self, tmp_path, locs):
+        path = tmp_path / "pandas_locs.hdf5"
+        locs.iloc[:7].to_hdf(path, key="locs", mode="w", format="fixed")
+        recorder = _PhaseRecorder()
+        loaded = io._read_locs_dataset(str(path), recorder)
+        assert len(loaded) == 7
+        assert recorder.labels() == ["Loading localizations"]
+        _assert_phases_end_at_maximum(recorder)
+
+    def test_tif_phases(self, tmp_path):
+        path = self._tif(tmp_path / "movie.tif")
+        recorder = _PhaseRecorder()
+        movie, _ = io.load_movie(path, progress=recorder)
+        movie.close()
+        assert recorder.labels() == ["Indexing movie.tif", "Reading movie.tif"]
+        assert [p["maximum"] for p in recorder.phases] == [5, 5]
+        _assert_phases_end_at_maximum(recorder)
+
+    def test_tif_none_is_silent_and_console_works(self, tmp_path, capsys):
+        path = self._tif(tmp_path / "movie.tif")
+        for progress in (None, "console"):
+            movie, _ = io.load_movie(path, progress=progress)
+            movie.close()
+            err = capsys.readouterr().err
+            if progress is None:
+                assert err == ""
+            else:
+                assert "Reading movie.tif" in err
+
+    def test_load_movie_all_forwards_progress(self, tmp_path):
+        # the docstring used to say that progress is not used
+        path = self._tif(tmp_path / "movie.tif")
+        recorder = _PhaseRecorder()
+        movies, _ = io.load_movie_all(path, progress=recorder)
+        movies[0].close()
+        assert recorder.labels() == ["Indexing movie.tif", "Reading movie.tif"]
+        _assert_phases_end_at_maximum(recorder)
+
+    def test_imagej_stack_phases(self, tmp_path):
+        data = np.zeros((6, 8, 8), dtype="<u2")
+        path = tmp_path / "ij.tif"
+        _write_imagej_contiguous_stack(path, data)
+        recorder = _PhaseRecorder()
+        movie, _ = io.load_tif(str(path), progress=recorder)
+        movie.close()
+        assert recorder.labels() == ["Indexing ij.tif", "Reading ij.tif"]
+        assert recorder.phases[1]["maximum"] == 6
+        _assert_phases_end_at_maximum(recorder)
+
+    def test_stray_ifd_ends_the_phase_and_retry_starts_anew(self, tmp_path):
+        # a stray trailing IFD makes the lightweight parsing fail (the
+        # retry restarts the phases instead of going backwards) and stops
+        # the scan one page early (the phase still ends at its maximum)
+        path = str(tmp_path / "stray.tif")
+        with tifffile.TiffWriter(path, ome=False) as tw:
+            for _ in range(3):
+                tw.write(
+                    np.ones((8, 8), "<u2"),
+                    photometric="minisblack",
+                    contiguous=True,
+                )
+            tw.write(
+                np.ones((4, 4), "<u2"),
+                photometric="minisblack",
+                contiguous=False,
+            )
+        recorder = _PhaseRecorder()
+        movie, _ = io.load_tif(path, progress=recorder)
+        assert movie.n_frames == 3
+        movie.close()
+        labels = recorder.labels()
+        assert labels[-2:] == ["Indexing stray.tif", "Reading stray.tif"]
+        for phase in recorder.phases:
+            assert phase["values"] == sorted(phase["values"])
+        _assert_phases_end_at_maximum(recorder, recorder.phases[-2:])
+        assert recorder.phases[-1]["maximum"] == 4
+
+    def test_concatenated_phases_per_file(self, tmp_path):
+        paths = [
+            self._tif(tmp_path / f"run_{i}.tif", n_frames=n)
+            for i, n in enumerate((3, 4))
+        ]
+        recorder = _PhaseRecorder()
+        movie, _ = io.load_tif_concatenated(paths, progress=recorder)
+        assert movie.n_frames == 7
+        movie.close()
+        assert recorder.labels() == [
+            "Indexing run_0.tif (1/2)",
+            "Reading run_0.tif (1/2)",
+            "Indexing run_1.tif (2/2)",
+            "Reading run_1.tif (2/2)",
+        ]
+        assert [p["maximum"] for p in recorder.phases] == [3, 3, 4, 4]
+        _assert_phases_end_at_maximum(recorder)
+
+    def test_concatenated_none_and_console(self, tmp_path, capsys):
+        paths = [self._tif(tmp_path / f"run_{i}.tif") for i in range(2)]
+        movie = io.ConcatenatedTiffMovie(paths)
+        movie.close()
+        assert capsys.readouterr().err == ""
+        movie, _ = io.load_tif_concatenated(paths, progress="console")
+        movie.close()
+        assert "(2/2)" in capsys.readouterr().err
+
+    def test_cancel_closes_opened_files(self, tmp_path, monkeypatch):
+        paths = [self._tif(tmp_path / f"run_{i}.tif") for i in range(2)]
+        closed = []
+        close = io.TiffMap.close
+
+        def recording_close(self):
+            closed.append(os.path.basename(self.path))
+            close(self)
+
+        monkeypatch.setattr(io.TiffMap, "close", recording_close)
+
+        class CancelSecondFile(_PhaseRecorder):
+            def zero_progress(self, description=None, *args, **kwargs):
+                super().zero_progress(description)
+                if "(2/2)" in description:
+                    raise lib.OperationCanceled
+
+        with pytest.raises(lib.OperationCanceled):
+            io.load_tif_concatenated(paths, progress=CancelSecondFile())
+        assert closed == ["run_0.tif"]
+
+    def test_other_formats_accept_every_progress(self, tmp_path, capsys):
+        movie = np.zeros((2, 4, 4), dtype=np.uint16)
+        info = {
+            "Byte Order": "<",
+            "Data Type": "uint16",
+            "Frames": 2,
+            "Height": 4,
+            "Width": 4,
+        }
+        path = str(tmp_path / "movie.raw")
+        io.save_raw(path, movie, [info])
+        for progress in (None, "console", _PhaseRecorder()):
+            loaded, _ = io.load_movie(path, progress=progress)
+            assert loaded.shape == (2, 4, 4)
+            loaded, _ = io.load_movie_all(path, progress=progress)
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+        with pytest.raises(ValueError, match="Invalid progress"):
+            io.load_movie(path, progress="bogus")
+
+
+class TestPathTooLong:
+    """On Windows, files whose path is too long to be opened are
+    reported as such, not as missing or unreadable."""
+
+    @pytest.fixture
+    def windows(self, monkeypatch):
+        """Pretend to run on Windows; returns a setter for whether long
+        paths are enabled."""
+        monkeypatch.setattr(io.os, "name", "nt")
+        enabled = [False]
+        monkeypatch.setattr(
+            io, "_windows_long_paths_enabled", lambda: enabled[0]
+        )
+        return lambda value: enabled.__setitem__(0, value)
+
+    def _long_path(self, tmp_path):
+        folder = tmp_path
+        while len(str(folder)) <= io._WINDOWS_MAX_PATH:
+            folder = folder / ("folder_" + "f" * 40)
+        return str(folder / "movie_locs.hdf5")
+
+    def test_is_an_os_error(self):
+        assert issubclass(io.PathTooLongError, OSError)
+
+    def test_full_path_limit(self, tmp_path, windows):
+        path = self._long_path(tmp_path)
+        with pytest.raises(io.PathTooLongError) as error:
+            io.load_locs(path)
+        message = str(error.value)
+        assert f"has {len(path)} characters" in message
+        assert "259 Windows allows" in message
+        assert "enable long paths" in message
+
+    def test_long_paths_enabled(self, tmp_path, windows):
+        windows(True)
+        io._check_path_length(self._long_path(tmp_path))
+
+    def test_too_long_folder_name(self, tmp_path, windows):
+        windows(True)  # the name limit holds even with long paths
+        path = str(tmp_path / ("d" * 256) / "locs.hdf5")
+        with pytest.raises(io.PathTooLongError, match="d{256}"):
+            io.load_info(path)
+
+    def test_every_tif_of_a_concatenated_movie(self, tmp_path, windows):
+        paths = [str(tmp_path / "a.tif"), str(tmp_path / ("b" * 256))]
+        with pytest.raises(io.PathTooLongError):
+            io.load_tif_concatenated(paths)
+
+    def test_short_path_passes(self, tmp_path, windows):
+        io._check_path_length(str(tmp_path / "movie_locs.hdf5"))
+
+    def test_nothing_checked_on_other_systems(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(io.os, "name", "posix")
+        io._check_path_length(self._long_path(tmp_path))
+        io._check_path_length(str(tmp_path / ("x" * 300)))
+
+
+# ---------------------------------------------------------------------------
+# All channels of .czi / .lif files (load_czi_all / load_lif_all), with the
+# fake readers above
+# ---------------------------------------------------------------------------
+
+
+def test_load_czi_all(tmp_path, monkeypatch):
+    rng = np.random.default_rng(10)
+    data = rng.integers(0, 60000, size=(3, 2, 4, 5), dtype="<u2")
+    _install_fake_czifile(
+        monkeypatch,
+        data,
+        ("T", "C", "Y", "X"),
+        channels={"DAPI": {}, "GFP": {}},
+    )
+    movies, infos = io.load_czi_all(str(tmp_path / "m.czi"))
+    try:
+        assert [info[0]["Channel"] for info in infos] == ["DAPI", "GFP"]
+        for c, movie in enumerate(movies):
+            np.testing.assert_array_equal(movie[2], data[2, c])
+    finally:
+        for movie in movies:
+            movie.close()
+
+
+def test_load_lif_all(tmp_path, monkeypatch):
+    rng = np.random.default_rng(11)
+    data = rng.integers(0, 60000, size=(3, 2, 4, 5), dtype="<u2")
+    image = _FakeLifImage(data, coords={"C": ["red", "green"]})
+    _install_fake_liffile(monkeypatch, [image])
+    movies, infos = io.load_lif_all(str(tmp_path / "m.lif"))
+    try:
+        assert [info[0]["Channel"] for info in infos] == ["red", "green"]
+        for c, movie in enumerate(movies):
+            np.testing.assert_array_equal(movie[1], data[1, c])
+    finally:
+        for movie in movies:
+            movie.close()
+
+
+@pytest.mark.parametrize("load", ["load_czi_all", "load_lif_all"])
+def test_load_all_without_library_raises(load, tmp_path, monkeypatch):
+    monkeypatch.setattr(io, "czifile", None)
+    monkeypatch.setattr(io, "liffile", None)
+    with pytest.raises(ImportError, match="picassosr"):
+        getattr(io, load)(str(tmp_path / "m.movie"))
+
+
+# ---------------------------------------------------------------------------
+# Nikon .nd2 (ND2Movie)
+#
+# The nd2 package cannot write files, so, as for .czi and .lif above, a fake
+# stands in for the small part of ``nd2.ND2File`` that ND2Movie uses. The
+# metadata parsing (the Nikon description text and the metadata structures)
+# runs for real.
+# ---------------------------------------------------------------------------
+
+
+# The description text of a Nikon acquisition: "Key: value" lines, and
+# section headers ("Key:") that nest the lines after them.
+ND2_DESCRIPTION = "\r\n".join(
+    [
+        "Metadata:",
+        "Camera Name: Zyla 4.2",
+        "Camera Settings:",
+        "Readout Rate: 540 MHz",
+        "Readout Mode: Rolling Shutter at 16-bit",
+        "Conversion Gain: Gain 4",
+        "Microscope Settings:",
+        "Nikon Ti2, FilterChanger(Turret-Lo): 2-G561",
+    ]
+)
+
+
+class _FakeDask:
+    """Indexing returns an object with ``compute``, like a dask array."""
+
+    def __init__(self, data):
+        self._data = data
+
+    def __getitem__(self, index):
+        return types.SimpleNamespace(compute=lambda: self._data[index])
+
+
+class _FakeND2File:
+    def __init__(self, data, dims, channel_names=None, text_info=None):
+        self._data = data
+        self.sizes = dict(zip(dims, data.shape))
+        self.dtype = data.dtype
+        names = channel_names or [""] * self.sizes.get("C", 1)
+        self.metadata = types.SimpleNamespace(
+            contents=types.SimpleNamespace(channelCount=len(names)),
+            channels=[
+                types.SimpleNamespace(
+                    channel=types.SimpleNamespace(name=name, index=i),
+                    loops=types.SimpleNamespace(TimeLoop=0),
+                    microscope=types.SimpleNamespace(
+                        objectiveMagnification=100
+                    ),
+                    volume=types.SimpleNamespace(
+                        axesInterpretation=["distance", "distance"]
+                    ),
+                )
+                for i, name in enumerate(names)
+            ],
+        )
+        if text_info is None:
+            text_info = {
+                "description": ND2_DESCRIPTION,
+                "capturing": "Exposure: 100 ms",
+                "optics": "Objective: Apo TIRF 100x",
+                "date": "1/2/2026 10:00:00 AM",
+            }
+        self.text_info = text_info
+        self.custom_data = {}
+        self.attributes = types.SimpleNamespace(_asdict=lambda: {"bits": 16})
+        self.closed = False
+
+    def to_dask(self):
+        return _FakeDask(self._data)
+
+    def close(self):
+        self.closed = True
+
+
+def _install_fake_nd2(monkeypatch, *args, **kwargs):
+    opened = []
+
+    def nd2file(path):
+        opened.append(_FakeND2File(*args, **kwargs))
+        return opened[-1]
+
+    monkeypatch.setattr(io.nd2, "ND2File", nd2file)
+    return opened
+
+
+# A camera configuration that matches the metadata above.
+ND2_CONFIG = {
+    "Cameras": {
+        "Zyla 4.2": {
+            "Pixelsize": 130,
+            "Sensitivity Categories": ["PixelReadoutRate", "ReadoutMode"],
+            "Sensitivity": {
+                "540 MHz": {"Rolling Shutter at 16-bit": 7.18},
+            },
+            "Filter Wavelengths": {"2-G561": 595},
+        }
+    }
+}
+
+
+class TestND2Movie:
+    def test_frames_and_metadata(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(12)
+        data = rng.integers(0, 60000, size=(4, 6, 6), dtype="<u2")
+        opened = _install_fake_nd2(monkeypatch, data, ("T", "Y", "X"))
+        movie, info = io.load_nd2(str(tmp_path / "m.nd2"))
+        assert len(movie) == 4
+        assert movie.dtype == np.dtype("uint16")
+        np.testing.assert_array_equal(movie[2], data[2])
+        np.testing.assert_array_equal(np.array(list(movie)), data)
+        assert info[0]["Frames"] == 4
+        assert info[0]["Camera"] == "Zyla 4.2"
+        assert info[0]["Picasso Metadata"] == {
+            "Camera": "Zyla 4.2",
+            "PixelReadoutRate": "540 MHz",
+            "ReadoutMode": "Rolling Shutter at 16-bit",
+            "ConversionGain": "Gain 4",
+            "Filter": "2-G561",
+        }
+        nd2_meta = info[0]["nd2 Metadata"]
+        assert nd2_meta["optics"] == {"Objective": "Apo TIRF 100x"}
+        assert nd2_meta["metadata"]["channels"][0]["microscope"] == {
+            "objectiveMagnification": 100
+        }
+        with movie:
+            pass
+        assert opened[-1].closed
+
+    def test_shape_of_a_non_square_movie(self, tmp_path, monkeypatch):
+        data = np.zeros((4, 6, 9), dtype="<u2")
+        _install_fake_nd2(monkeypatch, data, ("T", "Y", "X"))
+        movie, info = io.load_nd2(str(tmp_path / "m.nd2"))
+        assert movie[0].shape == (6, 9)
+        assert (info[0]["Height"], info[0]["Width"]) == (6, 9)
+        assert movie.shape == (4, 6, 9)
+
+    def test_camera_parameters_from_the_configuration(
+        self, tmp_path, monkeypatch
+    ):
+        data = np.zeros((2, 4, 4), dtype="<u2")
+        _install_fake_nd2(monkeypatch, data, ("T", "Y", "X"))
+        movie, _ = io.load_nd2(str(tmp_path / "m.nd2"))
+        parameters = movie.camera_parameters(ND2_CONFIG)
+        assert parameters["camera"] == "Zyla 4.2"
+        assert parameters["cam_index"] == 0
+        assert parameters["Sensitivity"] == {
+            "PixelReadoutRate": "540 MHz",
+            "ReadoutMode": "Rolling Shutter at 16-bit",
+        }
+        # a list, as for the other movie formats
+        assert parameters["wavelength"] == ["595"]
+        with pytest.raises(KeyError, match="not found in config"):
+            movie.camera_parameters({"Cameras": {"Other": {}}})
+
+    def test_all_channels(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(13)
+        data = rng.integers(0, 60000, size=(3, 2, 4, 4), dtype="<u2")
+        _install_fake_nd2(
+            monkeypatch,
+            data,
+            ("T", "C", "Y", "X"),
+            channel_names=["640", "561"],
+        )
+        movies, infos = io.load_nd2_all(str(tmp_path / "m.nd2"))
+        assert [info[0]["Channel"] for info in infos] == ["640", "561"]
+        for c, movie in enumerate(movies):
+            np.testing.assert_array_equal(movie[1], data[1, c])
+
+    def test_unnamed_channels_are_numbered(self, tmp_path, monkeypatch):
+        data = np.zeros((2, 2, 4, 4), dtype="<u2")
+        _install_fake_nd2(monkeypatch, data, ("T", "C", "Y", "X"))
+        _, infos = io.load_nd2_all(str(tmp_path / "m.nd2"))
+        assert [info[0]["Channel"] for info in infos] == [
+            "Channel 0",
+            "Channel 1",
+        ]
+
+    def test_a_z_stack_is_read_along_z(self, tmp_path, monkeypatch):
+        rng = np.random.default_rng(14)
+        data = rng.integers(0, 60000, size=(5, 4, 4), dtype="<u2")
+        _install_fake_nd2(monkeypatch, data, ("Z", "Y", "X"))
+        movie, info = io.load_nd2(str(tmp_path / "m.nd2"))
+        assert info[0]["Frames"] == 5
+        np.testing.assert_array_equal(movie[4], data[4])
+
+    @pytest.mark.parametrize(
+        "dims, message",
+        [
+            (("T", "Y"), "Required dimension X"),
+            (("C", "Y", "X"), "Neither dimension T nor Z"),
+            (("T", "Z", "Y", "X"), "unsupported dimensions"),
+        ],
+    )
+    def test_unsupported_dimensions(
+        self, dims, message, tmp_path, monkeypatch
+    ):
+        data = np.zeros((2,) * len(dims), dtype="<u2")
+        _install_fake_nd2(monkeypatch, data, dims)
+        with pytest.raises(KeyError, match=message):
+            io.load_nd2(str(tmp_path / "m.nd2"))
+
+    def test_unreadable_metadata_asks_for_it(self, tmp_path, monkeypatch):
+        data = np.zeros((3, 4, 4), dtype="<u2")
+        _install_fake_nd2(monkeypatch, data, ("T", "Y", "X"), text_info=None)
+        monkeypatch.setattr(
+            io.ND2Movie,
+            "get_metadata",
+            lambda self, nd2file: (_ for _ in ()).throw(KeyError("broken")),
+        )
+        asked = {}
+
+        def prompt(partial):
+            asked.update(partial)
+            return {**partial, "Pixelsize": 130}, False
+
+        movie, info = io.load_nd2(str(tmp_path / "m.nd2"), prompt_info=prompt)
+        assert asked["Frames"] == 3
+        assert info[0]["Pixelsize"] == 130
+        assert io.load_nd2(str(tmp_path / "m.nd2"), lambda p: None) is None
+
+    def test_cannot_be_written(self, tmp_path, monkeypatch):
+        data = np.zeros((2, 4, 4), dtype="<u2")
+        _install_fake_nd2(monkeypatch, data, ("T", "Y", "X"))
+        movie, _ = io.load_nd2(str(tmp_path / "m.nd2"))
+        with pytest.raises(NotImplementedError):
+            movie.tofile(None)
+
+
+def test_nikon_text_nests_under_section_headers():
+    text = "A:\r\nB: 1\r\nC:\r\nD: 2\r\nE: F: 3\r\nG: H: I: 4"
+    assert io.ND2Movie.nikontext_to_dict(text) == {
+        "A": {
+            "B": "1",
+            "C": {
+                "D": "2",
+                "E": {
+                    "F": "3",
+                    "G": {"H": "G: H: I: 4"},
+                },
+            },
+        }
+    }
+
+
+# ---------------------------------------------------------------------------
+# MetaMorph .stk (STKMovie, STKMultiMovie)
+#
+# tifffile reads STK files but cannot write them, so _write_stk writes the
+# few TIFF and MetaMorph (UIC) tags that STKMovie needs by hand.
+# ---------------------------------------------------------------------------
+
+
+def _write_stk(path, movie: np.ndarray, calibration=None) -> str:
+    """Write ``movie`` (``(n, h, w)`` uint16) as a little-endian
+    MetaMorph STK file: one image file directory (IFD) whose strip holds
+    the first plane, the other planes right after it, the UIC1 tag and
+    the UIC2 tag holding the number of planes. ``calibration`` is
+    ``(value, units)`` of the spatial calibration, e.g., ``(0.13, "um")``.
+    """
+    import struct
+
+    n, h, w = movie.shape
+    pixels = movie.astype("<u2").tobytes()
+    data_offset = 8  # after the TIFF header
+    uic2_offset = data_offset + len(pixels)
+    uic2 = np.zeros((n, 6), "<u4")
+    uic2[:, 1] = 1  # denominator of each plane's z distance
+    blocks = pixels + uic2.tobytes()
+    entries = [
+        (256, 4, 1, w),  # ImageWidth
+        (257, 4, 1, h),  # ImageLength
+        (258, 3, 1, 16),  # BitsPerSample
+        (259, 3, 1, 1),  # Compression: none
+        (262, 3, 1, 1),  # PhotometricInterpretation: black is zero
+        (273, 4, 1, data_offset),  # StripOffsets
+        (277, 3, 1, 1),  # SamplesPerPixel
+        (278, 4, 1, h),  # RowsPerStrip
+        (279, 4, 1, h * w * 2),  # StripByteCounts
+        (33629, 5, n, uic2_offset),  # UIC2Tag: one entry per plane
+    ]
+    # UIC1Tag, which tifffile identifies STK files by: (id, value) pairs;
+    # SpatialCalibration (3) and, if on, XCalibration (4), YCalibration (5)
+    # and CalibrationUnits (6), which point to their values
+    if calibration is None:
+        pairs = struct.pack("<2I", 3, 0)
+    else:
+        value, units = calibration
+        position = data_offset + len(blocks)
+        rational = struct.pack("<II", int(round(value * 1e6)), 1_000_000)
+        pascal = struct.pack("<I", len(units) + 1) + units.encode() + b"\0"
+        pairs = struct.pack(
+            "<8I", 3, 1, 4, position, 5, position, 6, position + 8
+        )
+        blocks += rational + pascal
+    entries.append((33628, 4, len(pairs) // 8, data_offset + len(blocks)))
+    blocks += pairs
+    ifd_offset = data_offset + len(blocks)
+    ifd_offset += ifd_offset % 2  # IFDs start on a word boundary
+    ifd = struct.pack("<H", len(entries))
+    for code, dtype, count, value in sorted(entries):
+        if dtype == 3:  # SHORT: left-justified in the 4 value bytes
+            ifd += struct.pack("<HHIHH", code, dtype, count, value, 0)
+        else:
+            ifd += struct.pack("<HHII", code, dtype, count, value)
+    ifd += struct.pack("<I", 0)  # no next IFD
+    with open(path, "wb") as f:
+        f.write(b"II*\0" + struct.pack("<I", ifd_offset))
+        f.write(blocks)
+        f.write(b"\0" * (ifd_offset - data_offset - len(blocks)))
+        f.write(ifd)
+    return str(path)
+
+
+@pytest.fixture
+def stk_movie():
+    rng = np.random.default_rng(15)
+    return rng.integers(0, 60000, size=(5, 6, 7), dtype="<u2")
+
+
+class TestSTKMovie:
+    def test_frames(self, stk_movie, tmp_path):
+        path = _write_stk(tmp_path / "m.stk", stk_movie)
+        with io.STKMovie(path) as movie:
+            assert movie.shape == (5, 6, 7)
+            assert len(movie) == 5
+            assert movie.dtype == np.dtype("uint16")
+            np.testing.assert_array_equal(movie[2], stk_movie[2])
+            np.testing.assert_array_equal(movie[-1], stk_movie[-1])
+            np.testing.assert_array_equal(movie[...], stk_movie)
+            np.testing.assert_array_equal(movie[1:4], stk_movie[1:4])
+            np.testing.assert_array_equal(movie[3, 1], stk_movie[3, 1])
+            np.testing.assert_array_equal(np.array(list(movie)), stk_movie)
+            with pytest.raises(IndexError, match="out of range"):
+                movie[5]
+
+    def test_slice_of_frames_and_rows(self, stk_movie, tmp_path):
+        path = _write_stk(tmp_path / "m.stk", stk_movie)
+        with io.STKMovie(path) as movie:
+            np.testing.assert_array_equal(movie[1:4, 2:5], stk_movie[1:4, 2:5])
+
+    @pytest.mark.parametrize(
+        "calibration, pixelsize",
+        [(None, None), ((0.13, "um"), 130.0), ((107.0, "nm"), 107.0)],
+    )
+    def test_info(self, calibration, pixelsize, stk_movie, tmp_path):
+        path = _write_stk(tmp_path / "m.stk", stk_movie, calibration)
+        with io.STKMovie(path) as movie:
+            info = movie.info()
+        assert (info["Frames"], info["Height"], info["Width"]) == (5, 6, 7)
+        assert info["Data Type"] == "uint16"
+        assert info.get("Pixelsize") == pytest.approx(pixelsize)
+
+    @pytest.mark.parametrize("byte_order", ["<", ">"])
+    def test_tofile_writes_the_raw_frames(
+        self, byte_order, stk_movie, tmp_path
+    ):
+        path = _write_stk(tmp_path / "m.stk", stk_movie)
+        out = tmp_path / "m.raw"
+        with io.STKMovie(path) as movie, open(out, "wb") as f:
+            movie.tofile(f, byte_order=byte_order)
+        written = np.fromfile(out, dtype=byte_order + "u2")
+        np.testing.assert_array_equal(written.reshape(-1, 6, 7), stk_movie)
+
+    def test_a_plain_tiff_is_rejected(self, stk_movie, tmp_path):
+        path = tmp_path / "m.tif"
+        tifffile.imwrite(path, stk_movie)
+        with pytest.raises(ValueError, match="not appear to be a MetaMorph"):
+            io.STKMovie(str(path))
+
+
+class TestSTKMultiMovie:
+    @pytest.fixture
+    def parts(self, stk_movie, tmp_path):
+        """A movie saved in three numbered parts of 5, 5 and 2 frames."""
+        rng = np.random.default_rng(16)
+        movies = [
+            stk_movie,
+            rng.integers(0, 60000, size=(5, 6, 7), dtype="<u2"),
+            rng.integers(0, 60000, size=(2, 6, 7), dtype="<u2"),
+        ]
+        for k, movie in enumerate(movies):
+            _write_stk(tmp_path / f"cell_{k:03d}.stk", movie)
+        (tmp_path / "other_001.stk").write_bytes(b"")  # not one of them
+        return movies
+
+    def test_numbered_parts_from_the_one_opened(self, parts, tmp_path):
+        movie, info = io.load_stk(str(tmp_path / "cell_001.stk"))
+        try:
+            expected = np.concatenate(parts[1:])
+            assert movie.shape == expected.shape
+            assert info[0]["Frames"] == 7
+            # frame 5 is the first frame of the third part
+            np.testing.assert_array_equal(movie[5], expected[5])
+            np.testing.assert_array_equal(movie[-1], expected[-1])
+            np.testing.assert_array_equal(movie[...], expected)
+            np.testing.assert_array_equal(movie[3:6, 1], expected[3:6, 1])
+            with pytest.raises(IndexError):
+                movie[7]
+        finally:
+            movie.close()
+
+    def test_tofile_writes_every_part(self, parts, tmp_path):
+        out = tmp_path / "m.raw"
+        with io.STKMultiMovie(str(tmp_path / "cell_000.stk")) as movie:
+            with open(out, "wb") as f:
+                movie.tofile(f, byte_order="<")
+        written = np.fromfile(out, dtype="<u2").reshape(-1, 6, 7)
+        np.testing.assert_array_equal(written, np.concatenate(parts))
+
+    def test_a_file_without_a_number_is_read_alone(self, stk_movie, tmp_path):
+        _write_stk(tmp_path / "cell.stk", stk_movie)
+        _write_stk(tmp_path / "cell_001.stk", stk_movie)
+        movie, info = io.load_movie(str(tmp_path / "cell.stk"))
+        try:
+            assert info[0]["Frames"] == 5
+        finally:
+            movie.close()
+
+
+# ---------------------------------------------------------------------------
+# Odds and ends
+# ---------------------------------------------------------------------------
+
+
+def test_a_truncated_file_is_reported_as_incomplete(locs, info, tmp_path):
+    path = str(tmp_path / "locs.hdf5")
+    io.save_locs(path, locs, info)
+    size = os.path.getsize(path)
+    with open(path, "r+b") as f:
+        f.truncate(size // 2)  # e.g., still being copied
+    with pytest.raises(OSError, match="is incomplete"):
+        io.load_locs(path)
+
+
+@pytest.mark.parametrize("tif_order", ["<", ">"])
+@pytest.mark.parametrize("raw_order", ["<", ">", None])
+def test_tif_tofile_writes_the_raw_frames(tif_order, raw_order, tmp_path):
+    rng = np.random.default_rng(17)
+    data = rng.integers(0, 60000, size=(4, 5, 6), dtype="<u2")
+    path = tmp_path / "m.tif"
+    _write_tif_stack(path, data, byteorder=tif_order)
+    movie, _ = io.load_tif(str(path))
+    out = tmp_path / "m.raw"
+    try:
+        with open(out, "wb") as f:
+            movie.tofile(f, byte_order=raw_order)
+    finally:
+        movie.close()
+    dtype = np.dtype("u2").newbyteorder(raw_order or "=")
+    written = np.fromfile(out, dtype=dtype).reshape(data.shape)
+    np.testing.assert_array_equal(written, data)
+
+
+def test_tif_frames_and_rows(tmp_path):
+    """Indexing one TIFF file (``TiffMap``) like an array."""
+    rng = np.random.default_rng(18)
+    data = rng.integers(0, 60000, size=(4, 5, 6), dtype="<u2")
+    path = tmp_path / "m.tif"
+    _write_tif_stack(path, data)
+    with io.TiffMap(str(path)) as movie:
+        np.testing.assert_array_equal(movie[2, 1], data[2, 1])
+        np.testing.assert_array_equal(movie[np.int64(2), 1:3], data[2, 1:3])
+        np.testing.assert_array_equal(movie[1:3, 2], data[1:3, 2])
+        np.testing.assert_array_equal(movie[1:3, :2, 3], data[1:3, :2, 3])
+        np.testing.assert_array_equal(movie[..., 1], data[..., 1])
+
+
+def test_save_config(tmp_path, monkeypatch):
+    import picasso
+
+    directory = tmp_path / "config"
+    monkeypatch.setattr(picasso, "user_config_dir", lambda: str(directory))
+    monkeypatch.setattr(
+        picasso, "config_filename", lambda: str(directory / "config.yaml")
+    )
+    config = {"Cameras": {"Zyla 4.2": {"Pixelsize": 130, "Baseline": 100}}}
+    io.save_config(config)
+    with open(directory / "config.yaml") as f:
+        assert yaml.safe_load(f) == config

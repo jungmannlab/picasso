@@ -4,6 +4,7 @@ See https://www.sphinx-doc.org/en/master/usage/configuration.html.
 """
 
 import os
+import pkgutil
 import re
 import sys
 
@@ -56,6 +57,9 @@ suppress_warnings = ["myst.header"]
 
 autosummary_generate = True
 autosummary_imported_members = False
+# Document exactly the names in each module's __all__, in that order
+# (modules without __all__ still list all their public members).
+autosummary_ignore_module_all = False
 # Members are listed by the autosummary module template
 # (_templates/autosummary/module.rst), not by automodule.
 autodoc_default_options = {"member-order": "bysource"}
@@ -116,8 +120,57 @@ def _strip_module_title(app, what, name, obj, options, lines):
         del lines[: start + 2]
 
 
+#: Where autosummary writes the module pages (not under version control)
+_GENERATED = os.path.join(_HERE, "api", "generated")
+
+
+def _submodules(name: str) -> list[str]:
+    """All submodules of the package ``name`` in the repository, found on
+    disk (nothing is imported)."""
+    package = os.path.join(_ROOT, *name.split("."))
+    if not os.path.isfile(os.path.join(package, "__init__.py")):
+        return []
+    names = []
+    for module in pkgutil.iter_modules([package]):
+        full_name = f"{name}.{module.name}"
+        names.append(full_name)
+        if module.ispkg:
+            names.extend(_submodules(full_name))
+    return names
+
+
+def _prune_stale_api_pages(app):
+    """Delete the module pages in ``api/generated`` that the API index no
+    longer lists.
+
+    Autosummary only adds and updates pages, so the page of a module
+    taken out of ``api/index.rst`` (or of a submodule of a package no
+    longer listed ``:recursive:``) would stay and warn that it is in no
+    toctree, documenting its members a second time.
+    """
+    from sphinx.ext.autosummary.generate import find_autosummary_in_files
+
+    if not os.path.isdir(_GENERATED):
+        return
+    expected = set()
+    for entry in find_autosummary_in_files(
+        [os.path.join(_HERE, "api", "index.rst")]
+    ):
+        if entry.path is None:  # listed, but no page generated
+            continue
+        expected.add(entry.name)
+        if entry.recursive:
+            expected.update(_submodules(entry.name))
+    for page in os.listdir(_GENERATED):
+        name, extension = os.path.splitext(page)
+        if extension == ".rst" and name not in expected:
+            os.remove(os.path.join(_GENERATED, page))
+
+
 def setup(app):
     app.connect("autodoc-process-docstring", _strip_module_title)
+    # before autosummary generates the pages (priority 500)
+    app.connect("builder-inited", _prune_stale_api_pages, priority=400)
 
 
 # -- HTML output -------------------------------------------------------------
@@ -131,21 +184,14 @@ html_css_files = ["custom.css"]
 html_js_files = ["anchor-redirects.js"]
 html_show_sourcelink = False
 
-# The Picasso logo. Until the image is added to _static, the navbar shows
-# the project name as text.
-_LOGO_LIGHT = "picasso-logo.png"
-_LOGO_DARK = "picasso-logo-dark.png"
-_logo = {"text": "Picasso"}
-if os.path.exists(os.path.join(_HERE, "_static", _LOGO_LIGHT)):
-    _logo = {"image_light": f"_static/{_LOGO_LIGHT}", "alt_text": "Picasso"}
-    if os.path.exists(os.path.join(_HERE, "_static", _LOGO_DARK)):
-        _logo["image_dark"] = f"_static/{_LOGO_DARK}"
-    else:
-        _logo["image_dark"] = f"_static/{_LOGO_LIGHT}"
-    html_favicon = f"_static/{_LOGO_LIGHT}"
+html_favicon = "_static/picasso-logo.png"
 
 html_theme_options = {
-    "logo": _logo,
+    "logo": {
+        "image_light": "_static/picasso-logo.png",
+        "image_dark": "_static/picasso-logo-dark.png",
+        "alt_text": "Picasso",
+    },
     "navbar_align": "left",
     "header_links_before_dropdown": 6,
     "show_toc_level": 2,

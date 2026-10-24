@@ -16,7 +16,6 @@ import sys
 import time
 import re
 from functools import partial
-from multiprocessing import cpu_count
 from datetime import datetime
 from copy import deepcopy
 from decimal import Decimal
@@ -24,7 +23,6 @@ from math import isclose
 from typing import Callable, Literal
 from PIL import Image
 
-import yaml
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -35,9 +33,10 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 # must come after the PyQt6 import so that matplotlib's qt_compat
 # selects the PyQt6 binding (picasso core no longer imports PyQt6)
 from matplotlib.backends.backend_qt5agg import FigureCanvas
+from matplotlib.figure import Figure
 from scipy.spatial.transform import Rotation
 
-from .. import io, lib, render, spinna, __version__, docs_url
+from .. import io, lib, lib_qt, render, spinna, __version__, docs_url
 from .app import run_gui
 from . import theme
 
@@ -75,6 +74,9 @@ FIT_RESULT_LIM = 100
 # number of molecules (before labeling efficiency) of the first target
 # in a single simulation run without experimental data
 SINGLE_SIM_N_MOL = 10_000
+# errors of the loaders of structures and masks; both raise TypeError
+# for a file that was not written by SPINNA
+SPINNA_LOAD_ERRORS = lib.FILE_LOAD_ERRORS + (TypeError,)
 
 # The font matplotlib actually resolves for its default family
 # (e.g. "DejaVu Sans"), used as the default in the NND plot font
@@ -390,11 +392,15 @@ class MaskPreview(QtWidgets.QWidget):
         painter.drawImage(QtCore.QPointF(0, 0), self.qimage)
         painter.end()
         if self.mask_tab.scalebar_check.isChecked():
+            # the viewport is in nm; (x_min, ...) are mask pixels
+            pixelsize = self.pixelsize()
             view = render.draw_scalebar(
                 view,
-                viewport=((y_min, x_min), (y_max, x_max)),
+                viewport=(
+                    (y_min * pixelsize, x_min * pixelsize),
+                    (y_max * pixelsize, x_max * pixelsize),
+                ),
                 scalebar_length_nm=self.mask_tab.scalebar_length.value(),
-                pixelsize=self.pixelsize(),
             )
         cx, cy = self.center
         origin = QtCore.QPointF(
@@ -870,7 +876,18 @@ class MaskGeneratorTab(lib.Dialog):
 
         self.window.pwd = os.path.dirname(path)
         self.locs_path = path
-        self.mask_generator = spinna.MaskGenerator(path)
+        try:
+            # molecules localized before Picasso 1.0 are in camera pixels
+            # and may not record the pixel size that converts them to nm
+            mask_generator = lib_qt.load_or_ask_pixelsize(
+                self, spinna.MaskGenerator, path
+            )
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
+            return
+        if mask_generator is None:  # the pixel size prompt was canceled
+            return
+        self.mask_generator = mask_generator
         self.clear_mask()
         self.mask_ndim.clear()
         if "z" in self.mask_generator.locs.columns:
@@ -935,7 +952,14 @@ class MaskGeneratorTab(lib.Dialog):
             # show the mask
             self.preview.on_mask_generated()
             self.update_mask_info()
-            # set threshold to otsu threhold
+            # cap the threshold below the densest pixel/voxel, so that a
+            # thresholded mask is never empty; 8 decimals are shown
+            peak = float(self.mask_generator.image.max())
+            cap = np.floor(peak * 1e8) / 1e8
+            if cap >= peak:
+                cap -= 1e-8
+            self.thresholding_value.setMaximum(max(cap, 0.0))
+            # set threshold to otsu threshold
             self.thresholding_check.setChecked(False)
             self.thresholding_value.setValue(self.mask_generator.thresh)
             for widget in (
@@ -1001,8 +1025,10 @@ class MaskGeneratorTab(lib.Dialog):
                     )
                     if reply == QtWidgets.QMessageBox.StandardButton.Yes:
                         for z in range(self.mask.shape[2]):
+                            # a copy: the slice is a view of the mask;
+                            # empty slices stay black
                             image = self.mask[:, :, z]
-                            image /= image.max()
+                            image = image / (image.max() or 1)
                             Image.fromarray(
                                 np.round(255 * image).astype("uint8")
                             ).save(os.path.splitext(path)[0] + f"_z{z}.png")
@@ -1784,28 +1810,30 @@ class StructuresTab(lib.Dialog):
         )
         if path:
             self.window.pwd = os.path.dirname(path)
-            with open(path, "r") as file:
-                try:
-                    info = list(yaml.load_all(file, Loader=yaml.FullLoader))
-                except TypeError:
-                    raise TypeError(
-                        "Incorrect file. Please choose a file that was created"
-                        " by SPINNA."
-                    )
-            if "Structure title" not in info[0]:
-                raise TypeError(
-                    "Incorrect file. Please choose a file that was created"
-                    " by SPINNA."
+            try:
+                structures, _ = io.load_structures(path)
+            except SPINNA_LOAD_ERRORS as error:
+                lib.show_load_error(self, path, error)
+                return
+            titles = [structure.title for structure in self.structures]
+            self.structures.extend(structures)
+            # structures are selected and deleted by their titles, so
+            # only the first of several with one title can be edited
+            duplicates = []
+            for structure in structures:
+                if structure.title in titles:
+                    if structure.title not in duplicates:
+                        duplicates.append(structure.title)
+                titles.append(structure.title)
+            if duplicates:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Duplicate structure titles",
+                    "More than one structure is titled "
+                    f"{', '.join(duplicates)}. Only the first one of each "
+                    "title can be selected, edited or deleted; rename the "
+                    "others in the file to tell them apart.",
                 )
-            # continue if the correct file is loaded
-            for m_info in info:
-                structure = spinna.Structure(m_info["Structure title"])
-                for target in m_info["Molecular targets"]:
-                    x = m_info[f"{target}_x"]
-                    y = m_info[f"{target}_y"]
-                    z = m_info[f"{target}_z"]
-                    structure.define_coordinates(target, x, y, z)
-                self.structures.append(structure)
 
             self.current_structure = self.structures[0].title
             self.update_structure_box()
@@ -1886,13 +1914,16 @@ class StructuresTab(lib.Dialog):
             if widget.objectName():  # skip labels
                 base, num = split_name(widget.objectName())
                 if num == row:  # delete the widget if the same row
+                    # removing it from the layout alone leaves it drawn
+                    # in the box
                     self.mol_tar_box.content_layout.removeWidget(widget)
-                    del widget
+                    widget.setParent(None)
+                    widget.deleteLater()
                 elif num > row:  # if the widget below, lower the object name
                     widget.setObjectName(f"{base}{num-1}")
                     # if this is delete button, connect it to a new function
                     if base == "del":
-                        widget.disconnect()
+                        widget.released.disconnect()
                         widget.released.connect(
                             partial(
                                 self.delete_molecular_target,
@@ -2242,7 +2273,11 @@ class CompareModelsDialog(lib.Dialog):
             return
         self.sim_tab.window.pwd = os.path.dirname(paths[0])
         for path in paths:
-            structures, targets = spinna.load_structures(path)
+            try:
+                structures, targets = io.load_structures(path)
+            except SPINNA_LOAD_ERRORS as error:
+                lib.show_load_error(self, path, error)
+                return
             # check that the loaded targets match the exp. data's targets
             if not set(targets) == set(self.sim_tab.targets):
                 QtWidgets.QMessageBox.warning(
@@ -2505,6 +2540,9 @@ class FitLEDialog(lib.Dialog):
                 "Choose folder to save scores",
                 os.path.dirname(sim_tab.structures_path or ""),
             )
+            # no folder, no fit, as in Compare models
+            if not savedir:
+                accepted = False
         return distances, label_unc, savedir, accepted
 
 
@@ -2515,8 +2553,8 @@ class OptionalSettingsDialog(lib.Dialog):
 
     Attributes
     ----------
-    asynch_check : QtWidgets.QCheckBox
-        Checkbox for using multiprocessing.
+    parallel_check : QtWidgets.QCheckBox
+        Checkbox for fitting in a pool of worker processes.
     auto_nn_check : QtWidgets.QCheckBox
         Checkbox for auto setting the number of neighbors to consider
         at fitting.
@@ -2570,14 +2608,14 @@ class OptionalSettingsDialog(lib.Dialog):
         self.fitting_mode.setCurrentIndex(0)
         layout.addWidget(self.fitting_mode)
 
-        # use multiprocessing (parallel processing)
-        self.asynch_check = QtWidgets.QCheckBox("Use multiprocessing")
-        self.asynch_check.setToolTip(
+        # score the candidates in a pool of worker processes
+        self.parallel_check = QtWidgets.QCheckBox("Use multiprocessing")
+        self.parallel_check.setToolTip(
             "Run simulations in parallel using multiple CPU cores?\n"
             "Not used for Bayesian optimization (single-threaded only)."
         )
-        self.asynch_check.setChecked(True)
-        layout.addWidget(self.asynch_check)
+        self.parallel_check.setChecked(True)
+        layout.addWidget(self.parallel_check)
 
         # numbers of neighbors to consider at fitting
         self.auto_nn_check = QtWidgets.QCheckBox(
@@ -2960,6 +2998,10 @@ class NNDPlotSettingsDialog(lib.Dialog):
     def update_plots(self) -> None:
         """Run a single simulation (if data loaded) or update the plots
         of the experimental NNDs only."""
+        # keep the requested rehistogramming for after the settings
+        # are corrected
+        if not self.extract_params():  # a warning was shown
+            return
         plot = not (self.rehist_exp or self.rehist_sim)
         if self.rehist_exp:
             self.sim_tab.hist_and_plot_exp_nnds()
@@ -3234,6 +3276,8 @@ class SimulationsTab(lib.Dialog):
         self.n_total = {}
         self.nnd_hist_data_exp = []
         self.nnd_hist_data_sim = []
+        # camera pixel size for saving simulated molecules without masks
+        self._sim_pixelsize = None
 
         self.load_mask_buttons = []
         self.load_exp_data_buttons = []
@@ -3359,7 +3403,7 @@ class SimulationsTab(lib.Dialog):
         nnd_plot_layout = QtWidgets.QVBoxLayout(nnd_plot_box)
         nnd_plot_layout.setSpacing(8)
 
-        self.nnd_fig = plt.figure(
+        self.nnd_fig = Figure(
             figsize=NND_FIGSIZE, dpi=NND_DPI, constrained_layout=True
         )
         self.nnd_ax = self.nnd_fig.add_subplot(111)
@@ -3578,7 +3622,12 @@ class SimulationsTab(lib.Dialog):
         )
         if path:
             self.window.pwd = os.path.dirname(path)
-            self.structures, targets = spinna.load_structures(path)
+            try:
+                structures, targets = io.load_structures(path)
+            except SPINNA_LOAD_ERRORS as error:
+                lib.show_load_error(self, path, error)
+                return
+            self.structures = structures
             # reset exp data-related widgets if new/different targets
             # are present
             if set(targets) != set(self.targets):
@@ -3644,8 +3693,6 @@ class SimulationsTab(lib.Dialog):
     def load_exp_data(self, name: str) -> None:
         """Load experimental data for the specified molecular target
         species."""
-        self.nnd_hist_data_sim = []
-        self.nnd_hist_data_exp = []
         target = name[3:]
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
             self,
@@ -3655,11 +3702,15 @@ class SimulationsTab(lib.Dialog):
         )
         if path:
             self.window.pwd = os.path.dirname(path)
-            # load the data
-            locs, info = io.load_locs(path)
-            pixelsize = lib.get_from_metadata(
-                info, "Pixelsize", raise_error=True
-            )
+            # load the data (nm)
+            try:
+                loaded = lib_qt.load_or_ask_pixelsize(self, io.load_locs, path)
+            except lib.FILE_LOAD_ERRORS as error:
+                lib.show_load_error(self, path, error)
+                return
+            if loaded is None:  # the pixel size prompt was canceled
+                return
+            locs, info = loaded
             pick_area = lib.get_from_metadata(info, "Area (um^2)")
             if pick_area is not None:
                 idx = self.targets.index(target)
@@ -3674,10 +3725,12 @@ class SimulationsTab(lib.Dialog):
                 coords = locs[["x", "y", "z"]].to_numpy()
             else:
                 coords = locs[["x", "y"]].to_numpy()
-            coords[:, :2] *= pixelsize
 
             self.exp_data[target] = coords
             self.exp_data_paths[target] = path
+            # the histograms of the previous data are outdated
+            self.nnd_hist_data_sim = []
+            self.nnd_hist_data_exp = []
             # change the color of the button
             for button in self.load_exp_data_buttons:
                 if button.objectName() == name:
@@ -3706,7 +3759,11 @@ class SimulationsTab(lib.Dialog):
         if path:
             self.window.pwd = os.path.dirname(path)
             # load the data
-            mask, info = io.load_mask(path)
+            try:
+                mask, info = io.load_mask(path)
+            except SPINNA_LOAD_ERRORS as error:
+                lib.show_load_error(self, path, error)
+                return
             self.masks[target] = mask
             self.mask_infos[target] = info
             self.mask_paths[target] = path
@@ -4028,14 +4085,14 @@ class SimulationsTab(lib.Dialog):
 
         # number of evaluations and parallelism per fitting mode
         mode = self.settings_dialog.fitting_mode.currentText()
-        use_async = self.settings_dialog.asynch_check.isChecked()
+        use_parallel = self.settings_dialog.parallel_check.isChecked()
         if mode == "Coarse to fine":
             # coarse pass = 10% of the search space; the fine pass is
             # data-dependent — approximate it with the same count as
             # the coarse pass for a rough total
             n_coarse = max(2, int(n * 0.1))
             n_evals = 2 * n_coarse
-            parallel = use_async
+            parallel = use_parallel
         elif mode == "Bayesian":
             # 20 initial + up to 80 GP-guided iterations (capped by n),
             # see spinna.SPINNA.fit_bayesian; single-threaded only
@@ -4043,11 +4100,12 @@ class SimulationsTab(lib.Dialog):
             parallel = False
         else:  # "Brute force" (and fallback)
             n_evals = n
-            parallel = use_async
+            parallel = use_parallel
 
-        # 0.8 is a rough correction for multiprocessing overhead
+        # 0.8 is a rough correction for the overhead of the worker
+        # processes
         if parallel:
-            total_dt = dt_single * n_evals / (cpu_count() * 0.8 * 0.8)
+            total_dt = dt_single * n_evals / (lib.n_workers() * 0.8)
         else:
             total_dt = dt_single * n_evals
 
@@ -4079,17 +4137,17 @@ class SimulationsTab(lib.Dialog):
         )
         if path:
             self.window.pwd = os.path.dirname(path)
-            df = pd.read_csv(path)
+            try:
+                df = pd.read_csv(path)
+            except lib.FILE_LOAD_ERRORS as error:
+                lib.show_load_error(self, path, error)
+                return
             # check if the structure titles are the same as the ones loaded
             loaded = df.columns
             titles = [_.title for _ in self.structures]
             if len(loaded) == len(titles) * 2 and all(
                 [f"N_{t}" in loaded for t in titles]
             ):  # check that all titles are present
-                self.N_structures_fit = {
-                    structure_name: np.int32(df[f"N_{structure_name}"])
-                    for structure_name in titles
-                }
                 n_sim_fit, ok = QtWidgets.QInputDialog.getInt(
                     self,
                     "",
@@ -4099,9 +4157,13 @@ class SimulationsTab(lib.Dialog):
                     max=100000,
                     step=1,
                 )
-                if not ok:
+                if not ok:  # canceled: keep the current search space
                     return
 
+                self.N_structures_fit = {
+                    structure_name: np.int32(df[f"N_{structure_name}"])
+                    for structure_name in titles
+                }
                 self.n_sim_fit = n_sim_fit
                 self.granularity = "loaded from file"
                 # update the generate n structures button
@@ -4129,15 +4191,6 @@ class SimulationsTab(lib.Dialog):
         if self.mixer is None:
             return
 
-        # discard the z component if 3D data is loaded but 2D simulation
-        # is conducted
-        if self.mask_den_stack.currentIndex() == 1:  # rect. ROI
-            if self.dim_widget.currentIndex() == 0:  # 2D
-                self.exp_data = {
-                    target: coords[:, :2]
-                    for target, coords in self.exp_data.items()
-                }
-
         save = ""
         if self.save_fit_results_check.isChecked():
             out_path = (
@@ -4154,10 +4207,8 @@ class SimulationsTab(lib.Dialog):
             gt_coords=self.exp_data,
             N_sim=self.n_sim_fit,
         )
-        # number of stoichiometries tested
-        N = len(list(self.N_structures_fit.values())[0])
         progress = lib.ProgressDialog(
-            "Preparing fit, please wait...", 0, N, self
+            "Preparing fit, please wait...", 0, 0, self
         )
         progress.set_value(0)
         progress.show()
@@ -4166,15 +4217,17 @@ class SimulationsTab(lib.Dialog):
             "Bayesian": "bayesian",
             "Brute force": "brute-force",
         }[self.settings_dialog.fitting_mode.currentText()]
-        self.opt_props, self.current_score = spinner.fit(
-            self.N_structures_fit,
-            fitting_mode=fitting_mode,
-            save=save,
-            asynch=self.settings_dialog.asynch_check.isChecked(),
-            bootstrap=self.bootstrap_check.isChecked(),
-            callback=progress,
-        )
-        progress.close()
+        try:
+            self.opt_props, self.current_score = spinner.fit(
+                self.N_structures_fit,
+                fitting_mode=fitting_mode,
+                save=save,
+                parallel=self.settings_dialog.parallel_check.isChecked(),
+                bootstrap=self.bootstrap_check.isChecked(),
+                progress=progress,
+            )
+        finally:
+            progress.close()
         self.best_score = self.current_score
 
         # update widgets and plot the best fitting stoichiometry
@@ -4405,32 +4458,33 @@ class SimulationsTab(lib.Dialog):
         progress = lib.ProgressDialog(
             "Comparing models, please wait...", 0, 1, self
         )
-        # keep a single dialog visible across all fitting phases
-        progress.setAutoClose(False)
-        progress.setAutoReset(False)
         fitting_mode = {
             "Coarse to fine": "coarse-to-fine",
             "Bayesian": "bayesian",
             "Brute force": "brute-force",
         }[self.settings_dialog.fitting_mode.currentText()]
-        _, idx, best_label_unc, best_mixer, opt_props = spinna.compare_models(
-            models=models,
-            exp_data=self.exp_data,
-            granularity=self.granularity,
-            label_unc=label_unc,
-            le=base_mixer.le,
-            N_sim=self.n_sim_fit,
-            mask_dict=base_mixer.mask_dict,
-            width=base_mixer.roi[0],
-            height=base_mixer.roi[1],
-            depth=base_mixer.roi[2],
-            random_rot_mode=base_mixer.random_rot_mode,
-            asynch=self.settings_dialog.asynch_check.isChecked(),
-            savedir=savedir,
-            callback=progress,
-            fitting_mode=fitting_mode,
-        )
-        progress.close()
+        try:
+            _, idx, best_label_unc, best_mixer, opt_props = (
+                spinna.compare_models(
+                    models=models,
+                    exp_data=self.exp_data,
+                    granularity=self.granularity,
+                    label_unc=label_unc,
+                    le=base_mixer.le,
+                    N_sim=self.n_sim_fit,
+                    mask_dict=base_mixer.mask_dict,
+                    width=base_mixer.roi[0],
+                    height=base_mixer.roi[1],
+                    depth=base_mixer.roi[2],
+                    random_rot_mode=base_mixer.random_rot_mode,
+                    parallel=self.settings_dialog.parallel_check.isChecked(),
+                    savedir=savedir,
+                    progress=progress,
+                    fitting_mode=fitting_mode,
+                )
+            )
+        finally:
+            progress.close()
 
         # load the structures and label_unc and display in the NN plot
         # without overwriting other attributes
@@ -4491,33 +4545,35 @@ class SimulationsTab(lib.Dialog):
             return
 
         progress = lib.ProgressDialog("Fitting LE, please wait...", 0, 1, self)
-        progress.setAutoClose(False)
-        progress.setAutoReset(False)
         fitting_mode = {
             "Coarse to fine": "coarse-to-fine",
             "Bayesian": "bayesian",
             "Brute force": "brute-force",
         }[self.settings_dialog.fitting_mode.currentText()]
 
-        le_values, best_lunc, best_d, score, props, best_mixer = spinna.fit_le(
-            target_a=self.targets[0],
-            target_b=self.targets[1],
-            exp_data=self.exp_data,
-            granularity=self.granularity,
-            label_unc=label_unc,
-            distances=distances,
-            N_sim=self.n_sim_fit,
-            mask_dict=base_mixer.mask_dict,
-            width=base_mixer.roi[0],
-            height=base_mixer.roi[1],
-            depth=base_mixer.roi[2],
-            random_rot_mode=base_mixer.random_rot_mode,
-            asynch=self.settings_dialog.asynch_check.isChecked(),
-            savedir=savedir,
-            callback=progress,
-            fitting_mode=fitting_mode,
-        )
-        progress.close()
+        try:
+            le_values, best_lunc, best_d, score, props, best_mixer = (
+                spinna.fit_le(
+                    target_a=self.targets[0],
+                    target_b=self.targets[1],
+                    exp_data=self.exp_data,
+                    granularity=self.granularity,
+                    label_unc=label_unc,
+                    distances=distances,
+                    N_sim=self.n_sim_fit,
+                    mask_dict=base_mixer.mask_dict,
+                    width=base_mixer.roi[0],
+                    height=base_mixer.roi[1],
+                    depth=base_mixer.roi[2],
+                    random_rot_mode=base_mixer.random_rot_mode,
+                    parallel=self.settings_dialog.parallel_check.isChecked(),
+                    savedir=savedir,
+                    progress=progress,
+                    fitting_mode=fitting_mode,
+                )
+            )
+        finally:
+            progress.close()
 
         # push fitted label_unc back into the simulations-tab spin boxes
         for spin, l in zip(self.label_unc_spins, best_lunc.values()):
@@ -4718,21 +4774,6 @@ class SimulationsTab(lib.Dialog):
             QtWidgets.QMessageBox.warning(self, "Warning", message)
             return
 
-        # check if the molecules are to be saved
-        if self.save_sim_result_check.isChecked():
-            out_path = os.path.splitext(self.structures_path)[0] + "_sim.hdf5"
-            path, _ = lib.get_save_filename_ext_dialog(
-                self,
-                "Save positions of simulated molecules",
-                out_path,
-                filter=".hdf5",
-            )
-            if not path:
-                return
-            self.window.pwd = os.path.dirname(path)
-        else:
-            path = ""
-
         # without experimental data, the numbers of molecules come from
         # the observed densities, which are not used with masks
         if (
@@ -4747,10 +4788,26 @@ class SimulationsTab(lib.Dialog):
             QtWidgets.QMessageBox.information(self, "Warning", message)
             return
 
-        # create the mixer instance
-        self.mixer = self.setup_mixer(mode="single_sim")
-        if self.mixer is None:
+        # create the mixer instance (refuses e.g. missing masks)
+        mixer = self.setup_mixer(mode="single_sim")
+        if mixer is None:
             return
+
+        # check if the molecules are to be saved; asked only once the
+        # simulation can run
+        path = ""
+        if self.save_sim_result_check.isChecked():
+            out_path = os.path.splitext(self.structures_path)[0] + "_sim.hdf5"
+            path, _ = lib.get_save_filename_ext_dialog(
+                self,
+                "Save positions of simulated molecules",
+                out_path,
+                filter=".hdf5",
+            )
+            if not path:
+                return
+            self.window.pwd = os.path.dirname(path)
+        self.mixer = mixer
 
         # run the simulation
         self.sim_and_plot_NND()
@@ -4758,10 +4815,38 @@ class SimulationsTab(lib.Dialog):
             props = np.array([_.value() for _ in self.prop_str_input_spins])
             n_total = self.single_sim_n_total()
             n_str = self.mixer.convert_props_to_counts(props, n_total)
-            self.mixer.run_simulation(
-                N_structures=n_str,
-                path=path,
+            pixelsize = self._save_pixelsize()
+            if pixelsize is None:  # the pixel size prompt was canceled
+                return
+            all_locs = self.mixer.run_simulation(N_structures=n_str)
+            self.mixer.save(path, all_locs, pixelsize=pixelsize)
+
+    def _save_pixelsize(self) -> float | None:
+        """The camera pixel size (nm) written to the metadata of saved
+        simulated molecules: the one of the masks when the simulation
+        uses them, else the one asked for once per session. None if the
+        question was canceled."""
+        if self.mask_den_stack.currentIndex() == 0 and self.mask_infos:
+            info = next(iter(self.mask_infos.values()))
+            pixelsize = info.get("Camera pixelsize (nm)")
+            if pixelsize is not None:
+                return float(pixelsize)
+        if self._sim_pixelsize is None:
+            value, ok = QtWidgets.QInputDialog.getDouble(
+                self,
+                "Camera pixel size",
+                "Camera pixel size (nm) recorded in the metadata of the "
+                "saved molecules\n(Picasso: Render needs it to display "
+                "them):",
+                130.0,
+                0.01,
+                1e6,
+                2,
             )
+            if not ok:
+                return None
+            self._sim_pixelsize = float(value)
+        return self._sim_pixelsize
 
     @check_structures_loaded
     def sim_and_plot_NND(self) -> None:
@@ -4776,6 +4861,8 @@ class SimulationsTab(lib.Dialog):
         n_total = self.single_sim_n_total()
         n_str = self.mixer.convert_props_to_counts(prop_str, n_total)
         plot_params = self.nn_plot_settings_dialog.extract_params()
+        if not plot_params:  # invalid plot settings, a warning was shown
+            return
         show_exp = self.check_exp_loaded()
 
         # extract NNDs from simulated data
@@ -4786,8 +4873,13 @@ class SimulationsTab(lib.Dialog):
             duplicate=True,
         )
         if show_exp:  # get the simulation's fitting score:
+            exp_data = self.exp_data
+            # a 2D homogeneous simulation of 3D data is compared in xy,
+            # as in spinna.SPINNA
+            if self.mixer.roi[0] is not None and self.mixer.roi[2] is None:
+                exp_data = {t: c[:, :2] for t, c in exp_data.items()}
             dist_exp = spinna.get_NN_dist_experimental(
-                self.exp_data, mixer=self.mixer, duplicate=True
+                exp_data, mixer=self.mixer, duplicate=True
             )
             self.current_score = spinna.NND_score(dist_exp, dist_sim)
             if self.nn_plot_settings_dialog.rehist_exp:
@@ -4818,8 +4910,10 @@ class SimulationsTab(lib.Dialog):
     def hist_and_plot_exp_nnds(self) -> None:
         """Histogram NNDs of experimental data only, according to the
         chosen plot settings and display the current NND plot."""
-        self.nnd_hist_data_exp = []
         plot_params = self.nn_plot_settings_dialog.extract_params()
+        if not plot_params:  # invalid plot settings, a warning was shown
+            return
+        self.nnd_hist_data_exp = []
         for i, t1 in enumerate(self.targets):
             for t2 in self.targets[i:]:
                 hist_data_t1t2 = self.hist_exp_nnds(t1, t2, plot_params)
@@ -5156,13 +5250,15 @@ class SimulationsTab(lib.Dialog):
         if not (len(self.nnd_hist_data_exp) or len(self.nnd_hist_data_sim)):
             return
 
+        plot_params = self.nn_plot_settings_dialog.extract_params()
+        if not plot_params:  # invalid plot settings, a warning was shown
+            return
         self.nnd_ax.cla()
         if self.nn_plot_settings_dialog.nnd_legend_check.isChecked():
             show_legend = True
         else:
             show_legend = False
 
-        plot_params = self.nn_plot_settings_dialog.extract_params()
         mixer = (
             self.setup_mixer(mode="dummy")
             if self.mixer is None
@@ -5272,6 +5368,8 @@ class SimulationsTab(lib.Dialog):
         self.window.pwd = os.path.dirname(path)
 
         plot_params = self.nn_plot_settings_dialog.extract_params()
+        if not plot_params:  # invalid plot settings, a warning was shown
+            return
         mixer = (
             self.setup_mixer(mode="dummy")
             if self.mixer is None
@@ -5359,13 +5457,15 @@ class SimulationsTab(lib.Dialog):
             else self.mixer
         )
 
-        for i, (t1, t2, n) in enumerate(
+        for i, (t1, t2, _) in enumerate(
             mixer.get_neighbor_idx(duplicate=True)
         ):
-            if not n:
-                continue
-            # extract simulated data (if available)
-            if len(self.nnd_hist_data_sim):
+            # extract simulated data (if available); the number of
+            # neighbors histogrammed is set in the plot settings, not
+            # by the mixer, and may be zero
+            if len(self.nnd_hist_data_sim) and len(
+                self.nnd_hist_data_sim[i]["counts"]
+            ):
                 data_sim = {}
                 bins = self.nnd_hist_data_sim[i]["bins"][0]
                 bin_centers = (bins[1:] + bins[:-1]) / 2.0
@@ -5381,7 +5481,9 @@ class SimulationsTab(lib.Dialog):
                 df.to_csv(outpath_sim, index=False)
 
             # extract experimental data (if available)
-            if len(self.nnd_hist_data_exp):
+            if len(self.nnd_hist_data_exp) and len(
+                self.nnd_hist_data_exp[i]["counts"]
+            ):
                 data_exp = {}
                 bins = self.nnd_hist_data_exp[i]["bins"][0]
                 bin_centers = (bins[1:] + bins[:-1]) / 2.0
@@ -5443,29 +5545,7 @@ class Window(QtWidgets.QMainWindow):
 
         # menu bar
         file_menu = self.menuBar().addMenu("File")
-        sounds_menu = file_menu.addMenu("Sound notifications")
-        sounds_menu.setIcon(theme.icon("sound"))
-        sounds_actiongroup = QtGui.QActionGroup(self.menuBar())
-        default_sound_path = lib.get_sound_notification_path()  # last used
-        default_sound_name = os.path.basename(str(default_sound_path))
-        for sound in lib.get_available_sound_notifications():
-            sound_name = os.path.splitext(str(sound))[0].replace("_", " ")
-            action = sounds_actiongroup.addAction(
-                QtGui.QAction(sound_name, sounds_menu, checkable=True)
-            )
-            action.setObjectName(sound)  # store full name
-            if default_sound_name == sound:
-                action.setChecked(True)
-            sounds_menu.addAction(action)
-        sounds_actiongroup.triggered.connect(lib.set_sound_notification)
-        sounds_menu.addSeparator()
-        open_sounds_action = sounds_menu.addAction(
-            "Open notification sounds folder..."
-        )
-        open_sounds_action.setIcon(theme.icon("open"))
-        open_sounds_action.triggered.connect(
-            lib.open_sound_notifications_folder
-        )
+        lib.add_sound_notifications_menu(file_menu)
         picasso_settings_action = file_menu.addAction("Picasso settings...")
         picasso_settings_action.setIcon(theme.icon("picasso-settings"))
         picasso_settings_action.triggered.connect(

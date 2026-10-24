@@ -33,6 +33,22 @@ Reference
 
       Jupyter notebooks that script analyses with the Python API.
 
+   .. grid-item-card:: :octicon:`shield-check;1.5em;sd-mr-1` Stability and versioning
+      :link: versioning
+      :link-type: doc
+      :class-card: sd-card-hover
+
+      What stays the same within a major version, and how long deprecated
+      names keep working.
+
+   .. grid-item-card:: :octicon:`arrow-up;1.5em;sd-mr-1` Migrating to 1.0
+      :link: migration
+      :link-type: doc
+      :class-card: sd-card-hover
+
+      What changes when you update from Picasso 0.11, with the replacement
+      of each setting, command and function.
+
 .. toctree::
    :hidden:
 
@@ -40,3 +56,5 @@ Reference
    cmd
    api/index
    notebooks
+   versioning
+   migration

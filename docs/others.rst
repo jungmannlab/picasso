@@ -6,8 +6,9 @@ Settings and Customization
 Sound notifications
 -------------------
 Picasso supports sound notifications for processes running longer than 1
-minute. In Localize, Render and SPINNA, these can be selected in the ``File`` menu in
-the menu bar.
+minute. In Localize, Render, SPINNA, Average and Simulate, the sound is
+selected in ``File > Sound notifications``; the choice applies to all of them.
+Sounds added to the folder appear in the menu the next time it is opened.
 
 - The available files are read from ``~/.picasso/notification_sounds``.
   ``.mp3`` and ``.wav`` files are supported.
@@ -32,11 +33,12 @@ Appearance
 ----------
 ``File > Appearance...`` in any module sets the look of the Picasso windows:
 
-- **Theme**: *System* (default) is light or dark like the operating system and follows it when it changes; *Light* and *Dark* fix it; *Native* is the platform's own PyQt style, the look of Picasso before version 0.12.
+- **Theme**: *System* (default) is light or dark like the operating system and follows it when it changes; *Light* and *Dark* fix it; *Native* is the platform's own PyQt style, the look of Picasso before version 1.0.
+- **Contrast**: *High* shows black text on white (or white on black in the dark theme) and draws the frames of buttons, input fields, check boxes and tables in the color of the text; the accent color is darkened or lightened where needed to stand out. *System* (default) is high when the operating system asks for it (macOS: *Increase contrast* in the Accessibility settings; Windows: a contrast theme) and follows it when it changes; *Normal* never is.
 - **Accent color**: the color of selections, checked and default buttons, sliders and focus frames; a preset or any color (*Custom...*).
-- **Font size**: the size of the text in percent of the system's.
+- **Font size**: the size of the text in percent of the system's (30–300 %). It also enlarges, on screen, the text of the charts (axis and tick labels, titles, legends) and the scale bar, legend and rotation angles on rendered images in Render and its 3D view. Saved charts and exported images keep the sizes set in the plot settings and the usual sizes of the scale bar and legend, whatever the font size.
 - **Density**: *Compact* reduces the spacing of the controls, e.g., for small laptop screens.
-- **Toolbar**: how the toolbars of ``Picasso: Render``, ``Picasso: Localize``, ``Picasso: Filter`` and ``Picasso: Average`` show their buttons: *Icons and text* (default), *Icons*, *Text* or *Hidden*. Which actions they hold is set in :ref:`toolbars`.
+- **Toolbar**: how the toolbars of ``Picasso: Render`` (also its 3D view), ``Picasso: Localize``, ``Picasso: Filter`` and ``Picasso: Average`` show their buttons: *Icons and text* (default), *Icons*, *Text* or *Hidden*. Which actions they hold is set in :ref:`toolbars`.
 - **Menus**: *Show icons in menus* (default on) shows the icons next to the actions of the menus.
 
 Changes apply immediately to the module that is open and are saved in the
@@ -54,10 +56,10 @@ their plot settings.
 
 Toolbars
 --------
-The toolbars of ``Picasso: Render``, ``Picasso: Localize``,
-``Picasso: Filter`` and ``Picasso: Average`` hold actions of the menus, by
-default the most used ones, e.g., opening and saving, the tools of Render and
-identifying and fitting in Localize. They can be dragged by their handle to
+The toolbars of ``Picasso: Render`` and its 3D view (see :ref:`render-3d`),
+``Picasso: Localize``, ``Picasso: Filter`` and ``Picasso: Average`` hold
+actions of the menus, by default the most used ones, e.g., opening and saving,
+the tools of Render and identifying and fitting in Localize. They can be dragged by their handle to
 any side of the window; the side is remembered for the next start.
 
 *Customize toolbar...* in ``File > Appearance...``, or a right-click on the
@@ -88,6 +90,27 @@ set in :ref:`appearance`.
 Plugin actions (see :doc:`plugins`) can be on the toolbar too; a button whose
 action is not in the menus, e.g., of a plugin that is disabled, is kept and
 shown in italics in the dialog, and returns with its plugin.
+
+.. _accessibility:
+
+Accessibility
+-------------
+- **Screen readers** (VoiceOver, Narrator, Orca) announce the input fields of
+  all Picasso windows by the label next to them, the fields in tables (e.g.,
+  ``View > Files`` in Render) by their column, and buttons that show only an
+  icon by their tooltip.
+- **Color blindness**: ``Colorblind-safe colors`` in Render's ``View > Files``
+  colors the channels so that people with red-green color blindness can tell
+  them apart (see :ref:`Default colors <render-default-colors>`), and
+  ``View > Color vision preview`` shows the image as people with color
+  blindness see it (see :ref:`render-color-vision-preview`). Buttons that
+  show a state, e.g., a loaded file, carry an icon besides their color.
+- **Text size and contrast**: the font size, the light or dark theme and high
+  contrast are set in :ref:`appearance`; high contrast also follows macOS's
+  *Increase contrast* and Windows' contrast themes.
+- **Keyboard**: Render's view is moved with the arrow keys (or :kbd:`W`,
+  :kbd:`A`, :kbd:`S`, :kbd:`D`), zoomed with :kbd:`Ctrl` +/- and fitted
+  to the window with :kbd:`Home`, see :ref:`render-navigation`.
 
 .. _user-settings-file:
 
@@ -149,6 +172,9 @@ Top level
    * - ``Save Micro-Manager metadata``
      - ``True``
      - Keep the (often large) MicroManager property block when copying a movie's metadata into the localizations fitted from it. See :ref:`files-metadata-settings`.
+   * - ``Release memory after idle (min)``
+     - ``30``
+     - Minutes without input (clicks, keys, scrolling) after which an open module releases the memory it rebuilds on demand - in Render the cached renders and the GPU memory, in Localize the frames cached for the identification preview - and hands freed memory back to the operating system. Render and Filter also move their localizations (200 MB or more) to ``~/.picasso/spill`` and read them back on the next action that needs them, while the rendered image and the rows of Filter's table stay on screen; linked Render windows keep sharing their channels. Nothing closes or changes on screen; the first action afterwards may take a moment longer (e.g., the first render starts the GPU again). A running task, such as clustering, counts as activity. ``0`` never releases memory.
 
 ``Sound_notification``
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -162,7 +188,7 @@ Top level
      - Description
    * - ``filename``
      - ``None`` (no sound)
-     - The sound file (from ``~/.picasso/notification_sounds``) played on long-running jobs in Localize, Render and SPINNA. See :ref:`sound-notifications` above.
+     - The sound file (from ``~/.picasso/notification_sounds``) played on long-running jobs, e.g., in Localize, Render, SPINNA, Average and Simulate. See :ref:`sound-notifications` above.
 
 ``Appearance``
 ^^^^^^^^^^^^^^
@@ -188,7 +214,7 @@ Top level
      - Spacing of the controls: ``Comfortable`` or ``Compact``.
    * - ``toolbar``
      - ``Icons and text``
-     - Buttons of the toolbars of Render, Localize, Filter and Average: ``Icons``, ``Icons and text``, ``Text`` or ``Hidden``.
+     - Buttons of the toolbars of Render (also its 3D view), Localize, Filter and Average: ``Icons``, ``Icons and text``, ``Text`` or ``Hidden``.
    * - ``menu_icons``
      - ``True``
      - Show the icons of the actions in the menus.
@@ -203,7 +229,7 @@ Top level
    * - Key
      - Default
      - Description
-   * - ``Render toolbar``, ``Localize toolbar``, ``Filter toolbar``, ``Average toolbar``
+   * - ``Render toolbar``, ``Render 3D toolbar``, ``Localize toolbar``, ``Filter toolbar``, ``Average toolbar``
      - not set (the default buttons, on top)
      - The toolbar of the module (see :ref:`toolbars`), with the keys:
 
@@ -235,15 +261,45 @@ Top level
    * - ``CustomColormaps``
      - *(none)*
      - User-defined colormaps created with the custom colormap editor, keyed by name; each is a list of color stops. See :ref:`render-colormap-setting`.
+   * - ``Channel colors``
+     - ``red``, ``cyan``, ``green``, … (the 14 solid colors)
+     - Colors given to newly loaded channels, in order: names, hexadecimal codes or colormaps from the *Color* dropdown of ``View > Files``. Channels beyond the list get the remaining built-in colors. See :ref:`Default colors <render-default-colors>`.
+   * - ``Colorblind-safe colors``
+     - ``False``
+     - Color the channels in an order that people with red-green color blindness can tell apart, instead of ``Channel colors``. See :ref:`Default colors <render-default-colors>`.
    * - ``PWD``
      - *(last used)*
      - Remembered last value: the directory used in Render's file dialogs.
+   * - ``contrast_slider``
+     - ``False``
+     - Show the contrast slider at the bottom of the main window, below the image. See :ref:`Contrast slider <render-contrast-slider>`.
+   * - ``Keep non-overlapping after alignment``
+     - ``True``
+     - Keep all localizations after ``Postprocess > Align channels``. ``False`` removes the localizations outside the region where all aligned channels overlap. See :ref:`render-align-non-overlapping`.
+   * - ``Confirm removing all localizations``
+     - ``False``
+     - ``True`` asks for confirmation before ``File > Remove all localizations``. Ticking *Don't ask again* in the question sets it to ``False``. See :ref:`render-remove-all-localizations`.
    * - ``Colorbar format``
      - ``.png``
      - Format of the exported colorbar/LUT image next to a "render by property" export - ``.png`` or ``.svg``. See :ref:`render-colorbar-format`.
    * - ``ToolStyles``
      - *(last used)*
      - Remembered last value: the appearance of the picks, the Measure tool and the Move tool's shift label, set in Render's ``Tools > Tools Settings``. Saved when Render is closed.
+   * - ``Grid``
+     - *(last used)*
+     - Remembered last value: the grid of the main window (spacing, automatic spacing, drawn behind or over the localizations, labels, line and label appearance), not whether it is shown. Saved when Render is closed. See :ref:`render-grid`.
+   * - ``Grid3D``
+     - *(last used)*
+     - Remembered last value: the grid of the 3D view, as ``Grid`` plus its planes and position. See :ref:`render-3d-grid`.
+   * - ``Tracks``
+     - *(last used)*
+     - Remembered last value: the maximum number of tracks drawn and the look of the lines of single-particle tracks (``Display Settings > Tracks``), not whether they are shown. See :ref:`render-spt-overlay`.
+   * - ``SPT``
+     - *(last used)*
+     - Remembered last values of the single-particle tracking dialogs: max. jump, max. gap, min. track length, frame time, MSD lags and fit points, localization error and the max. jump correction. See :ref:`render-spt`.
+   * - ``Expanded sections``
+     - all expanded, except *FRC in several ROIs* and the tools' *Appearance*
+     - Which sections of ``Display Settings``, ``3D Display Settings`` (the 3D window's), ``Info``, ``Tools Settings`` and ``Track analysis`` are expanded (``true``) or collapsed (``false``), keyed by the dialog and the section title. Saved whenever a section is expanded or collapsed by clicking its header.
    * - ``cpu_utilization``
      - ``0.5``
      - Fraction of CPU cores rendering's worker pool may use. See :ref:`render-cpu-usage`.
@@ -255,7 +311,7 @@ Top level
      - Target number of localizations rendered during live pan/zoom previews. See :ref:`render-cpu-usage`.
    * - ``max_blur_width``
      - ``100`` (nm)
-     - Localizations whose precision (``lpx``/``lpy``) exceeds this are skipped by the per-localization blur methods. See :ref:`render-cpu-usage`.
+     - Localizations whose precision (``lpx``/``lpy``) exceeds this are skipped by the per-localization render methods. See :ref:`render-cpu-usage`.
    * - ``gpu: enabled``
      - ``auto``
      - Whether/when rendering uses the GPU backend - ``auto``, ``on`` or ``off``. See :ref:`render-gpu-rendering`.
@@ -276,6 +332,9 @@ Top level
    * - Key
      - Default
      - Description
+   * - ``contrast_slider``
+     - ``True``
+     - Show the contrast slider at the bottom of the window, below the frame slider. See :ref:`localize-identification`.
    * - ``cpu_utilization``
      - ``0.8``
      - Fraction of CPU cores used by the spot identification/fitting worker pool. See :ref:`localize-cpu-fitting`.
@@ -321,6 +380,9 @@ Top level
    * - ``Columns to save``
      - *(all columns)*
      - Which localization columns are ticked in ``File`` > ``Select columns to save...`` when saving fit results.
+   * - ``Expanded sections``
+     - all expanded
+     - Which sections of the ``Parameters`` dialog are expanded (``true``) or collapsed (``false``), keyed by the section title. Saved whenever a section is expanded or collapsed by clicking its header.
 
 ``Filter``
 ^^^^^^^^^^
@@ -358,7 +420,7 @@ Top level
 
 ``Updates``
 ^^^^^^^^^^^
-Written and read only by the update-notification feature, not by any module's own GUI.
+Written and read only by the update-notification feature, not by any module's own GUI. Picasso checks for a new version at most once a day, also when a check fails, e.g., without an internet connection.
 
 .. list-table::
    :widths: 22 10 68
@@ -378,4 +440,7 @@ Written and read only by the update-notification feature, not by any module's ow
      - Timestamp (ISO format) until which "remind me later" suppresses notifications.
    * - ``Disabled``
      - ``False``
-     - Update checks are switched off entirely.
+     - Update checks are switched off entirely, e.g., for batch jobs on a computing cluster.
+   * - ``Installing``
+     - *(unset)*
+     - The version that *Install Now* closed Picasso to install (one-click installers); at the next start, Picasso removes it and tells if that version is not the one running. See :ref:`faq-update`.

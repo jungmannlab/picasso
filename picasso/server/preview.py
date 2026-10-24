@@ -1,6 +1,5 @@
 import streamlit as st
-from helper import db_filename
-from sqlalchemy import create_engine
+from helper import fetch_db, get_file_family
 import pandas as pd
 import os
 import numpy as np
@@ -41,7 +40,7 @@ def picasso_render(
     info : list of dicts
         Localizations metadata.
     viewport : tuple
-        ``((y_min, x_min), (y_max, x_max))`` in camera pixels.
+        ``((y_min, x_min), (y_max, x_max))`` in nm.
     disp_px_size : float
         Display pixel size of the rendered image in nm.
 
@@ -71,22 +70,17 @@ def preview():
         "Select a movie from the database. All hdf files with the same base "
         "path as the movie will be selectable."
     )
-    engine = create_engine("sqlite:///" + db_filename(), echo=False)
 
     try:
-        df = pd.read_sql_table("files", con=engine)
+        df = fetch_db()
+        if df.empty:
+            raise ValueError("no files in the database")
 
         file = st.selectbox("Select file", df["filename"].unique())
-        # Find files in familiy
-        base = os.path.split(file)[1].split(".")[0]
         folder = os.path.dirname(file)
 
         if os.path.isdir(folder):
-
-            files = os.listdir(folder)
-            files = [
-                f for f in files if f.startswith(base) and f.endswith(".hdf5")
-            ]
+            files, _ = get_file_family(file)
 
             hdf_file = st.selectbox("Select hdf file", [None] + files)
 

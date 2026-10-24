@@ -7,7 +7,7 @@ reimplemented in Python/NumPy/SciPy in
     picasso/spline.py                  spline_coefficients()
 
 Picasso no longer links against or redistributes the Gpuspline binary, but that
-implementation follows its scheme and layout, so its licence is reproduced
+implementation follows its scheme and layout, so its license is reproduced
 below in full.
 
 ---

@@ -22,18 +22,20 @@ Localizations
     closing channels, their colors and visibility stay per window.
 
 Navigation
-    Pan (viewport center), zoom (camera pixels per screen pixel), a
-    crosshair showing the cursor position of the window the mouse is
+    Pan (viewport center), zoom (the screen pixel size in nm, so
+    windows showing data of different camera pixel sizes still match),
+    a crosshair showing the cursor position of the window the mouse is
     in, and the active tool (Zoom, Pick, Measure, Move). Pan and zoom
     are linked separately, and windows of different sizes show the
     same center at the same scale.
 Rendering
-    Render settings (blur method and its parameters, display pixel
+    Render settings (render method and its parameters, display pixel
     size), contrast (including automatic contrast adjustments),
-    colormap and render by property.
+    per-channel contrast, colormap and render by property. The
+    per-channel contrast is matched by file: a channel takes the
+    contrast of the channel of the same file in the other window.
 Display
-    Scale bar, minimap, background color and legend, camera pixel
-    size.
+    Scale bar, grid, minimap, background color and legend.
 Picks
     Pick shape and size, or the picks themselves (which include their
     shape and size).
@@ -41,7 +43,7 @@ Slicing
     Slicing on/off, slice thickness and slice position; the position is
     matched in nm, since the slice bins depend on each window's data.
 
-Channel colors, visibility and intensities are never linked.
+Channel colors and visibility are never linked.
 
 A change is mirrored by applying it to the other windows' widgets as if
 the user had edited them there, so each window runs its own update
@@ -72,6 +74,7 @@ import numpy as np
 from PyQt6 import QtCore, QtWidgets
 
 from .. import io, lib, render
+from .grid_settings import GridGroupBox
 
 
 @dataclass(frozen=True)
@@ -122,8 +125,7 @@ CATEGORIES = (
         "viewport_zoom",
         "Zoom",
         "Navigation",
-        "Show the same scale (camera pixels per screen pixel) in all\n"
-        "windows.",
+        "Show the same scale (nm per screen pixel) in all windows.",
         default=True,
     ),
     LinkCategory(
@@ -143,7 +145,7 @@ CATEGORIES = (
         "render_settings",
         "Render settings",
         "Rendering",
-        "Blur method and its parameters, display pixel size.",
+        "Render method and its parameters, display pixel size.",
     ),
     LinkCategory(
         "contrast",
@@ -151,6 +153,13 @@ CATEGORIES = (
         "Rendering",
         "Minimum and maximum density, including automatic contrast\n"
         "adjustments.",
+    ),
+    LinkCategory(
+        "channel_contrast",
+        "Per-channel contrast",
+        "Rendering",
+        "Contrast of each channel (View > Files...), applied to the\n"
+        "channel of the same file in the other windows.",
     ),
     LinkCategory(
         "colormap",
@@ -172,6 +181,12 @@ CATEGORIES = (
         "Scale bar visibility, length and label.",
     ),
     LinkCategory(
+        "grid",
+        "Grid",
+        "Display",
+        "Grid visibility, spacing and appearance.",
+    ),
+    LinkCategory(
         "minimap",
         "Minimap",
         "Display",
@@ -182,12 +197,6 @@ CATEGORIES = (
         "Background and legend",
         "Display",
         "Background color and legend visibility.",
-    ),
-    LinkCategory(
-        "pixelsize",
-        "Camera pixel size",
-        "Display",
-        "Camera pixel size (nm).",
     ),
     LinkCategory(
         "pick_geometry",
@@ -215,7 +224,6 @@ CATEGORY_KEYS = tuple(category.key for category in CATEGORIES)
 # key -> (dialog attribute of the window, widget attribute names)
 WIDGET_CATEGORIES = {
     "minimap": ("display_settings_dlg", ("minimap",)),
-    "pixelsize": ("display_settings_dlg", ("pixelsize",)),
     "pick_geometry": (
         "tools_settings_dialog",
         ("pick_shape", "pick_diameter", "pick_width", "pick_side_length"),
@@ -259,6 +267,7 @@ WATCHED_WIDGETS = {
             "optimal_scalebar_check",
         ),
     ),
+    "grid": ("display_settings_dlg", ("grid_box",)),
     "background_legend": ("dataset_dialog", ("wbackground", "legend")),
     "slicer": (
         "slicer_dialog",
@@ -282,14 +291,16 @@ def widget_signal(widget: QtCore.QObject):
     Parameters
     ----------
     widget : QObject
-        A checkbox, group box, spin box, combo box, slider or button
-        group.
+        A checkbox, group box, spin box, combo box, slider, button
+        group or grid group box.
 
     Returns
     -------
     signal : pyqtBoundSignal
         The widget's change signal.
     """
+    if isinstance(widget, GridGroupBox):
+        return widget.changed
     if isinstance(widget, QtWidgets.QButtonGroup):
         return widget.buttonToggled
     if isinstance(widget, QtWidgets.QGroupBox):
@@ -343,6 +354,40 @@ def mirror_widget(
             dst.activated.emit(index)
     else:
         dst.setValue(src.value())
+
+
+def matching_channels(
+    src_paths: list[str], dst_paths: list[str]
+) -> list[tuple[int, int]]:
+    """Pair the channels of two windows that hold the same file.
+
+    A file loaded several times is paired in order: its k-th channel
+    in one window with its k-th channel in the other.
+
+    Parameters
+    ----------
+    src_paths, dst_paths : list of str
+        Paths of the channels of the two windows, see
+        ``View.locs_paths``.
+
+    Returns
+    -------
+    pairs : list of tuple of int
+        ``(i, j)`` per pair: channel ``i`` of the first window holds
+        the same file as channel ``j`` of the second.
+    """
+    dst_channels = {}
+    for j, path in enumerate(dst_paths):
+        dst_channels.setdefault(path, []).append(j)
+    occurrences = {}
+    pairs = []
+    for i, path in enumerate(src_paths):
+        k = occurrences.get(path, 0)
+        occurrences[path] = k + 1
+        channels = dst_channels.get(path, [])
+        if k < len(channels):
+            pairs.append((i, channels[k]))
+    return pairs
 
 
 def picks_signature(view) -> tuple:
@@ -515,6 +560,10 @@ class LinkGroup(QtCore.QObject):
         window.tools_actiongroup.triggered.connect(
             partial(self._on_changed, window, "tool_mode")
         )
+        # the per-channel contrast widgets come and go with the channels
+        window.dataset_dialog.channel_contrast_changed.connect(
+            partial(self._on_changed, window, "channel_contrast")
+        )
         for key, (dialog_name, names) in WATCHED_WIDGETS.items():
             dialog = getattr(window, dialog_name)
             for name in names:
@@ -625,9 +674,11 @@ class LinkGroup(QtCore.QObject):
             "tool_mode": self._apply_tool_mode,
             "render_settings": self._apply_render_settings,
             "contrast": self._apply_contrast,
+            "channel_contrast": self._apply_channel_contrast,
             "colormap": self._apply_colormap,
             "render_property": self._apply_render_property,
             "scalebar": self._apply_scalebar,
+            "grid": self._apply_grid,
             "background_legend": self._apply_background_legend,
             "picks": self._apply_picks,
             "slicer": self._apply_slicer,
@@ -703,6 +754,27 @@ class LinkGroup(QtCore.QObject):
             d.maximum.setValue(s.maximum.value())
 
     @staticmethod
+    def _apply_channel_contrast(src, dst) -> None:
+        s = src.dataset_dialog
+        d = dst.dataset_dialog
+
+        def contrast(dialog, channel: int) -> tuple[float, float]:
+            return (
+                dialog.contrast_low[channel].value(),
+                dialog.contrast_high[channel].value(),
+            )
+
+        changed = False
+        for i, j in matching_channels(
+            src.view.locs_paths, dst.view.locs_paths
+        ):
+            if contrast(s, i) != contrast(d, j):
+                d.set_channel_contrast(j, *contrast(s, i), update=False)
+                changed = True
+        if changed:
+            d.update_channel_contrast()
+
+    @staticmethod
     def _apply_colormap(src, dst) -> None:
         s = src.display_settings_dlg.colormap
         d = dst.display_settings_dlg.colormap
@@ -750,6 +822,14 @@ class LinkGroup(QtCore.QObject):
         if not s.optimal_scalebar_check.isChecked():
             mirror_widget(s.scalebar, d.scalebar)
         mirror_widget(s.optimal_scalebar_check, d.optimal_scalebar_check)
+
+    @staticmethod
+    def _apply_grid(src, dst) -> None:
+        s = src.display_settings_dlg.grid_box
+        d = dst.display_settings_dlg.grid_box
+        # an automatic spacing follows each window's own zoom
+        d.load_settings(s.settings())
+        d.setChecked(s.isChecked())
 
     @staticmethod
     def _apply_background_legend(src, dst) -> None:
@@ -801,8 +881,18 @@ class LinkGroup(QtCore.QObject):
     def _on_scene_requested(self, window) -> None:
         # a channel replaced since the last redraw (filtering, linking,
         # undrifting, etc. assign a new DataFrame) is passed on
+        if window.view.has_spilled_locs:
+            # moved to disk while idle (idle.spill_channels): replacing
+            # a channel would have read them back first
+            return
         current = list(window.view.locs)
         seen = self._seen_locs.get(window)
+        if seen is not None:
+            # channels moved to disk are seen as their placeholders
+            seen = [
+                item.loaded() if isinstance(item, io.SpilledFrame) else item
+                for item in seen
+            ]
         self._seen_locs[window] = current
         if seen is None or len(seen) != len(current):
             return  # channels added or closed: nothing is replaced
@@ -883,6 +973,13 @@ class LinkGroup(QtCore.QObject):
         for j, locs in enumerate(window.view.locs):
             if id(locs) in held:
                 window.view.detach_channel(j)
+        if window in self._seen_locs:
+            self._seen_locs[window] = list(window.view.locs)
+
+    def channels_reordered(self, window) -> None:
+        """Take note that ``window`` reordered its channels, so that the
+        next redraw does not mistake the moved channels for replaced
+        ones (see ``_on_scene_requested``)."""
         if window in self._seen_locs:
             self._seen_locs[window] = list(window.view.locs)
 

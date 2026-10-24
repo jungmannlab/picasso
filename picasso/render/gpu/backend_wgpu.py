@@ -101,12 +101,12 @@ _MODE_INDEXED = 8  # rows come from an index list into the columns
 #: the uniform block shared by both shader modules
 _UNIFORMS_WGSL = """
 struct Uniforms {
-    os: f32,
-    x_min: f32,
+    os: f32,          // rendered pixels per nm
+    x_min: f32,       // viewport (nm)
     y_min: f32,
     x_max: f32,
     y_max: f32,
-    min_blur: f32,
+    min_blur: f32,    // minimum blur (nm)
     npx_f: f32,
     npy_f: f32,
     n_locs: u32,
@@ -122,7 +122,7 @@ struct Uniforms {
     stride: u32,      // column index = offset + i * stride (strided
     offset: u32,      // previews read the resident buffers directly)
     rot: mat3x3<f32>,     // 3D rotation (MODE_ROT)
-    center: vec2<f32>,    // rotation center (camera px)
+    center: vec2<f32>,    // rotation center (nm)
     _pad2: vec2<f32>,
 };
 @group(0) @binding(0) var<uniform> u: Uniforms;
@@ -154,8 +154,8 @@ fn src(i: u32) -> u32 {
     return k;
 }
 
-// camera-pixel position, rotated about the view center when MODE_ROT
-// (as _locs_rotation_arrays does, before the in-view mask)
+// position in nm, rotated about the view center when MODE_ROT (as
+// _locs_rotation_arrays does, before the in-view mask)
 fn position(i: u32) -> vec2<f32> {
     let k = src(i);
     var x = xs[k];
@@ -250,7 +250,8 @@ const WHALE_MAX_TILES: u32 = {_WHALE_MAX_TILES}u;
 // per-pixel prefix within its tile (tile-major pixel index q = tile *
 // 256 + local, ntiles*256 entries), the pixel tier's per-tile global
 // base (ntiles entries), then the tile tier's offsets persisted per
-// channel (ntiles per channel, sliced by u.tile_base)
+// channel (ntiles + 1 per channel, the last one the end of the last
+// tile; sliced by u.tile_base)
 @group(0) @binding(3)
 var<storage, read_write> tile_atomics: array<atomic<u32>>;
 @group(0) @binding(4) var<storage, read_write> offsets: array<u32>;
@@ -419,6 +420,28 @@ fn flush_count(local_index: u32, my_count: u32) {
     }
 }
 
+// tiles (tx_min, tx_max, ty_min, ty_max) of a footprint with its
+// edges moved outward by grow pixels (inward if negative), with the
+// footprint arithmetic of splat_params
+fn tile_range(s: Splat, grow: f32) -> vec4<i32> {
+    let off_x = max(3.0 * s.sx + grow, 0.0);
+    let off_y = max(3.0 * s.sy + grow, 0.0);
+    let j_min = max(0, i32(trunc(s.xp - off_x)));
+    let j_max = min(i32(u.npx), i32(trunc(s.xp + off_x)) + 1);
+    let i_min = max(0, i32(trunc(s.yp - off_y)));
+    let i_max = min(i32(u.npy), i32(trunc(s.yp + off_y)) + 1);
+    return vec4<i32>(
+        j_min / i32(TILE),
+        (j_max - 1) / i32(TILE),
+        i_min / i32(TILE),
+        (i_max - 1) / i32(TILE),
+    );
+}
+
+fn tiles_touched(r: vec4<i32>) -> u32 {
+    return u32(r.y - r.x + 1) * u32(r.w - r.z + 1);
+}
+
 // ---- phase A: size the tile-tier bins (needs a readback) ----
 
 @compute @workgroup_size(WORKGROUP)
@@ -427,18 +450,30 @@ fn cs_bin_count(
     @builtin(num_workgroups) nwg: vec3<u32>,
 ) {
     let stride = nwg.x * WORKGROUP;
+    // cs_bin_scatter recomputes each footprint, and the compiler may
+    // round its edges (xp +/- 3 sx) differently there, e.g., with a
+    // fused multiply-add: an edge within float rounding of a tile
+    // boundary then reaches one tile more or less. Reserve slots for
+    // every tile either rounding can touch (the footprint grown by a
+    // margin far above the rounding error), including the
+    // localizations whose shrunk footprint would still be tile tier;
+    // unused slots are never read (cs_gather reads the filled ones)
+    let margin = 1e-3 + 1e-6 * (u.npx_f + u.npy_f);
     for (var i = gid.x; i < u.n_locs; i += stride) {
         let s = splat_params(i);
         if (s.tier == 2u) {
             atomicAdd(&aux[2], 1u);
         }
-        if (s.tier != 1u) {
+        if (s.tier != 1u && s.tier != 2u) {
             continue;
         }
-        let ty_max = (s.i_max - 1) / i32(TILE);
-        let tx_max = (s.j_max - 1) / i32(TILE);
-        for (var ty = s.i_min / i32(TILE); ty <= ty_max; ty++) {
-            for (var tx = s.j_min / i32(TILE); tx <= tx_max; tx++) {
+        if (s.tier == 2u && tiles_touched(tile_range(s, -margin))
+                > WHALE_MAX_TILES) {
+            continue;
+        }
+        let r = tile_range(s, margin);
+        for (var ty = r.z; ty <= r.w; ty++) {
+            for (var tx = r.x; tx <= r.y; tx++) {
                 atomicAdd(&tile_atomics[2u * (u32(ty) * u.ntx + u32(tx))], 1u);
             }
         }
@@ -455,6 +490,7 @@ fn cs_scan() {
         offsets[tile_offsets_at(t)] = acc;
         acc += atomicLoad(&tile_atomics[2u * t]);
     }
+    offsets[tile_offsets_at(n_tiles)] = acc;
     atomicStore(&aux[1], acc);
 }
 
@@ -534,7 +570,8 @@ fn cs_bin_scatter(
             let slot = atomicAdd(&px_atomics[2u * q + 1u], 1u);
             let e = offsets[n_tiles * TILE_PX + q / TILE_PX]
                 + offsets[q] + slot;
-            if (e < u.px_cap) {
+            // never past the slots cs_px_count reserved for q
+            if (slot < atomicLoad(&px_atomics[2u * q]) && e < u.px_cap) {
                 sorted[e] = vec4<f32>(s.xp, s.yp, s.sx, s.sy);
                 if ((u.mode & (MODE_THETA | MODE_ROT)) != 0u) {
                     sorted_off[e] = s.s01;  // axis-aligned modes: 0
@@ -548,7 +585,10 @@ fn cs_bin_scatter(
                     let tile = u32(ty) * u.ntx + u32(tx);
                     let slot = atomicAdd(&tile_atomics[2u * tile + 1u], 1u);
                     let idx = offsets[tile_offsets_at(tile)] + slot;
-                    if (idx < u.bin_cap) {
+                    // never past the slots cs_bin_count reserved
+                    let reserved = offsets[tile_offsets_at(tile + 1u)]
+                        - offsets[tile_offsets_at(tile)];
+                    if (slot < reserved && idx < u.bin_cap) {
                         bins[u.whale_cap + idx] = i;
                     }
                 }
@@ -592,7 +632,10 @@ fn cs_gather(
             let nt = u32(qy) / TILE * u.ntx + u32(qx) / TILE;
             let q = nt * TILE_PX + (u32(qy) % TILE) * TILE + u32(qx) % TILE;
             let start = offsets[n_tiles * TILE_PX + nt] + offsets[q];
-            let end = start + atomicLoad(&px_atomics[2u * q + 1u]);
+            let end = start + min(
+                atomicLoad(&px_atomics[2u * q + 1u]),
+                atomicLoad(&px_atomics[2u * q]),
+            );
             // the off-diagonal term is only stored (and read) when the
             // mode can produce one; uniform branch, no divergence
             if ((u.mode & (MODE_THETA | MODE_ROT)) != 0u) {
@@ -607,9 +650,13 @@ fn cs_gather(
         }
     }
 
-    // tile tier: stream this tile's bin through workgroup memory
+    // tile tier: stream this tile's bin through workgroup memory;
+    // cs_bin_count may reserve more slots than are filled (see there)
     let start = u.whale_cap + offsets[tile_offsets_at(tile)];
-    let count = atomicLoad(&tile_atomics[2u * tile + 1u]);
+    let count = min(
+        atomicLoad(&tile_atomics[2u * tile + 1u]),
+        offsets[tile_offsets_at(tile + 1u)] - offsets[tile_offsets_at(tile)],
+    );
     var done = 0u;
     while (done < count) {
         let chunk = min(WORKGROUP, count - done);
@@ -788,6 +835,10 @@ class WgpuBackend(SplatBackend):
         # one render at a time per device queue; the seam allows
         # concurrent callers (async worker + synchronous renders)
         self._lock = threading.Lock()
+        # set by close(): a caller that fetched this backend before it
+        # was closed gets a SplatBackendError (i.e., a CPU render)
+        # rather than a call into the destroyed device
+        self._closed = False
         # scratch buffers, reused across calls and grown as needed
         self._scratch = {}  # name -> (buffer, size)
         self._scatter_group0 = None
@@ -895,12 +946,12 @@ class WgpuBackend(SplatBackend):
             Display pixel size in nm, see ``splat.render``.
         viewport : tuple or None
             Field of view ``((y_min, x_min), (y_max, x_max))`` in
-            camera pixels, see ``splat.render``.
+            nm, see ``splat.render``.
         blur_method : {"gaussian", "gaussian_iso", "smooth", \
                 "convolve"} or None
             Blur method, see ``splat.render``.
         min_blur_width : float
-            Minimum size of blur (camera pixels), see ``splat.render``.
+            Minimum size of blur (nm), see ``splat.render``.
         ang : tuple or scipy.spatial.transform.Rotation or None
             Rotation of the localizations, see ``splat.render``.
         quadtree_capacity : int, optional
@@ -928,6 +979,8 @@ class WgpuBackend(SplatBackend):
         self._validate_render_request(columns, blur_method, viewport, ang)
         try:
             with self._lock:
+                if self._closed:
+                    raise SplatBackendError("the GPU backend was closed")
                 return self._render(
                     columns,
                     info,
@@ -957,10 +1010,10 @@ class WgpuBackend(SplatBackend):
         ang,
     ):
         (y_min, x_min), (y_max, x_max) = viewport
-        pixelsize = lib.get_from_metadata(
-            info[0], "Pixelsize", raise_error=True
-        )
-        oversampling = pixelsize / disp_px_size
+        # rendered pixels per nm, as in _render_arrays; the viewport,
+        # the positions and the blur widths are all nm, carried in
+        # float32 (a resolution of ~0.1 nm at a 1 mm field of view)
+        oversampling = 1.0 / float(disp_px_size)
         # image size exactly as _render_setup computes it (float64)
         n_pixel_y = int(np.ceil(oversampling * (y_max - y_min)))
         n_pixel_x = int(np.ceil(oversampling * (x_max - x_min)))
@@ -1300,7 +1353,9 @@ class WgpuBackend(SplatBackend):
         self, renderings, columns, blur_method, oversampling, min_blur_width
     ):
         """``smooth`` / ``convolve``: the CPU image filter on the GPU
-        histogram, with the CPU backend's exact blur widths."""
+        histogram, with the CPU backend's exact blur widths (the
+        precisions and ``min_blur_width`` in nm, scaled to rendered
+        pixels by ``oversampling``)."""
         from ..splat import _fftconvolve, global_blur
 
         out = []
@@ -1335,7 +1390,7 @@ class WgpuBackend(SplatBackend):
                 len(channel),
                 geometry,
                 mode=self._mode(channel, iso),
-                tile_base=c * ntiles,
+                tile_base=c * (ntiles + 1),
                 stride=stride,
                 offset=offset,
             )
@@ -1391,7 +1446,7 @@ class WgpuBackend(SplatBackend):
                 len(channel),
                 geometry,
                 mode=self._mode(channel, iso),
-                tile_base=c * ntiles,
+                tile_base=c * (ntiles + 1),
                 bin_cap=bin_cap,
                 stride=stride,
                 offset=offset,
@@ -1452,7 +1507,7 @@ class WgpuBackend(SplatBackend):
         # pixel-tier prefixes + bases, then per-channel tile offsets
         self._ensure_buffer(
             "offsets",
-            ntiles * (tile_px + 1 + n_channels) * 4,
+            (ntiles * (tile_px + 1) + n_channels * (ntiles + 1)) * 4,
             wgpu.BufferUsage.STORAGE,
         )
         # grown on demand by _bin_phase / _render
@@ -1605,6 +1660,11 @@ class WgpuBackend(SplatBackend):
 
     def clear_cache(self) -> None:
         """Drop resident column uploads (frees GPU memory)."""
+        with self._lock:
+            self._clear_cache()
+
+    def _clear_cache(self) -> None:
+        """``clear_cache`` with ``_lock`` held."""
         self._groups.clear()
         for _, buffer, _ in self._arrays.values():
             buffer.destroy()
@@ -1615,10 +1675,27 @@ class WgpuBackend(SplatBackend):
         """Drop resident uploads (a dataset was closed)."""
         self.clear_cache()
 
-    def close(self) -> None:
-        """Release the device and all cached resources."""
-        self.clear_cache()
-        self._scratch.clear()
-        self._scatter_group0 = None
-        self._tiled_group0 = None
-        self._device.destroy()
+    def close(self, wait: bool = True) -> bool:
+        """Release the device and all cached resources; a render in
+        progress finishes first, unless ``wait`` is False.
+
+        Returns
+        -------
+        closed : bool
+            False if ``wait`` is False and a render is in progress,
+            in which case nothing was released.
+        """
+        if not self._lock.acquire(blocking=wait):
+            return False
+        try:
+            if self._closed:
+                return True
+            self._clear_cache()
+            self._scratch.clear()
+            self._scatter_group0 = None
+            self._tiled_group0 = None
+            self._device.destroy()
+            self._closed = True
+        finally:
+            self._lock.release()
+        return True

@@ -36,15 +36,19 @@ Simulate DNA-PAINT image acquisitions
    ~200-300 ms.
 4. In ``Imager parameters``, fluorophore characteristics such as PSF width and
    photon budget can be set. Adjusting the ``Power density`` field affects the
-   simulation analogously to changing the laser power in an experiment.
+   simulation analogously to changing the laser power in an experiment: the
+   photon rate is the power density times the ``Photon detection rate``, shown
+   as photons per frame.
 5. The ``Camera parameters`` group allows the user to set the number of
    acquisition frames and integration time. Values calculated from the
    settings, such as the total acquisition time, the mean dark time or the
    photons per frame, are shown in a muted color.
 
-   The default image size is set to 32 pixels. As the computation time
-   increases considerably with image size, it is recommended to simulate only
-   a subset of the actual camera field of view.
+   The default image size is set to 32 camera pixels (the simulation grid
+   is the camera chip itself, so image size, frame margin and positions are
+   counted in camera pixels; their size in nm follows from ``Pixel size``).
+   As the computation time increases considerably with image size, it is
+   recommended to simulate only a subset of the actual camera field of view.
 6. Select ``Simulate data`` (bottom right, or ``Simulation > Simulate data...``,
    :kbd:`Ctrl+R`) to start the simulation; a progress bar is shown while it
    runs (see :ref:`simulate-run` below).
@@ -80,7 +84,10 @@ Structures can also be imported:
 - When a structure has been previously designed with :doc:`design`, it can be
   imported with ``File > Import structure from Picasso: Design...``.
 - Docking strand positions of a .yaml or .hdf5 file can be used with
-  ``File > Import handles...``.
+  ``File > Import handles...``: the structure of a Simulate or Design .yaml
+  file, or the cluster centers of a clusterer .hdf5 file (keeping the
+  orientation they have in Render). The imported structure is placed once,
+  in the center of the field of view.
 
 A probability for the presence of a handle can be set with ``Incorporation``.
 
@@ -94,7 +101,8 @@ Selecting the button ``Generate positions`` (``Simulation > Generate
 positions``, :kbd:`Ctrl+G`) will generate a list of positions with the current
 settings and update the two preview panels:
 
-- ``Positions`` shows the whole simulated field of view in camera pixels.
+- ``Positions`` shows the whole simulated field of view in camera pixels (the
+  grid the movie is simulated on).
   Each cross is one handle (binding site) that will be simulated, so a
   structure appears as a small cluster of crosses. Handles dropped by
   ``Incorporation`` are not shown. The dashed square marks the ``Frame``
@@ -114,7 +122,13 @@ every structure and then converting it to a movie that will be saved as a .raw
 file, ready for subsequent localization.
 
 - All simulation settings are saved and can be loaded at a later time with
-  ``File > Load settings from previous simulation...``.
+  ``File > Load settings from previous simulation...``: select the .yaml file
+  next to the simulated movie. This restores the settings and the simulated
+  docking strand positions (``Structure.CX (nm)`` and ``Structure.CY (nm)``);
+  a file that does not contain them is reported and changes nothing. The
+  ``.yaml`` also carries the camera pixel size as the top-level ``Pixelsize``
+  key (next to ``Camera.Pixelsize``), which Localize needs to save the
+  localization coordinates in nm.
 - For 3D data, check ``Simulate 3D`` and load the 3D calibration with
   ``File > Load 3D calibration...`` (see :ref:`localize-3d-calibration` for
   how to create one).
@@ -132,15 +146,15 @@ file, ready for subsequent localization.
       import numpy as np
       from picasso import simulate
 
-      pixelsize, imagesize, frames, itime = 130, 32, 5000, 100   # nm, px, -, ms
+      pixelsize, imagesize, frames, itime = 130, 32, 5000, 100   # nm, camera px, -, ms
 
       # 3 x 2 grid of handles, 20 nm apart; one exchange round, z = 0
-      structure = simulate.defineStructure(
+      structure = simulate.define_structure(
           np.array([0, 20, 40, 0, 20, 40]), np.array([0, 0, 0, 20, 20, 20]),
           np.ones(6), np.zeros(6), pixelsize,
       )
-      positions = simulate.generatePositions(9, imagesize, 6, 0)     # 9 copies, 6 px margin, grid
-      handles = simulate.prepareStructures(
+      positions = simulate.generate_positions(9, imagesize, 6, 0)     # 9 copies, 6 camera px margin, grid
+      handles = simulate.prepare_structures(
           structure, positions, orientation=0, number=9, incorporation=0.85, exchange=0
       )
 
@@ -148,7 +162,7 @@ file, ready for subsequent localization.
       n_handles = handles.shape[1]
       photons = np.zeros((n_handles, frames), dtype=int)
       for i in range(n_handles):
-          photons[i], _, _ = simulate.distphotons(
+          photons[i], _, _ = simulate.distribute_photons(
               handles, itime, frames, taud=54054, taub=280,          # ms
               photonrate=53, photonratestd=29, photonbudget=1.5e6,
           )
@@ -156,18 +170,20 @@ file, ready for subsequent localization.
       # Frames, background and camera noise
       movie = np.zeros((frames, imagesize, imagesize))
       for f in range(frames):
-          movie[f] = simulate.convertMovie(
+          movie[f] = simulate.convert_movie(
               f, photons, handles, imagesize, frames, psf=0.82,
               photonrate=53, background=4, noise=2, mode3Dstate=False, cx=[], cy=[],
           )
       movie = simulate.check_type(simulate.noisy_p(movie, 4))
 
+      # Pixelsize (nm) is what Localize needs to save the coordinates in nm;
+      # Camera.Pixelsize is the key Simulate reads back from its own files
       info = {
           "Byte Order": "<", "Data Type": "uint16", "Frames": frames,
           "Height": imagesize, "Width": imagesize, "Camera": "Simulation",
-          "Camera.Pixelsize": pixelsize,
+          "Camera.Pixelsize": pixelsize, "Pixelsize": pixelsize,
       }
-      simulate.saveMovie("simulated.raw", movie, info)
+      simulate.save_movie("simulated.raw", movie, info)
 
 
 .. _simulate-multiplexing:

@@ -25,18 +25,20 @@ from picasso import render
 from picasso.gui import render as gui_render
 
 
-WIDTH = HEIGHT = 64.0
+WIDTH = HEIGHT = 64.0  # camera pixels
 PIXELSIZE = 130.0
+WIDTH_NM = WIDTH * PIXELSIZE
+HEIGHT_NM = HEIGHT * PIXELSIZE
 
 
 def _locs(n: int = 3000, seed: int = 0) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     return pd.DataFrame(
         {
-            "x": rng.uniform(0.0, WIDTH, size=n),
-            "y": rng.uniform(0.0, HEIGHT, size=n),
-            "lpx": rng.uniform(0.05, 0.3, size=n),
-            "lpy": rng.uniform(0.05, 0.3, size=n),
+            "x": rng.uniform(0.0, WIDTH_NM, size=n),
+            "y": rng.uniform(0.0, HEIGHT_NM, size=n),
+            "lpx": rng.uniform(0.05, 0.3, size=n) * PIXELSIZE,
+            "lpy": rng.uniform(0.05, 0.3, size=n) * PIXELSIZE,
             "photons": rng.uniform(500.0, 5000.0, size=n),
             "frame": rng.integers(0, 1000, size=n).astype(np.int32),
         }
@@ -75,7 +77,7 @@ def window(qt_offscreen, tmp_path):
     window = gui_render.Window(plugins_loaded=True)
     path = str(tmp_path / "locs.hdf5")
     window.view.add(path, _locs(), _info(), render_=False)
-    window.view.viewport = [(0.0, 0.0), (HEIGHT, WIDTH)]
+    window.view.viewport = [(0.0, 0.0), (HEIGHT_NM, WIDTH_NM)]
     window.view.resize(128, 128)
     window.view.async_rendering = True  # instance attr shadows the stub
     yield window
@@ -175,7 +177,7 @@ class TestAsyncRender:
     def test_stale_result_discarded(self, window, qapp, monkeypatch):
         monkeypatch.setattr(gui_render, "VIEWPORT_MARGIN", 0.0)
         view = window.view
-        zoomed = ((0.0, 0.0), (HEIGHT / 2, WIDTH / 2))
+        zoomed = ((0.0, 0.0), (HEIGHT_NM / 2, WIDTH_NM / 2))
         view.update_scene()
         stale_id = view._render_request_id
         # supersede immediately with a different viewport; a result is
@@ -296,11 +298,9 @@ class TestAsyncRender:
             gui_render.io, "load_user_settings", lambda: {"Render": {}}
         )
         assert view._max_blur_width() == default
-        # the render request carries it in camera pixels
+        # the render request carries it in nm
         kwargs = view.get_render_kwargs()
-        assert kwargs["max_blur_width"] == pytest.approx(
-            default / view.pixelsize
-        )
+        assert kwargs["max_blur_width"] == pytest.approx(default)
 
     def test_persistent_backend_gets_whole_channels(self, window, monkeypatch):
         view = window.view
@@ -316,7 +316,7 @@ class TestAsyncRender:
                 )
 
         backend_mod = gui_render.render.backend
-        zoomed = ((0.0, 0.0), (HEIGHT / 4, WIDTH / 4))
+        zoomed = ((0.0, 0.0), (HEIGHT_NM / 4, WIDTH_NM / 4))
         request = {
             "locs": view.locs[0],
             "viewport": zoomed,
@@ -367,7 +367,8 @@ class TestAsyncRender:
         assert preview["locs"] is view.locs[0]  # the channel stays whole
         assert len(preview["indices"][0]) == len(indices[0][::expected_step])
         # the bypass regime (large viewport) hands over no selection
-        assert view._render_indices(((0.0, 0.0), (HEIGHT, WIDTH))) == [None]
+        full = ((0.0, 0.0), (HEIGHT_NM, WIDTH_NM))
+        assert view._render_indices(full) == [None]
         # the CPU path keeps its own slicing: no indices in its requests
         monkeypatch.setattr(
             backend_mod, "_get_backend", render.backend._cpu_backend
@@ -401,7 +402,7 @@ class TestAsyncRender:
         monkeypatch.setattr(
             view, "_interaction_subsample_target", lambda population=0: 50
         )
-        zoomed = ((0.0, 0.0), (HEIGHT / 4, WIDTH / 4))
+        zoomed = ((0.0, 0.0), (HEIGHT_NM / 4, WIDTH_NM / 4))
         locs, _ = view._prepare_locs_for_rendering(viewport=zoomed)
         assert sum(len(channel) for channel in locs) == len(view.locs[0])
         in_view = len(view._viewport_indices(0, zoomed))
@@ -410,14 +411,14 @@ class TestAsyncRender:
         assert view._subsample_request(preview)
         sampled = pd.concat(preview["locs"])
         visible = sampled[
-            (sampled["x"] < WIDTH / 4) & (sampled["y"] < HEIGHT / 4)
+            (sampled["x"] < WIDTH_NM / 4) & (sampled["y"] < HEIGHT_NM / 4)
         ]
         # about the target in view (a whole-FOV stride would leave ~3)
         assert len(visible) >= 25
         # a full-FOV preview is unchanged: strided over all rows
         full = {
             "locs": locs,
-            "viewport": ((0.0, 0.0), (HEIGHT, WIDTH)),
+            "viewport": ((0.0, 0.0), (HEIGHT_NM, WIDTH_NM)),
             "contrast": (0.0, 1.0),
         }
         assert view._whole_channel_view_fraction(full) == 1.0
@@ -512,7 +513,7 @@ class TestAsyncRender:
         # an interactive viewport change must update the displayed frame
         # synchronously (geometric blit of the stale frame), before any
         # worker result can possibly be applied
-        shifted = ((10.0, 10.0), (10.0 + HEIGHT, 10.0 + WIDTH))
+        shifted = ((1300.0, 1300.0), (1300.0 + HEIGHT_NM, 1300.0 + WIDTH_NM))
         view.update_scene(viewport=shifted, interactive=True)
         assert view._displayed_viewport != shown_before
         assert view._displayed_viewport == (
@@ -529,7 +530,10 @@ class TestAsyncRender:
         n_locs_before = view.n_locs
         shown_before = _qimage_bytes(view.qimage)
         # fabricate a superseded completion: older id, shifted viewport
-        stale_viewport = ((5.0, 5.0), (5.0 + HEIGHT, 5.0 + WIDTH))
+        stale_viewport = (
+            (650.0, 650.0),
+            (650.0 + HEIGHT_NM, 650.0 + WIDTH_NM),
+        )
         view._render_request_id += 1  # pretend a newer request exists
         fake = view.qimage_no_picks.copy()
         view._on_render_finished(
@@ -547,12 +551,12 @@ class TestAsyncRender:
         assert view.image is image_cache
         assert view.n_locs == n_locs_before
 
-    @pytest.mark.parametrize("size", [WIDTH, 20.0, 3.0, 0.7])
+    @pytest.mark.parametrize("size", [WIDTH_NM, 2600.0, 390.0, 91.0])
     def test_n_locs_counts_the_visible_viewport(self, window, qapp, size):
         # the render covers a margin and the pyramid query whole edge
         # blocks; neither may leak into the count shown in Info
         view = window.view
-        viewport = ((10.2, 10.2), (10.2 + size, 10.2 + size))
+        viewport = ((1326.0, 1326.0), (1326.0 + size, 1326.0 + size))
         view.update_scene(viewport=viewport)
         _wait_until(qapp, lambda: getattr(view, "image", None) is not None)
         (y_min, x_min), (y_max, x_max) = view.viewport

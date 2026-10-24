@@ -13,7 +13,7 @@ with ``View > 3D view`` (:kbd:`Ctrl+Shift+R`):
 - Pressed again with nothing changed, it only brings the window to the front,
   keeping the rotation; a new pick or a new field of view reloads it.
 
-Some of the display settings (blur method, colormap, etc.) are taken
+Some of the display settings (render method, colormap, etc.) are taken
 over from the main window, see :ref:`render-3d-display-settings`.
 
 The arrow keys move the shown region. In the pick mode, they move the pick
@@ -22,6 +22,9 @@ itself, in the main window too.
 The user may perform multiple actions in the 3D view, including:
 saving rotated localizations, building animations (.mp4 format), rotating by a
 specified angle, see below.
+
+The toolbar holds the most used actions. Right-click it to choose other actions of the menus, see
+:ref:`toolbars`.
 
 Rendering in the 3D view runs in the background, as in the main
 window:
@@ -35,8 +38,8 @@ window:
 
 When rotating by a specified angle, the dialog offers a ``Rotate around``
 choice between **Localizations** (the default) and **World**.
-``Localizations`` rotates around the data's own axes - the axes shown by the
-axes icon, which rotate together with the data - so each entered angle changes
+``Localizations`` rotates around the data's own axes - the axes that rotate
+together with the data - so each entered angle changes
 the corresponding displayed angle by exactly that amount. ``World`` rotates
 around the fixed screen/camera axes instead.
 
@@ -56,9 +59,9 @@ The zoom and pan controls match the main window's, see
 
   - :kbd:`Ctrl` (:kbd:`Cmd` on macOS) + the mouse wheel (or trackpad scroll; a
     pinch works too) zooms about the cursor.
-  - Drag a rectangle with :kbd:`Shift` + the left button to zoom to it (as in
-    the main window, the rectangle stretches towards the bottom right and
-    releasing above or left of the start cancels).
+  - Drag a rectangle with :kbd:`Shift` + the left button to zoom to it. As in
+    the main window, it can be dragged in any direction, and a right click
+    (or :kbd:`Esc`) before releasing the left button cancels it.
   - :kbd:`Ctrl` +/- zoom about the center.
 
 - **Pan**: drag with the right or the middle mouse button, or with :kbd:`Alt`
@@ -131,9 +134,13 @@ View
    Opens the display settings of the 3D view, see
    :ref:`render-3d-display-settings` below.
 
-``Show/hide legend`` (:kbd:`Ctrl+L`), ``Show/hide rotation`` (:kbd:`Ctrl+P`), ``Show/hide rotation angles``
-   Toggle the overlays: the channel legend of multichannel data, the axes icon
-   that shows the current orientation, and the rotation angles in degrees.
+``Show/hide legend`` (:kbd:`Ctrl+L`), ``Show/hide rotation angles``
+   Toggle the overlays: the channel legend of multichannel data and the
+   rotation angles in degrees.
+
+``Color vision preview``
+   Shows the main and the 3D window as people with color blindness see them,
+   see :ref:`render-color-vision-preview`.
 
 ``Rotate by angle...`` (:kbd:`Ctrl+Shift+R`)
    Rotates by angles typed in, around the data's own axes or the fixed screen
@@ -171,17 +178,58 @@ Display settings
 
 The display settings of the 3D view are separate from the main window's, so
 the 3D view can be tuned without changing the main image. When the 3D view is
-opened or reloaded, the blur method, the colormap and the settings of the
+opened or reloaded, the render method, the colormap and the settings of the
 adaptive histogram and of the jittered triangulation are taken over from the
 main window; everything else is set here:
 
 - the display pixel size (with ``dynamic``) and the contrast (``Min. density``,
   ``Max. density``) and colormap;
-- the blur method, with ``Min. Blur (nm)``, the adaptive histogram's
+- the render method, with ``Min. blur (nm)``, the adaptive histogram's
   ``Leaf capacity`` and the jittered triangulation's ``Passes``, ``Jitter``
   and ``Max. localizations`` (see :ref:`render-display-settings`);
 - the scale bar: its length, ``Automatic length`` and ``Print scale bar
-  length``.
+  length``;
+- the grid, see below.
+
+The per-channel contrast is shared with the main window: it is set in the main
+window's ``View > Files...`` (see :ref:`Per-channel contrast <render-channel-contrast>`) and applied
+to the 3D view's own minimum and maximum density.
+
+.. _render-3d-grid:
+
+Grid
+^^^^
+
+Tick ``Grid`` to draw grid planes that rotate with the data, which makes the
+orientation easy to follow. The planes span the data's bounding box, enlarged
+to the next grid lines, and the lines sit at whole multiples of
+``Spacing (nm)`` in the original coordinates (so z = 0 nm lies on a line).
+``Planes`` chooses which of the ``XY``, ``XZ`` and ``YZ`` planes are drawn and
+``Position`` where (both are grayed out for ``Axes only``, see below):
+
+``Back of the data`` (default)
+   Each plane lies on the side of the bounding box facing away from you, so
+   the planes form the back walls of a box around the data and swap sides as
+   it rotates.
+``Through the center``
+   Each plane passes through the center of the bounding box.
+
+``Show`` set to ``Axes only`` draws, instead of the planes, the three axes
+from one corner of the bounding box along its edges, with a tick mark at each
+grid line, like the axes of a 3D plot. The corner is chosen anew as the data
+rotate: one where no two axes overlap on screen, on the outline of the box and
+preferably at the bottom left. An axis pointing at you is left out.
+
+``Labels`` prints the coordinates of the lines, e.g., ``z = 200 nm``, just
+past one end of the lines of each axis, where they keep clear of the grid; z
+is labeled first. With ``Axes only``, the labels sit past the ticks and each
+axis is named with its unit, e.g., ``x (µm)``. An axis pointing at you gets no
+labels, and the labels that would overlap others or reach past the window are
+left out.
+
+``Spacing``, ``Automatic``, ``Draw``, ``Labels`` and the line settings work as
+in the main window (see :ref:`render-grid`); the 3D grid keeps its own
+settings, saved under ``Grid3D`` in ``~/.picasso/settings.yaml``.
 
 .. _render-animation:
 
@@ -205,6 +253,15 @@ Build an animation with ``File > Build an animation...`` in the 3D view:
 The frames are rendered in the background, at the resolution set in the
 animation dialog (``Resolution (px)``, by default the window's size), so the
 windows stay usable while the video is built.
+
+If the scale bar is shown in the display settings, it is drawn into every
+frame with the length set there. The length stays fixed in nm, so the bar
+grows and shrinks as the animation zooms in and out. The ``.yaml`` file saved
+next to the video records the positions (the rotations and the viewports, as
+``Viewports at checkpoints (nm)``), durations, transition and the scale
+bar's length (if drawn). Likewise, the grid planes, if shown, rotate with the
+data in every frame, with the spacing set when the build starts; the ``.yaml``
+file records the spacing, planes and position.
 
 While the video is built, a progress dialog shows how many frames have been
 rendered. ``Cancel`` stops the build and deletes the unfinished video file.
@@ -233,7 +290,7 @@ within each of them, not how long they take.
    :class-container: api-example
 
    Each position is a ``scipy.spatial.transform.Rotation`` and a viewport
-   (``((y_min, x_min), (y_max, x_max))`` in camera pixels). ``transition``
+   (``((y_min, x_min), (y_max, x_max))`` in nm). ``transition``
    is ``"ease"`` (*Stop at each position*), ``"smooth"`` or ``"linear"``
    (*Constant speed*).
 
@@ -243,7 +300,7 @@ within each of them, not how long they take.
       from picasso import io, render
 
       locs, info = io.load_locs("movie_locs_3d.hdf5")
-      viewport = ((100, 100), (164, 164))
+      viewport = ((13000, 13000), (21320, 21320))   # nm
       positions = [
           (Rotation.identity(), viewport),
           (Rotation.from_euler("xyz", [0, 90, 0], degrees=True), viewport),
@@ -258,5 +315,6 @@ within each of them, not how long they take.
           transition="ease",
           blur_method="gaussian",
           fps=30,
-          progress_callback="console",
+          grid=render.GridOverlay(spacing_nm=200, labels=True),  # optional
+          progress="console",
       )

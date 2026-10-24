@@ -15,7 +15,6 @@ import glob as _glob
 import os
 import sys
 import time
-import yaml
 from typing import Literal
 
 import numpy as np
@@ -26,10 +25,19 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 # must come after the PyQt6 import so that matplotlib's qt_compat
 # selects the PyQt6 binding (picasso core no longer imports PyQt6)
 from matplotlib.backends.backend_qt5agg import FigureCanvas
+from matplotlib.figure import Figure
 from scipy.optimize import curve_fit
 from scipy.stats import norm
 
-from .. import io, lib, simulate, __version__, docs_url
+from .. import (
+    io,
+    lib,
+    lib_qt,
+    notifications,
+    simulate,
+    __version__,
+    docs_url,
+)
 from .app import run_gui
 from . import plot_style, theme
 
@@ -93,8 +101,10 @@ STRUCTURE3D_DEFAULT = "0,0,0,0,0,0,0,0,0,0,0,0"
 STRUCTURENO_DEFAULT = 9
 STRUCTUREFRAME_DEFAULT = 6
 INCORPORATION_DEFAULT = 85
-# Default 3D calibration
-CX_DEFAULT = [
+# Default 3D calibration: spot widths as polynomials in z (nm). The
+# coefficients were recorded in camera pixels of PIXELSIZE_DEFAULT nm and
+# are converted to nm below, as in the calibration files of Picasso 1.0.
+_CX_DEFAULT_PX = [
     3.1638306844743706e-17,
     -2.2103661248660896e-14,
     -9.775815406044296e-12,
@@ -103,7 +113,7 @@ CX_DEFAULT = [
     -0.0028759382006135654,
     1.1756537760039398,
 ]
-CY_DEFAULT = [
+_CY_DEFAULT_PX = [
     1.710907877866197e-17,
     -2.4986657766862576e-15,
     -8.405284979510355e-12,
@@ -112,6 +122,8 @@ CY_DEFAULT = [
     0.0018155881468011011,
     1.011468185618154,
 ]
+CX_DEFAULT = [c * PIXELSIZE_DEFAULT for c in _CX_DEFAULT_PX]
+CY_DEFAULT = [c * PIXELSIZE_DEFAULT for c in _CY_DEFAULT_PX]
 
 
 def _mark_derived(*widgets: QtWidgets.QWidget) -> None:
@@ -215,7 +227,7 @@ class Window(QtWidgets.QMainWindow):
     photonstdframeEdit : QtWidgets.QLabel
         Label displaying the standard deviation of photons per emitter
         per frame.
-    pixelsizeEdit : QtWidgets.QSpinBox
+    pixelsizeEdit : QtWidgets.QDoubleSpinBox
         Spin box for the pixel size (nm).
     psfEdit : QtWidgets.QDoubleSpinBox
         Spin box for the point spread function (PSD) width (pixels).
@@ -316,6 +328,7 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        lib.add_sound_notifications_menu(file_menu)
         plot_settings_action = file_menu.addAction("Plot settings...")
         plot_settings_action.setIcon(theme.icon("plot-settings"))
         plot_settings_action.setToolTip("Appearance of all chart windows")
@@ -386,8 +399,9 @@ class Window(QtWidgets.QMainWindow):
         self.framesEdit = QtWidgets.QSpinBox()
         self.framesEdit.setRange(10, 100000000)  # 10-100.000.000 frames
         self.framesEdit.setSingleStep(1000)
-        self.pixelsizeEdit = QtWidgets.QSpinBox()
-        self.pixelsizeEdit.setRange(1, 1000)  # 1 to 1000 nm frame size
+        self.pixelsizeEdit = QtWidgets.QDoubleSpinBox()
+        self.pixelsizeEdit.setRange(0.01, 10000)  # nm
+        self.pixelsizeEdit.setDecimals(2)
         self.totaltimeEdit = QtWidgets.QLabel()
 
         # Deactivate keyboard tracking
@@ -485,7 +499,8 @@ class Window(QtWidgets.QMainWindow):
             laserpower = QtWidgets.QLabel("Laser power")
         psf = QtWidgets.QLabel("PSF")
         psf.setToolTip(
-            "Point Spread Function (PSF) width (Gaussian \u03c3) in pixels."
+            "Point Spread Function (PSF) width (Gaussian \u03c3) in camera "
+            "pixels."
         )
         psf_fwhm = QtWidgets.QLabel("PSF (FWHM)")
         psf_fwhm.setToolTip(
@@ -516,13 +531,17 @@ class Window(QtWidgets.QMainWindow):
         self.psfEdit.setRange(0, 3)
         self.psfEdit.setSingleStep(0.01)
         self.psf_fwhmEdit = QtWidgets.QLabel()
+        # The photon rate and its std follow from the power density and
+        # the photon detection rate (changeImager); their ranges and
+        # decimals hold any product so that the simulation uses the
+        # photons per frame shown.
         self.photonrateEdit = QtWidgets.QDoubleSpinBox()
-        self.photonrateEdit.setRange(0, 1000)
-        self.photonrateEdit.setDecimals(0)
+        self.photonrateEdit.setRange(0, 1e6)
+        self.photonrateEdit.setDecimals(2)
         self.photonsframeEdit = QtWidgets.QLabel()
         self.photonratestdEdit = QtWidgets.QDoubleSpinBox()
-        self.photonratestdEdit.setRange(0, 1000)
-        self.photonratestdEdit.setDecimals(0)
+        self.photonratestdEdit.setRange(0, 1e6)
+        self.photonratestdEdit.setDecimals(2)
         self.photonstdframeEdit = QtWidgets.QLabel()
         self.photonbudgetEdit = QtWidgets.QDoubleSpinBox()
         self.photonbudgetEdit.setRange(0, 100000000)
@@ -532,6 +551,7 @@ class Window(QtWidgets.QMainWindow):
         self.photonslopeEdit = QtWidgets.QDoubleSpinBox()
         self.photonslopeEdit.setRange(0, 10000)
         self.photonslopeStdEdit = QtWidgets.QDoubleSpinBox()
+        self.photonslopeStdEdit.setRange(0, 10000)
 
         self.laserpowerEdit.setValue(LASERPOWER_DEFAULT)
         self.psfEdit.setValue(PSF_DEFAULT)
@@ -966,6 +986,7 @@ class Window(QtWidgets.QMainWindow):
         simgrid.addWidget(self.exportkinetics, 3, 0, 1, 2)
 
         self.changeTime()
+        self.changeImager()  # the photon rate of the defaults
         self.changePSF()
         self.changeNoise()
         self.changePaint()
@@ -978,9 +999,9 @@ class Window(QtWidgets.QMainWindow):
         posgrid = QtWidgets.QGridLayout(pos_groupbox)
         strgrid = QtWidgets.QGridLayout(str_groupbox)
 
-        self.figure1 = plt.figure(figsize=(2, 2), constrained_layout=True)
+        self.figure1 = Figure(figsize=(2, 2), constrained_layout=True)
         self.ax1 = self.figure1.add_subplot(111)
-        self.figure2 = plt.figure(figsize=(2, 2), constrained_layout=True)
+        self.figure2 = Figure(figsize=(2, 2), constrained_layout=True)
         self.ax2 = self.figure2.add_subplot(111)
         self.canvas1 = FigureCanvas(self.figure1)
         csize = 180
@@ -1111,13 +1132,18 @@ class Window(QtWidgets.QMainWindow):
             self, "Load 3d calibration", directory=dir, filter="*.yaml"
         )
         if path:
-            with open(path, "r") as f:
-                z_calibration = yaml.full_load(f)
-                self.cx = [_ for _ in z_calibration["X Coefficients"]]
-                self.cy = [_ for _ in z_calibration["Y Coefficients"]]
-                self.statusBar().showMessage(
-                    "Calibration loaded from: " + path
+            try:
+                # spot widths in nm; a calibration from before Picasso 1.0
+                # (camera pixels) is converted with the camera pixel size
+                z_calibration = io.load_calibration(
+                    path, pixelsize=self.pixelsizeEdit.value()
                 )
+            except lib.FILE_LOAD_ERRORS as error:
+                lib.show_load_error(self, path, error)
+                return
+            self.cx = [_ for _ in z_calibration["X Coefficients"]]
+            self.cy = [_ for _ in z_calibration["Y Coefficients"]]
+            self.statusBar().showMessage("Calibration loaded from: " + path)
 
     def changeTime(self) -> None:
         """Update the total acquisition time based on the current
@@ -1305,6 +1331,7 @@ class Window(QtWidgets.QMainWindow):
         structurexx = structurexx[:-1]
         structureyy = structureyy[:-1]
         structureex = structureex[:-1]
+        structure3d = structure3d[:-1]
 
         self.structurexxEdit.setText(structurexx)
         self.structureyyEdit.setText(structureyy)
@@ -1322,7 +1349,8 @@ class Window(QtWidgets.QMainWindow):
 
         twopi = 2 * 3.1415926535
 
-        circdata = np.arange(0, twopi, twopi / labels)
+        # not np.arange, whose rounding may add a label at 2 pi
+        circdata = np.linspace(0, twopi, labels, endpoint=False)
 
         xxval = np.round(np.cos(circdata) * diameter / 2 * 100) / 100
         yyval = np.round(np.sin(circdata) * diameter / 2 * 100) / 100
@@ -1341,6 +1369,7 @@ class Window(QtWidgets.QMainWindow):
         structurexx = structurexx[:-1]
         structureyy = structureyy[:-1]
         structureex = structureex[:-1]
+        structure3d = structure3d[:-1]
 
         self.structurexxEdit.setText(structurexx)
         self.structureyyEdit.setText(structureyy)
@@ -1485,7 +1514,7 @@ class Window(QtWidgets.QMainWindow):
         timetrace = {}
 
         for i in range(nsites):
-            p_temp, t_temp, k_temp = simulate.distphotons(
+            p_temp, t_temp, k_temp = simulate.distribute_photons(
                 partstruct,
                 itime,
                 frames,
@@ -1526,7 +1555,7 @@ class Window(QtWidgets.QMainWindow):
         movie = np.zeros(shape=(frames, imagesize, imagesize))
         app = QtCore.QCoreApplication.instance()
         for runner in range(frames):
-            movie[runner, :, :] = simulate.convertMovie(
+            movie[runner, :, :] = simulate.convert_movie(
                 runner,
                 photondist,
                 partstruct,
@@ -1537,8 +1566,9 @@ class Window(QtWidgets.QMainWindow):
                 background,
                 noise,
                 mode3Dstate,
-                self.cx,
+                self.cx,  # spot widths in nm
                 self.cy,
+                pixelsize=params["pixelsize"],
             )
             outputmsg = (
                 "Converting to Image ... "
@@ -1580,7 +1610,15 @@ class Window(QtWidgets.QMainWindow):
             movie = simulate.noisy_p(movie, params["background"])
             movie = simulate.check_type(movie)
             self.statusBar().showMessage("Saving movie ...")
-            simulate.saveMovie(fileName, movie, info)
+            simulate.save_movie(fileName, movie, info)
+            if self.exportkinetics.isChecked():
+                kinfo_path = (
+                    os.path.splitext(fileName)[0]
+                    + "_"
+                    + str(self.currentround)
+                    + "_kinetics.yaml"
+                )
+                io.save_info(kinfo_path, [timetrace])
             self.statusBar().showMessage("Movie saved to: " + fileName)
             dt = time.time() - t0
             self.statusBar().showMessage(
@@ -1605,7 +1643,6 @@ class Window(QtWidgets.QMainWindow):
                     + "_kinetics.yaml"
                 )
                 io.save_info(kinfo_path, [timetrace])
-            self.statusBar().showMessage("Movie saved to: " + fileName)
 
     def _process_singleround_movie(
         self,
@@ -1622,7 +1659,7 @@ class Window(QtWidgets.QMainWindow):
         self.mainpbar.setValue(100)
         self.statusBar().showMessage("Converting to image ... complete.")
         self.statusBar().showMessage("Saving movie ...")
-        simulate.saveMovie(fileName, movie, info)
+        simulate.save_movie(fileName, movie, info)
         if self.exportkinetics.isChecked():
             kinfo_path = os.path.splitext(fileName)[0] + "_kinetics.yaml"
             io.save_info(kinfo_path, [timetrace])
@@ -1726,7 +1763,7 @@ class Window(QtWidgets.QMainWindow):
             meanbrightsim = self.vectorToString(spotkinetics[:, 3])
 
             info = {
-                "Generated by": f"Picasso v{__version__} Simulate",
+                **lib.step_info("Simulate"),
                 "Byte Order": "<",
                 "Camera": "Simulation",
                 "Data Type": "uint16",
@@ -1746,8 +1783,8 @@ class Window(QtWidgets.QMainWindow):
                 "Structure.Arrangement": params["structureArrangement"],
                 "Structure.Orientation": params["structureOrientation"],
                 "Structure.3D": mode3Dstate,
-                "Structure.CX": self.cx,
-                "Structure.CY": self.cy,
+                "Structure.CX (nm)": self.cx,
+                "Structure.CY (nm)": self.cy,
                 "PAINT.k_on": params["kon"],
                 "PAINT.imager": params["imagerconcentration"],
                 "PAINT.taub": params["taub"],
@@ -1766,6 +1803,7 @@ class Window(QtWidgets.QMainWindow):
                 "Camera.Integration Time": params["itime"],
                 "Camera.Frames": params["frames"],
                 "Camera.Pixelsize": params["pixelsize"],
+                "Pixelsize": params["pixelsize"],
                 "Noise.Lasercoefficient": params["laserc"],
                 "Noise.Imagercoefficient": params["imagerc"],
                 "Noise.EquationA": params["equationA"],
@@ -1793,112 +1831,137 @@ class Window(QtWidgets.QMainWindow):
                 self._process_singleround_movie(
                     movie, fileName, info, timetrace, t0, params
                 )
+        notifications.notify_finished(time.time() - t0)
 
-    def loadSettings(self) -> None:  # TODO: re-write exceptions, check key
-        """Load simulation settings from a YAML file."""
+    def loadSettings(self) -> None:
+        """Load the settings of a simulation from its .yaml file,
+        including the simulated docking strand positions.
+
+        A file without the settings is reported and changes nothing. The
+        3D, constant photon rate std, background and noise model settings
+        are applied only if the file has them.
+        """
         path, exe = QtWidgets.QFileDialog.getOpenFileName(
             self, "Open yaml", filter="*.yaml"
         )
-        if path:
-            info = io.load_info(path)
-            self.framesEdit.setValue(info[0]["Frames"])
-
-            self.structureframeEdit.setValue(info[0]["Structure.Frame"])
-            self.structurenoEdit.setValue(info[0]["Structure.Number"])
-            self.structurexxEdit.setText(info[0]["Structure.StructureX"])
-            self.structureyyEdit.setText(info[0]["Structure.StructureY"])
-            self.structureexEdit.setText(info[0]["Structure.StructureEx"])
-            try:
-                self.structure3DEdit.setText(info[0]["Structure.Structure3D"])
-                self.mode3DEdit.setChecked(info[0]["Structure.3D"])
-                self.cx = info[0]["Structure.CX"]
-                self.cy = info[0]["Structure.CY"]
-            except Exception as e:
-                print(e)
-                pass
-            try:
-                self.photonslopemodeEdit.setChecked(
-                    info[0]["Imager.Constant Photonrate Std"]
-                )
-            except Exception as e:
-                print(e)
-                pass
-
-            try:
-                self.backgroundlevelEdit.setValue(
-                    info[0]["Imager.BackgroundLevel"]
-                )
-            except Exception as e:
-                print(e)
-                pass
-            self.structureIncorporationEdit.setValue(
-                info[0]["Structure.Incorporation"]
+        if not path:
+            return
+        title = "Load settings"
+        try:
+            documents = io.load_info(path)
+        except Exception as error:  # e.g., not valid YAML
+            QtWidgets.QMessageBox.warning(
+                self, title, f"Could not read {path}:\n{error}"
             )
+            return
+        info = documents[0] if documents else None
+        if not isinstance(info, dict):
+            info = {}
 
-            self.structurerandomEdit.setChecked(
-                info[0]["Structure.Arrangement"]
+        def check(widget):
+            return lambda value: widget.setChecked(bool(value))
+
+        required = {
+            "Structure.Frame": self.structureframeEdit.setValue,
+            "Structure.Number": self.structurenoEdit.setValue,
+            "Structure.StructureX": self.structurexxEdit.setText,
+            "Structure.StructureY": self.structureyyEdit.setText,
+            "Structure.StructureEx": self.structureexEdit.setText,
+            "Structure.Incorporation": (
+                self.structureIncorporationEdit.setValue
+            ),
+            "Structure.Arrangement": check(self.structurerandomEdit),
+            "Structure.Orientation": check(
+                self.structurerandomOrientationEdit
+            ),
+            "PAINT.k_on": self.konEdit.setValue,
+            "PAINT.imager": self.imagerconcentrationEdit.setValue,
+            "PAINT.taub": self.taubEdit.setValue,
+            "Imager.PSF": self.psfEdit.setValue,
+            "Imager.Photonrate": self.photonrateEdit.setValue,
+            "Imager.Photonrate Std": self.photonratestdEdit.setValue,
+            "Imager.Photonbudget": self.photonbudgetEdit.setValue,
+            "Imager.Laserpower": self.laserpowerEdit.setValue,
+            "Imager.Photonslope": self.photonslopeEdit.setValue,
+            "Imager.PhotonslopeStd": self.photonslopeStdEdit.setValue,
+            "Camera.Image Size": self.camerasizeEdit.setValue,
+            "Camera.Integration Time": self.integrationtimeEdit.setValue,
+            "Camera.Frames": self.framesEdit.setValue,
+            "Camera.Pixelsize": self.pixelsizeEdit.setValue,
+        }
+        optional = {
+            "Structure.Structure3D": self.structure3DEdit.setText,
+            "Structure.3D": check(self.mode3DEdit),
+            "Imager.Constant Photonrate Std": check(self.photonslopemodeEdit),
+            "Imager.BackgroundLevel": self.backgroundlevelEdit.setValue,
+        }
+        if ADVANCEDMODE:
+            optional.update(
+                {
+                    "Noise.Lasercoefficient": self.lasercEdit.setValue,
+                    "Noise.Imagercoefficient": self.imagercEdit.setValue,
+                    "Noise.BackgroundOff": self.BgoffsetEdit.setValue,
+                    "Noise.EquationA": self.EquationAEdit.setValue,
+                    "Noise.EquationB": self.EquationBEdit.setValue,
+                    "Noise.EquationC": self.EquationCEdit.setValue,
+                    "Noise.BackgroundStdOff": self.BgStdoffsetEdit.setValue,
+                }
             )
-            self.structurerandomOrientationEdit.setChecked(
-                info[0]["Structure.Orientation"]
+        # the simulated positions, in the rows of ``self.newstruct``
+        handle_keys = [
+            "Structure.HandleX",
+            "Structure.HandleY",
+            "Structure.HandleEx",
+            "Structure.HandleStruct",
+            "Structure.Handle3d",
+        ]
+
+        missing = [key for key in [*required, *handle_keys] if key not in info]
+        if missing:
+            listed = ", ".join(missing[:5])
+            if len(missing) > 5:
+                listed += f" and {len(missing) - 5} more"
+            QtWidgets.QMessageBox.warning(
+                self,
+                title,
+                f"{path} does not contain the settings of a Picasso: "
+                f"Simulate simulation.\nMissing: {listed}.",
             )
-
-            self.konEdit.setValue(info[0]["PAINT.k_on"])
-            self.imagerconcentrationEdit.setValue(info[0]["PAINT.imager"])
-            self.taubEdit.setValue(info[0]["PAINT.taub"])
-
-            self.psfEdit.setValue(info[0]["Imager.PSF"])
-            self.photonrateEdit.setValue(info[0]["Imager.Photonrate"])
-            self.photonratestdEdit.setValue(info[0]["Imager.Photonrate Std"])
-            self.photonbudgetEdit.setValue(info[0]["Imager.Photonbudget"])
-            self.laserpowerEdit.setValue(info[0]["Imager.Laserpower"])
-            self.photonslopeEdit.setValue(info[0]["Imager.Photonslope"])
-            self.photonslopeStdEdit.setValue(info[0]["Imager.PhotonslopeStd"])
-
-            self.structurecombo.setCurrentIndex(2)
-            self.camerasizeEdit.setValue(info[0]["Camera.Image Size"])
-            self.integrationtimeEdit.setValue(
-                info[0]["Camera.Integration Time"]
+            return
+        try:
+            handles = np.array(
+                [
+                    np.asarray(str(info[key]).split(","), dtype=float)
+                    for key in handle_keys
+                ]
             )
-            self.framesEdit.setValue(info[0]["Camera.Frames"])
-            self.pixelsizeEdit.setValue(info[0]["Camera.Pixelsize"])
-
-            if ADVANCEDMODE:
-                self.lasercEdit.setValue(info[0]["Noise.Lasercoefficient"])
-                self.imagercEdit.setValue(info[0]["Noise.Imagercoefficient"])
-                self.BgoffsetEdit.setValue(info[0]["Noise.BackgroundOff"])
-
-                self.EquationAEdit.setValue(info[0]["Noise.EquationA"])
-                self.EquationBEdit.setValue(info[0]["Noise.EquationB"])
-                self.EquationCEdit.setValue(info[0]["Noise.EquationC"])
-                self.BgStdoffsetEdit.setValue(
-                    info[0]["Noise.BackgroundStdOff"]
-                )
-
-            # SET POSITIONS
-            handlexx = np.asarray((info[0]["Structure.HandleX"]).split(","))
-            handleyy = np.asarray((info[0]["Structure.HandleY"]).split(","))
-            handleex = np.asarray((info[0]["Structure.HandleEx"]).split(","))
-            handless = np.asarray(
-                (info[0]["Structure.HandleStruct"]).split(",")
+        except ValueError as error:
+            QtWidgets.QMessageBox.warning(
+                self,
+                title,
+                f"Could not read the docking strand positions in {path}:"
+                f"\n{error}",
             )
+            return
 
-            handlexx = handlexx.astype(float)
-            handleyy = handleyy.astype(float)
-            handleex = handleex.astype(float)
-            handless = handless.astype(float)
+        for key, apply in required.items():
+            apply(info[key])
+        for key, apply in optional.items():
+            if key in info:
+                apply(info[key])
+        if "Structure.CX (nm)" in info and "Structure.CY (nm)" in info:
+            self.cx = list(info["Structure.CX (nm)"])
+            self.cy = list(info["Structure.CY (nm)"])
+        elif "Structure.CX" in info and "Structure.CY" in info:
+            # before Picasso 1.0: spot widths in camera pixels
+            pixelsize = float(info["Camera.Pixelsize"])
+            self.cx = [c * pixelsize for c in info["Structure.CX"]]
+            self.cy = [c * pixelsize for c in info["Structure.CY"]]
+        self.structurecombo.setCurrentIndex(2)  # Custom
 
-            handleex = handleex.astype(int)
-            handless = handless.astype(int)
-
-            handle3d = np.asarray((info[0]["Structure.Handle3d"]).split(","))
-            handle3d = handle3d.astype(float)
-            structure = np.array(
-                [handlexx, handleyy, handleex, handless, handle3d]
-            )
-
-            self.newstruct = structure
-            self.plotPositions()
-            self.statusBar().showMessage("Settings loaded from: " + path)
+        self.newstruct = handles
+        self.plotPositions()
+        self.statusBar().showMessage("Settings loaded from: " + path)
 
     def importDesign(self) -> None:
         """Import DNA origami design generated by Picasso: Design."""
@@ -1972,37 +2035,55 @@ class Window(QtWidgets.QMainWindow):
                     ex = np.ones_like(x)
 
                 try:
-                    z = self.readLine(info[0]["Structure.Structure3D"])
+                    z = self.readLine(
+                        info[0]["Structure.Structure3D"],
+                        textmode=False,
+                    )
                 except Exception as e:
                     print(e)
                     z = np.zeros_like(x)
 
                 minlen = min(len(x), len(y), len(ex), len(z))
 
-                x = x[0:minlen]
-                y = y[0:minlen]
+                x = np.asarray(x[0:minlen])
+                y = np.asarray(y[0:minlen])
                 ex = ex[0:minlen]
                 z = z[0:minlen]
 
+                # The structure is stored relative to its own origin (nm,
+                # y up as in Simulate); align it in the center of window.
+                center = self.camerasizeEdit.value() / 2
+                center *= self.pixelsizeEdit.value()
+                x = x - np.mean(x) + center
+                y = y - np.mean(y) + center
+
             else:
 
-                clusters = io.load_clusters(path)
+                try:
+                    loaded = lib_qt.load_or_ask_pixelsize(
+                        self, io.load_locs, path
+                    )
+                except lib.FILE_LOAD_ERRORS as error:
+                    lib.show_load_error(self, path, error)
+                    return
+                if loaded is None:  # the pixel size prompt was canceled
+                    return
+                clusters, _ = loaded
 
-                pixelsize = self.pixelsizeEdit.value()
-                imagesize = self.camerasizeEdit.value()
-
-                x = clusters["com_x"]
-                y = clusters["com_y"]
-
-                # Align in the center of window:
-                x = x - np.mean(x) + imagesize / 2
-                y = -(y - np.mean(y)) + imagesize / 2
-
-                x = x * pixelsize
-                y = y * pixelsize
+                # The cluster centers are in nm; align them in the center
+                # of the window (nm). Simulate's coordinates point y up
+                # (simulate.convert_movie flips the frame), the clusters' y
+                # points down as in Render, so y is negated to keep the
+                # structure's orientation in the simulated movie.
+                center = self.camerasizeEdit.value() / 2
+                center *= self.pixelsizeEdit.value()
+                x = clusters["x"].to_numpy(dtype=np.float64)
+                y = clusters["y"].to_numpy(dtype=np.float64)
+                x = x - np.mean(x) + center
+                y = -(y - np.mean(y)) + center
 
                 try:
-                    z = clusters["com_z"]
+                    z = clusters["z"]
                 except Exception as e:
                     print(e)
                     z = np.zeros_like(x)
@@ -2015,7 +2096,6 @@ class Window(QtWidgets.QMainWindow):
             self.handles["z"] = z
             self.handles["ex"] = ex
 
-            # TODO: Check axis orientation
             exchangecolors = list(set(self.handles["ex"]))
             exchangecolorsList = ",".join(map(str, exchangecolors))
             # UPDATE THE EXCHANGE COLORS IN BUTTON TO BE simulated
@@ -2071,7 +2151,7 @@ class Window(QtWidgets.QMainWindow):
             (structurexx, structureyy, structureex, structure3d) = (
                 self.readStructure()
             )
-            structure = simulate.defineStructure(
+            structure = simulate.define_structure(
                 structurexx, structureyy, structureex, structure3d, pixelsize
             )
         else:
@@ -2079,7 +2159,7 @@ class Window(QtWidgets.QMainWindow):
             structureyy = self.handles["y"]
             structureex = self.handles["ex"]
             structure3d = self.handles["z"]
-            structure = simulate.defineStructure(
+            structure = simulate.define_structure(
                 structurexx,
                 structureyy,
                 structureex,
@@ -2092,7 +2172,7 @@ class Window(QtWidgets.QMainWindow):
         imageSize = self.camerasizeEdit.value()
         frame = self.structureframeEdit.value()
         arrangement = int(self.structurerandomEdit.isChecked())
-        gridpos = simulate.generatePositions(
+        gridpos = simulate.generate_positions(
             number, imageSize, frame, arrangement
         )
 
@@ -2101,7 +2181,7 @@ class Window(QtWidgets.QMainWindow):
         exchange = 0
 
         if self.structureMode:
-            self.newstruct = simulate.prepareStructures(
+            self.newstruct = simulate.prepare_structures(
                 structure,
                 gridpos,
                 orientation,
@@ -2110,7 +2190,7 @@ class Window(QtWidgets.QMainWindow):
                 exchange,
             )
         else:
-            self.newstruct = simulate.prepareStructures(
+            self.newstruct = simulate.prepare_structures(
                 structure,
                 np.array([[0, 0]]),
                 orientation,
@@ -2155,9 +2235,13 @@ class Window(QtWidgets.QMainWindow):
         self.noexchangecolors = list(set(struct1[2, :]))
         structurexx = struct1[0, :]
         structureyy = struct1[1, :]
+        # none if no docking strand of it was incorporated
+        if struct1.shape[1]:
+            structurexx = structurexx - min(structurexx)
+            structureyy = structureyy - min(structureyy)
         self._structure_preview = (
-            np.multiply(structurexx - min(structurexx), pixelsize),
-            np.multiply(structureyy - min(structureyy), pixelsize),
+            np.multiply(structurexx, pixelsize),
+            np.multiply(structureyy, pixelsize),
             struct1[2, :],
         )
         self._draw_previews()
@@ -2228,7 +2312,9 @@ class Window(QtWidgets.QMainWindow):
     def calibrateNoise(self) -> None:
         """Calibrate noise model coefficients given experimental data.
         Only available when ADVANCED_MODE is set to 1."""
-        bg, bgstd, las, time, conc, ok = CalibrationDialog.setExt()
+        bg, bgstd, las, time, conc, ok = CalibrationDialog.setExt(self)
+        if not ok:
+            return
 
         np.asarray(bg)
         np.asarray(bgstd)
@@ -2298,34 +2384,39 @@ class Window(QtWidgets.QMainWindow):
     def readhdf5(self, path: str) -> None:
         """Read HDF5 localizations from a file."""
         try:
-            locs, self.info = io.load_locs(path, qt_parent=self)
-        except io.NoMetadataFileError:
+            locs, self.info = io.load_locs(path)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
             return
         integrationtime, ok1 = QtWidgets.QInputDialog.getText(
             self, "Input Dialog", "Enter integration time in ms:"
         )
-        integrationtime = int(integrationtime)
         if ok1:
+            integrationtime = int(integrationtime)
             imagerconcentration, ok2 = QtWidgets.QInputDialog.getText(
                 self, "Input Dialog", "Enter imager concentration in nM:"
             )
-            imagerconcentration = float(imagerconcentration)
 
             if ok2:
+                imagerconcentration = float(imagerconcentration)
                 laserpower, ok3 = QtWidgets.QInputDialog.getText(
                     self, "Input Dialog", "Enter Laserpower in mW:"
                 )
-                laserpower = float(laserpower)
                 if ok3:
+                    laserpower = float(laserpower)
                     cbaseline, ok4 = QtWidgets.QInputDialog.getText(
                         self, "Input Dialog", "Enter camera baseline"
                     )
+                    if not ok4:
+                        return
                     cbaseline = float(cbaseline)
                     # self.le.setText(str(text))
 
                     photons = locs["photons"]
-                    sigmax = locs["sx"]
-                    sigmay = locs["sy"]
+                    # spot widths (nm) in camera pixels of the simulation
+                    pixelsize = self.pixelsizeEdit.value()
+                    sigmax = locs["sx"] / pixelsize
+                    sigmay = locs["sy"] / pixelsize
                     bg = locs["bg"]
                     bg = bg - cbaseline
 
@@ -2560,10 +2651,16 @@ class CalibrationDialog(lib.Dialog):
         The progress bar for displaying loading progress.
     table : QtWidgets.QTableWidget
         The table widget for displaying calibration data.
+    tifCounter : int
+        Number of .tif files loaded.
+    tifFiles : list of str
+        Paths of the .tif files loaded.
     """
 
     def __init__(self, parent=None):
         super(CalibrationDialog, self).__init__(parent)
+        self.tifCounter = 0
+        self.tifFiles = []
 
         layout = QtWidgets.QVBoxLayout(self)
 
@@ -2588,8 +2685,7 @@ class CalibrationDialog(lib.Dialog):
         self.evalTifButton.clicked.connect(self.evalTif)
 
         self.buttons = QtWidgets.QDialogButtonBox(
-            QtWidgets.QDialogButtonBox.ActionRole
-            | QtWidgets.QDialogButtonBox.StandardButton.Ok
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
             self,
         )
@@ -2649,28 +2745,35 @@ class CalibrationDialog(lib.Dialog):
         baseline, ok1 = QtWidgets.QInputDialog.getText(
             self, "Input Dialog", "Enter Camera Baseline:"
         )
-        if ok1:
-            baseline = int(baseline)
-        else:
-            baseline = 200  # default
+        try:
+            if ok1:
+                baseline = int(baseline)
+            else:
+                baseline = 200  # default
 
-        sensitvity, ok2 = QtWidgets.QInputDialog.getText(
-            self, "Input Dialog", "Enter Camera Sensitivity:"
-        )
-        if ok2:
-            sensitvity = float(sensitvity)
-        else:
-            sensitvity = 1.47
+            sensitvity, ok2 = QtWidgets.QInputDialog.getText(
+                self, "Input Dialog", "Enter Camera Sensitivity:"
+            )
+            if ok2:
+                sensitvity = float(sensitvity)
+            else:
+                sensitvity = 1.47
+        except ValueError as error:
+            QtWidgets.QMessageBox.warning(
+                self, "Noise Model Calibration", str(error)
+            )
+            return
 
         counter = 0
         for element in self.tifFiles:
             counter += 1
-            self.pbar.setValue((counter - 1) / self.tifCounter * 100)
+            self.pbar.setValue(int((counter - 1) / self.tifCounter * 100))
             print(f"Current Dataset: {counter} of {self.tifCounter}")
             QtWidgets.QApplication.instance().processEvents()
             movie, info = io.load_movie(element)
 
-            movie = movie[0:100, :, :]
+            # float, so that pixels below the baseline do not wrap around
+            movie = movie[0:100, :, :].astype(float)
 
             movie = (movie - baseline) * sensitvity
             self.table.setItem(
@@ -2684,32 +2787,23 @@ class CalibrationDialog(lib.Dialog):
                 QtWidgets.QTableWidgetItem(str((np.std(movie)))),
             )
 
-            self.table.setItem(
-                counter - 1,
-                1,
-                QtWidgets.QTableWidgetItem(
-                    str((self.ValueFind(element, "nM_")))
-                ),
-            )
-            self.table.setItem(
-                counter - 1,
-                2,
-                QtWidgets.QTableWidgetItem(
-                    str((self.ValueFind(element, "ms_")))
-                ),
-            )
-            self.table.setItem(
-                counter - 1,
-                3,
-                QtWidgets.QTableWidgetItem(
-                    str((self.ValueFind(element, "mW_")))
-                ),
-            )
+            # left blank (to be filled in) if the name does not say
+            for column, unit in ((1, "nM_"), (2, "ms_"), (3, "mW_")):
+                value = self.ValueFind(element, unit)
+                if value is not None:
+                    self.table.setItem(
+                        counter - 1,
+                        column,
+                        QtWidgets.QTableWidgetItem(str(value)),
+                    )
 
         self.pbar.setValue(100)
 
-    def ValueFind(self, filename: str, unit: str) -> int:
-        """Find the value of a specific unit in the filename."""
+    def ValueFind(self, filename: str, unit: str) -> int | None:
+        """Find the value of a specific unit in the filename, None if
+        the filename does not contain the unit."""
+        if unit not in filename:
+            return None
         index = filename.index(unit)
 
         value = 0
@@ -2729,8 +2823,8 @@ class CalibrationDialog(lib.Dialog):
             "Select Directory",
         )
         if self.path:
-            self.tifCounter = len(_glob.glob(self.path, "*.tif"))
             self.tifFiles = _glob.glob(os.path.join(self.path, "*.tif"))
+            self.tifCounter = len(self.tifFiles)
 
             self.table.setRowCount(int(self.tifCounter))
             self.table.setColumnCount(6)
@@ -2809,13 +2903,38 @@ class CalibrationDialog(lib.Dialog):
         # self.exportTable()
         return bg, bgstd, las, time, conc
 
+    def accept(self) -> None:
+        """Accept the dialog if the table has the values of at least
+        three .tif files, the fewest the noise model can be fitted
+        to."""
+        try:
+            values = self.evalTable()
+        except (AttributeError, ValueError):  # a cell empty or no number
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Noise Model Calibration",
+                "Evaluate the .tif files and fill in the empty cells.",
+            )
+            return
+        if len(values[0]) < 3:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Noise Model Calibration",
+                "Load at least three .tif files.",
+            )
+            return
+        super().accept()
+
     @staticmethod
     def setExt(
         parent: QtWidgets.QWidget | None = None,
     ) -> tuple[list, list, list, list, list, bool]:
-        """Create the dialog and return (date, time, accepted)."""
+        """Create the dialog and return the values of its table (empty
+        if it was canceled) and whether it was accepted."""
         dialog = CalibrationDialog(parent)
         result = dialog.exec()
+        if result != QtWidgets.QDialog.DialogCode.Accepted:
+            return [], [], [], [], [], False
         bg, bgstd, las, time, conc = dialog.evalTable()
         return (
             bg,

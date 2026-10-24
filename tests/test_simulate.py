@@ -169,7 +169,7 @@ class TestDistphotons:
     def test_matches_paintgen_shapes(self):
         np.random.seed(6)
         structures = np.zeros((5, 1))
-        photonsinframe, timetrace, kinetics = simulate.distphotons(
+        photonsinframe, timetrace, kinetics = simulate.distribute_photons(
             structures=structures,
             itime=1.0,
             frames=100,
@@ -197,7 +197,7 @@ class TestDistphotonsxy:
             ]
         )
         photondist = np.array([[50]])  # 1 frame x 1 site
-        photonpos = simulate.distphotonsxy(
+        photonpos = simulate.distribute_photons_xy(
             runner=0,
             photondist=photondist,
             structures=structures,
@@ -213,7 +213,7 @@ class TestDistphotonsxy:
         structures = np.array([[20.0], [20.0], [1.0], [0.0], [0.0]])
         photondist = np.array([[5000]])
         psf = 0.8
-        photonpos = simulate.distphotonsxy(
+        photonpos = simulate.distribute_photons_xy(
             runner=0,
             photondist=photondist,
             structures=structures,
@@ -232,7 +232,7 @@ class TestConvertMovie:
     def test_zero_photons_zero_frame(self):
         structures = np.array([[5.0], [5.0], [1.0], [0.0], [0.0]])
         photondist = np.array([[0]])
-        frame = simulate.convertMovie(
+        frame = simulate.convert_movie(
             runner=0,
             photondist=photondist,
             structures=structures,
@@ -253,7 +253,7 @@ class TestConvertMovie:
         np.random.seed(9)
         structures = np.array([[8.0], [8.0], [1.0], [0.0], [0.0]])
         photondist = np.array([[2000]])
-        frame = simulate.convertMovie(
+        frame = simulate.convert_movie(
             runner=0,
             photondist=photondist,
             structures=structures,
@@ -286,7 +286,7 @@ class TestDefineStructure:
         y = np.array([5.0, 10.0, 15.0])
         ex = np.array([1.0, 1.0, 1.0])
         z = np.array([0.0, 0.0, 0.0])
-        s = simulate.defineStructure(x, y, ex, z, pixelsize=1.0, mean=True)
+        s = simulate.define_structure(x, y, ex, z, pixelsize=1.0, mean=True)
         # rows: x, y, ex, z
         assert s.shape == (4, 3)
         assert s[0].mean() == pytest.approx(0.0, abs=1e-9)
@@ -297,7 +297,7 @@ class TestDefineStructure:
         y = np.array([5.0, 15.0])
         ex = np.array([1.0, 1.0])
         z = np.array([0.0, 0.0])
-        s = simulate.defineStructure(x, y, ex, z, pixelsize=1.0, mean=False)
+        s = simulate.define_structure(x, y, ex, z, pixelsize=1.0, mean=False)
         np.testing.assert_allclose(s[0], x)
         np.testing.assert_allclose(s[1], y)
 
@@ -306,14 +306,14 @@ class TestDefineStructure:
         y = np.array([0.0, 130.0])
         ex = np.array([1.0, 1.0])
         z = np.array([0.0, 0.0])
-        s = simulate.defineStructure(x, y, ex, z, pixelsize=130.0, mean=False)
+        s = simulate.define_structure(x, y, ex, z, pixelsize=130.0, mean=False)
         np.testing.assert_allclose(s[0], [1.0, 2.0])
         np.testing.assert_allclose(s[1], [0.0, 1.0])
 
 
 class TestGeneratePositions:
     def test_grid_arrangement(self):
-        pos = simulate.generatePositions(
+        pos = simulate.generate_positions(
             number=4, imagesize=100, frame=10, arrangement=0
         )
         assert pos.shape == (4, 2)
@@ -324,7 +324,7 @@ class TestGeneratePositions:
     def test_random_arrangement_count_and_range(self):
         np.random.seed(10)
         n = 25
-        pos = simulate.generatePositions(
+        pos = simulate.generate_positions(
             number=n, imagesize=100, frame=10, arrangement=1
         )
         assert pos.shape == (n, 2)
@@ -343,7 +343,7 @@ class TestRotateStructure:
                 [0.0, 0.0, 0.0, 0.0],
             ]
         )
-        s_rot = simulate.rotateStructure(s)
+        s_rot = simulate.rotate_structure(s)
 
         def _pair_dists(arr):
             xy = arr[:2].T
@@ -367,7 +367,7 @@ class TestRotateStructure:
                 [10.0, 20.0, 30.0],  # z
             ]
         )
-        s_rot = simulate.rotateStructure(s)
+        s_rot = simulate.rotate_structure(s)
         np.testing.assert_array_equal(s_rot[2], s[2])
         np.testing.assert_array_equal(s_rot[3], s[3])
 
@@ -383,7 +383,7 @@ class TestIncorporateStructure:
                 [0.0, 0.0, 0.0],
             ]
         )
-        out = simulate.incorporateStructure(s, incorporation=1.0)
+        out = simulate.incorporate_structure(s, incorporation=1.0)
         assert out.shape == s.shape
 
     def test_zero_incorporation_returns_empty(self):
@@ -396,7 +396,7 @@ class TestIncorporateStructure:
                 [0.0, 0.0, 0.0],
             ]
         )
-        out = simulate.incorporateStructure(s, incorporation=0.0)
+        out = simulate.incorporate_structure(s, incorporation=0.0)
         assert out.shape[1] == 0
 
 
@@ -411,7 +411,7 @@ class TestRandomExchange:
                 [100.0, 200.0, 300.0, 400.0],  # z
             ]
         )
-        out = simulate.randomExchange(pos.copy())
+        out = simulate.random_exchange(pos.copy())
         np.testing.assert_array_equal(out[0], pos[0])
         np.testing.assert_array_equal(out[1], pos[1])
         np.testing.assert_array_equal(out[3], pos[3])
@@ -432,7 +432,7 @@ class TestPrepareStructures:
             ]
         )
         gridpos = np.array([[10.0, 10.0], [30.0, 30.0], [50.0, 50.0]])
-        newpos = simulate.prepareStructures(
+        newpos = simulate.prepare_structures(
             structure=structure,
             gridpos=gridpos,
             orientation=0,
@@ -465,8 +465,8 @@ class TestMovieRoundtrip:
             "Generated by": "test_simulate roundtrip",
         }
         raw_path = tmp_path / "movie.raw"
-        simulate.saveMovie(str(raw_path), movie, info)
-        # saveMovie writes both .raw and .yaml (via io.save_raw → save_info)
+        simulate.save_movie(str(raw_path), movie, info)
+        # save_movie writes both .raw and .yaml (via io.save_raw → save_info)
         yaml_path = tmp_path / "movie.yaml"
         assert raw_path.exists()
         assert yaml_path.exists()
@@ -484,7 +484,7 @@ class TestMovieRoundtrip:
             "Pixelsize": 130,
         }
         path = tmp_path / "info.yaml"
-        simulate.saveInfo(str(path), info)
+        simulate.save_info(str(path), info)
         assert path.exists()
         loaded = io.load_info(str(path))
         # save_info wraps into [info]; load_info also returns a list

@@ -40,7 +40,7 @@ and fall back to the numba CPU kernels otherwise; both compute the same thing,
 so the choice is invisible to the caller.
 
 The closed forms lived in ``picasso.gausslq`` and ``picasso.gaussmle`` until
-0.11 (those modules are deprecated and go in Picasso 1.0); the Fisher-matrix
+0.11 (those modules were removed in Picasso 1.0); the Fisher-matrix
 estimators lived in ``picasso.localize`` and moved here in 0.11, where
 ``picasso.localize`` still re-exports them under their old names.
 
@@ -66,18 +66,22 @@ from __future__ import annotations
 
 import math
 import warnings
-from typing import Callable, Literal
 
 import numba
 import numpy as np
 from numba import cuda
-from tqdm import tqdm
 
 from picasso import lib
 
 # aliased: `transforms` is used as a local name for lists of channel
 # transforms in this package
 from picasso import transforms as _tf
+
+__all__ = [
+    "localization_precision",
+    "sigma_uncertainty_lsq",
+    "sigma_uncertainty_mle",
+]
 
 # Check for CUDA availability for the spline CRLB kernels. Otherwise, CPU is
 # used. ``picasso.localize`` keeps its own probe for the *fitting* path.
@@ -488,7 +492,7 @@ def _gauss_crlb(
     the Gaussian model that was actually optimized and returns the diagonal of
     its inverse — the variance an efficient maximum-likelihood estimator
     attains. Evaluated at the fitted parameters; the spot data is not needed.
-    Mirrors :func:`_spline_crlb` and ``gaussmle._mlefit_sigmaxy_crlb``.
+    Mirrors :func:`_spline_crlb`.
 
     Model (photon units, spots are gain-converted before fitting)::
 
@@ -978,9 +982,7 @@ def _gauss_crlb_multichannel(
     em: bool = False,
     link_photons: bool = True,
     variance: lib.FloatArray4D | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
 ) -> lib.FloatArray2D:
     """Parameter variances for a multichannel spherical Gaussian fit.
 
@@ -1008,9 +1010,10 @@ def _gauss_crlb_multichannel(
     variance : lib.FloatArray4D, optional
         ``(n_locs, n_channels, box, box)`` sCMOS readout variance, laid out
         like the (channel-major) spots.
-    progress_callback : callable, "console" or None, optional
-        Progress over localization chunks. ``"console"`` shows a tqdm bar; a
-        callable is invoked with the cumulative number of localizations done.
+    progress : lib.Progress or None, optional
+        Normalized progress tracker (see ``picasso.lib.normalize_progress``).
+        Reports one phase, "Computing Gaussian CRLB", over the
+        localizations. None reports nothing. Default is None.
 
     Returns
     -------
@@ -1024,7 +1027,10 @@ def _gauss_crlb_multichannel(
     residuals = np.ascontiguousarray(residuals, dtype=np.float64)
     n_channels = jacobians.shape[1]
     n_params = 5 if link_photons else 3 + 2 * n_channels
+    progress = lib.normalize_progress(progress)
+    lib.start_phase(progress, "Computing Gaussian CRLB", n_locs, unit="loc")
     if n_locs == 0:
+        progress.set_value(0)
         return np.full((0, n_params), np.nan)
     finite = np.isfinite(theta).all(axis=1)
     if variance is not None:
@@ -1033,16 +1039,9 @@ def _gauss_crlb_multichannel(
     bread = np.tile(np.eye(n_params), (n_locs, 1, 1))
     meat = np.zeros((n_locs, n_params, n_params))
 
-    use_tqdm = progress_callback == "console"
-    do_callback = callable(progress_callback)
-    chunk = (
-        max(1, min(n_locs, 100_000)) if (use_tqdm or do_callback) else n_locs
-    )
-    starts = range(0, n_locs, chunk)
-    if use_tqdm:
-        starts = tqdm(starts, desc="Computing Gaussian CRLB")
-
-    for start in starts:
+    # one kernel call could span all localizations; chunk to report progress
+    chunk = max(1, min(n_locs, 100_000))
+    for start in range(0, n_locs, chunk):
         stop = min(start + chunk, n_locs)
         sl = slice(start, stop)
         var_chunk = (
@@ -1084,8 +1083,7 @@ def _gauss_crlb_multichannel(
                 bread[sl],
                 meat[sl],
             )
-        if do_callback:
-            progress_callback(stop)
+        progress.set_value(stop)
 
     # Guard against LAPACK's batched SVD segfaulting on a non-finite
     # information matrix (a pathological finite-theta spot can produce one).
@@ -1748,7 +1746,7 @@ _LINK_XYZ_MAX_P = 3 + 2 * _LINK_XYZ_MAX_CHANNELS
 
 _SPLINE_CRLB_CUDA_THREADS = 128
 # Device working set (inputs + outputs) per kernel launch. Chunking bounds
-# device memory and paces the progress callback; unlike the host path there is
+# device memory and paces the progress reports; unlike the host path there is
 # no (n, P, P) matrix stack to budget for, so the chunks are large.
 _SPLINE_CRLB_CUDA_CHUNK_BYTES = 256 << 20
 # Ceiling on one launch, so a display-attached GPU cannot trip a watchdog
@@ -2652,9 +2650,7 @@ def _spline_crlb_cuda(
     finite: np.ndarray,
     mu_floor: float,
     mle: bool,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
     variance: lib.FloatArray4D | None = None,
 ) -> tuple[lib.FloatArray2D, np.ndarray]:
     """Covariance diagonal of the shared-amplitude spline models on the GPU.
@@ -2687,9 +2683,11 @@ def _spline_crlb_cuda(
         Lower bound the model mean is clamped to.
     mle : bool
         Poisson Cramer-Rao bound (True) or the least-squares sandwich.
-    progress_callback : callable, "console" or None, optional
-        Progress over localization chunks. ``"console"`` shows a tqdm bar; a
-        callable is invoked with the cumulative number of localizations done.
+    progress : lib.Progress or None, optional
+        Normalized progress tracker (see ``picasso.lib.normalize_progress``)
+        whose current phase is told the number of localizations done after
+        every chunk; the caller starts the phase. None reports nothing.
+        Default is None.
     variance : lib.FloatArray4D, optional
         ``(n_locs, n_channels, box, box)`` channel-major sCMOS readout
         variance. Default None.
@@ -2723,34 +2721,37 @@ def _spline_crlb_cuda(
     res = np.ascontiguousarray(res, dtype=np.float64)
     n_channels = coeff.shape[0]
 
-    # The variance patches are the same for every chunk, so upload once. With
-    # no calibration this is a four-byte dummy that only exists to keep the
-    # kernel's argument types stable.
+    # The variance patches are per localization and the kernel indexes them
+    # by the row within the launch, so they are chunked like every other
+    # per-row input. Without a calibration the variance is a four-byte dummy,
+    # uploaded once, that only exists to keep the kernel's argument types
+    # stable.
     use_variance = variance is not None
-    d_variance = cuda.to_device(
-        np.ascontiguousarray(variance, dtype=np.float32)
-        if use_variance
-        else np.zeros((1, 1, 1, 1), dtype=np.float32)
-    )
+    if use_variance:
+        variance = np.ascontiguousarray(variance, dtype=np.float32)
+        d_dummy_variance = None
+    else:
+        d_dummy_variance = cuda.to_device(
+            np.zeros((1, 1, 1, 1), dtype=np.float32)
+        )
     d_coeff = cuda.to_device(np.ascontiguousarray(coeff))
-    # inputs (amp, x, y, [z], offset, per-channel residual) + outputs (crlb
-    # row, status byte)
+    # inputs (amp, x, y, [z], offset, per-channel residual and Jacobian,
+    # variance patches) + outputs (crlb row, status byte)
     n_inputs = 5 if is_3d else 4
-    chunk = min(
-        n_locs,
-        _crlb_chunk_rows(8 * (n_inputs + 6 * n_channels + n_params) + 1),
-    )
+    bytes_per_row = 8 * (n_inputs + 6 * n_channels + n_params) + 1
+    if use_variance:
+        bytes_per_row += 4 * n_channels * box * box
+    chunk = min(n_locs, _crlb_chunk_rows(bytes_per_row))
 
-    use_tqdm = progress_callback == "console"
-    do_callback = callable(progress_callback)
-    pbar = (
-        tqdm(total=n_locs, desc="Computing spline CRLB", unit="locs")
-        if use_tqdm
-        else None
-    )
+    progress = lib.normalize_progress(progress)
     for start in range(0, n_locs, chunk):
         stop = min(start + chunk, n_locs)
         n = stop - start
+        d_variance = (
+            cuda.to_device(variance[start:stop])
+            if use_variance
+            else d_dummy_variance
+        )
         d_amp = cuda.to_device(amplitude[start:stop])
         d_x = cuda.to_device(x_shift[start:stop])
         d_y = cuda.to_device(y_shift[start:stop])
@@ -2801,12 +2802,7 @@ def _spline_crlb_cuda(
             )
         crlb[start:stop] = d_crlb.copy_to_host()
         failed[start:stop] = d_status.copy_to_host() != 0
-        if use_tqdm:
-            pbar.update(n)
-        elif do_callback:
-            progress_callback(stop)
-    if use_tqdm:
-        pbar.close()
+        progress.set_value(stop)
     return crlb, failed
 
 
@@ -2823,15 +2819,13 @@ def _spline_link_xyz_crlb_cuda(
     finite: np.ndarray,
     mu_floor: float,
     mle: bool,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
     variance: lib.FloatArray4D | None = None,
 ) -> tuple[lib.FloatArray2D, np.ndarray]:
     """Covariance diagonal of the photon-decoupled (link-XYZ) spline model on
     the GPU. Array-in / array-out counterpart of
     :func:`_spline_link_xyz_crlb_cpu`; see :func:`_spline_crlb_cuda` for the
-    return convention and for ``jac`` / ``res``."""
+    return convention, for ``jac`` / ``res`` and for ``progress``."""
     _require_crlb_cuda()
     n_channels = coeff.shape[0]
     n_params = 3 + 2 * n_channels
@@ -2855,32 +2849,32 @@ def _spline_link_xyz_crlb_cuda(
     jac = np.ascontiguousarray(jac, dtype=np.float64)
     res = np.ascontiguousarray(res, dtype=np.float64)
 
-    # The variance patches are the same for every chunk, so upload once. With
-    # no calibration this is a four-byte dummy that only exists to keep the
-    # kernel's argument types stable.
+    # Chunked like every other per-row input; see _spline_crlb_cuda.
     use_variance = variance is not None
-    d_variance = cuda.to_device(
-        np.ascontiguousarray(variance, dtype=np.float32)
-        if use_variance
-        else np.zeros((1, 1, 1, 1), dtype=np.float32)
-    )
+    if use_variance:
+        variance = np.ascontiguousarray(variance, dtype=np.float32)
+        d_dummy_variance = None
+    else:
+        d_dummy_variance = cuda.to_device(
+            np.zeros((1, 1, 1, 1), dtype=np.float32)
+        )
     d_coeff = cuda.to_device(np.ascontiguousarray(coeff))
-    # inputs (x, y, z, photons, bg, per-channel residual) + outputs (crlb row,
-    # status byte)
-    chunk = min(
-        n_locs, _crlb_chunk_rows(8 * (3 + 8 * n_channels + n_params) + 1)
-    )
+    # inputs (x, y, z, photons, bg, per-channel residual and Jacobian,
+    # variance patches) + outputs (crlb row, status byte)
+    bytes_per_row = 8 * (3 + 8 * n_channels + n_params) + 1
+    if use_variance:
+        bytes_per_row += 4 * n_channels * box * box
+    chunk = min(n_locs, _crlb_chunk_rows(bytes_per_row))
 
-    use_tqdm = progress_callback == "console"
-    do_callback = callable(progress_callback)
-    pbar = (
-        tqdm(total=n_locs, desc="Computing spline CRLB", unit="locs")
-        if use_tqdm
-        else None
-    )
+    progress = lib.normalize_progress(progress)
     for start in range(0, n_locs, chunk):
         stop = min(start + chunk, n_locs)
         n = stop - start
+        d_variance = (
+            cuda.to_device(variance[start:stop])
+            if use_variance
+            else d_dummy_variance
+        )
         d_x = cuda.to_device(x_shift[start:stop])
         d_y = cuda.to_device(y_shift[start:stop])
         d_z = cuda.to_device(z_eval[start:stop])
@@ -2914,12 +2908,7 @@ def _spline_link_xyz_crlb_cuda(
         )
         crlb[start:stop] = d_crlb.copy_to_host()
         failed[start:stop] = d_status.copy_to_host() != 0
-        if use_tqdm:
-            pbar.update(n)
-        elif do_callback:
-            progress_callback(stop)
-    if use_tqdm:
-        pbar.close()
+        progress.set_value(stop)
     return crlb, failed
 
 
@@ -2935,9 +2924,7 @@ def _spline_link_xyz_crlb_cpu(
     bg: lib.FloatArray2D,
     finite: np.ndarray,
     mle: bool,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
     variance: lib.FloatArray4D | None = None,
 ) -> lib.FloatArray2D:
     """CPU (numba) parameter variances for the photon-decoupled (link-XYZ)
@@ -2948,20 +2935,19 @@ def _spline_link_xyz_crlb_cpu(
     :func:`_spline_channel_jacobians` / :func:`_spline_crlb_residuals`); both
     must already be sliced to the same rows as ``x_shift``. Returns the raw
     ``(n_locs, 3 + 2*n_channels)`` covariance diagonal; masking non-finite and
-    non-positive entries is the caller's job."""
+    non-positive entries is the caller's job. ``progress`` (a normalized
+    tracker, or None) is told the number of localizations done after every
+    chunk, within the phase the caller started."""
     n_channels = coeff.shape[0]
     n_params = 3 + 2 * n_channels
     n_locs = len(x_shift)
 
-    use_tqdm = progress_callback == "console"
-    do_callback = callable(progress_callback)
+    progress = lib.normalize_progress(progress)
     rows_per_chunk = max(
         1024, _SPLINE_CRLB_CHUNK_BYTES // (n_params * n_params * 8)
     )
     chunk = int(min(max(n_locs, 1), rows_per_chunk, 100_000))
     starts = range(0, n_locs, chunk) if n_locs else []
-    if use_tqdm:
-        starts = tqdm(starts, desc="Computing spline CRLB")
 
     crlb = np.empty((n_locs, n_params), dtype=np.float64)
     for start in starts:
@@ -3006,8 +2992,7 @@ def _spline_link_xyz_crlb_cpu(
             var = np.diagonal(cov, axis1=1, axis2=2).copy()
         var[bad] = np.nan
         crlb[sl] = var
-        if do_callback:
-            progress_callback(stop)
+        progress.set_value(stop)
     return crlb
 
 
@@ -3018,9 +3003,7 @@ def _spline_link_xyz_crlb(
     residuals: np.ndarray | None = None,
     mle: bool = True,
     em: bool = False,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
     variance: lib.FloatArray4D | None = None,
     jacobians: np.ndarray | None = None,
 ) -> lib.FloatArray2D:
@@ -3031,10 +3014,13 @@ def _spline_link_xyz_crlb(
     ``[x, y, z, N_0..N_{c-1}, bg_0..bg_{c-1}]`` (see
     :func:`_spline_infomats_link_xyz_3d`). ``residuals`` are the per-channel
     sub-pixel ROI offsets the fit used, as in :func:`_spline_crlb`, and ``em``
-    applies the same EMCCD excess-noise doubling. Returns
-    ``(n_locs, 3 + 2*n_channels)`` variances in that parameter order."""
+    applies the same EMCCD excess-noise doubling, and ``progress`` reports
+    the same phase(s). Returns ``(n_locs, 3 + 2*n_channels)`` variances in
+    that parameter order."""
     theta = np.asarray(theta, dtype=np.float64)
     n_locs = len(theta)
+    progress = lib.normalize_progress(progress)
+    lib.start_phase(progress, _SPLINE_CRLB_LABEL, n_locs, unit="loc")
     n_channels = _spline_n_channels(calibration)
     variance = _crlb_variance_channel_major(variance, n_channels)
 
@@ -3069,13 +3055,19 @@ def _spline_link_xyz_crlb(
                 _SPLINE_CRLB_MU_FLOOR,
                 mle,
                 variance=variance,
-                progress_callback=progress_callback,
+                progress=progress,
             )
+        except lib.OperationCanceled:
+            raise
         except Exception as exc:
             # Degrade to the CPU (e.g. device out of memory while the fit still
             # holds allocations) rather than failing the whole fit.
             _warn_crlb_gpu_fallback(exc)
             crlb = None
+            # the CPU starts over: a fresh phase keeps the count monotone
+            lib.start_phase(
+                progress, _SPLINE_CRLB_CPU_LABEL, n_locs, unit="loc"
+            )
         else:
             if failed.any():
                 # The device could not diagonalize these information matrices;
@@ -3108,8 +3100,9 @@ def _spline_link_xyz_crlb(
             finite,
             mle,
             variance=variance,
-            progress_callback=progress_callback,
+            progress=progress,
         )
+    progress.set_value(n_locs)
     if em:
         crlb *= _EM_EXCESS_NOISE_FACTOR
     crlb[~finite] = np.nan
@@ -3118,6 +3111,11 @@ def _spline_link_xyz_crlb(
 
 
 _crlb_gpu_fallback_warned = False
+
+#: Progress labels of the spline CRLB phase, and of its restart on the CPU
+#: after a failed GPU attempt.
+_SPLINE_CRLB_LABEL = "Computing spline CRLB"
+_SPLINE_CRLB_CPU_LABEL = "Computing spline CRLB on the CPU"
 
 
 def _warn_crlb_gpu_fallback(exc: Exception) -> None:
@@ -3153,9 +3151,7 @@ def _spline_crlb_cpu(
     offset: lib.FloatArray1D,
     finite: np.ndarray,
     mle: bool,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
     variance: lib.FloatArray4D | None = None,
 ) -> lib.FloatArray2D:
     """CPU (numba) parameter variances for the shared-amplitude spline models.
@@ -3169,7 +3165,9 @@ def _spline_crlb_cpu(
     must already be sliced to the same rows as ``amplitude``, and neither is
     used by the single-channel 2D model. Returns the raw ``(n_locs, P)``
     covariance diagonal; masking non-finite and non-positive entries is the
-    caller's job."""
+    caller's job. ``progress`` (a normalized tracker, or None) is told the
+    number of localizations done after every chunk, within the phase the
+    caller started."""
     is_3d = z_eval is not None
     n_params = 5 if is_3d else 4
     n_locs = len(amplitude)
@@ -3182,15 +3180,10 @@ def _spline_crlb_cpu(
     bread = np.tile(np.eye(n_params), (max(n_locs, 1), 1, 1))
     meat = np.zeros((max(n_locs, 1), n_params, n_params))
 
-    use_tqdm = progress_callback == "console"
-    do_callback = callable(progress_callback)
-    # One kernel call spans all localizations; chunk only to report progress.
-    chunk = (
-        max(1, min(n_locs, 100_000)) if (use_tqdm or do_callback) else n_locs
-    )
+    progress = lib.normalize_progress(progress)
+    # One kernel call could span all localizations; chunk to report progress.
+    chunk = max(1, min(n_locs, 100_000))
     starts = range(0, n_locs, chunk) if n_locs else []
-    if use_tqdm:
-        starts = tqdm(starts, desc="Computing spline CRLB")
 
     for start in starts:
         stop = min(start + chunk, n_locs)
@@ -3230,8 +3223,7 @@ def _spline_crlb_cpu(
                 bread[sl],
                 meat[sl],
             )
-        if do_callback:
-            progress_callback(stop)
+        progress.set_value(stop)
 
     # Guard: LAPACK's batched SVD (np.linalg.pinv) can SEGFAULT, not just
     # warn, on a non-finite information matrix. A pathological spot (mu~0, or
@@ -3263,9 +3255,7 @@ def _spline_crlb(
     box: int,
     mle: bool = True,
     em: bool = False,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | None = None,
     residuals: np.ndarray | None = None,
     variance: lib.FloatArray4D | None = None,
     jacobians: np.ndarray | None = None,
@@ -3281,8 +3271,7 @@ def _spline_crlb(
 
     With ``mle`` True the result is the Cramer-Rao lower bound: the diagonal of
     the inverse Poisson Fisher-information matrix ``I = Σ g gᵀ / μ`` (``g =
-    ∂μ/∂θ``), which an efficient maximum-likelihood estimator attains. Mirrors
-    ``gaussmle._mlefit_sigmaxy_crlb``.
+    ∂μ/∂θ``), which an efficient maximum-likelihood estimator attains.
 
     With ``mle`` False the result is the covariance of the *unweighted*
     least-squares estimator (the ``spline-gpu`` LSE mode), the Huber
@@ -3313,9 +3302,12 @@ def _spline_crlb(
         every pixel's variance on top of the Poisson term, so all variances are
         scaled by 2. Applies to both estimators: the doubling is a property of
         the detector, not of the fit. Default False.
-    progress_callback : callable, "console" or None, optional
-        Progress over localization chunks. ``"console"`` shows a tqdm bar; a
-        callable is invoked with the cumulative number of localizations done.
+    progress : lib.Progress or None, optional
+        Normalized progress tracker (see ``picasso.lib.normalize_progress``).
+        Reports one phase, "Computing spline CRLB", over the localizations;
+        if the GPU attempt fails, the CPU starts over in a new phase,
+        "Computing spline CRLB on the CPU". None reports nothing. Default
+        is None.
     residuals : np.ndarray, optional
         Per-localization, per-channel sub-pixel ROI offsets ``(n_locs,
         n_channels, 2)``, as passed to the fit (see
@@ -3355,13 +3347,15 @@ def _spline_crlb(
             residuals=residuals,
             mle=mle,
             em=em,
-            progress_callback=progress_callback,
+            progress=progress,
             variance=variance,
         )
     is_3d = model != "spline-2d"
 
     theta = np.asarray(theta, dtype=np.float64)
     n_locs = len(theta)
+    progress = lib.normalize_progress(progress)
+    lib.start_phase(progress, _SPLINE_CRLB_LABEL, n_locs, unit="loc")
 
     amplitude = np.ascontiguousarray(theta[:, 0])
     x_shift = np.ascontiguousarray(theta[:, 1])
@@ -3398,13 +3392,19 @@ def _spline_crlb(
                 _SPLINE_CRLB_MU_FLOOR,
                 mle,
                 variance=variance,
-                progress_callback=progress_callback,
+                progress=progress,
             )
+        except lib.OperationCanceled:
+            raise
         except Exception as exc:
             # Degrade to the CPU (e.g. device out of memory while the fit still
             # holds allocations) rather than failing the whole fit.
             _warn_crlb_gpu_fallback(exc)
             crlb = None
+            # the CPU starts over: a fresh phase keeps the count monotone
+            lib.start_phase(
+                progress, _SPLINE_CRLB_CPU_LABEL, n_locs, unit="loc"
+            )
         else:
             if failed.any():
                 # The device could not diagonalize these information matrices;
@@ -3437,8 +3437,9 @@ def _spline_crlb(
             finite,
             mle,
             variance=variance,
-            progress_callback=progress_callback,
+            progress=progress,
         )
+    progress.set_value(n_locs)
     if em:
         crlb *= _EM_EXCESS_NOISE_FACTOR
     crlb[~finite] = np.nan

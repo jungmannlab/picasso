@@ -26,7 +26,7 @@ calibration model                    kind  parameters
 
 The per-spot kernels are ``nogil=True`` (not ``parallel=True``) so that a
 plain thread pool can run them concurrently while a shared counter reports
-per-spot progress - the same arrangement as ``picasso.gaussmle``.
+per-spot progress - the same arrangement as ``picasso.fitting.gaussfit``.
 
 This module deliberately knows nothing about calibration dicts: it takes
 plain arrays only, so that ``picasso.localize`` can import it without a
@@ -69,9 +69,23 @@ from typing import Callable, Literal, NamedTuple
 
 import numba
 import numpy as np
-from tqdm import tqdm
 
 from picasso import lib
+
+__all__ = [
+    "KIND_2D",
+    "KIND_3D",
+    "KIND_LINK_XYZ",
+    "FIT_STATE_CONVERGED",
+    "FIT_STATE_MAX_ITERATION",
+    "FIT_STATE_SINGULAR_HESSIAN",
+    "FIT_STATE_NEG_CURVATURE_MLE",
+    "AsyncFit",
+    "fit_spots",
+    "fit_spots_async",
+    "convergence_schedule",
+    "n_workers",
+]
 
 # Model kinds. The lateral (2D) and axial (3D) models need separate kernels
 # because numba types an array by its number of dimensions, so a
@@ -117,15 +131,13 @@ FIT_STATE_NEG_CURVATURE_MLE = 3
 # meant for.
 #
 # Instead such a pixel is floored, which is what Picasso's own
-# maximum-likelihood code already does elsewhere: ``gaussmle._mlefit_sigma``
-# drops a pixel whose model is below ``10e-3`` from its Newton update, and
-# ``precision._spline_crlb`` floors the Fisher weight at
-# ``_SPLINE_CRLB_MU_FLOOR``. The pixel still contributes a (bounded) penalty to
-# the likelihood, so multi-start seeds stay comparable and solutions that need
-# a negative model are disfavoured, but it contributes nothing to the gradient
-# or the Hessian: its ``1 / mu`` weight would otherwise be enormous and, since
-# Gpufit's scaling vector is a running maximum, would damp every parameter to a
-# standstill for the rest of the fit. Well-behaved fits never reach the floor,
+# maximum-likelihood code already does elsewhere: ``precision._spline_crlb``
+# floors the Fisher weight at ``_SPLINE_CRLB_MU_FLOOR``. The pixel still
+# contributes a (bounded) penalty to the likelihood, so multi-start seeds stay
+# comparable and solutions that need a negative model are disfavored, but it
+# contributes nothing to the gradient or the Hessian: its ``1 / mu`` weight
+# would otherwise be enormous and, since Gpufit's scaling vector is a running
+# maximum, would damp every parameter to a standstill for the rest of the fit. Well-behaved fits never reach the floor,
 # so this does not change their result.
 MU_FLOOR = 1e-3
 
@@ -231,7 +243,7 @@ def _floored_chi_square(data: float) -> float:
     """Likelihood penalty of a pixel below the :data:`MU_FLOOR` model value.
 
     Gpufit's Poisson term evaluated at the floor. It is large but finite, so it
-    disfavours parameters that need a negative model without making the
+    disfavors parameters that need a negative model without making the
     chi-square infinite - which would make the multi-start unable to rank its
     seeds."""
     if data > 0.0:
@@ -264,7 +276,7 @@ def _estimator_terms(
         if value < MU_FLOOR:
             # Below the floor the pixel is charged to the likelihood - so
             # multi-start seeds stay comparable and invalid regions are
-            # disfavoured - but kept out of the gradient and Hessian, where its
+            # disfavored - but kept out of the gradient and Hessian, where its
             # 1/mu weight would be enormous and, through the monotone scaling
             # vector, damp every parameter to a standstill for the rest of the
             # fit.
@@ -560,7 +572,7 @@ def _lm_solve_step(
 # Per-spot Levenberg-Marquardt kernels
 #
 # All three take the same 15 arguments so that one worker can drive any of
-# them (as ``gaussmle._worker`` takes its kernel as an argument).
+# them.
 #
 # ``spots`` is float32 ``(n_spots, n_channels, box, box)``, channel-major, and
 # indexed ``[spot, channel, row = y, column = x]``: Gpufit's fast pixel axis is
@@ -986,7 +998,7 @@ def _fit_spline_spot(  # noqa: C901
     z_col = 2 if kind == KIND_LINK_XYZ else 3
     # All scratch is allocated once per spot, outside the seed and iteration
     # loops - allocating inside them dominates the runtime of a threaded numba
-    # kernel (the same reason gaussmle._mlefit_sigma hoists its buffers).
+    # kernel.
     theta = np.empty(n_params)
     theta_previous = np.empty(n_params)
     best = np.empty(n_params)
@@ -1236,9 +1248,10 @@ def _fit_spline_spot(  # noqa: C901
 # Threaded driver with per-spot progress
 #
 # The kernels are ``nogil``, so real threads run them concurrently. Each worker
-# claims the next spot index under a lock and bumps a shared counter; the
-# caller polls that counter to report progress. This is the arrangement of
-# ``gaussmle.gaussmle_async`` / ``gaussmle._worker``.
+# claims the next spot index under a lock and, once the spot is fitted, bumps
+# a shared finished counter; the caller polls that counter to report
+# progress. The Gaussian fitters of ``picasso.fitting.gaussfit`` share this
+# driver.
 # ----------------------------------------------------------------------
 
 
@@ -1451,33 +1464,138 @@ def _check_inputs(
 
 
 def _worker(
-    spots: np.ndarray, args: tuple, current: list, lock, stop: np.ndarray
+    kernel: Callable,
+    spots: np.ndarray,
+    args: tuple,
+    current: list,
+    done: list,
+    lock,
+    stop: np.ndarray,
+    chunk_size: int | None = None,
 ) -> None:
-    """Worker for asynchronous fitting: claim the next spot and fit it."""
+    """Worker for asynchronous fitting: claim the next spot, fit it with
+    ``kernel(spots, index, *args)`` and count it as finished. With a
+    ``chunk_size``, claim up to that many consecutive spots at once and fit
+    them with ``kernel(spots, start, stop, *args)``.
+
+    The finished count is bumped under the same lock acquisition that claims
+    the next spot, so counting costs no extra locking."""
     n_spots = len(spots)
+    fitted = 0
     while True:
         with lock:
+            done[0] += fitted
             if stop[0] or current[0] == n_spots:
                 return
-            index = current[0]
-            current[0] += 1
-        _fit_spline_spot(spots, index, *args)
+            start = current[0]
+            end = start + 1 if chunk_size is None else start + chunk_size
+            end = min(end, n_spots)
+            current[0] = end
+        fitted = 0
+        if chunk_size is None:
+            kernel(spots, start, *args)
+        else:
+            kernel(spots, start, end, *args)
+        fitted = end - start
+
+
+def _start_async(
+    kernel: Callable,
+    spots: np.ndarray,
+    args: tuple,
+    outputs: tuple,
+    n_threads: int | None,
+    chunk_size: int | None = None,
+) -> AsyncFit:
+    """Start ``n_threads`` workers fitting every spot with ``kernel``.
+
+    Shared by the asynchronous spline and Gaussian fitters.
+
+    Parameters
+    ----------
+    kernel : callable
+        Per-spot ``nogil`` kernel, called as ``kernel(spots, index, *args)``,
+        or, with ``chunk_size``, a kernel over a range of spots, called as
+        ``kernel(spots, start, stop, *args)``.
+    spots : np.ndarray
+        The spots, indexed by spot along the first axis.
+    args : tuple
+        Remaining kernel arguments.
+    outputs : tuple
+        ``(thetas, chi_squares, states, iterations)``, filled in place.
+    n_threads : int or None
+        Number of worker threads; None uses :func:`n_workers`. Clipped to
+        at most one thread per spot.
+    chunk_size : int or None, optional
+        Number of spots a worker claims at once, for kernels so short that
+        the Python round trip per spot (claim, dispatch) would hold the GIL
+        longer than the fit runs without it. None claims one spot at a
+        time with a per-spot kernel. Default None.
+
+    Returns
+    -------
+    async_fit : AsyncFit
+        Handle on the running fit.
+    """
+    n_spots = len(spots)
+    if n_threads is None:
+        n_threads = n_workers()
+    n_threads = max(1, min(int(n_threads), max(n_spots, 1)))
+    lock = threading.Lock()
+    current = [0]
+    done = [0]
+    stop = np.zeros(1, dtype=np.uint8)
+    executor = futures.ThreadPoolExecutor(n_threads)
+    fs = [
+        executor.submit(
+            _worker,
+            kernel,
+            spots,
+            args,
+            current,
+            done,
+            lock,
+            stop,
+            chunk_size,
+        )
+        for _ in range(n_threads)
+    ]
+    executor.shutdown(wait=False)
+    return AsyncFit(current, done, *outputs, fs, stop)
 
 
 class AsyncFit(NamedTuple):
-    """Handle on a spline fit running in the background.
+    """Handle on a fit running in the background.
 
-    ``current[0]`` is the number of spots claimed so far, which the caller
-    polls to report progress; the result arrays are filled in place as the
-    workers run."""
+    ``done[0]`` (also :attr:`n_done`) is the number of spots finished so
+    far, i.e. fitted with their results written, which the caller polls to
+    report progress. ``current[0]`` is the number of spots claimed by the
+    workers, including the ones still being fitted, so it runs ahead of
+    ``done[0]`` and is not a progress count. The result arrays are filled
+    in place as the workers run."""
 
     current: list
+    done: list
     theta: np.ndarray
     chi_squares: np.ndarray
     states: np.ndarray
     iterations: np.ndarray
     futures: list[Future]
     stop_flag: np.ndarray
+
+    @property
+    def n_done(self) -> int:
+        """Number of spots finished so far (fitted, results written).
+
+        Read without locking, from any thread; it only grows, and equals
+        the number of spots once a fit that was not stopped is
+        :meth:`finished`.
+
+        Returns
+        -------
+        n_done : int
+        """
+        return self.done[0]
 
     def results(self) -> tuple:
         """The result arrays of the fit.
@@ -1550,11 +1668,10 @@ def fit_spots(
     mle: bool = False,
     tolerance: float | None = None,
     max_iterations: int | None = None,
-    progress_callback: (
-        Callable[[int], None] | Literal["console"] | None
-    ) = None,
+    progress: lib.Progress | Literal["console"] | None = None,
     variance: np.ndarray | None = None,
-) -> tuple:
+    abort_callback: Callable[[], bool] | None = None,
+) -> tuple | None:
     """Fit spots with a cubic-spline PSF model on the CPU, serially.
 
     Parameters
@@ -1594,13 +1711,18 @@ def fit_spots(
     max_iterations : int, optional
         Maximum number of iterations. ``None`` (the default) uses the one the
         GPU path uses for this kind of fit, see :func:`convergence_schedule`.
-    progress_callback : callable, "console" or None, optional
-        ``"console"`` shows a tqdm bar; a callable is invoked with the
-        cumulative number of spots fitted.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase, "Fitting spots" over
+        the spots. Default is None.
     variance : np.ndarray, optional
         Per-pixel sCMOS readout variance in photoelectrons squared, laid out
         exactly like ``spots``. ``None`` (the default) fits the plain Poisson
         model. See :func:`_estimator_terms`.
+    abort_callback : callable or None, optional
+        Polled between spots; returning True stops the fit and the
+        function returns None. Default is None.
 
     Returns
     -------
@@ -1644,14 +1766,16 @@ def fit_spots(
         states,
         iterations,
     )
-    use_tqdm = progress_callback == "console"
-    index_range = range(n_spots)
-    if use_tqdm:
-        index_range = tqdm(index_range, desc="Fitting", unit="spot")
-    for index in index_range:
-        _fit_spline_spot(spots, index, *args)
-        if callable(progress_callback):
-            progress_callback(index + 1)
+    with lib.tracked_progress(
+        progress, "Fitting spots", unit="spot"
+    ) as progress:
+        lib.start_phase(progress, "Fitting spots", n_spots, unit="spot")
+        progress.set_value(0)
+        for index in range(n_spots):
+            if callable(abort_callback) and abort_callback():
+                return None
+            _fit_spline_spot(spots, index, *args)
+            progress.set_value(index + 1)
     return thetas, chi_squares, states, iterations
 
 
@@ -1713,7 +1837,8 @@ def fit_spots_async(
     Returns
     -------
     async_fit : AsyncFit
-        Handle on the running fit, whose result arrays are filled in place.
+        Handle on the running fit, whose result arrays are filled in place;
+        poll :attr:`AsyncFit.n_done` for the number of spots finished.
     """
     _check_inputs(
         kind, spots, coefficients, jacobians, residuals, initial_parameters
@@ -1744,19 +1869,13 @@ def fit_spots_async(
         states,
         iterations,
     )
-    if n_threads is None:
-        n_threads = n_workers()
-    n_threads = max(1, min(int(n_threads), max(n_spots, 1)))
-    lock = threading.Lock()
-    current = [0]
-    stop = np.zeros(1, dtype=np.uint8)
-    executor = futures.ThreadPoolExecutor(n_threads)
-    fs = [
-        executor.submit(_worker, spots, args, current, lock, stop)
-        for _ in range(n_threads)
-    ]
-    executor.shutdown(wait=False)
-    return AsyncFit(current, thetas, chi_squares, states, iterations, fs, stop)
+    return _start_async(
+        _fit_spline_spot,
+        spots,
+        args,
+        (thetas, chi_squares, states, iterations),
+        n_threads,
+    )
 
 
 # ----------------------------------------------------------------------

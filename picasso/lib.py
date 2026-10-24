@@ -13,14 +13,15 @@ from __future__ import annotations
 import glob
 import collections
 import colorsys
+import contextlib
 import importlib
 import multiprocessing
 import os
 import sys
 import warnings
 from copy import deepcopy
-from typing import Any, TypeAlias, Literal, TYPE_CHECKING
-from collections.abc import Callable
+from typing import Any, TypeAlias, Literal, Protocol, runtime_checkable
+from collections.abc import Callable, Iterator
 from asyncio import Future
 
 import numba
@@ -28,24 +29,63 @@ import numpy as np
 import pandas as pd
 import matplotlib.colors as mcolors
 import matplotlib.pyplot as plt
-from numpy.lib.recfunctions import append_fields, drop_fields
 from scipy import stats, optimize
-from playsound3 import playsound
 from tqdm import tqdm
 
-from picasso import io
+from picasso import io, __version__
 
-if TYPE_CHECKING:
-    from PyQt6 import QtGui
+__all__ = [
+    "field_of_view",
+    # metadata
+    "get_from_metadata",
+    "step_info",
+    "append_metadata",
+    "overwrite_metadata",
+    "extract_filter_recipe",
+    "extract_filter_steps",
+    "apply_filter_steps",
+    # localization tables
+    "ensure_sanity",
+    "standardize_dtypes",
+    "concat_locs",
+    "merge_locs",
+    "locs_glob_map",
+    "fit_canvas",
+    "sync_groups",
+    "unfold_localizations_square",
+    # regions
+    "PICK_SHAPES",
+    "pick_areas",
+    "locs_at",
+    "locs_in_rectangle",
+    "locs_in_polygon",
+    # kinetics
+    "cumulative_exponential",
+    "fit_cum_exp",
+    "estimate_kinetic_rate",
+    "plot_cumulative_exponential_fit",
+    # plots
+    "calculate_optimal_bins",
+    "plot_trace",
+    "plot_subclustering_check",
+    "plot_rel_sigma_check",
+    # lateral corrections
+    "lateral_transforms",
+    "describe_lateral_transforms",
+    "apply_lateral_transforms",
+    "DuplicateLateralTransformWarning",
+    # progress
+    "Progress",
+    "MockProgress",
+    "OperationCanceled",
+    # other
+    "append_group",
+]
 
 # A global variable where we store all open progress and status dialogs.
 # In case of an exception, we close them all,
 # so that the GUI remains responsive.
 _dialogs = []
-
-# Min. time to use sound notification when ProcessDialog or
-# StatusDialog is finished
-SOUND_NOTIFICATION_DURATION = 60  # seconds
 
 # Columns that are required for Picasso
 REQUIRED_COLUMNS = ["frame", "x", "y", "z", "lpx", "lpy", "lpz"]
@@ -105,6 +145,8 @@ class _LazyQtModule:
 # imports PyQt6) but stay accessible as lib.<name>; they are resolved
 # lazily below so that importing picasso.lib does not require PyQt6.
 _QT_NAMES = (
+    "ask_pixelsize",
+    "load_or_ask_pixelsize",
     "Dialog",
     "UserSettingsDialog",
     "MetadataDialog",
@@ -115,21 +157,29 @@ _QT_NAMES = (
     "Task",
     "run_task",
     "run_with_status",
-    "ProgressType",
     "CollapsibleHeader",
     "CollapsibleGroupBox",
+    "remember_expanded_sections",
+    "resize_with_sections",
     "ScrollableGroupBox",
     "LogDoubleSpinBox",
+    "WrappingLabel",
     "RangeSlider",
+    "SpinBoxRangeSlider",
     "DensityContrastSlider",
     "GenericPlotWindow",
     "RemoveColumnsDialog",
     "HelpButton",
     "confirm_restore_defaults",
+    "contrast_slider_setting",
     "cancel_dialogs",
     "install_excepthook",
     "adjust_widget_size",
     "get_save_filename_ext_dialog",
+    "show_load_error",
+    "notify_config_load_error",
+    "FILE_LOAD_ERRORS",
+    "add_sound_notifications_menu",
 )
 
 
@@ -257,6 +307,42 @@ def n_workers(
     return n
 
 
+def release_free_memory() -> None:
+    """Collect garbage and hand the memory the process has freed back
+    to the operating system.
+
+    Freeing an array does not always shrink the process: the C
+    allocator keeps freed blocks for reuse, so the memory stays
+    reserved for Picasso while other programs could use it. This asks
+    the allocator to return it - ``malloc_trim`` on Linux,
+    ``malloc_zone_pressure_relief`` on macOS and ``HeapCompact`` of the
+    process heap on Windows. Only memory nothing references is
+    affected, so this is always safe, if not free: the garbage
+    collection and the trim take up to about a second for a large
+    process. Picasso's GUIs call it after a period of inactivity (see
+    ``picasso.gui.idle``).
+    """
+    import ctypes
+    import gc
+
+    # cycles, e.g., closed windows referenced by their own callbacks,
+    # are only freed by the cyclic garbage collector
+    gc.collect()
+    try:
+        if sys.platform.startswith("linux"):
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        elif sys.platform == "darwin":
+            libc = ctypes.CDLL("/usr/lib/libSystem.B.dylib")
+            libc.malloc_zone_pressure_relief(None, ctypes.c_size_t(0))
+        elif sys.platform == "win32":
+            kernel32 = ctypes.windll.kernel32
+            kernel32.GetProcessHeap.restype = ctypes.c_void_p
+            kernel32.HeapCompact.argtypes = [ctypes.c_void_p, ctypes.c_uint]
+            kernel32.HeapCompact(kernel32.GetProcessHeap(), 0)
+    except Exception:  # noqa: BLE001 - e.g., another C library (musl)
+        pass
+
+
 def normalize_frame_bounds(frame_bounds, n_frames):
     """Normalize ``frame_bounds`` to a list of concrete, inclusive,
     0-indexed ``(lo, hi)`` segments.
@@ -338,8 +424,8 @@ def bin_z_steps(
         position of each step, the mean spot width per step, or a stack of
         bead volumes.
     z_binning : int
-        Number of consecutive steps per bin. 1 returns ``values``
-        unchanged.
+        Number of consecutive steps per bin. 1 returns a copy of
+        ``values``.
     axis : int, optional
         Axis of ``values`` that runs over the steps. Default 0.
 
@@ -361,7 +447,8 @@ def bin_z_steps(
     if z_binning < 1:
         raise ValueError(f"z binning must be at least 1, got {z_binning}.")
     if z_binning == 1:
-        return values
+        # a copy, so that callers may change either array in place
+        return values.copy()
     n_steps = values.shape[axis]
     n_bins = n_steps // z_binning
     if n_bins < 1:
@@ -393,13 +480,89 @@ class OperationCanceled(Exception):
     """
 
 
+@runtime_checkable
+class Progress(Protocol):
+    """The progress tracker interface taken by Picasso's long-running
+    functions.
+
+    Every public function that reports progress takes one ``progress``
+    argument, which is one of:
+
+    * an object implementing this interface, e.g.,
+      ``picasso.lib.ProgressDialog`` or the ``TaskProgress`` of a GUI
+      task (``picasso.lib.run_task``);
+    * ``"console"``, which shows a tqdm progress bar per phase;
+    * None, which reports nothing.
+
+    The function sets the maximum of each phase itself and reports the
+    number of items finished so far, ending each phase at its maximum, so
+    a tracker never needs to know what the function computes. A custom
+    tracker can subclass :class:`MockProgress` and override the methods
+    it needs, e.g., only :meth:`set_value`.
+
+    The methods are called from the thread that called the function.
+    ``set_value`` and ``zero_progress`` may raise
+    :class:`OperationCanceled` to cancel the computation.
+    """
+
+    def set_value(self, value: int) -> None:
+        """Report the number of items finished in the current phase.
+
+        Parameters
+        ----------
+        value : int
+            Items finished so far, from 0 up to :meth:`maximum`.
+        """
+
+    def setMaximum(self, maximum: int) -> None:
+        """Set the number of items of the current phase.
+
+        Parameters
+        ----------
+        maximum : int
+            Number of items; 0 means unknown (a busy indicator).
+        """
+
+    def maximum(self) -> int:
+        """The maximum last set.
+
+        Returns
+        -------
+        maximum : int
+        """
+
+    def zero_progress(
+        self, description: str | None = None, unit: str | None = None
+    ) -> None:
+        """Start a new phase at zero progress.
+
+        Parameters
+        ----------
+        description : str, optional
+            Label of the new phase. None keeps the current one.
+        unit : str, optional
+            Name of one item of the new phase, e.g. "loc" (shown by the
+            console bar). None keeps the current one.
+        """
+
+    def close(self) -> None:
+        """Finish reporting."""
+
+
 class MockProgress:
-    """Class to mock a progress bar or dialog, allowing for calling
-    the same methods but not displaying anything.
+    """Progress tracker that reports nothing.
+
+    Implements the :class:`Progress` interface with methods that do
+    nothing (except remembering the maximum), so that a function can drive
+    progress unconditionally; ``normalize_progress(None)`` returns one.
+    Also a convenient base class for custom trackers, e.g.::
+
+        class PrintProgress(lib.MockProgress):
+            def set_value(self, value, *args, **kwargs):
+                print(f"{value} / {self.maximum()}")
 
     Every method accepts (and ignores) whatever the ``ProgressDialog``
-    interface passes, so a caller can drive progress unconditionally. See
-    :func:`normalize_progress`.
+    interface passes.
     """
 
     def __init__(self, *args, **kwargs):
@@ -445,16 +608,17 @@ class MockProgress:
         pass
 
     def zero_progress(self, description=None, *args, **kwargs):
-        """Do nothing.
+        """Record the label of the new phase.
 
         Parameters
         ----------
         description : str, optional
-            Ignored; a real dialog would show it as the new phase's label.
+            Label of the new phase. None keeps the current one.
         *args, **kwargs
             Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
-        pass
+        if description:
+            self.description_base = description
 
     def close(self, *args, **kwargs):
         """Do nothing."""
@@ -468,27 +632,13 @@ class MockProgress:
         """Do nothing."""
         pass
 
-    def get_iterator(self, start=0, end=100):
-        """A plain iterator, with no progress attached.
-
-        Parameters
-        ----------
-        start, end : int, optional
-            First and one-past-last value. Defaults 0 and 100.
-
-        Returns
-        -------
-        iterator : range
-        """
-        return range(start, end)
-
 
 class TqdmProgress:
-    """Class to absorb calls to ProgressDialog but is used to display
-    tqdm progress bar instead.
+    """Progress tracker showing a tqdm progress bar in the console, one
+    bar per phase.
 
-    Implements the same interface as ``ProgressDialog`` (see
-    ``normalize_progress``): the bar is armed lazily on the first
+    Implements the :class:`Progress` interface; ``normalize_progress``
+    returns one for ``"console"``. The bar is armed lazily on the first
     ``set_value`` call, using the description and maximum declared so
     far; ``zero_progress`` closes the current bar so that the next
     ``set_value`` starts a fresh one (a new phase)."""
@@ -499,14 +649,12 @@ class TqdmProgress:
         Parameters
         ----------
         unit : str, optional
-            Name of one iteration, shown by tqdm. Default "it".
+            Name of one item, shown by tqdm. Default "it".
         *args, **kwargs
             ``description`` (keyword) is used as the bar's label; anything
             else a real progress dialog takes is accepted and ignored.
         """
-        self.description_base = (
-            "" if "description" not in kwargs else kwargs["description"]
-        )
+        self.description_base = kwargs.get("description", "")
         self.iterator = None
         self.unit = unit
         self._maximum = 0
@@ -521,7 +669,7 @@ class TqdmProgress:
         Parameters
         ----------
         value : int
-            Cumulative progress so far.
+            Items finished so far in the current phase.
         *args, **kwargs
             Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
@@ -539,13 +687,13 @@ class TqdmProgress:
         Parameters
         ----------
         maximum : int
-            The total the bar counts towards.
+            The total the bar counts towards; 0 means unknown.
         *args, **kwargs
             Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
         self._maximum = maximum
         if self.iterator is not None:
-            self.iterator.total = maximum
+            self.iterator.total = maximum or None
             self.iterator.refresh()
 
     def maximum(self):
@@ -565,7 +713,7 @@ class TqdmProgress:
         """Do nothing; accepted for interface compatibility with Qt."""
         pass
 
-    def zero_progress(self, description=None, *args, **kwargs):
+    def zero_progress(self, description=None, *args, unit=None, **kwargs):
         """Close the current bar so the next :meth:`set_value` starts a fresh
         one, i.e. a new phase.
 
@@ -573,11 +721,16 @@ class TqdmProgress:
         ----------
         description : str, optional
             Label of the new phase. None keeps the current one.
+        unit : str, optional
+            Name of one item of the new phase. None keeps the current
+            one.
         *args, **kwargs
             Accepted and ignored, for ``ProgressDialog`` compatibility.
         """
         if description:
             self.description_base = description
+        if unit:
+            self.unit = unit
         self.close()
 
     def close(self, *args, **kwargs):
@@ -594,51 +747,28 @@ class TqdmProgress:
         """Do nothing; there is no console equivalent."""
         pass
 
-    def get_iterator(self, start=0, end=100, unit="segment"):
-        """Get an iterator that drives the progress bar.
-
-        Parameters
-        ----------
-        start, end : int, optional
-            First and one-past-last value of the iteration. Defaults 0 and
-            100.
-        unit : str, optional
-            Name of one iteration, shown by tqdm. Default "segment".
-
-        Returns
-        -------
-        iterator : tqdm.tqdm
-            Iterator over ``range(start, end)``, also stored on the instance.
-        """
-        self.close()
-        iterator = tqdm(
-            range(start, end),
-            desc=self.description_base,
-            unit=unit,
-        )
-        self.iterator = iterator
-        return iterator
-
 
 def normalize_progress(
-    progress: Any,
+    progress: Progress | Literal["console"] | None,
     description: str = "",
     unit: str = "it",
-) -> Any:
-    """Normalize a public ``progress``/``callback`` argument to an
-    object with the ``ProgressDialog`` interface (``set_value``,
-    ``setMaximum``, ``zero_progress``, ...), so that callers can drive
-    progress with plain method calls instead of checking which kind of
-    tracker they hold (which would also pull in Qt in headless runs):
+) -> Progress:
+    """Normalize a public ``progress`` argument to a :class:`Progress`
+    tracker, so that callers can drive progress with plain method calls
+    instead of checking which kind of tracker they hold (which would also
+    pull in Qt in headless runs):
 
     * ``None`` -> ``MockProgress`` (reports nothing),
     * ``"console"`` -> ``TqdmProgress`` (tqdm bar in the console),
     * anything else (e.g. a ``lib.ProgressDialog``) is returned
       unchanged, as long as it exposes the interface.
 
+    Public functions that create the tracker should also close it, see
+    :func:`tracked_progress`.
+
     Parameters
     ----------
-    progress : None, "console", or ProgressType
+    progress : Progress, "console" or None
         The public progress argument.
     description : str, optional
         Initial description for a newly created ``TqdmProgress``.
@@ -649,8 +779,8 @@ def normalize_progress(
 
     Returns
     -------
-    progress : ProgressType
-        Object implementing the ``ProgressDialog`` interface.
+    progress : Progress
+        Object implementing the :class:`Progress` interface.
     """
     if progress is None:
         return MockProgress()
@@ -659,15 +789,85 @@ def normalize_progress(
             return TqdmProgress(description=description, unit=unit)
         raise ValueError(
             f"Invalid progress argument: {progress!r}. Must be None, "
-            "'console', or an object with the ProgressDialog interface."
+            "'console', or an object with the Progress interface."
         )
     if not callable(getattr(progress, "set_value", None)):
         raise TypeError(
             f"Invalid progress argument: {progress!r}. Must be None, "
-            "'console', or an object with the ProgressDialog interface "
-            "(set_value, setMaximum, zero_progress, ...)."
+            "'console', or an object with the Progress interface "
+            "(set_value, setMaximum, maximum, zero_progress, close), see "
+            "picasso.lib.Progress."
         )
     return progress
+
+
+@contextlib.contextmanager
+def tracked_progress(
+    progress: Progress | Literal["console"] | None,
+    description: str = "",
+    unit: str = "it",
+) -> Iterator[Progress]:
+    """Normalize a public ``progress`` argument for the duration of a
+    ``with`` block, closing the tracker afterwards if it was created here.
+
+    A tracker passed in by the caller (e.g. a GUI dialog, or the tracker of
+    an enclosing Picasso function) is left open, since the caller may
+    report further phases with it; one created from ``"console"`` is
+    closed, so that its last bar ends.
+
+    Parameters
+    ----------
+    progress : Progress, "console" or None
+        The public progress argument.
+    description, unit : str, optional
+        Passed to :func:`normalize_progress`.
+
+    Yields
+    ------
+    progress : Progress
+        Object implementing the :class:`Progress` interface.
+    """
+    tracker = normalize_progress(progress, description, unit)
+    try:
+        yield tracker
+    finally:
+        if tracker is not progress:
+            tracker.close()
+
+
+def start_phase(
+    progress: Progress,
+    description: str,
+    maximum: int,
+    unit: str | None = None,
+) -> None:
+    """Start a new progress phase: set its maximum and label and reset the
+    progress to zero.
+
+    Parameters
+    ----------
+    progress : Progress
+        A normalized tracker, see :func:`normalize_progress`.
+    description : str
+        Label of the phase.
+    maximum : int
+        Number of items of the phase; 0 means unknown (a busy indicator).
+    unit : str, optional
+        Name of one item, shown in the console bar. None keeps the
+        current one.
+
+    Raises
+    ------
+    OperationCanceled
+        If the tracker reports that the user canceled the computation.
+    """
+    # new phase first, so a console bar of the previous phase keeps its
+    # own maximum when it closes
+    if unit is not None:
+        progress.zero_progress(description, unit=unit)
+    else:
+        progress.zero_progress(description)
+    progress.setMaximum(maximum)
 
 
 class AutoDict(collections.defaultdict):
@@ -684,96 +884,19 @@ class AutoDict(collections.defaultdict):
 def deprecation_warning(message: str) -> None:
     """Display a deprecation warning message.
 
+    Issued as a ``FutureWarning``, which Python shows by default, at the
+    line that called the deprecated function. New deprecations are
+    declared with ``picasso.deprecation.deprecated`` or
+    ``picasso.deprecation.register`` instead, which also record when
+    the name may be removed.
+
     Parameters
     ----------
     message : str
         The deprecation warning message to be displayed.
     """
-    warnings.warn(message, DeprecationWarning, stacklevel=2)
-
-
-def get_sound_notification_path() -> str | None:
-    """Return the path to the sound notification file from the user
-    settings file. If the file is not found or not specified, return
-    None.
-
-    Returns
-    -------
-    path : str or None
-        Path to the sound notification file or None if not found or not
-        specified.
-    """
-    settings = io.load_user_settings()
-    if "Sound_notification" not in settings:  # add default settings (no sound)
-        settings["Sound_notification"]["filename"] = None
-        io.save_user_settings(settings)
-    filename = settings["Sound_notification"]["filename"]
-    sounds_dir = _sound_notification_dir()
-    if filename is not None and os.path.isfile(
-        os.path.join(sounds_dir, filename)
-    ):
-        ext = os.path.splitext(filename)[1].lower()
-        if ext not in [".mp3", ".wav"]:
-            path = None
-        else:
-            path = os.path.join(sounds_dir, filename)
-    else:
-        path = None
-    return path
-
-
-def get_available_sound_notifications() -> list[str | None]:
-    """Get a list of file names of the available sound notifications in
-    the folder ``~/.picasso/notification_sounds``.
-
-    Returns
-    -------
-    filenames : list of strs
-        List of file names of the available sound notifications.
-    """
-    sounds_dir = _sound_notification_dir()
-    filenames = [
-        _
-        for _ in os.listdir(sounds_dir)
-        if os.path.isfile(os.path.join(sounds_dir, _))
-        and os.path.splitext(_)[1].lower() in [".mp3", ".wav"]
-    ]
-    filenames = ["None"] + filenames
-    return filenames
-
-
-def set_sound_notification(action: QtGui.QAction) -> None:
-    """Save the selected sound notification in the user settings
-    file.
-
-    Parameters
-    ----------
-    action : QtGui.QAction
-        The action representing the selected sound notification.
-    """
-    settings = io.load_user_settings()
-    selected_sound = action.objectName()  # file name with extension
-    settings["Sound_notification"]["filename"] = selected_sound
-    io.save_user_settings(settings)
-    # play selected sound as a preview
-    play_path = get_sound_notification_path()
-    playsound(play_path, block=False) if play_path is not None else None
-
-
-def _sound_notification_dir() -> str:
-    """Return the path to the user sound notification folder
-    (``~/.picasso/notification_sounds``)."""
-    return io.notification_sounds_directory()
-
-
-def open_sound_notifications_folder() -> None:
-    """Open the user sound notification folder
-    (``~/.picasso/notification_sounds``) in the system file browser."""
-    from PyQt6 import QtCore, QtGui
-
-    QtGui.QDesktopServices.openUrl(
-        QtCore.QUrl.fromLocalFile(_sound_notification_dir())
-    )
+    # 3: this function, the deprecated function, its caller
+    warnings.warn(message, FutureWarning, stacklevel=3)
 
 
 def get_from_metadata(
@@ -821,6 +944,151 @@ def get_from_metadata(
         raise ValueError("info must be a dict or a list of dicts.")
 
 
+def step_info(step: str, **entries: Any) -> dict:
+    """Metadata dict recording one processing step, to be appended to the
+    metadata of the localizations (or other files) the step produced.
+
+    Starts with ``"Generated by"`` (``"Picasso v<version> <step>"``,
+    which the metadata viewers show), ``"Picasso version"`` and
+    ``"Step"``, the parts that code reads, e.g., to find the filter
+    steps of a file; ``entries`` follow.
+
+    Parameters
+    ----------
+    step : str
+        Name of the step, e.g. ``"Filter"`` or ``"Render : Pick"``.
+    **entries
+        Further metadata of the step, e.g., its parameters. Keys that
+        are not Python identifiers are passed by unpacking a dict.
+
+    Returns
+    -------
+    info : dict
+        The metadata of the step.
+
+    See Also
+    --------
+    append_metadata : Add the step to the metadata of localizations.
+
+    Examples
+    --------
+    >>> from picasso import lib
+    >>> entry = lib.step_info("My analysis", **{"Radius (nm)": 50.0})
+    >>> info = lib.append_metadata(info, entry)
+    """
+    return {
+        "Generated by": f"Picasso v{__version__} {step}",
+        "Picasso version": __version__,
+        "Step": step,
+        **entries,
+    }
+
+
+def append_metadata(
+    info: list[dict] | dict | None, entry: dict | list[dict]
+) -> list[dict]:
+    """Localization metadata with one or more entries appended, e.g.,
+    the record of a processing step (see :func:`step_info`).
+
+    Picasso's processing functions return the complete metadata of
+    their output in this way, so it can be saved as it is (see
+    ``io.save_locs``). Use this function to record steps of your own.
+
+    Parameters
+    ----------
+    info : list of dicts, dict or None
+        Metadata of the localizations, e.g., from ``io.load_locs``. A
+        single dict is treated as a list of one; None as an empty list.
+    entry : dict or list of dicts
+        The entry to append, or several entries, appended in order.
+
+    Returns
+    -------
+    new_info : list of dicts
+        A new list: copies of the entries of ``info`` followed by
+        copies of ``entry``. Neither argument is modified, and setting
+        a key of the result (e.g., with :func:`overwrite_metadata`) does
+        not change them either. Nested values, e.g., lists, are not
+        copied but shared.
+
+    Raises
+    ------
+    TypeError
+        If ``info`` or ``entry`` is not a dict or a list of dicts.
+
+    Examples
+    --------
+    >>> from picasso import io, lib
+    >>> locs, info = io.load_locs("locs.hdf5")
+    >>> locs = locs[locs["photons"] > 1000]
+    >>> info = lib.append_metadata(
+    ...     info, lib.step_info("Photon cut", **{"Min. photons": 1000})
+    ... )
+    >>> io.save_locs("locs_bright.hdf5", locs, info)
+    """
+    entries = []
+    for name, value in (("info", info), ("entry", entry)):
+        if value is None and name == "info":
+            continue
+        if isinstance(value, dict):
+            value = [value]
+        if not isinstance(value, list) or not all(
+            isinstance(item, dict) for item in value
+        ):
+            raise TypeError(
+                f"{name} must be a dict or a list of dicts, got "
+                f"{type(value).__name__}."
+            )
+        entries.extend(dict(item) for item in value)
+    return entries
+
+
+def field_of_view(info: list[dict] | dict) -> tuple[float, float]:
+    """Size of the field of view in nm.
+
+    The metadata records the movie size in camera pixels (``Width``,
+    ``Height``) and the camera pixel size in nm (``Pixelsize``); the
+    field of view spans ``[0, Width * Pixelsize)`` in x and
+    ``[0, Height * Pixelsize)`` in y, the range ``ensure_sanity`` keeps.
+
+    Parameters
+    ----------
+    info : list of dicts or dict
+        Localization metadata.
+
+    Returns
+    -------
+    width, height : float
+        Extent of the field of view in x and y, in nm.
+
+    Raises
+    ------
+    KeyError
+        If ``Width``, ``Height`` or ``Pixelsize`` is missing.
+
+    Examples
+    --------
+    >>> from picasso import lib
+    >>> lib.field_of_view([{"Width": 512, "Height": 256, "Pixelsize": 130}])
+    (66560.0, 33280.0)
+    """
+    pixelsize = float(get_from_metadata(info, "Pixelsize", raise_error=True))
+    width = get_from_metadata(info, "Width", raise_error=True)
+    height = get_from_metadata(info, "Height", raise_error=True)
+    return float(width) * pixelsize, float(height) * pixelsize
+
+
+def _is_filter_dict(entry: Any) -> bool:
+    """Whether a metadata entry records a Filter step: its ``Step`` is
+    ``"Filter"`` or, for entries saved before Picasso 1.0 that have no
+    ``Step``, its ``Generated by`` value contains ``"Filter"``."""
+    if not isinstance(entry, dict):
+        return False
+    if "Step" in entry:
+        return entry["Step"] == "Filter"
+    return "Filter" in str(entry.get("Generated by", ""))
+
+
 def _merge_filter_range(
     ranges: dict, missing: list, current: set, key, xmin: float, xmax: float
 ) -> None:
@@ -839,24 +1107,37 @@ def _merge_filter_range(
         ranges[key] = [xmin, xmax]
 
 
+#: Metadata key of a Filter step dict holding its filter conditions, in
+#: the order they were applied (see :mod:`picasso.expression`).
+FILTER_STEPS_KEY = "Filter steps"
+
+
+def _is_range_entry(key: Any, value: Any) -> bool:
+    """Whether a Filter metadata item is a ``column: [min, max]`` range."""
+    return (
+        key not in ("Generated by", "Removed columns", FILTER_STEPS_KEY)
+        and isinstance(value, (list, tuple))
+        and len(value) == 2
+        and all(isinstance(v, (int, float)) for v in value)
+    )
+
+
 def _extract_filter_dict(
     d: dict, current: set, ranges: dict, missing: list, to_remove_all: list
 ) -> None:
     """Fold one filter-step metadata dict into the running totals."""
     for key, value in d.items():
-        if key == "Generated by":
-            continue
         if key == "Removed columns" and isinstance(value, (list, tuple)):
             to_remove_all.extend(value)
-            continue
-        if (
-            isinstance(value, (list, tuple))
-            and len(value) == 2
-            and all(isinstance(v, (int, float)) for v in value)
-        ):
+        elif _is_range_entry(key, value):
             _merge_filter_range(
                 ranges, missing, current, key, float(value[0]), float(value[1])
             )
+
+
+def _filter_dicts(info: list[dict]) -> list[dict]:
+    """Metadata dicts written by Filter, oldest first."""
+    return [d for d in info if _is_filter_dict(d)]
 
 
 def _dedupe_preserve_order(items: list) -> list:
@@ -874,13 +1155,19 @@ def extract_filter_steps(
     info: list[dict],
     current_columns,
 ) -> tuple[dict[str, list[float]], list[str], list[str]]:
-    """Parse filter steps out of a Picasso Filter metadata list.
+    """Parse the per-column filter ranges out of a Picasso Filter
+    metadata list.
 
-    Iterates ``info`` oldest -> newest. A dict is treated as a filter
-    dict when its ``Generated by`` value contains ``"Filter"``. Numeric
-    [min, max] ranges for columns present in ``current_columns`` are
-    intersected; columns absent from the current data are reported as
-    missing instead of being applied.
+    Iterates ``info`` oldest -> newest over the dicts that record a
+    Filter step (``"Step": "Filter"``, see :func:`step_info`, or, saved
+    before Picasso 1.0, a ``Generated by`` value with ``"Filter"``).
+    Numeric [min, max] ranges for columns present in
+    ``current_columns`` are intersected; columns absent from the current
+    data are reported as missing instead of being applied.
+
+    The ranges summarize the column limits only; conditions such as
+    ``photons > median(photons)`` are left out. The complete, ordered
+    filter steps are given by :func:`extract_filter_recipe`.
 
     Parameters
     ----------
@@ -903,12 +1190,7 @@ def extract_filter_steps(
     to_remove_all = []
     missing = []
 
-    for d in info:
-        if not isinstance(d, dict):
-            continue
-        gen_by = get_from_metadata(d, "Generated by", default="")
-        if "Filter" not in str(gen_by):
-            continue
+    for d in _filter_dicts(info):
         _extract_filter_dict(d, current, ranges, missing, to_remove_all)
 
     to_remove = [c for c in to_remove_all if c in current]
@@ -917,43 +1199,135 @@ def extract_filter_steps(
     return ranges, to_remove, _dedupe_preserve_order(missing)
 
 
+def extract_filter_recipe(
+    info: list[dict],
+    current_columns,
+) -> tuple[list[str], list[str], list[str]]:
+    """Parse the ordered filter steps out of a Picasso Filter metadata
+    list.
+
+    Iterates ``info`` oldest -> newest over the dicts that record a
+    Filter step (``"Step": "Filter"``, see :func:`step_info`, or, saved
+    before Picasso 1.0, a ``Generated by`` value with ``"Filter"``).
+    Each dict contributes its ``"Filter steps"`` conditions in the order
+    they were applied; a dict without them (saved before Picasso 1.0)
+    contributes its ``column: [min, max]`` ranges as conditions
+    ``min < column < max``.
+    The order matters for conditions with statistics such as
+    ``photons > median(photons)``, which are computed over the
+    localizations left by the previous steps.
+
+    Parameters
+    ----------
+    info : list of dicts
+        Localization metadata loaded via ``io.load_info``.
+    current_columns : iterable of str
+        Columns available in the target localizations DataFrame.
+
+    Returns
+    -------
+    steps : list of str
+        Conditions to apply in this order (see
+        :func:`picasso.expression.condition`). Steps that need a column
+        absent from the current data are skipped.
+    to_remove : list[str]
+        Columns to drop after filtering (present in current data).
+    missing : list[str]
+        Columns referenced in metadata but absent from current data.
+
+    Raises
+    ------
+    picasso.expression.ExpressionError
+        If a recorded step cannot be parsed.
+    """
+    from picasso import expression
+
+    current = set(current_columns)
+    variables = set(expression.METADATA_VARIABLES)
+    steps = []
+    to_remove_all = []
+    missing = []
+
+    for d in _filter_dicts(info):
+        recorded = d.get(FILTER_STEPS_KEY)
+        if isinstance(recorded, (list, tuple)):
+            candidates = [str(step) for step in recorded]
+        else:
+            candidates = [
+                expression.range_expression(key, value[0], value[1])
+                for key, value in d.items()
+                if _is_range_entry(key, value)
+            ]
+        for step in candidates:
+            absent = sorted(expression.names(step) - current - variables)
+            if absent:
+                missing.extend(absent)
+            else:
+                steps.append(step)
+        removed = d.get("Removed columns")
+        if isinstance(removed, (list, tuple)):
+            to_remove_all.extend(removed)
+
+    to_remove = [c for c in to_remove_all if c in current]
+    missing.extend(c for c in to_remove_all if c not in current)
+
+    return steps, to_remove, _dedupe_preserve_order(missing)
+
+
 def apply_filter_steps(
     locs: pd.DataFrame,
-    info: list[dict],
-) -> tuple[pd.DataFrame, dict[str, list[float]], list[str], list[str]]:
-    """Apply Picasso Filter steps recorded in ``info`` to ``locs``.
+    info: list[dict] | None = None,
+    *,
+    recipe: list[dict],
+) -> tuple[pd.DataFrame, list[dict], list[str]]:
+    """Apply the Picasso Filter steps recorded in the metadata of
+    another file (``recipe``) to ``locs``.
 
-    Thin wrapper around :func:`extract_filter_steps`: it parses the
-    filter recipe out of the metadata, intersects each per-column
-    [min, max] range against ``locs``, drops any "Removed columns",
-    and reports columns that were referenced by the metadata but absent
-    from ``locs``.
+    The steps from :func:`extract_filter_recipe` are applied in order,
+    then the "Removed columns" are dropped. Columns referenced by the
+    recipe but absent from ``locs`` are reported.
 
     Parameters
     ----------
     locs : pd.DataFrame
         Localizations to filter.
-    info : list of dicts
-        Localization metadata loaded via ``io.load_info``.
+    info : list of dicts or None, optional
+        Metadata of ``locs``. It gives ``pixelsize`` to steps that use
+        it (if None, the pixel size in ``recipe`` is used) and is
+        carried over into the returned metadata. Default is None.
+    recipe : list of dicts
+        Metadata of the filtered file whose steps are replayed, e.g.,
+        loaded via ``io.load_info``.
 
     Returns
     -------
     filtered_locs : pd.DataFrame
-        ``locs`` with the range filters and column removals applied.
-    ranges : dict[str, list[float]]
-        Column -> [min, max] that were applied.
-    to_remove : list[str]
-        Columns that were dropped.
+        ``locs`` with the filter steps and column removals applied.
+    info : list of dicts
+        Metadata of ``filtered_locs``: ``info`` with a Filter entry
+        listing the applied steps and removed columns appended, see
+        ``lib.append_metadata`` and ``expression.filter_entry``.
     missing : list[str]
-        Columns referenced in ``info`` but not present in ``locs``
+        Columns referenced in ``recipe`` but not present in ``locs``
         (skipped, not applied).
+
+    Raises
+    ------
+    picasso.expression.ExpressionError
+        If a recorded step cannot be evaluated on ``locs``.
     """
-    ranges, to_remove, missing = extract_filter_steps(info, locs.columns)
-    for field, (xmin, xmax) in ranges.items():
-        locs = locs[(locs[field] > xmin) & (locs[field] < xmax)]
+    from picasso import expression
+
+    steps, to_remove, missing = extract_filter_recipe(recipe, locs.columns)
+    variables = expression.variables_from_info(
+        recipe if info is None else info
+    )
+    for step in steps:
+        locs = locs[expression.condition(step, locs, variables)]
     if to_remove:
         locs = locs.drop(columns=to_remove)
-    return locs, ranges, to_remove, missing
+    entry = expression.filter_entry(steps, removed_columns=to_remove)
+    return locs, append_metadata(info, entry), missing
 
 
 def overwrite_metadata(
@@ -1002,16 +1376,16 @@ def overwrite_metadata(
 
 
 #: Metadata keys holding the translation of the localizations from the
-#: camera frame applied by ``fit_canvas`` (camera pixels); subtract it to
-#: return to the camera coordinates
-CANVAS_OFFSET_KEYS = ("Canvas offset x (cam. px)", "Canvas offset y (cam. px)")
+#: camera frame applied by ``fit_canvas`` (nm, a whole number of camera
+#: pixels); subtract it to return to the camera coordinates.
+CANVAS_OFFSET_KEYS = ("Canvas offset x (nm)", "Canvas offset y (nm)")
 #: Metadata keys holding the size of the camera image (camera pixels),
 #: stored by ``fit_canvas`` once ``Width`` or ``Height`` differ from it
 CAMERA_SIZE_KEYS = ("Camera Width", "Camera Height")
 
 
 def fit_canvas(
-    locs_list: list[pd.DataFrame], infos_list: list[list[dict]]
+    locs: list[pd.DataFrame], infos: list[list[dict]]
 ) -> tuple[list[pd.DataFrame], list[list[dict]], list[tuple[int, int]]]:
     """Fit the canvas (``Width`` and ``Height`` in the metadata) of one
     or more channels to their localizations, so that none is removed by
@@ -1022,9 +1396,9 @@ def fit_canvas(
     missing):
 
     - The offset becomes the smallest whole number of camera pixels
-      that makes every coordinate of every channel non-negative (0 if
-      none is negative). It is the same for all channels, so their
-      relative position is preserved.
+      (stored in nm) that makes every coordinate of every channel
+      non-negative (0 if none is negative). It is the same for all
+      channels, so their relative position is preserved.
     - ``Width`` and ``Height`` become the camera size
       (``CAMERA_SIZE_KEYS``, or the current ``Width`` and ``Height`` if
       missing) or the extent of the localizations, whichever is
@@ -1035,35 +1409,38 @@ def fit_canvas(
     offset. For example, moving a channel beyond the left edge and
     back restores the original canvas.
 
-    The localizations and metadata are modified in place (translated
-    columns are replaced with new arrays rather than modified in
-    memory, so caches keyed on the array memory, e.g., the GPU
-    uploads, see the change). The offset and the camera size are
-    stored in the last metadata dictionary of each channel once they
-    differ from the defaults.
+    Unlike the processing functions, which return new localizations
+    and metadata, this function modifies its input in place, as it
+    maintains the canvas of data that is being edited, e.g., in Render
+    (translated columns are replaced with new arrays rather than
+    modified in memory, so caches keyed on the array memory, e.g., the
+    GPU uploads, see the change). No metadata entry is added: the
+    offset and the camera size are stored in the last metadata
+    dictionary of each channel once they differ from the defaults.
 
     Parameters
     ----------
-    locs_list : list of pd.DataFrames
+    locs : list of pd.DataFrames
         Localizations of each channel.
-    infos_list : list of lists of dicts
+    infos : list of lists of dicts
         Metadata of each channel.
 
     Returns
     -------
-    locs_list : list of pd.DataFrames
+    locs : list of pd.DataFrames
         The input localizations, translated if needed.
-    infos_list : list of lists of dicts
+    infos : list of lists of dicts
         The input metadata with the updated canvas.
-    shifts : list of tuples of ints
+    shifts : list of tuples of floats
         Translation ``(dx, dy)`` applied to each channel in this call
-        (camera pixels), e.g., to move picks along with the
-        localizations. Channels that shared an offset share the shift.
+        (nm), e.g., to move picks along with the localizations.
+        Channels that shared an offset share the shift.
 
     Raises
     ------
     KeyError
-        If ``Width`` or ``Height`` is missing from the metadata.
+        If ``Width``, ``Height`` or ``Pixelsize`` is missing from the
+        metadata.
     """
 
     def finite(locs, column):
@@ -1071,13 +1448,19 @@ def fit_canvas(
         values = locs[column].to_numpy()
         return values[np.isfinite(values)]
 
-    extents = [(finite(locs, "x"), finite(locs, "y")) for locs in locs_list]
+    extents = [(finite(locs_, "x"), finite(locs_, "y")) for locs_ in locs]
+    pixelsizes = [
+        float(get_from_metadata(info, "Pixelsize", raise_error=True))
+        for info in infos
+    ]
     offsets = [
         [get_from_metadata(info, key, 0) for key in CANVAS_OFFSET_KEYS]
-        for info in infos_list
+        for info in infos
     ]
 
-    # the new offset, from the minimum in the camera frame
+    # the new offset, from the minimum in the camera frame, in whole
+    # camera pixels (of the first channel's pixel size)
+    pixelsize = pixelsizes[0] if pixelsizes else 1.0
     new_offset = []
     for axis in range(2):
         camera_min = [
@@ -1086,31 +1469,33 @@ def fit_canvas(
             if len(ext[axis])
         ]
         lowest = min(camera_min, default=0)
-        new_offset.append(int(np.ceil(-lowest)) if lowest < 0 else 0)
+        pixels = int(np.ceil(-lowest / pixelsize)) if lowest < 0 else 0
+        new_offset.append(pixels * pixelsize)
 
     shifts = []
-    for locs, ext, info, offset in zip(
-        locs_list, extents, infos_list, offsets
+    for locs_, ext, info, offset, ps in zip(
+        locs, extents, infos, offsets, pixelsizes
     ):
-        shift = tuple(int(new - old) for new, old in zip(new_offset, offset))
+        shift = tuple(float(new - old) for new, old in zip(new_offset, offset))
         for column, delta in zip(("x", "y"), shift):
             if delta:
-                locs[column] = locs[column].to_numpy() + np.float32(delta)
+                locs_[column] = locs_[column].to_numpy() + np.float32(delta)
         shifts.append(shift)
 
         for axis in range(2):
             _fit_canvas_axis(
-                info, axis, ext[axis], shift[axis], new_offset[axis]
+                info, axis, ext[axis], shift[axis], new_offset[axis], ps
             )
-    return locs_list, infos_list, shifts
+    return locs, infos, shifts
 
 
 def _fit_canvas_axis(
     info: list[dict],
     axis: int,
     values: np.ndarray,
-    shift: int,
-    offset: int,
+    shift: float,
+    offset: float,
+    pixelsize: float,
 ) -> None:
     """Update the canvas size, camera size and offset of one channel
     along one axis in place, see ``fit_canvas``.
@@ -1123,11 +1508,14 @@ def _fit_canvas_axis(
         0 for x (``Width``), 1 for y (``Height``).
     values : np.ndarray
         Finite coordinates of the channel along ``axis`` before the
-        shift (camera pixels).
-    shift : int
-        Translation applied to the channel along ``axis``.
-    offset : int
-        The new canvas offset along ``axis``.
+        shift (nm).
+    shift : float
+        Translation applied to the channel along ``axis`` (nm).
+    offset : float
+        The new canvas offset along ``axis`` (nm).
+    pixelsize : float
+        Camera pixel size of the channel (nm); the canvas size is a
+        number of camera pixels.
     """
     size_key = ("Width", "Height")[axis]
     camera_key = CAMERA_SIZE_KEYS[axis]
@@ -1136,10 +1524,10 @@ def _fit_canvas_axis(
     camera = stored
     if camera is None:
         camera = get_from_metadata(info, size_key, raise_error=True)
-    value = camera + offset
+    value = camera + int(round(offset / pixelsize))
     if len(values):
-        # strictly x < Width is kept by ensure_sanity, hence + 1
-        top = values.max() + np.float32(shift)
+        # strictly x < Width * Pixelsize is kept by ensure_sanity, hence + 1
+        top = (values.max() + np.float32(shift)) / pixelsize
         value = max(value, int(np.floor(top)) + 1)
     # the canvas size is read from the first and from the last
     # dictionary in different places, so every occurrence is set
@@ -1149,13 +1537,13 @@ def _fit_canvas_axis(
     if value != camera or stored is not None:
         info[-1][camera_key] = int(camera)
     if offset or get_from_metadata(info, offset_key):
-        info[-1][offset_key] = offset
+        info[-1][offset_key] = float(offset)
 
 
 def translate_picks(
     picks: list, shape: str | None, dx: float, dy: float
 ) -> list:
-    """Translate picks by ``(dx, dy)`` camera pixels, e.g., to follow
+    """Translate picks by ``(dx, dy)`` nm, e.g., to follow
     localizations moved by ``fit_canvas``.
 
     Parameters
@@ -1167,7 +1555,7 @@ def translate_picks(
             "Brush"} or None
         Shape of the picks. None is allowed only with no picks.
     dx, dy : float
-        Translation in camera pixels.
+        Translation in nm.
 
     Returns
     -------
@@ -1238,8 +1626,8 @@ def is_hexadecimal(text):
 
 
 def is_path_available(
-    path: str, *, check_ext: str | list[str] = "", parent=None
-) -> bool:
+    path: str, *, check_ext: str | list[str] = ""
+) -> list[bool]:
     """Check if a file or folder exists at the given path. Returns True
     if there is not such path. Returns False if the path already exists.
     Allows to easily change the extension of the path.
@@ -1251,11 +1639,6 @@ def is_path_available(
     check_ext : str or list of str, optional
         Other extension(s) to be checked if they're available. Default
         is "".
-    parent : QWidget, optional
-        Parent widget for the error message box if raise_error is True.
-        A message box will be displayed showing asking if the user wants
-        to continue without the file or folder if the path does not
-        exist.
 
     Returns
     -------
@@ -1274,33 +1657,7 @@ def is_path_available(
         paths = [os.path.splitext(path)[0] + ext for ext in check_ext]
     else:
         paths = [path]
-    paths_available = []
-    for path in paths:
-        if os.path.exists(path):
-            if parent is not None:
-                from PyQt6 import QtWidgets
-
-                box = QtWidgets.QMessageBox(parent)
-                box.setIcon(QtWidgets.QMessageBox.Icon.Warning)
-                box.setWindowTitle("File or folder already exists")
-                box.setText(
-                    f"The path '{path}' already exists."
-                    "\nDo you wish to overwrite it?"
-                )
-                box.setStandardButtons(
-                    QtWidgets.QMessageBox.StandardButton.Yes
-                    | QtWidgets.QMessageBox.StandardButton.No
-                )
-                result = box.exec()
-                if result != QtWidgets.QMessageBox.StandardButton.Yes:
-                    paths_available.append(False)
-                else:
-                    paths_available.append(True)
-            else:
-                paths_available.append(False)
-        else:
-            paths_available.append(True)
-    return paths_available
+    return [not os.path.exists(path) for path in paths]
 
 
 @numba.njit
@@ -1367,7 +1724,9 @@ def fit_cum_exp(data: FloatArray1D) -> dict:
     result : dict
         Contains the best fit parameters and the fitted data.
     """
-    data.sort()
+    # a sorted copy: sorting in place reordered the caller's array, e.g.,
+    # a column of the localizations (read-only from pandas 3 on)
+    data = np.sort(data)
     n = len(data)
     y = np.arange(1, n + 1)
     data_min = data.min()
@@ -1594,12 +1953,12 @@ def plot_trace(
     ax1.scatter(locs["frame"], locs["x"], s=2)
     ax1.set_title("X-pos vs frame")
     ax1.set_xlim(0, n_frames)
-    ax1.set_ylabel("X-pos [Px]")
+    ax1.set_ylabel("X-pos [nm]")
 
     # frame vs y
     ax2.scatter(locs["frame"], locs["y"], s=2)
     ax2.set_title("Y-pos vs frame")
-    ax2.set_ylabel("Y-pos [Px]")
+    ax2.set_ylabel("Y-pos [nm]")
 
     # locs in time
     ax3.plot(xvec, yvec, linewidth=1)
@@ -1696,7 +2055,7 @@ def calculate_optimal_bins(
 
 
 @numba.njit(parallel=True, nogil=True)
-def hist2d_numba(
+def hist2d(
     x: FloatArray1D,
     y: FloatArray1D,
     x_min: float,
@@ -1779,8 +2138,8 @@ def select_frc_rois(
     info : list of dicts
         Metadata of the localizations list.
     viewport : tuple of floats
-        Region ((y_min, x_min), (y_max, x_max)) in camera pixels in
-        which the ROIs are placed.
+        Region ((y_min, x_min), (y_max, x_max)) in nm in which the ROIs
+        are placed.
     n_rois : int, optional
         Maximum number of ROIs. Default is 30.
     roi_size : float, optional
@@ -1794,17 +2153,16 @@ def select_frc_rois(
     -------
     rois : list of tuples
         Viewports ((y_min, x_min), (y_max, x_max)) of the selected ROIs
-        in camera pixels.
+        in nm.
 
     Raises
     ------
     ValueError
         If ``viewport`` is smaller than one ROI.
     """
-    pixelsize = get_from_metadata(info, "Pixelsize", raise_error=True)
     (y_min, x_min), (y_max, x_max) = viewport
     n_sub = 10  # grid steps per ROI side
-    step = roi_size / pixelsize / n_sub
+    step = roi_size / n_sub
     ny = int((y_max - y_min) / step)
     nx = int((x_max - x_min) / step)
     if ny < n_sub or nx < n_sub:
@@ -1843,46 +2201,6 @@ def select_frc_rois(
         x0 = x_min + j * step
         rois.append(((y0, x0), (y0 + n_sub * step, x0 + n_sub * step)))
     return rois
-
-
-def append_to_rec(
-    rec_array: np.recarray,
-    data: FloatArray1D | IntArray1D,
-    name: str,
-) -> np.recarray:
-    """Append a new column to the existing np.recarray.
-
-    Parameters
-    ----------
-    rec_array : np.recarray
-        Recarray to which the new column is appended.
-    data : FloatArray1D | IntArray1D
-        1D data to be appended.
-    name : str
-        Name of the new column.
-
-    Returns
-    -------
-    rec_array : np.recarray
-        Recarray with the new column.
-    """
-    deprecation_warning(
-        "Appending to recarrays is deprecated and will be removed in Picasso"
-        " 1.0. Since 0.9.0, Picasso uses pandas DataFrames instead of"
-        " recarrays. Simply use locs['new_column'] = data to add a new column"
-        " to the DataFrame."
-    )
-    if hasattr(rec_array, name):
-        rec_array = remove_from_rec(rec_array, name)
-    rec_array = append_fields(
-        rec_array,
-        name,
-        data,
-        dtypes=data.dtype,
-        usemask=False,
-        asrecarray=True,
-    )
-    return rec_array
 
 
 def merge_locs(
@@ -2083,12 +2401,13 @@ def append_group(
 
 
 def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
-    """Ensure that localizations are within the image dimensions
-    and have positive localization precisions and other parameters.
+    """Ensure that localizations are within the field of view (see
+    ``field_of_view``) and have positive localization precisions and
+    other parameters.
 
-    v0.9.6: check that the info metadata contains the necessary
-    information for processing: Width, Height, Pixelsize and Frames.
-    Raises a KeyError if any of the required keys is missing.
+    Checks that the metadata contains the keys every localization file
+    needs (``io.MINIMUM_METADATA_KEYS``: Width, Height, Frames and
+    Pixelsize). Raises a KeyError if any of them is missing.
 
     Parameters
     ----------
@@ -2107,14 +2426,14 @@ def ensure_sanity(locs: pd.DataFrame, info: list[dict]) -> pd.DataFrame:
     locs.replace([np.inf, -np.inf], np.nan, inplace=True)
     locs.dropna(axis=0, how="any", inplace=True)
     # other sanity checks:
-    required_keys = ["Width", "Height", "Frames"]
-    for key in required_keys:
+    for key in io.MINIMUM_METADATA_KEYS:
         value = get_from_metadata(info, key)
         if value is None:
             raise KeyError(f"Metadata is missing required key: '{key}'")
 
-    locs = locs[locs["x"] < get_from_metadata(info, "Width")]
-    locs = locs[locs["y"] < get_from_metadata(info, "Height")]
+    width, height = field_of_view(info)
+    locs = locs[locs["x"] < width]
+    locs = locs[locs["y"] < height]
     for attr in [
         "x",
         "y",
@@ -2136,8 +2455,8 @@ def standardize_dtypes(locs: pd.DataFrame) -> pd.DataFrame:
     integer ``frame`` column cast to uint32 (the dtypes Localize
     writes), leaving every other column as it is.
 
-    float32 resolves 2e-4 camera pixels at 4096 pixels and far below a
-    nanometer in z, two orders below any localization precision, while
+    float32 resolves 0.03 nm at 500 um, two orders below any
+    localization precision, while
     halving memory and file size for columns that pandas arithmetic or
     imports from other software promoted to float64, and sparing the
     GPU renderer a converted copy of such columns on every render.
@@ -2218,13 +2537,16 @@ def locs_at(x: float, y: float, locs: pd.DataFrame, r: float) -> pd.DataFrame:
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def is_loc_at_numba(
+def is_loc_in_circle(
     x: float,
     y: float,
     locs_xy: FloatArray2D,
     r: float,
 ) -> BoolArray1D:
-    """Numba implementation of ``is_loc_at``.
+    """Check which localizations are within radius ``r`` from position
+    ``(x, y)``.
+
+    Array analogue of ``is_loc_at``, usable in numba-compiled code.
 
     Parameters
     ----------
@@ -2248,13 +2570,15 @@ def is_loc_at_numba(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def locs_at_numba(
+def locs_in_circle(
     x: float,
     y: float,
     locs_xy: FloatArray2D,
     r: float,
 ) -> FloatArray2D:
-    """Numba implementation of ``locs_at``.
+    """Return localizations within radius ``r`` from position ``(x, y)``.
+
+    Array analogue of ``locs_at``, usable in numba-compiled code.
 
     Parameters
     ----------
@@ -2270,7 +2594,7 @@ def locs_at_numba(
     picked_xy : FloatArray2D
         ``(2, n_picked)`` coordinates within ``r`` of ``(x, y)``.
     """
-    is_picked = is_loc_at_numba(x, y, locs_xy, r)
+    is_picked = is_loc_in_circle(x, y, locs_xy, r)
     return locs_xy[:, is_picked]
 
 
@@ -2296,7 +2620,7 @@ def rmsd_at_com(locs_xy: FloatArray2D) -> float:
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def is_loc_in_square_numba(
+def is_loc_in_square(
     x: float,
     y: float,
     locs_xy: FloatArray2D,
@@ -2305,7 +2629,7 @@ def is_loc_in_square_numba(
     """Check which localizations are within the axis-aligned square of
     side length ``a`` centered at ``(x, y)``.
 
-    Square analogue of ``is_loc_at_numba``. The bounds are exclusive,
+    Square analogue of ``is_loc_in_circle``. The bounds are exclusive,
     matching ``postprocess._picked_square_locs``.
 
     Parameters
@@ -2330,7 +2654,7 @@ def is_loc_in_square_numba(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def locs_in_square_numba(
+def locs_in_square(
     x: float,
     y: float,
     locs_xy: FloatArray2D,
@@ -2352,14 +2676,14 @@ def locs_in_square_numba(
     -------
     picked_xy : FloatArray2D
         ``(2, n_picked)`` coordinates inside the square. See
-        ``is_loc_in_square_numba``.
+        ``is_loc_in_square``.
     """
-    is_picked = is_loc_in_square_numba(x, y, locs_xy, a)
+    is_picked = is_loc_in_square(x, y, locs_xy, a)
     return locs_xy[:, is_picked]
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def is_loc_in_box_numba(
+def is_loc_in_box(
     x: float,
     y: float,
     locs_xy: FloatArray2D,
@@ -2369,9 +2693,8 @@ def is_loc_in_box_numba(
     """Check which localizations are within the axis-aligned box of
     width ``w`` and height ``h`` centered at ``(x, y)``.
 
-    Generalization of ``is_loc_in_square_numba`` to independent side
-    lengths. The bounds are exclusive, matching
-    ``postprocess._picked_box_locs``.
+    Generalization of ``is_loc_in_square`` to independent side lengths.
+    The bounds are exclusive, matching ``postprocess._picked_box_locs``.
 
     Parameters
     ----------
@@ -2394,7 +2717,7 @@ def is_loc_in_box_numba(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def locs_in_box_numba(
+def locs_in_box(
     x: float,
     y: float,
     locs_xy: FloatArray2D,
@@ -2417,14 +2740,14 @@ def locs_in_box_numba(
     -------
     picked_xy : FloatArray2D
         ``(2, n_picked)`` coordinates inside the box. See
-        ``is_loc_in_box_numba``.
+        ``is_loc_in_box``.
     """
-    is_picked = is_loc_in_box_numba(x, y, locs_xy, w, h)
+    is_picked = is_loc_in_box(x, y, locs_xy, w, h)
     return locs_xy[:, is_picked]
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def is_loc_in_rectangle_numba(
+def is_loc_in_oriented_rectangle(
     xc: float,
     yc: float,
     theta: float,
@@ -2475,7 +2798,7 @@ def is_loc_in_rectangle_numba(
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
-def locs_in_rectangle_numba(
+def locs_in_oriented_rectangle(
     xc: float,
     yc: float,
     theta: float,
@@ -2502,9 +2825,9 @@ def locs_in_rectangle_numba(
     -------
     picked_xy : FloatArray2D
         ``(2, n_picked)`` coordinates inside the rectangle. See
-        ``is_loc_in_rectangle_numba``.
+        ``is_loc_in_oriented_rectangle``.
     """
-    is_picked = is_loc_in_rectangle_numba(
+    is_picked = is_loc_in_oriented_rectangle(
         xc, yc, theta, length, width, locs_xy
     )
     return locs_xy[:, is_picked]
@@ -2952,7 +3275,7 @@ def brush_stroke_arrays(
     """Split a brush stroke into its width and its path arrays.
 
     A brush stroke is stored as ``(width, path)``, where ``path`` is the
-    list of ``(x, y)`` positions the cursor swept, in camera pixels.
+    list of ``(x, y)`` positions the cursor swept, in nm.
     Loading a picks file yields lists rather than tuples, so the stroke
     is indexed rather than unpacked.
 
@@ -2964,7 +3287,7 @@ def brush_stroke_arrays(
     Returns
     -------
     width : float
-        Width of the stroke in camera pixels.
+        Width of the stroke in nm.
     X, Y : FloatArray1D
         x and y coordinates of the path.
     """
@@ -3010,8 +3333,7 @@ def merge_brush_strokes(
     interest, and merging is transitive: a stroke bridging two picks
     joins all three into one. Picks are returned in the order of their
     newest stroke, so the stroke drawn last always ends up as
-    ``picks[-1][-1]`` - which is what makes "remove the last stroke"
-    well defined after adding, undoing or loading alike.
+    ``picks[-1][-1]``.
 
     Parameters
     ----------
@@ -3180,7 +3502,7 @@ def minimize_shifts(
 
 
 def n_futures_done(futures: list[Future]) -> int:
-    """Return the number of finished futures, used in multiprocessing.
+    """Return the number of finished futures, e.g., of a pool of workers.
 
     Parameters
     ----------
@@ -3193,31 +3515,6 @@ def n_futures_done(futures: list[Future]) -> int:
         How many of them have completed.
     """
     return sum([_.done() for _ in futures])
-
-
-def remove_from_rec(rec_array: np.recarray, name: str) -> np.recarray:
-    """Remove a column from the existing recarray.
-
-    Parameters
-    ----------
-    rec_array : np.recarray
-        Recarray from which the column is removed.
-    name : str
-        Name of the column to be removed.
-
-    Returns
-    -------
-    rec_array : np.recarray
-        Recarray without the column.
-    """
-    deprecation_warning(
-        "Removing columns from recarrays is deprecated and will be removed in "
-        " Picasso 1.0. Since 0.9.0, Picasso uses pandas DataFrames instead of"
-        " recarrays. Simply use locs.drop('new_column', axis=1) to remove a"
-        " column from the DataFrame."
-    )
-    rec_array = drop_fields(rec_array, name, usemask=False, asrecarray=True)
-    return rec_array
 
 
 def locs_glob_map(
@@ -3302,7 +3599,7 @@ def get_pick_rectangle_corners(
     """Find the positions of corners of a rectangular pick.
 
     A rectangular pick is defined by ``[(start_x, start_y), (end_x,
-    end_y)]`` and its width, all values in camera pixels.
+    end_y)]`` and its width, all values in nm.
 
     Parameters
     ----------
@@ -3311,7 +3608,7 @@ def get_pick_rectangle_corners(
     end_x, end_y : float
         Ending point of the pick.
     width : float
-        Width of the pick in camera pixels.
+        Width of the pick in nm.
 
     Returns
     -------
@@ -3342,7 +3639,7 @@ def get_pick_box_corners(
     """Find the positions of corners of a box pick.
 
     A box pick is defined by two opposite corners,
-    ``((x0, y0), (x1, y1))``, all values in camera pixels. The corners
+    ``((x0, y0), (x1, y1))``, all values in nm. The corners
     are returned in the same order as ``get_pick_rectangle_corners``,
     i.e., counter-clockwise starting from the corner with the smaller x
     and y.
@@ -3532,7 +3829,7 @@ def _brush_bounds(
     Returns
     -------
     bounds : tuple
-        ``(x_min, x_max, y_min, y_max)`` in camera pixels.
+        ``(x_min, x_max, y_min, y_max)`` in nm.
 
     Raises
     ------
@@ -3565,18 +3862,18 @@ def pick_areas(
     Parameters
     ----------
     picks : list of tuples
-        Coordinates of picks in camera pixels.
+        Coordinates of picks in nm.
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"}
         Shape of picks.
     pick_size : float or None
-        Size of picks in camera pixels. For circles - diameters. For
+        Size of picks in nm. For circles - diameters. For
         rectangles - width. For squares - side length. For polygons,
         boxes and brush picks - ignored.
 
     Returns
     -------
     areas : FloatArray1D
-        Pick areas in camera pixels squared.
+        Pick areas in nm squared.
     """
     if pick_shape == "Circle":
         r = pick_size / 2
@@ -3613,19 +3910,19 @@ def pick_bounds(
     Parameters
     ----------
     pick : tuple
-        Coordinates of one pick in camera pixels. Must match the format
+        Coordinates of one pick in nm. Must match the format
         of ``pick_shape``.
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"}
         Shape of the pick.
     pick_size : float or None
-        Size of the pick in camera pixels. For circles - diameter. For
+        Size of the pick in nm. For circles - diameter. For
         rectangles - width. For squares - side length. For polygons,
         boxes and brush picks - ignored.
 
     Returns
     -------
     bounds : tuple
-        ``(x_min, x_max, y_min, y_max)`` in camera pixels. For an open
+        ``(x_min, x_max, y_min, y_max)`` in nm. For an open
         polygon (fewer than three vertices or not closed), the bounding
         box of its vertices is returned; an empty polygon or brush pick
         raises ``ValueError``.
@@ -3670,14 +3967,14 @@ def point_in_pick(
     Parameters
     ----------
     x, y : float
-        Position to test, in camera pixels.
+        Position to test, in nm.
     pick : tuple
-        Coordinates of one pick in camera pixels. Must match the format
+        Coordinates of one pick in nm. Must match the format
         of ``pick_shape``.
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"}
         Shape of the pick.
     pick_size : float or None
-        Size of the pick in camera pixels. For circles - diameter. For
+        Size of the pick in nm. For circles - diameter. For
         rectangles - width. For squares - side length. For polygons,
         boxes and brush picks - ignored.
 
@@ -3692,16 +3989,14 @@ def point_in_pick(
         r = pick_size / 2
         return bool((x - pick[0]) ** 2 + (y - pick[1]) ** 2 < r**2)
     elif pick_shape == "Square":
-        return bool(
-            is_loc_in_square_numba(pick[0], pick[1], point_xy, pick_size)[0]
-        )
+        return bool(is_loc_in_square(pick[0], pick[1], point_xy, pick_size)[0])
     elif pick_shape == "Rectangle":
         (xs, ys), (xe, ye) = pick
         # the oriented test rotates the point into the rectangle's
         # frame, which - unlike ray casting over the corners - is well
         # defined for axis-aligned rectangles
         return bool(
-            is_loc_in_rectangle_numba(
+            is_loc_in_oriented_rectangle(
                 0.5 * (xs + xe),
                 0.5 * (ys + ye),
                 np.arctan2(ye - ys, xe - xs),
@@ -3722,7 +4017,7 @@ def point_in_pick(
     elif pick_shape == "Box":
         (x0, y0), (x1, y1) = pick
         return bool(
-            is_loc_in_box_numba(
+            is_loc_in_box(
                 0.5 * (x0 + x1),
                 0.5 * (y0 + y1),
                 point_xy,
@@ -3790,17 +4085,23 @@ def permutation_test(
     # observe the real difference
     obs_d, ks_pval = stats.ks_2samp(arr1, arr2, alternative=alternative)
 
-    # build null distribution by shuffling
+    def statistic(x, y):
+        # only the statistic: the asymptotic method skips the exact p-value,
+        # which ks_2samp would otherwise compute and which makes a one-sided
+        # test about a hundred times slower
+        return stats.ks_2samp(x, y, alternative=alternative, method="asymp")[0]
+
+    # build null distribution by shuffling; the observed statistic it is
+    # compared with is computed the same way, so that ties count as ties
+    observed = statistic(arr1, arr2)
     null_dist = np.empty(iterations)
     for i in range(iterations):
         shuffled = rng.permutation(combined)
-        null_dist[i], _ = stats.ks_2samp(
-            shuffled[:n1], shuffled[n1:], alternative=alternative
-        )
+        null_dist[i] = statistic(shuffled[:n1], shuffled[n1:])
 
     # the observed arrangement is one of the possible ones (Phipson and
     # Smyth, 2010), which also keeps p from being exactly 0
-    p_perm = (np.sum(null_dist >= obs_d) + 1) / (iterations + 1)
+    p_perm = (np.sum(null_dist >= observed) + 1) / (iterations + 1)
     return obs_d, p_perm, ks_pval
 
 
@@ -3941,11 +4242,6 @@ def plot_subclustering_check(
     has_clustered = len(clustered_n_events) > 0
     has_sparse = len(sparse_n_events) > 0
 
-    m_clustered = clustered_n_events.mean()
-    m_sparse = sparse_n_events.mean()
-    s_clustered = clustered_n_events.std()
-    s_sparse = sparse_n_events.std()
-
     # create the plot
     if fig is None:
         fig, ax1 = plt.subplots(1, figsize=(6, 4), constrained_layout=True)
@@ -3958,7 +4254,11 @@ def plot_subclustering_check(
 
     if has_clustered:
         label = _subcluster_label(
-            "Clustered", clustering_dist, "<", m_clustered, s_clustered
+            "Clustered",
+            clustering_dist,
+            "<",
+            clustered_n_events.mean(),
+            clustered_n_events.std(),
         )
         _plot_subcluster_bar(
             ax1, clustered_n_events, label, "C0", fill, outline
@@ -3966,7 +4266,11 @@ def plot_subclustering_check(
 
     if has_sparse:
         label = _subcluster_label(
-            "Sparse", sparse_dist, ">", m_sparse, s_sparse
+            "Sparse",
+            sparse_dist,
+            ">",
+            sparse_n_events.mean(),
+            sparse_n_events.std(),
         )
         _plot_subcluster_bar(ax1, sparse_n_events, label, "C1", fill, outline)
 
@@ -3994,7 +4298,7 @@ def plot_subclustering_check(
 
 
 def plot_rel_sigma_check(
-    mols: pd.DataFrame, info: list[dict], path: str
+    mols: pd.DataFrame, info: list[dict] | None = None, *, path: str
 ) -> None:
     """Plot the relative sigma of G5M molecules to inspect if lp values
     reflect the experimental sizes of localization clouds.
@@ -4003,8 +4307,9 @@ def plot_rel_sigma_check(
     ----------
     mols : pd.DataFrame
         Molecules to be plotted, output of ``picasso.g5m.g5m``.
-    info : list of dicts
-        Molecuels metadata.
+    info : list of dicts or None, optional
+        Metadata of ``mols``. Not used; accepted so that the call
+        matches the other functions on localizations. Default is None.
     path : str
         Path to save the plot.
     """
@@ -4041,8 +4346,8 @@ def unfold_localizations_square(
     info: list[dict],
     *,
     n_square: int = 10,
-    spacing: int | float = 1,
-):
+    spacing: int | float = 250.0,
+) -> tuple[pd.DataFrame, list[dict]]:
     """Shift localizations onto a square grid (tile) based on their
     group indices. The localizations must contain a 'group' column.
 
@@ -4055,15 +4360,17 @@ def unfold_localizations_square(
     n_square : int, optional
         Number of groups per square side. Default is 10.
     spacing : int or float, optional
-        Spacing between groups in camera pixels. Default is 1.
+        Spacing between groups in nm. Default is 250.
 
     Returns
     -------
     shifted_locs : pd.DataFrame
         Localizations shifted onto a square grid based on their group
         indices.
-    updated_info : list of dicts
-        Updated metadata with new FOV dimensions after unfolding.
+    info : list of dicts
+        Metadata of ``shifted_locs``: ``info`` with the new field of
+        view (``Width`` and ``Height``) and an entry recording the
+        unfolding appended, see ``lib.append_metadata``.
     """
     assert (
         "group" in locs.columns
@@ -4077,8 +4384,9 @@ def unfold_localizations_square(
 
     # shift localizations to the middle of the FOV and by the COM
     # of each group
-    cx = get_from_metadata(updated_info, "Width", raise_error=True) / 2
-    cy = get_from_metadata(updated_info, "Height", raise_error=True) / 2
+    width, height = field_of_view(updated_info)
+    cx = width / 2
+    cy = height / 2
     for group_id in np.unique(locs["group"]):
         mask = locs["group"] == group_id
         mean_x = locs.loc[mask, "x"].mean()
@@ -4095,14 +4403,19 @@ def unfold_localizations_square(
     locs["x"] += np.absolute(locs["x"].min())
     locs["y"] += np.absolute(locs["y"].min())
 
-    # Update FOV and clean up
+    # Update FOV (camera pixels) and clean up
+    pixelsize = float(get_from_metadata(updated_info, "Pixelsize"))
     updated_info = overwrite_metadata(
-        updated_info, "Width", int(np.ceil(locs["x"].max()))
+        updated_info, "Width", int(np.floor(locs["x"].max() / pixelsize)) + 1
     )
     updated_info = overwrite_metadata(
-        updated_info, "Height", int(np.ceil(locs["y"].max()))
+        updated_info, "Height", int(np.floor(locs["y"].max() / pixelsize)) + 1
     )
-    return locs, updated_info
+    entry = step_info(
+        "Unfold groups",
+        **{"Groups per row": n_square, "Spacing (nm)": spacing},
+    )
+    return locs, append_metadata(updated_info, entry)
 
 
 def sync_groups(locs: list[pd.DataFrame]) -> list[pd.DataFrame]:
@@ -4189,7 +4502,9 @@ def lateral_transforms(calibration: dict | list | None) -> list[dict]:
     return list(calibration.get(LATERAL_TRANSFORMS_KEY) or [])
 
 
-def resolve_lateral_transforms(source: dict | list | str | None) -> list:
+def resolve_lateral_transforms(
+    source: dict | list | str | None, pixelsize: float | None = None
+) -> list:
     """The lateral corrections held by ``source``, reading it from disk if
     it is a path.
 
@@ -4198,23 +4513,31 @@ def resolve_lateral_transforms(source: dict | list | str | None) -> list:
     source : dict, list, str or None
         A calibration dictionary, a list of entries, the path of a
         calibration file of any kind (see ``io.load_any_calibration``), or
-        None.
+        None. Entries given in memory are taken as they are (nm).
+    pixelsize : float, optional
+        Camera pixel size in nm, used only when `source` is the path of
+        a calibration file written before Picasso 1.0 (camera pixels,
+        no format marker), whose corrections are then converted to nm
+        (see ``io.load_any_calibration``). Default is None.
 
     Returns
     -------
     transforms : list of dicts
-        The entries in the order they must be applied. Empty if `source`
-        is None or carries none.
+        The entries in the order they must be applied, in nm. Empty if
+        `source` is None or carries none.
 
     Raises
     ------
     ValueError
         If `source` is a path to a file that carries no lateral
         corrections, which would otherwise be a silent no-op.
+    io.MissingPixelsizeError
+        If `source` is the path of a file written before Picasso 1.0 and
+        `pixelsize` is None.
     """
     if not isinstance(source, str):
         return lateral_transforms(source)
-    transforms = lateral_transforms(io.load_any_calibration(source))
+    transforms = lateral_transforms(io.load_any_calibration(source, pixelsize))
     if not transforms:
         raise ValueError(
             f"No lateral corrections found in {source}. Build one with "
@@ -4231,14 +4554,15 @@ def lateral_transform_models(calibration: dict | list | None) -> list:
     Parameters
     ----------
     calibration : dict, list or None
-        A calibration carrying an ``"Affine transforms"`` list, that list
+        A calibration carrying a ``"Lateral transforms"`` list, that list
         itself, or None. Its items may be entries (dicts with a
         ``"Transform"`` key) or bare transforms.
 
     Returns
     -------
     models : list of picasso.transforms.Transform
-        One transform per correction, in application order.
+        One transform per correction, in application order, in nm (the
+        unit of the coordinates they correct).
     """
     from picasso import transforms as _tf
 
@@ -4289,9 +4613,12 @@ def apply_lateral_transforms(
 ) -> pd.DataFrame:
     """Map ``locs`` x/y through a calibration's lateral corrections.
 
-    The transforms are applied in stored order, in camera-pixel
-    coordinates. Returns ``locs`` unchanged (and untouched) when there is
-    nothing to apply, so this is safe to call on every fit path.
+    The transforms are applied in stored order, in nm (the unit of the
+    localizations and of the corrections since Picasso 1.0; corrections
+    from earlier calibration files are converted when the file is
+    loaded, see ``io.load_any_calibration``). Returns ``locs`` unchanged
+    (and untouched) when there is nothing to apply, so this is safe to
+    call on every fit path.
 
     Parameters
     ----------

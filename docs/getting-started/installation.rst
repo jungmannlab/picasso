@@ -32,6 +32,32 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
       and want the accelerated tools. On machines without one, CUDA-only
       options are hidden.
 
+      .. _installation-command-line:
+
+      .. rubric:: Command line
+
+      The installers also include Picasso's :doc:`command line </cmd>`
+      (``picasso localize``, ``picasso link``, ...):
+
+      - **Windows:** the installer adds the installation folder (e.g.,
+        ``C:\Picasso``) to the ``PATH``, so ``picasso`` works in any
+        Command Prompt or PowerShell window opened after installing.
+        Uninstalling removes it again.
+      - **macOS:** ``picasso`` is not on the ``PATH`` after dragging the apps
+        to Applications. To add it, run once in the Terminal (asks for your
+        password):
+
+        .. code-block:: bash
+
+           sudo mkdir -p /usr/local/bin
+           sudo ln -sf /Applications/Picasso.app/Contents/MacOS/picasso /usr/local/bin/picasso
+
+        and open a new Terminal window. The link points into Picasso.app, so
+        it keeps working after updates; ``sudo rm /usr/local/bin/picasso``
+        removes it. Without the link, call
+        ``/Applications/Picasso.app/Contents/MacOS/picasso`` instead of
+        ``picasso``.
+
    .. tab-item:: PyPI
       :sync: pypi
 
@@ -47,6 +73,12 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
             conda create --name picasso python=3.14
             conda activate picasso
 
+         .. note::
+
+            Python 3.15 is not supported yet: some of Picasso's dependencies
+            cannot be installed on it with pip, and GPU fitting (CUDA) would
+            not work. See :ref:`faq-python-315`.
+
       2. Install Picasso:
 
          .. code-block:: bash
@@ -56,6 +88,29 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
       3. Start any module from the terminal, for example ``picasso render``
          or ``picasso localize``, or import Picasso in your scripts.
 
+      .. rubric:: Menu entries on Linux
+
+      The script ``create_linux_shortcuts.py`` adds Picasso's modules to the
+      application menu of a Linux desktop (GNOME, KDE, Xfce, ...), and adds
+      a ``picasso`` command that works without activating the environment.
+      Download it and run it with the Python of the environment Picasso is
+      installed in:
+
+      .. code-block:: bash
+
+         conda activate picasso
+         curl -O https://raw.githubusercontent.com/jungmannlab/picasso/master/release/create_linux_shortcuts.py
+         python create_linux_shortcuts.py
+
+      The menu entries are written to ``~/.local/share/applications`` and
+      the command to ``~/.local/bin``. Run as root, with
+      ``sudo "$(which python)" create_linux_shortcuts.py``, the script adds
+      them for all users (to ``/usr/share/applications`` and
+      ``/usr/local/bin``). Run it again after installing Picasso in another
+      environment, and ``python create_linux_shortcuts.py --remove`` to
+      delete the entries. The Server entry is added with the ``server``
+      extra installed.
+
       .. rubric:: Optional extras
 
       .. list-table::
@@ -64,27 +119,32 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
 
          * - Command
            - Adds
+         * - ``pip install picassosr[server]``
+           - :doc:`Picasso Server <../server>` (``picasso server``), the
+             browser app.
          * - ``pip install picassosr[czi]``
            - Reading Zeiss ``.czi`` files.
          * - ``pip install picassosr[lif]``
            - Reading Leica ``.lif`` files.
-         * - ``pip install picassosr[wgpu]``
-           - :ref:`GPU rendering <render-gpu-rendering>` in Render (``wgpu``:
-             Metal on macOS, Direct3D 12 on Windows, Vulkan on Linux; any
-             recent graphics card).
          * - ``pip install picassosr[gpu]``
-           - GPU rendering plus GPU-accelerated (``numba.cuda``) code for CUDA
-             toolkit 12.x. Needs an NVIDIA (CUDA-capable) GPU.
+           - GPU-accelerated (``numba.cuda``) code for CUDA toolkit 12.x.
+             Needs an NVIDIA (CUDA-capable) GPU.
          * - ``pip install picassosr[cuda11]`` / ``[cuda13]``
            - The same for CUDA toolkit 11.x or 13.x.
 
-      Without the GPU extras, Picasso runs on the CPU and GPU-only options
-      are hidden.
+      :ref:`GPU rendering <render-gpu-rendering>` in Render (``wgpu``: Metal
+      on macOS, Direct3D 12 on Windows, Vulkan on Linux; any recent graphics
+      card) is included in the default installation. Without the CUDA
+      extras, CUDA-only options are hidden.
 
       .. rubric:: Updating
 
-      Picasso notifies you about new versions (since v0.10.0). To update,
-      run:
+      Picasso notifies you about new versions (since v0.10.0), at most once
+      a day. In the command line, the notification comes after the command
+      has finished, and Picasso asks what to do about it only in a
+      terminal, so scripts and batch jobs never wait for an answer. To
+      switch the checks off, e.g., on a computing cluster, set ``Disabled``
+      in the :ref:`user settings <user-settings-file>`. To update, run:
 
       .. code-block:: bash
 
@@ -96,7 +156,8 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
       Use a local, editable installation to work with your own changes to
       Picasso:
 
-      1. Create and activate a new conda environment:
+      1. Create and activate a new conda environment with Python 3.11 to
+         3.14 (not 3.15 yet, see :ref:`faq-python-315`):
 
          .. code-block:: bash
 
@@ -140,6 +201,27 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
 
       See :doc:`/development` for how to contribute your changes.
 
+.. _updating-to-1-0:
+
+Updating from an earlier version
+--------------------------------
+
+**Your files keep working.** Since Picasso 1.0, every length (coordinates,
+precisions, pick sizes, drift, ...) is stored in nm instead of camera pixels.
+Picasso 1.0 reads all files written by earlier versions as before and converts
+them to nm as it opens them, without changing them on disk; there is nothing
+you need to do. See :ref:`files-legacy` for details, including how to convert
+files on disk if you want to.
+
+What has changed is how lengths are entered: dialogs, command line options and
+Python functions now take nm. Scripts that pass camera pixels need updating;
+:doc:`/migration` lists what changes and the replacement of each setting,
+command and function.
+
+On Windows, the one-click installer's *GPU* edition is now called *CUDA* and
+installs beside the old one: uninstall *Picasso-GPU* (Windows *Settings* >
+*Apps*), or ``picasso`` in a terminal keeps running the old version.
+
 .. _error-log:
 
 Reporting problems
@@ -153,8 +235,9 @@ the tracebacks of failing background threads. The file rotates to
 ``picasso.log.1`` once it exceeds 5 MB. The one-click installers have no
 console, so everything Picasso prints goes to this file as well.
 
-Please report problems on `GitHub
-<https://github.com/jungmannlab/picasso/issues>`__ and attach the log file.
+Many problems are answered in the :doc:`/faq`. Please report others on
+`GitHub <https://github.com/jungmannlab/picasso/issues>`__ and attach the log
+file.
 
 Next steps
 ----------

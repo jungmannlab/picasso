@@ -69,11 +69,11 @@ def render(
     info : dict
         Contains localizations metadata.
     disp_px_size : float
-        Display pixel size in nm.
+        Display pixel size in nm, i.e., the size of a rendered pixel.
     viewport : tuple, optional
-        Field of view to be rendered (in camera pixels). The input is
-        ``((y_min, x_min), (y_max, x_max))``. If None, all localizations
-        are rendered.
+        Field of view to be rendered in nm,
+        ``((y_min, x_min), (y_max, x_max))``. If None, the whole field
+        of view is rendered (see ``lib.field_of_view``).
     blur_method : {"gaussian", "gaussian_iso", "smooth", "convolve"} or None, \
             optional
         Defines localizations' blur. The string has to be one of
@@ -86,11 +86,11 @@ def render(
         localizations: ``global_precision``, or else the median
         localization precision of the rows rendered.
     min_blur_width : float, optional
-        Minimum size of blur (camera pixels).
+        Minimum size of blur (nm).
     max_blur_width : float, optional
-        Localizations whose ``lpx`` or ``lpy`` exceeds this (camera
-        pixels) are not rendered by 'gaussian' and 'gaussian_iso'
-        (see ``_extract_render_columns``). If None (default), all
+        Localizations whose ``lpx`` or ``lpy`` exceeds this (nm) are
+        not rendered by 'gaussian' and 'gaussian_iso' (see
+        ``_extract_render_columns``). If None (default), all
         localizations are rendered.
     ang : tuple or scipy.spatial.transform.Rotation, optional
         Rotation of locs; either a scipy Rotation (e.g. built from a
@@ -102,8 +102,8 @@ def render(
         pre-selection from ``spatial_index``); the other rows are
         ignored. If None (default), all rows are rendered.
     global_precision : tuple of float, optional
-        ``(lpx, lpy)`` blur of the 'convolve' method in camera pixels,
-        e.g. the median precision of the whole dataset computed once
+        ``(lpx, lpy)`` blur of the 'convolve' method in nm, e.g. the
+        median precision of the whole dataset computed once
         by the caller, so the blur is the same at every zoom level and
         rotation and nothing is recomputed per render. If None
         (default), the median of the rows rendered is used.
@@ -291,7 +291,7 @@ def _extract_render_columns(
     DataFrame, converting angle to radians and applying the lpz
     fallback once per channel.
 
-    With ``max_blur_width`` (camera pixels), the per-localization blur
+    With ``max_blur_width`` (nm), the per-localization blur
     methods (``gaussian``, ``gaussian_iso``) drop localizations whose
     ``lpx`` or ``lpy`` exceeds it: such precisions are useless
     artifacts of unfiltered data, their blur would cover a large FOV
@@ -302,7 +302,7 @@ def _extract_render_columns(
     ``indices`` (positions into ``locs``) restrict the render to those
     rows without copying the columns (see ``_RenderColumns``); the
     filter above is applied to them as well. ``global_precision`` is
-    the ``(lpx, lpy)`` blur of the ``convolve`` method (camera pixels),
+    the ``(lpx, lpy)`` blur of the ``convolve`` method (nm),
     see ``render``. ``render_index`` is the channel's pyramid for the
     ``quadtree`` method; it indexes all rows, so it is only kept when
     no row selection restricts the render."""
@@ -369,12 +369,11 @@ def _render_arrays(
     slice so no pandas work happens inside worker tasks."""
     # a row selection is gathered first: the kernels take dense arrays
     columns = columns.materialize()
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
-    oversampling = pixelsize / disp_px_size
+    # rendered pixels per nm (the kernels call it oversampling)
+    oversampling = 1.0 / float(disp_px_size)
 
     if viewport is None:
-        height = lib.get_from_metadata(info, "Height", raise_error=True)
-        width = lib.get_from_metadata(info, "Width", raise_error=True)
+        width, height = lib.field_of_view(info)
         viewport = [(0, 0), (height, width)]
 
     (y_min, x_min), (y_max, x_max) = viewport
@@ -576,14 +575,16 @@ def _render_quadtree(
                 root_px,
                 total_bits,
                 int(capacity),
+                # the rows lie within the viewport, projected
+                float(oversampling * (x_max - x_min)),
+                float(oversampling * (y_max - y_min)),
             )
         return n, image
     pyramid = columns.pyramid
     if pyramid is None or pyramid.sorted_keys is None:
-        width = lib.get_from_metadata(info, "Width", raise_error=True)
-        height = lib.get_from_metadata(info, "Height", raise_error=True)
+        width, height = lib.field_of_view(info)
         pyramid = spatial_index.build_render_index_arrays(
-            columns.x, columns.y, float(width), float(height)
+            columns.x, columns.y, width, height
         )
     sorted_keys, perm, root_px, total_bits = spatial_index.quadtree_layout(
         pyramid
@@ -605,6 +606,8 @@ def _render_quadtree(
             root_px,
             total_bits,
             int(capacity),
+            float(pyramid.width),
+            float(pyramid.height),
         )
     in_view = (x > x_min) & (y > y_min) & (x < x_max) & (y < y_max)
     return int(in_view.sum()), image
@@ -626,11 +629,11 @@ def _render_hist(
     locs : pd.DataFrame
         Localizations to be rendered.
     oversampling : float
-        Number of super-resolution pixels per camera pixel.
+        Number of super-resolution pixels per nm.
     y_min, x_min : float
-        Minimum y and x coordinates to be rendered (camera pixels)
+        Minimum y and x coordinates to be rendered (nm)
     y_max, x_max : float
-        Maximum y and x coordinates to be rendered (camera pixels)
+        Maximum y and x coordinates to be rendered (nm)
     ang : tuple or scipy.spatial.transform.Rotation, optional
         Rotation of locs; either a scipy Rotation (e.g. built from a
         quaternion) or a tuple of 3 rotation angles around the x, y
@@ -701,29 +704,25 @@ def render_hist3d(
     x_max: float,
     z_min: float,
     z_max: float,
-    pixelsize: float,
 ) -> tuple[int, lib.FloatArray3D]:
     """Render localizations in 3D with no blur by assigning them to
     pixels.
 
     Parameters
     ----------
-    x, y : lib.FloatArray1D
-        Lateral coordinates of the localizations (camera pixels).
-    z : lib.FloatArray1D
-        Axial coordinates of the localizations (nm).
-    oversampling : float (default=1)
-        Number of super-resolution pixels per camera pixel.
+    x, y, z : lib.FloatArray1D
+        Coordinates of the localizations (nm).
+    oversampling : float
+        Number of rendered pixels per nm, i.e., one over the pixel size
+        of the rendered image.
     y_min, x_min : float
-        Minimum y and x coordinates to be rendered (camera pixels).
+        Minimum y and x coordinates to be rendered (nm).
     y_max, x_max : float
-        Maximum y and x coordinates to be rendered (camera pixels).
+        Maximum y and x coordinates to be rendered (nm).
     z_min : float
         Minimum z coordinate to be rendered (nm).
     z_max : float
         Maximum z coordinate to be rendered (nm).
-    pixelsize : float
-        Camera pixel size in nm, used for converting z coordinates.
 
     Returns
     -------
@@ -732,9 +731,6 @@ def render_hist3d(
     image : lib.FloatArray3D
         Rendered 3D image.
     """
-    z_min = z_min / pixelsize
-    z_max = z_max / pixelsize
-
     image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view = _render_setup3d(
         x,
         y,
@@ -746,7 +742,6 @@ def render_hist3d(
         x_max,
         z_min,
         z_max,
-        pixelsize,
     )
     _fill3d(image, x, y, z)
     n = len(x)
@@ -767,7 +762,6 @@ def render_hist3d_anisotropic(
     x_max: float,
     z_min: float,
     z_max: float,
-    pixelsize: float,
 ) -> tuple[int, lib.FloatArray3D]:
     """Render localizations in 3D with no blur by assigning them to
     pixels. Allows for different pixel sizes in x, y and z
@@ -775,23 +769,18 @@ def render_hist3d_anisotropic(
 
     Parameters
     ----------
-    x, y : lib.FloatArray1D
-        Lateral coordinates of the localizations (camera pixels).
-    z : lib.FloatArray1D
-        Axial coordinates of the localizations (nm).
-    oversampling_x, oversampling_y, oversampling_z : float (default=1)
-        Number of super-resolution pixels per camera pixel in x, y, and
-        z directions.
+    x, y, z : lib.FloatArray1D
+        Coordinates of the localizations (nm).
+    oversampling_x, oversampling_y, oversampling_z : float
+        Number of rendered pixels per nm in x, y, and z directions.
     y_min, x_min : float
-        Minimum y and x coordinates to be rendered (camera pixels).
+        Minimum y and x coordinates to be rendered (nm).
     y_max, x_max : float
-        Maximum y and x coordinates to be rendered (camera pixels).
+        Maximum y and x coordinates to be rendered (nm).
     z_min : float
         Minimum z coordinate to be rendered (nm).
     z_max : float
         Maximum z coordinate to be rendered (nm).
-    pixelsize : float
-        Camera pixel size in nm, used for converting z coordinates.
 
     Returns
     -------
@@ -800,9 +789,6 @@ def render_hist3d_anisotropic(
     image : lib.FloatArray3D
         Rendered 3D image.
     """
-    z_min = z_min / pixelsize
-    z_max = z_max / pixelsize
-
     image, n_pixel_y, n_pixel_x, n_pixel_z, x, y, z, in_view = (
         _render_setup3d_anisotropic(
             x,
@@ -817,7 +803,6 @@ def render_hist3d_anisotropic(
             x_max,
             z_min,
             z_max,
-            pixelsize,
         )
     )
     _fill3d(image, x, y, z)
@@ -844,13 +829,13 @@ def _render_gaussian(
     columns : _RenderColumns
         Column arrays of the localizations to be rendered.
     oversampling : float
-        Number of super-resolution pixels per camera pixel.
+        Number of super-resolution pixels per nm.
     y_min, x_min : float
-        Minimum y and x coordinates to be rendered (camera pixels).
+        Minimum y and x coordinates to be rendered (nm).
     y_max, x_max : float
-        Maximum y and x coordinates to be rendered (camera pixels).
+        Maximum y and x coordinates to be rendered (nm).
     min_blur_width : float
-        Minimum localization precision (camera pixels).
+        Minimum localization precision (nm).
     ang : tuple or scipy.spatial.transform.Rotation, optional
         Rotation of localizations; either a scipy Rotation (e.g. built
         from a quaternion) or a tuple of 3 rotation angles around the
@@ -1016,13 +1001,13 @@ def _render_convolve(
     columns : _RenderColumns
         Column arrays of the localizations to be rendered.
     oversampling : float
-        Number of super-resolution pixels per camera pixel.
+        Number of super-resolution pixels per nm.
     y_min, x_min : float
-        Minimum y and x coordinates to be rendered (camera pixels).
+        Minimum y and x coordinates to be rendered (nm).
     y_max, x_max : float
-        Maximum y and x coordinates to be rendered (camera pixels).
+        Maximum y and x coordinates to be rendered (nm).
     min_blur_width : float
-        Minimum localization precision (camera pixels).
+        Minimum localization precision (nm).
     ang : tuple or scipy.spatial.transform.Rotation, optional
         Rotation of localizations; either a scipy Rotation (e.g. built
         from a quaternion) or a tuple of 3 rotation angles around the
@@ -1068,7 +1053,7 @@ def _render_convolve(
 
 
 def global_blur(columns: _RenderColumns) -> tuple[float, float]:
-    """Find the ``convolve`` blur of a channel in camera pixels.
+    """Find the ``convolve`` blur of a channel in nm.
 
     The blur is the caller's ``global_precision`` when given (see
     ``render``), else the median ``lpx`` and ``lpy`` of the rows to
@@ -1084,9 +1069,9 @@ def global_blur(columns: _RenderColumns) -> tuple[float, float]:
     Returns
     -------
     lpx : float
-        Blur in x (camera pixels); 0 if there are no rows to render.
+        Blur in x (nm); 0 if there are no rows to render.
     lpy : float
-        Blur in y (camera pixels); 0 if there are no rows to render.
+        Blur in y (nm); 0 if there are no rows to render.
     """
     if columns.global_lp is not None:
         return columns.global_lp
@@ -1115,11 +1100,11 @@ def _render_smooth(
     columns : _RenderColumns
         Column arrays of the localizations to be rendered.
     oversampling : float
-        Number of super-resolution pixels per camera pixel.
+        Number of super-resolution pixels per nm.
     y_min, x_min : float
-        Minimum y and x coordinates to be rendered (camera pixels).
+        Minimum y and x coordinates to be rendered (nm).
     y_max, x_max : float
-        Maximum y and x coordinates to be rendered (camera pixels).
+        Maximum y and x coordinates to be rendered (nm).
     ang : tuple or scipy.spatial.transform.Rotation, optional
         Rotation of localizations; either a scipy Rotation (e.g. built
         from a quaternion) or a tuple of 3 rotation angles around the
@@ -1230,13 +1215,11 @@ def locs_rotation(
     locs : pd.DataFrame
         Localizations to be rotated.
     oversampling : float
-        Number of super-resolution pixels per camera pixel.
+        Number of super-resolution pixels per nm.
     x_min, x_max : float
-        Minimum and maximum x coordinates to be rendered (camera
-        pixels).
+        Minimum and maximum x coordinates to be rendered (nm).
     y_min, y_max : float
-        Minimum and maximum y coordinates to be rendered (camera
-        pixels).
+        Minimum and maximum y coordinates to be rendered (nm).
     ang : tuple or scipy.spatial.transform.Rotation
         Rotation of localizations; either a scipy Rotation or a tuple
         of 3 rotation angles around the x, y and z axes in radians
@@ -1276,7 +1259,7 @@ def _locs_rotation_arrays(
     lib.FloatArray1D, lib.FloatArray1D, lib.BoolArray1D, lib.FloatArray1D
 ]:
     """``locs_rotation`` on pre-extracted column arrays."""
-    # z is translated to pixels
+    # x, y and z are all in nm
     locs_coord = np.column_stack((columns.x, columns.y, columns.z))
 
     # x and y are in range (x_min/y_min, x_max/y_max) so they need to be
@@ -1342,13 +1325,12 @@ def _image_bytes(
     without a viewport)."""
     n_bytes = 0
     for channel_info in info:
-        pixelsize = lib.get_from_metadata(channel_info, "Pixelsize")
-        if pixelsize is None:
-            continue
-        oversampling = float(pixelsize) / disp_px_size
+        oversampling = 1.0 / float(disp_px_size)
         if viewport is None:
-            height = lib.get_from_metadata(channel_info, "Height") or 0
-            width = lib.get_from_metadata(channel_info, "Width") or 0
+            try:
+                width, height = lib.field_of_view(channel_info)
+            except KeyError:
+                continue
         else:
             (y_min, x_min), (y_max, x_max) = viewport
             height = y_max - y_min

@@ -13,15 +13,17 @@ their shortcuts or from a terminal with ``picasso <module>`` (for example
 
 .. tip::
 
-   We provide an example dataset showing 20 nm grid DNA origami. It's a cropped movie from `Strauss and Jungmann. Nature Methods, 2020 <https://doi.org/10.1038/s41592-020-0869-x>`_ (Fig 2b, R6). You can practice all the steps listed below on this experimental dataset. Download the file from this `link <website>`_. Use ``EM Gain = 1``, ``Sensitivity = 0.53``, ``Baseline = 100`` and ``Pixel size = 130``.
+   We provide an example dataset showing 20 nm grid DNA origami. It's a cropped movie from `Strauss and Jungmann. Nature Methods, 2020 <https://doi.org/10.1038/s41592-020-0869-x>`_ (Fig 2b, R6). You can practice all the steps listed below on this experimental dataset. Download the file from this `link <https://zenodo.org/records/23318677>`_. Use ``EM Gain = 1``, ``Sensitivity = 0.53``, ``Baseline = 100`` and ``Pixel size = 130``.
 
 .. rubric:: Key words used on this page
 
 Frame
    One camera image of the movie. A DNA-PAINT movie has thousands of them.
 Camera pixel
-   A pixel of the raw movie, typically 100-160 nm wide in the sample. Positions
-   in Picasso's files are given in camera pixels.
+   A pixel of the raw movie, typically 100-160 nm wide in the sample. Picasso
+   fits the spots on this grid, but every position and length in its files is
+   given in nanometers (nm); the ``Pixel size (nm)`` of the camera makes the
+   conversion.
 Spot
    The blurred image of a single fluorescent molecule on the camera, a few
    pixels wide. Its shape is stems from the point spread function (PSF).
@@ -29,8 +31,8 @@ Localization
    The position of one spot in one frame, measured with a precision far below
    the pixel size. The super-resolution image is built from millions of them.
 Localization precision
-   How well a single localization is determined, in camera pixels (``lpx``,
-   ``lpy``). Brighter spots give better precision.
+   How well a single localization is determined, in nm (``lpx``, ``lpy``).
+   Brighter spots give better precision.
 
 The steps
 ---------
@@ -155,8 +157,9 @@ Open ``Analyze > Parameters...``. Two settings in the ``Identification`` group
 decide which spots are fitted.
 
 **Box side length**
-   The size, in camera pixels, of the box cut out around each spot. Only the
-   pixels inside the box are fitted, so:
+   The size, in camera pixels (a count of pixels on the detector grid, not a
+   length in nm), of the box cut out around each spot. Only the pixels inside
+   the box are fitted, so:
 
    - the box must contain the whole spot, otherwise the fit misjudges its
      position, brightness and width;
@@ -206,9 +209,10 @@ acquisition software:
    Electrons per count.
 ``Pixel size (nm)``
    The size of a camera pixel in the sample, i.e., the physical pixel size
-   divided by the magnification of the microscope. It is saved with the
-   localizations, and the later steps use it to convert camera pixels to
-   nanometers, e.g., for drift correction, pick sizes and scale bars.
+   divided by the magnification of the microscope. It converts from camera
+   pixel size to nanometers. It is saved with the localizations
+   (``Pixelsize`` in the metadata). A wrong value scales every length in the
+   file.
 
 For movies made with Simulate, use ``EM Gain`` = 1, ``Baseline`` = 0,
 ``Sensitivity`` = 1 and the ``Pixel size`` set in Simulate (130 nm by
@@ -250,15 +254,15 @@ The columns you will meet most often:
    * - ``frame``
      - The frame the molecule was found in.
    * - ``x``, ``y``
-     - The position, in camera pixels.
+     - The position, in nm.
    * - ``photons``
      - The number of photons in the spot.
    * - ``bg``
-     - The background, in photons per pixel.
+     - The background, in photons per camera pixel.
    * - ``sx``, ``sy``
-     - The width of the spot in x and y, in camera pixels.
+     - The width of the spot in x and y, in nm.
    * - ``lpx``, ``lpy``
-     - The localization precision in x and y, in camera pixels.
+     - The localization precision in x and y, in nm.
    * - ``net_gradient``
      - The identification score from above.
 
@@ -339,11 +343,12 @@ Two filters that are often useful:
 
 .. figure:: /images/first-steps-filter.png
    :width: 520px
-   :alt: Picasso Filter histogram of the sx column after filtering, a single peak around 0.87 pixels with the values kept between 0.75 and 1.05
+   :alt: Picasso Filter histogram of the sx column after filtering, a single peak around 113 nm with the values kept between 100 and 130 nm
 
    The ``sx`` histogram of the example data after keeping the values between
-   0.75 and 1.05 pixels: the main peak stays, the widest and narrowest spots
-   are removed. The title shows how many localizations are left.
+   100 and 130 nm (the peak lies at about 113 nm): the main peak stays, the
+   widest and narrowest spots are removed. The title shows how many
+   localizations are left (here 35,413).
 
 More: :doc:`/filter`.
 
@@ -497,10 +502,14 @@ link localizations into binding events and compute their dark times:
    locs, info = io.load_locs("testdata_locs.hdf5")
 
    # Link localizations and calculate dark times
-   linked_locs = postprocess.link(locs, info, r_max=0.05, max_dark_time=1)
-   linked_locs = postprocess.compute_dark_times(linked_locs)
+   linked_locs, linked_info = postprocess.link(
+       locs, info, r_max=10, max_dark_time=1
+   )
+   linked_locs, linked_info = postprocess.compute_dark_times(
+       linked_locs, linked_info
+   )
 
-   print(f"Average bright time {linked_locs['n'].mean():.2f} frames")
+   print(f"Average bright time {linked_locs['len'].mean():.2f} frames")
    print(f"Average dark time {linked_locs['dark'].mean():.2f} frames")
 
 More examples are in the :doc:`/notebooks` and the

@@ -69,6 +69,37 @@ class TestUnreadableSettingsFile:
         io.dismiss_settings_load_error()
         assert io.settings_load_error() is None
 
+    def test_dismissed_file_is_not_reported_again(self, settings_path):
+        # every window reads the settings while it is built, also after
+        # the first one has reported the broken file
+        settings_path.write_text(self.BROKEN)
+        io.load_user_settings()
+        io.dismiss_settings_load_error()
+        io.load_user_settings()
+        assert io.settings_load_error() is None
+        assert io.settings_file_is_broken()
+
+    def test_dismissed_file_is_not_backed_up(self, settings_path):
+        # the .bak keeps the last good file, not the broken one
+        io.save_user_settings({"Render": {"Colormap": "hot"}})
+        io.save_user_settings({"Render": {"Colormap": "magma"}})
+        settings_path.write_text(self.BROKEN)
+        io.load_user_settings()
+        io.dismiss_settings_load_error()
+        io.save_user_settings({"Render": {"Colormap": "gray"}})
+        backup = settings_path.with_name("settings.yaml.bak")
+        assert (
+            yaml.safe_load(backup.read_text())["Render"]["Colormap"] == "hot"
+        )
+
+    def test_a_newly_broken_file_is_reported_again(self, settings_path):
+        settings_path.write_text(self.BROKEN)
+        io.load_user_settings()
+        io.dismiss_settings_load_error()
+        settings_path.write_text("Render: [also broken, but differently\n")
+        io.load_user_settings()
+        assert io.settings_load_error() is not None
+
     def test_non_mapping_file_counts_as_broken(self, settings_path):
         settings_path.write_text("- just\n- a list\n")
         assert io.load_user_settings() == {}

@@ -35,15 +35,20 @@ the current picks; the boxes you drew yourself are kept as drawn. See
    :icon: code
    :class-container: api-example
 
-   ``pick_size`` is the radius for circles; ``std_range`` is ``Pick similar
-   ± range``.
+   ``pick_size`` is the diameter for circles, in nm; ``std_range`` is
+   ``Pick similar ± range``.
 
    .. code-block:: python
 
       from picasso import postprocess
 
       new_picks = postprocess.pick_similar(
-          locs, info, picks, "Circle", pick_size=radius, std_range=2.0
+          locs,
+          info,
+          picks=picks,
+          pick_shape="Circle",
+          pick_size=diameter,
+          std_range=2.0,
       )
 
 
@@ -59,12 +64,12 @@ separate or all channels simultaneously.
    :icon: code
    :class-container: api-example
 
-   The circle size is the diameter here.
+   The circle size is the diameter.
 
    .. code-block:: python
 
-      locs = postprocess.remove_locs_in_picks(
-          locs, info, picks=picks, pick_shape="Circle", pick_size=2 * radius
+      locs, info = postprocess.remove_locs_in_picks(
+          locs, info, picks=picks, pick_shape="Circle", pick_size=diameter
       )
 
 
@@ -85,8 +90,7 @@ Automatically picks fiducial markers, e.g., for
 bright spots that are visible in nearly every frame, so they appear as the
 densest spots of the image. Requires no existing picks.
 
-1. The whole image is rendered with one pixel per camera pixel and
-   ``One-Pixel-Blur``.
+1. The whole image is rendered with 100 nm pixels and ``One-Pixel-Blur``.
 2. Spots are detected as in Localize's net gradient identification
    (see :ref:`localize-identification`), with a box of about 900 nm and the
    99th percentile of the pixel values as the minimum net gradient.
@@ -98,8 +102,8 @@ densest spots of the image. Requires no existing picks.
    :class-container: api-example
 
    ``find_fiducials`` returns the centers and the box size (the pick
-   diameter), both in camera pixels. ``undrift_from_fiducials`` picks and
-   undrifts in one go.
+   diameter), both in nm. ``undrift_from_fiducials`` picks and undrifts in
+   one go.
 
    .. code-block:: python
 
@@ -136,8 +140,8 @@ kinetics or to tell repeated binding from a single sticking event. With
 several picks, their localizations are combined into one trace. The window
 has four panels, all over the frames of the movie:
 
-- ``X-pos vs frame`` and ``Y-pos vs frame``: the x and y coordinates (camera
-  pixels) of each localization;
+- ``X-pos vs frame`` and ``Y-pos vs frame``: the x and y coordinates (nm)
+  of each localization;
 - ``Localizations``: 1 in frames with a localization, 0 otherwise;
 - ``Photons``: the photon count in each frame.
 
@@ -153,7 +157,9 @@ three columns: frame, on/off (1 or 0) and photons (as integers).
       import pandas as pd
       from picasso import lib, postprocess
 
-      picked = postprocess.picked_locs(locs, info, picks, "Circle", pick_size=radius)
+      picked = postprocess.picked_locs(
+          locs, info, picks=picks, pick_shape="Circle", pick_size=diameter
+      )
       fig = lib.plot_trace(pd.concat(picked, ignore_index=True), info)
 
 
@@ -274,7 +280,11 @@ button) pans, and a double click resets the zoom.
    :class-container: api-example
 
    ``mask_image`` takes a method name or a threshold between 0 and 1
-   (``Custom``). The mask spans the whole field of view.
+   (``Custom``). The mask spans the whole field of view. ``mask_locs``
+   returns the metadata of both parts, with the area inside or outside the
+   mask under ``Area (um^2)`` (used, e.g., by SPINNA) and ``mask_info``.
+   To mask other localizations, e.g., another channel, with the same mask,
+   pass the field of view of the first as ``field_of_view``.
 
    .. code-block:: python
 
@@ -284,8 +294,10 @@ button) pans, and a double click resets the zoom.
       locs, info = io.load_locs("movie_locs.hdf5")
       image = masking.generate_image(locs, info, disp_px_size=300, blur=500)   # nm
       mask, threshold = masking.mask_image(image, "otsu")   # or 0.5, "li", "local_mean", ...
-      locs_in, locs_out = masking.mask_locs(locs, info, mask)
+      locs_in, info_in, locs_out, info_out = masking.mask_locs(
+          locs, info, mask=mask, mask_info={"Blur (nm)": 500}
+      )
 
-      io.save_locs("movie_locs_mask_in.hdf5", locs_in, info)
-      io.save_locs("movie_locs_mask_out.hdf5", locs_out, info)
+      io.save_locs("movie_locs_mask_in.hdf5", locs_in, info_in)
+      io.save_locs("movie_locs_mask_out.hdf5", locs_out, info_out)
       np.save("movie_locs_mask.npy", mask)

@@ -77,15 +77,15 @@ additional summary statistics will then be stored in the local database.
       from picasso import io, localize
 
       locs, info = io.load_locs("movie_locs.hdf5")
-      nena_px = localize.check_nena(locs, info)              # camera pixels
+      nena = localize.check_nena(locs, info)                 # nm
       mean_len = localize.check_kinetics(locs, info)         # mean bright time, frames
-      drift = localize.check_drift(locs, info)               # (x, y), camera pixels
+      drift = localize.check_drift(locs, info)               # (x, y), nm
 
       summary = localize.get_file_summary(
-          "movie.tif", "movie_locs.hdf5", drift=drift, len_mean=mean_len, nena=nena_px
+          "movie.tif", "movie_locs.hdf5", drift=drift, len_mean=mean_len, nena=nena
       )
       localize.add_file_to_db(
-          "movie.tif", "movie_locs.hdf5", drift=drift, len_mean=mean_len, nena=nena_px
+          "movie.tif", "movie_locs.hdf5", drift=drift, len_mean=mean_len, nena=nena
       )
 
 
@@ -97,20 +97,32 @@ Server is a tool to interactively explore the database and to enable
 continuous processing workflows.
 
 When launching the server, i.e., clicking on the shortcut or executing the
-command ``picasso server``, the command line will start and show you the local
-IP address on which the server is running. It should open your default browser
-automatically and redirect to the Picasso Server page.
+command ``picasso server``, the command line will start and show you the URL
+on which the server is running, ``http://localhost:8501``. It should open your
+default browser automatically and redirect to the Picasso Server page. Only
+this computer can open the server.
 
-You can also use this IP to, e.g., connect to ``Picasso Server`` from within a
-network. For this, take the ``Network URL`` that is displayed in the command
-line and access it via browser.
+The one-click installers include Picasso Server. With pip, it is an extra:
+``pip install "picassosr[server]"``.
+
+To connect to ``Picasso Server`` from other computers in your network, start it
+with ``picasso server --network``. The command line then also shows the
+``Network URL``; open it in the browser of the other computer.
+
+.. warning::
+
+   Picasso Server has no login. With ``--network``, anyone who can reach the
+   computer over the network can use it, including running any program on
+   this computer as you with the :ref:`custom command <server-custom-commands>`
+   of the watcher. Use ``--network`` only in a network you trust.
 
 .. figure:: /images/server_cmd.png
    :width: 560px
    :class: screenshot
    :alt: Command line window after starting Picasso Server, showing the local and network URLs
 
-   The command line shows the local and network URLs of the server.
+   The command line shows the local and network URLs of the server, started
+   with ``--network``.
 
 In case you close the website tab or the browser, ``Picasso Server`` will run
 in the background until the command line window is closed. You can go back to
@@ -224,6 +236,8 @@ The file ending will be different according to the parameter group used.
 E.g., if you have two parameter groups, file ``testfile.raw`` will be
 processed as ``testfile_pg_1_locs.hdf5`` and ``testfile_pg_2_locs.hdf5``.
 
+.. _server-custom-commands:
+
 Custom commands
 ^^^^^^^^^^^^^^^
 You can use the ``Custom command`` to execute a custom script after a file was
@@ -252,14 +266,34 @@ Picasso Server would be:
 
    C:\ProgramData\Miniconda3\python.exe C:\Users\Maximilian\Desktop\test.py $FILENAME
 
-When having an existing Picasso one-click installation, Picasso can directly
-be called via the command line (see :doc:`cmd`). Some example commands would
-then be:
+The command can hold two placeholders:
 
-- ``picasso undrift $FILENAME`` for drift correction;
-- ``picasso link $FILENAME`` for linking localizations;
-- ``picasso dbscan $FILENAME 0.1 2`` for performing DBSCAN cluster analysis
-  with clustering radius 0.1 and density 2.
+``$FILENAME``
+   The path of the processed movie. The command runs once per movie.
+``$LOCS``
+   The path of a localization file (``_locs.hdf5``) the watcher saved from the
+   movie. The command runs once per localization file, e.g., twice for
+   ``testfile_pg_1_locs.hdf5`` and ``testfile_pg_2_locs.hdf5`` of two parameter
+   groups, and not at all if none was saved.
+
+Each path reaches the program as one argument, also if it contains spaces. The
+command runs without a shell, so pipes (``|``), redirections (``>``) and shell
+variables do not work; put them in a script and call the script instead. On
+macOS and Linux, put paths with spaces in quotes, as in a terminal, e.g.,
+``python "/Users/me/my scripts/test.py" $FILENAME``. If the command fails, the
+watcher's logfile shows its exit code.
+
+The custom command can call Picasso's command line (see :doc:`cmd`), which
+the Windows one-click installer puts on the ``PATH``; with the macOS one-click
+installer, add ``picasso`` to the ``PATH`` as described in
+:ref:`installation-command-line`, or call
+``/Applications/Picasso.app/Contents/MacOS/picasso`` instead of ``picasso``.
+Some example commands would then be:
+
+- ``picasso undrift $LOCS`` for drift correction;
+- ``picasso link $LOCS`` for linking localizations;
+- ``picasso dbscan $LOCS 13 2`` for performing DBSCAN cluster analysis
+  with a clustering radius of 13 nm and density 2.
 
 Preview
 ~~~~~~~
@@ -268,7 +302,7 @@ Preview will render the super-resolution data in the browser.
 .. figure:: /images/server_preview.png
    :width: 720px
    :class: screenshot
-   :alt: File preview page of Picasso Server with oversampling and density settings above a rendered super-resolution image
+   :alt: File preview page of Picasso Server with display pixel size and density settings above a rendered super-resolution image
 
    The ``Preview`` page.
 
@@ -276,29 +310,3 @@ Preview will render the super-resolution data in the browser.
 
    The database will store the file path when it is localized. If the file is
    moved, it will not be selectable.
-
-.. _server-docker:
-
-Docker
-~~~~~~
-If you want to install Picasso Server in a headless Linux or Mac system, the
-provided dockerfile might be useful for installation.
-
-1. Build the docker image from the dockerfile (clone the GitHub repository):
-
-   .. code-block:: bash
-
-      docker build -t picasso .
-
-2. Run the docker image (interactive mode, port forwarding and with a mounted
-   drive). Note that you need to replace the respective paths.
-
-   .. code-block:: bash
-
-      docker run -it -p 8501:8501 --volume "C:/Users/Maximilian/Desktop/data:/home/picasso/data" picasso
-
-3. Launch Picasso Server in the docker image:
-
-   .. code-block:: bash
-
-      python3 -m picasso server

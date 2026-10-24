@@ -75,15 +75,20 @@ class TestOverwriteMetadata:
             lib.overwrite_metadata({"Width": 32}, "Missing", 1)
 
 
+#: camera pixel size of the canvas tests (nm); their positions are
+#: written in camera pixels for readability and converted here
+PS = 130.0
+
+
 def _canvas_locs(x, y):
     n = len(x)
     return pd.DataFrame(
         {
             "frame": np.zeros(n, dtype=np.uint32),
-            "x": np.asarray(x, dtype=np.float32),
-            "y": np.asarray(y, dtype=np.float32),
-            "lpx": np.full(n, 0.1, dtype=np.float32),
-            "lpy": np.full(n, 0.1, dtype=np.float32),
+            "x": np.asarray(x, dtype=np.float32) * np.float32(PS),
+            "y": np.asarray(y, dtype=np.float32) * np.float32(PS),
+            "lpx": np.full(n, 10.0, dtype=np.float32),
+            "lpy": np.full(n, 10.0, dtype=np.float32),
         }
     )
 
@@ -91,8 +96,13 @@ def _canvas_locs(x, y):
 def _canvas_info(width=32, height=32):
     return [
         {"Width": width, "Height": height, "Frames": 1},
-        {"Pixelsize": 130},
+        {"Pixelsize": PS},
     ]
+
+
+def _px(values):
+    """Camera pixels -> nm, for comparisons."""
+    return [v * PS for v in values]
 
 
 class TestFitCanvas:
@@ -101,7 +111,7 @@ class TestFitCanvas:
         info = _canvas_info()
         _, _, shifts = lib.fit_canvas([locs], [info])
         assert shifts == [(0, 0)]
-        assert locs["x"].tolist() == pytest.approx([1.0, 30.5])
+        assert locs["x"].tolist() == pytest.approx(_px([1.0, 30.5]))
         assert info[0]["Width"] == 32 and info[0]["Height"] == 32
         # no new keys while the canvas is the camera image
         for key in lib.CANVAS_OFFSET_KEYS + lib.CAMERA_SIZE_KEYS:
@@ -112,14 +122,15 @@ class TestFitCanvas:
         other = _canvas_locs([0.0, 31.0], [0.0, 31.0])
         infos = [_canvas_info(), _canvas_info()]
         _, _, shifts = lib.fit_canvas([moved, other], infos)
-        assert shifts == [(3, 1), (3, 1)]  # whole camera pixels
+        # whole camera pixels, in nm
+        assert shifts == [(3 * PS, 1 * PS), (3 * PS, 1 * PS)]
         assert moved["x"].min() >= 0 and moved["y"].min() >= 0
         # the relative position of channels is kept
-        assert other["x"].tolist() == pytest.approx([3.0, 34.0])
-        assert other["y"].tolist() == pytest.approx([1.0, 32.0])
+        assert other["x"].tolist() == pytest.approx(_px([3.0, 34.0]))
+        assert other["y"].tolist() == pytest.approx(_px([1.0, 32.0]))
         for info in infos:
-            assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 3
-            assert info[-1][lib.CANVAS_OFFSET_KEYS[1]] == 1
+            assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 3 * PS
+            assert info[-1][lib.CANVAS_OFFSET_KEYS[1]] == 1 * PS
             assert info[-1][lib.CAMERA_SIZE_KEYS[0]] == 32
             # grown by the offset, so the camera FOV stays inside
             assert info[0]["Width"] == 35 and info[0]["Height"] == 33
@@ -130,8 +141,8 @@ class TestFitCanvas:
         lib.fit_canvas([locs], [info])
         assert info[0]["Width"] == 41 and info[0]["Height"] == 33
         # shrinks back, but not below the camera image
-        locs["x"] = np.float32([1.0])
-        locs["y"] = np.float32([1.0])
+        locs["x"] = np.float32([1.0 * PS])
+        locs["y"] = np.float32([1.0 * PS])
         lib.fit_canvas([locs], [info])
         assert info[0]["Width"] == 32 and info[0]["Height"] == 32
 
@@ -139,15 +150,15 @@ class TestFitCanvas:
         moved = _canvas_locs([0.5, 31.5], [1.0, 1.0])
         other = _canvas_locs([0.5, 31.5], [1.0, 1.0])
         infos = [_canvas_info(), _canvas_info()]
-        moved["x"] = moved["x"].to_numpy() - np.float32(10)
+        moved["x"] = moved["x"].to_numpy() - np.float32(10 * PS)
         _, _, shifts = lib.fit_canvas([moved, other], infos)
-        assert shifts[0] == (10, 0)
+        assert shifts[0] == (10 * PS, 0)
         assert infos[0][0]["Width"] == 42
-        moved["x"] = moved["x"].to_numpy() + np.float32(10)
+        moved["x"] = moved["x"].to_numpy() + np.float32(10 * PS)
         _, _, shifts = lib.fit_canvas([moved, other], infos)
-        assert shifts[0] == (-10, 0)
-        assert moved["x"].tolist() == pytest.approx([0.5, 31.5])
-        assert other["x"].tolist() == pytest.approx([0.5, 31.5])
+        assert shifts[0] == (-10 * PS, 0)
+        assert moved["x"].tolist() == pytest.approx(_px([0.5, 31.5]))
+        assert other["x"].tolist() == pytest.approx(_px([0.5, 31.5]))
         for info in infos:
             assert info[0]["Width"] == 32
             assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 0
@@ -156,25 +167,25 @@ class TestFitCanvas:
         locs = _canvas_locs([-1.5], [1.0])
         info = _canvas_info()
         lib.fit_canvas([locs], [info])
-        assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 2
-        locs["x"] = locs["x"].to_numpy() - np.float32(4.0)
+        assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 2 * PS
+        locs["x"] = locs["x"].to_numpy() - np.float32(4.0 * PS)
         lib.fit_canvas([locs], [info])
-        assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 2 + 4
+        assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == (2 + 4) * PS
         assert info[0]["Width"] == 32 + 6
 
     def test_channels_with_different_offsets_are_aligned(self):
         # e.g., a file saved after a translation, opened with a raw one
         saved = _canvas_locs([0.0, 5.0], [1.0, 1.0])
         saved_info = _canvas_info(width=37)
-        saved_info[-1][lib.CANVAS_OFFSET_KEYS[0]] = 5
+        saved_info[-1][lib.CANVAS_OFFSET_KEYS[0]] = 5 * PS
         saved_info[-1][lib.CAMERA_SIZE_KEYS[0]] = 32
         raw = _canvas_locs([2.0], [1.0])
         infos = [saved_info, _canvas_info()]
         _, _, shifts = lib.fit_canvas([saved, raw], infos)
-        assert shifts == [(0, 0), (5, 0)]
-        assert raw["x"].tolist() == pytest.approx([7.0])
+        assert shifts == [(0, 0), (5 * PS, 0)]
+        assert raw["x"].tolist() == pytest.approx(_px([7.0]))
         for info in infos:
-            assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 5
+            assert info[-1][lib.CANVAS_OFFSET_KEYS[0]] == 5 * PS
             assert info[0]["Width"] == 37
 
     def test_replaces_column_arrays(self):
@@ -183,7 +194,7 @@ class TestFitCanvas:
         before = locs["x"].to_numpy()
         lib.fit_canvas([locs], [_canvas_info()])
         assert not np.shares_memory(before, locs["x"].to_numpy())
-        assert before[0] == -1.0
+        assert before[0] == -1.0 * PS
 
     def test_ignores_non_finite(self):
         locs = _canvas_locs([np.nan, -np.inf, 3.0], [1.0, 1.0, 1.0])
@@ -338,6 +349,16 @@ class TestFitCumExp:
         # Fit should land in the same order of magnitude
         assert result["best_values"]["t"] == pytest.approx(true_tau, rel=0.4)
 
+    def test_leaves_the_localizations_unchanged(self):
+        # the dark times passed as a view of the column used to be
+        # sorted in place, reordering them among the localizations
+        rng = np.random.default_rng(2)
+        locs = pd.DataFrame({"dark": rng.exponential(scale=20.0, size=500)})
+        before = locs["dark"].to_numpy().copy()
+        result = lib.fit_cum_exp(locs["dark"].to_numpy())
+        np.testing.assert_array_equal(locs["dark"].to_numpy(), before)
+        np.testing.assert_array_equal(result["data"], np.sort(before))
+
 
 class TestEstimateKineticRate:
     def test_returns_finite_for_long_data(self):
@@ -414,7 +435,7 @@ class TestHist2DNumba:
         inside = (x > x_min) & (x < x_max) & (y > y_min) & (y < y_max)
         x = x[inside]
         y = y[inside]
-        counts = lib.hist2d_numba(x, y, x_min, x_max, y_min, y_max, nx, ny)
+        counts = lib.hist2d(x, y, x_min, x_max, y_min, y_max, nx, ny)
         x_edges = np.linspace(x_min, x_max, nx + 1)
         y_edges = np.linspace(y_min, y_max, ny + 1)
         expected, _, _ = np.histogram2d(x, y, bins=[x_edges, y_edges])
@@ -429,7 +450,7 @@ class TestHist2DNumba:
     def test_skips_non_finite(self):
         x = np.array([0.0, 1.0, np.nan, 2.0, np.inf], dtype=np.float64)
         y = np.array([0.0, 1.0, 1.0, np.nan, 2.0], dtype=np.float64)
-        counts = lib.hist2d_numba(x, y, 0.0, 3.0, 0.0, 3.0, 3, 3)
+        counts = lib.hist2d(x, y, 0.0, 3.0, 0.0, 3.0, 3, 3)
         # only two points are fully finite and inside the range
         assert counts.sum() == 2
 
@@ -448,34 +469,6 @@ class TestRmsdAtCom:
     def test_zero_for_identical_points(self):
         xy = np.full((2, 5), 3.0)
         assert lib.rmsd_at_com(xy) == pytest.approx(0.0)
-
-
-# ---------------------------------------------------------------------------
-# Recarray manipulation (deprecated path — explicit warnings expected)
-# ---------------------------------------------------------------------------
-
-
-class TestRecarrayHelpers:
-    def _toy_rec(self):
-        return pd.DataFrame(
-            {"x": [0.0, 1.0, 2.0], "y": [3.0, 4.0, 5.0]}
-        ).to_records(index=False)
-
-    def test_append_to_rec_adds_column(self):
-        rec = self._toy_rec()
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            out = lib.append_to_rec(rec, np.array([10.0, 11.0, 12.0]), "z")
-        assert "z" in out.dtype.names
-        np.testing.assert_array_equal(out["z"], [10.0, 11.0, 12.0])
-
-    def test_remove_from_rec_drops_column(self):
-        rec = self._toy_rec()
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", DeprecationWarning)
-            out = lib.remove_from_rec(rec, "y")
-        assert "y" not in out.dtype.names
-        assert "x" in out.dtype.names
 
 
 # ---------------------------------------------------------------------------
@@ -517,7 +510,7 @@ class TestConcatLocs:
     for spherical fits, no ``z`` in 2D, ...); combining them must not lose
     localizations to ``ensure_sanity``'s NaN filter."""
 
-    INFO = [{"Width": 32, "Height": 32, "Frames": 100}]
+    INFO = [{"Width": 32, "Height": 32, "Frames": 100, "Pixelsize": 130}]
 
     @staticmethod
     def _locs(n: int, net_gradient: bool = True, **extra) -> pd.DataFrame:
@@ -615,13 +608,14 @@ class TestEnsureSanity:
         locs = pd.DataFrame(
             {
                 "frame": [0, 0, 0],
-                "x": [1.0, 100.0, 5.0],  # 100 is outside Width=32
-                "y": [1.0, 5.0, 50.0],  # 50 is outside Height=32
+                # 10000 nm is outside Width = 32 px of 130 nm (4160 nm)
+                "x": [1.0, 10000.0, 5.0],
+                "y": [1.0, 5.0, 5000.0],  # 5000 is outside Height
                 "lpx": [0.1, 0.1, 0.1],
                 "lpy": [0.1, 0.1, 0.1],
             }
         )
-        info = [{"Width": 32, "Height": 32, "Frames": 100}]
+        info = [{"Width": 32, "Height": 32, "Frames": 100, "Pixelsize": 130}]
         out = lib.ensure_sanity(locs, info)
         assert len(out) == 1
 
@@ -634,13 +628,13 @@ class TestEnsureSanity:
                 "photons": [100.0, -5.0],
             }
         )
-        info = [{"Width": 32, "Height": 32, "Frames": 1}]
+        info = [{"Width": 32, "Height": 32, "Frames": 1, "Pixelsize": 130}]
         out = lib.ensure_sanity(locs, info)
         assert len(out) == 1
 
     def test_missing_key_raises(self):
         locs = pd.DataFrame({"frame": [0], "x": [1.0], "y": [1.0]})
-        info = [{"Width": 32}]  # missing Height + Frames
+        info = [{"Width": 32}]  # missing Height, Frames and Pixelsize
         with pytest.raises(KeyError):
             lib.ensure_sanity(locs, info)
 
@@ -706,12 +700,12 @@ class TestSquareContainment:
         locs_xy = np.array(
             [[10.0, 10.9, 11.0, 10.0], [10.0, 10.0, 10.0, 12.0]]
         )
-        mask = lib.is_loc_in_square_numba(10.0, 10.0, locs_xy, 2.0)
+        mask = lib.is_loc_in_square(10.0, 10.0, locs_xy, 2.0)
         assert mask.tolist() == [True, True, False, False]
 
     def test_locs_in_square_filters(self):
         locs_xy = np.array([[10.0, 20.0], [10.0, 20.0]])
-        out = lib.locs_in_square_numba(10.0, 10.0, locs_xy, 2.0)
+        out = lib.locs_in_square(10.0, 10.0, locs_xy, 2.0)
         assert out.shape == (2, 1)
         assert out[0, 0] == 10.0
 
@@ -732,7 +726,7 @@ class TestOrientedRectangleContainment:
             reference = lib.check_if_in_rectangle(
                 x, y, np.array(X), np.array(Y)
             )
-            mask = lib.is_loc_in_rectangle_numba(
+            mask = lib.is_loc_in_oriented_rectangle(
                 xc, yc, theta, length, width, locs_xy
             )
             # points right at the boundary may be classified either way
@@ -745,7 +739,7 @@ class TestOrientedRectangleContainment:
 
     def test_locs_in_rectangle_numba_filters(self):
         locs_xy = np.array([[0.0, 0.0, 3.0, 5.0], [0.0, 2.0, 0.0, 0.0]])
-        out = lib.locs_in_rectangle_numba(0.0, 0.0, 0.0, 8.0, 1.0, locs_xy)
+        out = lib.locs_in_oriented_rectangle(0.0, 0.0, 0.0, 8.0, 1.0, locs_xy)
         assert out.shape == (2, 2)
         assert out[0].tolist() == [0.0, 3.0]
 
@@ -827,7 +821,7 @@ def _rectangles_overlap_brute_force(rect_a, rect_b, rng, n=20000):
     y = ya + u * np.sin(ta) + v * np.cos(ta)
     xb, yb, tb, lb, wb = rect_b
     return bool(
-        lib.is_loc_in_rectangle_numba(
+        lib.is_loc_in_oriented_rectangle(
             xb, yb, tb, lb, wb, np.stack((x, y))
         ).any()
     )
@@ -1014,27 +1008,27 @@ class TestBoxContainment:
     PICK = ((1.0, 2.0), (5.0, 4.0))  # 4 wide, 2 high, centered (3, 3)
 
     def test_inside(self):
-        assert lib.is_loc_in_box_numba(
-            3.0, 3.0, np.array([[3.0], [3.0]]), 4.0, 2.0
-        )[0]
+        assert lib.is_loc_in_box(3.0, 3.0, np.array([[3.0], [3.0]]), 4.0, 2.0)[
+            0
+        ]
 
     def test_outside_in_y_only(self):
         # inside the 4-wide extent (1..5) but outside the 2-high one
         # (2..4), so a square test of the longer side would wrongly
         # accept it
-        assert not lib.is_loc_in_box_numba(
+        assert not lib.is_loc_in_box(
             3.0, 3.0, np.array([[3.0], [4.5]]), 4.0, 2.0
         )[0]
 
     def test_bounds_are_exclusive(self):
         # matches postprocess._picked_box_locs
-        assert not lib.is_loc_in_box_numba(
+        assert not lib.is_loc_in_box(
             3.0, 3.0, np.array([[5.0], [3.0]]), 4.0, 2.0
         )[0]
 
     def test_locs_in_box_numba_filters(self):
         locs_xy = np.array([[3.0, 9.0, 2.0], [3.0, 9.0, 2.5]])
-        out = lib.locs_in_box_numba(3.0, 3.0, locs_xy, 4.0, 2.0)
+        out = lib.locs_in_box(3.0, 3.0, locs_xy, 4.0, 2.0)
         assert out.shape == (2, 2)
 
 
@@ -1451,7 +1445,8 @@ class TestSyncGroups:
 
 
 # ---------------------------------------------------------------------------
-# Progress trackers (MockProgress / TqdmProgress / normalize_progress)
+# Progress trackers (Progress / MockProgress / TqdmProgress /
+# normalize_progress / tracked_progress / start_phase)
 # ---------------------------------------------------------------------------
 
 
@@ -1465,7 +1460,28 @@ class TestMockProgress:
         p.setLabelText("text")
         p.play_sound_notification()
         p.close()
-        assert list(p.get_iterator(0, 5)) == [0, 1, 2, 3, 4]
+        assert p.description_base == "new phase"
+
+    def test_satisfies_protocol(self):
+        assert isinstance(lib.MockProgress(), lib.Progress)
+        assert isinstance(lib.TqdmProgress(), lib.Progress)
+
+    def test_subclass_as_custom_tracker(self):
+        # the documented way to write a custom tracker
+        class Recorder(lib.MockProgress):
+            def __init__(self):
+                super().__init__()
+                self.values = []
+
+            def set_value(self, value, *args, **kwargs):
+                self.values.append((value, self.maximum()))
+
+        tracker = Recorder()
+        assert lib.normalize_progress(tracker) is tracker
+        lib.start_phase(tracker, "phase", 3)
+        tracker.set_value(3)
+        assert tracker.values == [(3, 3)]
+        assert tracker.description_base == "phase"
 
     def test_maximum_roundtrip(self):
         p = lib.MockProgress()
@@ -1513,14 +1529,21 @@ class TestTqdmProgress:
         assert p.iterator.total == 7
         p.close()
 
-    def test_get_iterator_closes_previous_bar(self):
-        p = lib.TqdmProgress(description="loop")
-        p.setMaximum(3)
+    def test_zero_progress_sets_unit(self):
+        p = lib.TqdmProgress(description="phase 1", unit="loc")
+        p.zero_progress("phase 2", unit="spot")
         p.set_value(1)
-        first_bar = p.iterator
-        iterator = p.get_iterator(0, 4)
-        assert p.iterator is not first_bar
-        assert list(iterator) == [0, 1, 2, 3]
+        assert p.iterator.unit == "spot"
+        p.close()
+
+    def test_zero_maximum_is_unknown_total(self):
+        p = lib.TqdmProgress(description="busy")
+        p.setMaximum(0)
+        p.set_value(2)
+        assert p.iterator.total is None
+        p.setMaximum(5)
+        p.setMaximum(0)
+        assert p.iterator.total is None
         p.close()
 
 
@@ -1561,6 +1584,85 @@ class TestNormalizeProgress:
         with pytest.raises(TypeError):
             lib.normalize_progress(42)
 
+    def test_plain_function_raises(self):
+        # a bare callable is not a tracker; it must not be silently ignored
+        with pytest.raises(TypeError):
+            lib.normalize_progress(lambda value: None)
+
+
+class _RecordingTracker(lib.MockProgress):
+    def __init__(self):
+        super().__init__()
+        self.calls = []
+        self.closed = False
+
+    def set_value(self, value, *args, **kwargs):
+        self.calls.append(("set_value", value))
+
+    def setMaximum(self, maximum, *args, **kwargs):
+        super().setMaximum(maximum)
+        self.calls.append(("setMaximum", maximum))
+
+    def zero_progress(self, description=None, *args, **kwargs):
+        super().zero_progress(description)
+        self.calls.append(("zero_progress", description))
+
+    def close(self, *args, **kwargs):
+        self.closed = True
+
+
+class TestTrackedProgress:
+    def test_caller_tracker_is_not_closed(self):
+        tracker = _RecordingTracker()
+        with lib.tracked_progress(tracker, "task") as progress:
+            assert progress is tracker
+        assert not tracker.closed
+
+    def test_console_tracker_is_closed(self):
+        with lib.tracked_progress("console", "task", unit="loc") as progress:
+            assert isinstance(progress, lib.TqdmProgress)
+            progress.setMaximum(2)
+            progress.set_value(1)
+            assert progress.iterator is not None
+        assert progress.iterator is None
+
+    def test_closed_on_exception(self):
+        with pytest.raises(lib.OperationCanceled):
+            with lib.tracked_progress("console") as progress:
+                progress.set_value(1)
+                raise lib.OperationCanceled
+        assert progress.iterator is None
+
+    def test_none_is_silent(self, capsys):
+        with lib.tracked_progress(None, "task") as progress:
+            lib.start_phase(progress, "phase", 3)
+            progress.set_value(3)
+        captured = capsys.readouterr()
+        assert captured.out == "" and captured.err == ""
+
+
+class TestStartPhase:
+    def test_label_then_maximum(self):
+        tracker = _RecordingTracker()
+        lib.start_phase(tracker, "phase 1", 7)
+        assert tracker.calls == [
+            ("zero_progress", "phase 1"),
+            ("setMaximum", 7),
+        ]
+        assert tracker.maximum() == 7
+
+    def test_previous_console_bar_keeps_its_total(self):
+        p = lib.TqdmProgress(description="phase 1")
+        lib.start_phase(p, "phase 1", 5)
+        p.set_value(5)
+        first_bar = p.iterator
+        lib.start_phase(p, "phase 2", 0, unit="pair")
+        assert first_bar.total == 5
+        p.set_value(1)
+        assert p.iterator.desc == "phase 2"
+        assert p.iterator.unit == "pair"
+        p.close()
+
 
 # ---------------------------------------------------------------------------
 # Lazy Qt imports (PyQt6 must not load with the core library; the Qt
@@ -1575,7 +1677,9 @@ class TestLazyQtImports:
         code = (
             "import sys\n"
             "from picasso import lib, io, render, g5m, clusterer, aim\n"
-            "lib.normalize_progress('console').set_value(0)\n"
+            "with lib.tracked_progress('console') as progress:\n"
+            "    lib.start_phase(progress, 'phase', 1)\n"
+            "    progress.set_value(1)\n"
             "assert 'PyQt6' not in sys.modules, 'PyQt6 imported eagerly'\n"
         )
         result = subprocess.run(
@@ -1589,7 +1693,7 @@ class TestLazyQtImports:
         from picasso import lib_qt
 
         assert lib.Dialog is lib_qt.Dialog
-        assert lib.ProgressType is lib_qt.ProgressType
+        assert lib.TaskProgress is lib_qt.TaskProgress
 
     def test_unknown_attribute_raises(self):
         with pytest.raises(AttributeError):
@@ -1678,7 +1782,7 @@ class TestStandardizeDtypes:
         locs = pd.DataFrame(
             {"frame": [0, 1], "x": [1.0, 2.0], "y": [1.0, 2.0]}
         )
-        info = [{"Width": 8, "Height": 8, "Frames": 2}]
+        info = [{"Width": 8, "Height": 8, "Frames": 2, "Pixelsize": 130}]
         out = lib.ensure_sanity(locs, info)
         assert out["x"].dtype == np.float32
         assert out["frame"].dtype == np.uint32
@@ -1691,14 +1795,14 @@ class TestSelectFrcRois:
         n = 50_000
         return pd.DataFrame(
             {
-                "x": rng.uniform(0, 100, n).astype(np.float32),
-                "y": rng.uniform(0, 100, n).astype(np.float32),
+                "x": rng.uniform(0, 10_000, n).astype(np.float32),
+                "y": rng.uniform(0, 10_000, n).astype(np.float32),
             }
         )
 
-    # pixel size 100 nm, so a 1000 nm ROI is 10 camera pixels
+    # a 10 x 10 um field with 1000 nm ROIs, i.e., 100 ROI places
     info = [{"Pixelsize": 100}]
-    viewport = ((0, 0), (100, 100))
+    viewport = ((0, 0), (10_000, 10_000))
 
     def test_rois_inside_viewport_and_not_overlapping(self, uniform_locs):
         rois = lib.select_frc_rois(
@@ -1711,18 +1815,18 @@ class TestSelectFrcRois:
         )
         assert 0 < len(rois) <= 40
         for (y0, x0), (y1, x1) in rois:
-            assert y1 - y0 == pytest.approx(10)
-            assert x1 - x0 == pytest.approx(10)
-            assert y0 >= 0 and x0 >= 0 and y1 <= 100 and x1 <= 100
+            assert y1 - y0 == pytest.approx(1000)
+            assert x1 - x0 == pytest.approx(1000)
+            assert y0 >= 0 and x0 >= 0 and y1 <= 10_000 and x1 <= 10_000
         for a, ((ay0, ax0), _) in enumerate(rois):
             for (by0, bx0), _ in rois[a + 1 :]:
-                overlap_y = abs(ay0 - by0) < 10 - 1e-9
-                overlap_x = abs(ax0 - bx0) < 10 - 1e-9
+                overlap_y = abs(ay0 - by0) < 1000 - 1e-6
+                overlap_x = abs(ax0 - bx0) < 1000 - 1e-6
                 assert not (overlap_y and overlap_x)
 
     def test_min_locs_respected(self, uniform_locs):
-        # ~500 locs per 10 x 10 px ROI; the right half is emptied
-        locs = uniform_locs[uniform_locs["x"] < 50]
+        # ~500 locs per 1 x 1 um ROI; the right half is emptied
+        locs = uniform_locs[uniform_locs["x"] < 5000]
         rois = lib.select_frc_rois(
             locs,
             self.info,
@@ -1768,9 +1872,13 @@ class TestSelectFrcRois:
 class TestBinZSteps:
     """``lib.bin_z_steps``: axial binning shared by the 3D calibrations."""
 
-    def test_no_binning_returns_the_input(self):
+    def test_no_binning_returns_a_copy(self):
+        # a copy: zfit.calibrate_z shifted the stage positions twice when
+        # the binned array was the input itself
         values = np.arange(7.0)
-        assert lib.bin_z_steps(values, 1) is values
+        binned = lib.bin_z_steps(values, 1)
+        np.testing.assert_array_equal(binned, values)
+        assert not np.shares_memory(binned, values)
 
     def test_averages_consecutive_groups_and_drops_the_remainder(self):
         # 7 steps in bins of 3: [0, 1, 2] and [3, 4, 5]; step 6 is dropped

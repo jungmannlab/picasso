@@ -9,6 +9,8 @@ picasso.__init__.py
 
 import os.path
 import re
+import warnings
+
 import yaml
 from .version import __version__
 
@@ -32,8 +34,8 @@ def docs_version(version: str = __version__) -> str:
 
     Final releases read the default documentation (``latest``, built
     from ``master``). Pre-releases (``a``, ``b``, ``rc`` or ``.dev``,
-    e.g. ``0.12.0a2``) read the documentation built from their
-    development branch ``vX.Y`` (e.g. ``v0.12``), which describes
+    e.g. ``1.0.0a2``) read the documentation built from their
+    development branch ``vX.Y`` (e.g. ``v1.0``), which describes
     features not yet merged into ``master``.
 
     Parameters
@@ -131,27 +133,51 @@ def resolve_config_path() -> str | None:
     return None
 
 
+#: Why the camera configuration could not be read, or None; set by
+#: ``load_config`` and reported by Localize when it opens.
+CONFIG_LOAD_ERROR: str | None = None
+
+
 def load_config() -> dict:
     """Load the camera configuration used by Picasso Localize.
 
     Reads ``~/.picasso/config.yaml`` if present, otherwise the legacy
-    in-package ``config.yaml`` (see ``resolve_config_path``).
+    in-package ``config.yaml`` (see ``resolve_config_path``). A file
+    that cannot be read does not stop Picasso: it is warned about, the
+    reason is kept in ``CONFIG_LOAD_ERROR`` and no camera is configured.
 
     Returns
     -------
     config : dict
-        The parsed configuration; an empty dict if neither file exists, it
-        cannot be read, or it parses to nothing.
+        The parsed configuration; an empty dict if neither file exists,
+        it cannot be read or parsed, or it parses to nothing.
     """
+    global CONFIG_LOAD_ERROR
+    CONFIG_LOAD_ERROR = None
     path = resolve_config_path()
     if path is None:
         return {}
     try:
         with open(path, "r") as config_file:
-            config = yaml.full_load(config_file)
-    except (FileNotFoundError, OSError):
+            config = yaml.safe_load(config_file)
+    except FileNotFoundError:
         return {}
-    return config if config is not None else {}
+    except OSError as error:
+        reason = f"it cannot be opened ({error})"
+    except yaml.YAMLError as error:
+        reason = f"it is not valid YAML:\n{error}"
+    else:
+        if config is None:
+            return {}
+        if isinstance(config, dict):
+            return config
+        reason = "it does not hold settings such as 'Cameras: ...'"
+    CONFIG_LOAD_ERROR = (
+        f"The camera configuration {path} could not be read, so no camera "
+        f"is configured: {reason}"
+    )
+    warnings.warn(CONFIG_LOAD_ERROR, stacklevel=2)
+    return {}
 
 
 CONFIG = load_config()

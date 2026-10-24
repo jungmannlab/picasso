@@ -19,7 +19,7 @@ Identification and fitting of single-molecule spots
 
 2. **Adjust the image contrast** so that the single-molecule spots are clearly visible.
 
-   - The quickest way is the two-handle slider at the bottom of the window, below the frame slider.
+   - The quickest way is the two-handle slider at the bottom of the window, below the frame slider. It can be hidden with ``contrast_slider: false`` in the ``Localize`` section of the user settings (see :ref:`user-settings-file`).
    - Alternatively, select ``View`` > ``Contrast`` to type in the black and white points, or to re-enable ``Auto``, which re-scales every frame to its own minimum and maximum.
 
 3. **Open the** ``Parameters`` **dialog** (select ``Analyze`` > ``Parameters``) to adjust spot identification and fit parameters.
@@ -42,9 +42,10 @@ Identification and fitting of single-molecule spots
 
 8. **Set the photon conversion** in the ``Photon conversion`` group: adjust ``EM Gain``, ``Baseline`` and ``Sensitivity`` according to your camera specifications and the experimental conditions.
 
-   - Set ``EM Gain`` to 1 for conventional output amplification.
-   - ``Baseline`` is the average dark camera count.
-   - ``Sensitivity`` is the conversion factor (electrons per analog-to-digital (A/D) count).
+   - ``EM Gain`` is the electron-multiplying gain of an EMCCD camera. Set it to 1 for conventional output amplification and for cameras without EM gain, such as sCMOS cameras.
+   - ``Baseline`` is the camera's offset, which the camera adds to every pixel: the average count of a frame recorded without light (e.g., with the shutter closed). It is neither the background of the sample nor zero for most cameras.
+   - ``Sensitivity`` is the conversion factor (electrons per analog-to-digital (A/D) count) of the readout mode the movie was recorded with.
+   - Localize the movie as the camera recorded it: background subtraction or rescaling (e.g., to 8 bit) changes the counts, so they no longer convert to photons.
 
    These parameters convert camera counts to photons. The fitted positions may depend on them, but the reported photon counts, background and localization precisions depend directly on them. The maximum-likelihood fit also assumes Poisson photon noise, so it works best with correct absolute photon counts.
 
@@ -64,37 +65,49 @@ Hovering the mouse cursor over a fit marker or over an identification box shows 
    :icon: code
    :class-container: api-example
 
-   The two steps also run one after the other, with the settings of the
-   dialog as arguments. ``identify_by_frame_number`` is the ``Preview``:
-   the spots of one frame with the current settings.
+   The two steps also run one after the other. The identification
+   settings of the dialog make up one ``IdentificationParameters``: the
+   ``method`` (``NetGradient`` with the ``Min. net gradient``, or the
+   wavelet settings, see :ref:`localize-wavelet`), the ``box`` and the
+   filters. ``identify_by_frame_number`` is the ``Preview``: the spots of
+   one frame with the current settings.
 
    .. code-block:: python
 
       from picasso import io, localize
 
       movie, info = io.load_movie("movie.tif")
-      camera_info = {
-          "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Qe": 1, "Pixelsize": 130
+      camera_info = {   # Pixelsize (nm) is required: the localizations are saved in nm
+          "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Pixelsize": 130
       }
 
-      # Preview: the spots of frame 100 with a box of 7 and a min. net gradient of 5000
-      spots = localize.identify_by_frame_number(movie, 5000, 7, 100)
-
-      # Identification of the whole movie
-      identifications, id_info = localize.identify(
-          movie, 5000, 7, progress_callback="console"
+      # a box of 7 (camera pixels) and a min. net gradient of 5000
+      parameters = localize.IdentificationParameters(
+          method=localize.NetGradient(5000), box=7
       )
 
-      # Fitting
-      locs, fit_info = localize.fit(
+      # Preview: the spots of frame 100
+      spots = localize.identify_by_frame_number(
+          movie, parameters.method, parameters.box, 100
+      )
+
+      # Identification of the whole movie
+      identifications, ids_info = localize.identify(
+          movie, info, parameters=parameters, progress="console"
+      )
+
+      # Fitting: the metadata now record the movie, the identification
+      # and the fit
+      locs, locs_info = localize.fit(
           movie,
+          ids_info,
           camera_info=camera_info,
           identifications=identifications,
           box=7,
           fitting_method="gaussmle",
-          progress_callback="console",
+          progress="console",
       )
-      io.save_locs("movie_locs.hdf5", locs, info + [id_info, fit_info])
+      io.save_locs("movie_locs.hdf5", locs, locs_info)
 
 
 .. _localize-remembered-parameters:
@@ -138,23 +151,22 @@ For a description of temporal median filtering in the wider context of SMLM anal
    :icon: code
    :class-container: api-example
 
-   ``temporal_median_window`` (``Window (frames)``) switches the filter on.
-   As in the GUI, it changes which spots are found, not how they are
-   fitted.
+   ``temporal_median_window`` (``Window (frames)``) of the
+   ``IdentificationParameters`` switches the filter on. As in the GUI, it
+   changes which spots are found, not how they are fitted.
 
    .. code-block:: python
 
-      identifications, id_info = localize.identify(
-          movie, 3000, 7, temporal_median_window=51
+      parameters = localize.IdentificationParameters(
+          method=localize.NetGradient(3000), box=7, temporal_median_window=51
       )
+      identifications, id_info = localize.identify(movie, parameters=parameters)
 
       # or for the whole pipeline
       locs, info = localize.localize(
           movie,
           camera_info=camera_info,
-          identification_parameters={
-              "Box Size": 7, "Min. Net Gradient": 3000, "Temporal Median Window": 51
-          },
+          identification_parameters=parameters,
           movie_info=info,
       )
 
@@ -166,7 +178,7 @@ Gaussian filter
 
 Spot identification looks for a *single* local maximum per spot. A non-Gaussian point spread function may break up into several local maxima, making identification challenging.
 
-Setting ``Gaussian filter sigma`` in the ``Identification`` group smooths each frame with a Gaussian of that standard deviation (in camera pixels) before spots are identified, which merges those maxima back into one.
+Setting ``Gaussian filter sigma`` in the ``Identification`` group smooths each frame with a Gaussian of that standard deviation before spots are identified, which merges those maxima back into one. Like the box size and the regions of interest, the sigma is a quantity of the raw image and is therefore given in camera pixels, not in nm.
 
 A sigma of 0 (the default, shown as ``Off``) disables the filter. Enable ``Preview`` and adapt the value of the filter until the expected regions are outlined successfully.
 
@@ -183,15 +195,15 @@ Unlike the temporal median filter, the Gaussian filter *is applied when calibrat
    :icon: code
    :class-container: api-example
 
-   ``gaussian_filter_sigma`` is the ``Gaussian filter sigma`` of the
-   dialog, in camera pixels (``"Gaussian Filter Sigma"`` in
-   ``identification_parameters``).
+   ``gaussian_filter_sigma`` of the ``IdentificationParameters`` is the
+   ``Gaussian filter sigma`` of the dialog, in camera pixels.
 
    .. code-block:: python
 
-      identifications, id_info = localize.identify(
-          movie, 5000, 7, gaussian_filter_sigma=1.0
+      parameters = localize.IdentificationParameters(
+          method=localize.NetGradient(5000), box=7, gaussian_filter_sigma=1.0
       )
+      identifications, id_info = localize.identify(movie, parameters=parameters)
 
 
 .. _localize-wavelet:
@@ -243,15 +255,20 @@ Things to keep in mind:
    :icon: code
    :class-container: api-example
 
-   ``noise`` is ``"image_std"`` or ``"w1_mad"``. The net gradient argument
-   is not used by the wavelet method and can be ``None``.
+   The wavelet settings take the place of ``NetGradient`` as the
+   ``method``; ``noise`` is ``"image_std"`` or ``"w1_mad"``.
 
    .. code-block:: python
 
       from picasso import localize, wavelet
 
-      params = wavelet.WaveletParameters(threshold=0.5, noise="image_std", min_area=4)
-      identifications, id_info = localize.identify(movie, None, 7, wavelet=params)
+      parameters = localize.IdentificationParameters(
+          method=wavelet.WaveletParameters(
+              threshold=0.5, noise="image_std", min_area=4
+          ),
+          box=7,
+      )
+      identifications, id_info = localize.identify(movie, parameters=parameters)
 
 
 
@@ -281,20 +298,35 @@ If ROIs overlap, Picasso automatically trims them so that no spot is detected tw
    :class-container: api-example
 
    ROIs are given as ``[[y_min, x_min], [y_max, x_max]]`` in camera pixels;
-   ``clip_rois`` trims overlapping ones like the GUI does.
+   ``clip_rois`` trims overlapping ones like the GUI does. A list of
+   methods gives each ROI its own threshold.
 
    .. code-block:: python
 
       rois = [[[0, 0], [256, 256]], [[0, 256], [256, 512]]]
       rois = localize.clip_rois(rois, min_size=7)
 
-      identifications, id_info = localize.identify(movie, 5000, 7, roi=rois)
+      parameters = localize.IdentificationParameters(
+          method=localize.NetGradient(5000), box=7
+      )
+      identifications, id_info = localize.identify(
+          movie, parameters=parameters, roi=rois
+      )
+
+      # one threshold per ROI
+      per_roi = localize.IdentificationParameters(
+          method=[localize.NetGradient(5000), localize.NetGradient(3000)],
+          box=7,
+      )
+      identifications, id_info = localize.identify(
+          movie, parameters=per_roi, roi=rois
+      )
 
       # or for the whole pipeline; the localizations get the roi_id column
       locs, info = localize.localize(
           movie,
           camera_info=camera_info,
-          identification_parameters={"Box Size": 7, "Min. Net Gradient": 5000},
+          identification_parameters=parameters,
           roi=rois,
           movie_info=info,
       )
@@ -455,7 +487,9 @@ Save spots
 
       import numpy as np
 
-      spots = localize.get_spots(movie, identifications, 7, camera_info)  # (N, 7, 7)
+      spots = localize.get_spots(
+          movie, identifications, box=7, camera_info=camera_info
+      )  # (N, 7, 7)
       np.save("movie_spots.npy", spots)
 
 

@@ -10,8 +10,8 @@ one), and the same correction coming in twice must be applied once.
 ``picasso.zfit`` does the applying; what is tested here is the window's
 part of it: which corrections reach the fit, that a 3D run applies them
 after the z fit rather than before, and that the file says which ones
-were applied - the workers discard the info their fit returns, so
-without that the GUI would leave no record where the CLI leaves one.
+were applied - the window saves the metadata its fit returns, so a GUI
+run leaves the same record as the CLI.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -88,6 +88,8 @@ def _dialog(z_calibration=None, spline_calibration=None):
         lateral_transforms=[],
         affine_calibration_paths=[],
         affine_calib_label=_Label(),
+        # converts calibrations from before Picasso 1.0 (camera pixels)
+        pixelsize=types.SimpleNamespace(value=lambda: 130),
     )
     for name in (
         "update_affine_calib",
@@ -105,7 +107,9 @@ def _dialog(z_calibration=None, spline_calibration=None):
 def _load(dialog, files, monkeypatch, warnings_seen=None):
     """Run the real ``update_affine_calib`` on in-memory calibrations."""
     monkeypatch.setattr(
-        gui_localize.io, "load_any_calibration", lambda path: files[path]
+        gui_localize.io,
+        "load_any_calibration",
+        lambda path, pixelsize=None: files[path],
     )
     monkeypatch.setattr(
         gui_localize.QtWidgets.QMessageBox,
@@ -132,12 +136,13 @@ def _window(dialog, locs, status=None):
         ),
         abort_action=types.SimpleNamespace(setEnabled=lambda _: None),
         _active_worker=None,
-        _applied_lateral=[],
+        # the metadata of the 2D fit, with the camera information
+        extra_info=list(INFO),
         on_fit_z_progress=lambda *a: None,
         on_fit_z_finished=lambda *a: None,
         on_worker_aborted=lambda *a: None,
     )
-    for name in ("_extra_lateral_transforms", "_record_applied_lateral"):
+    for name in ("_extra_lateral_transforms", "_report_skipped_lateral"):
         setattr(
             window,
             name,
@@ -148,7 +153,8 @@ def _window(dialog, locs, status=None):
 
 def _run_fit_z(window, monkeypatch):
     """Drive ``Window.fit_z``, then the real worker body on what it built,
-    returning the finished localizations and the worker."""
+    returning the finished localizations, their metadata and the
+    worker."""
     real = gui_localize.FitZWorker
     built = {}
 
@@ -170,10 +176,9 @@ def _run_fit_z(window, monkeypatch):
             worker = types.SimpleNamespace(
                 **dict(zip(self.FIELDS, args)),
                 lateral_transforms=kwargs.get("lateral_transforms") or [],
-                applied_lateral_transforms=[],
                 skipped_lateral_transforms=[],
                 isInterruptionRequested=lambda: False,
-                on_progress=lambda n: None,
+                on_progress=lambda n, maximum: None,
             )
             built["worker"] = worker
             for signal in ("progressMade", "finished", "aborted"):
@@ -203,11 +208,11 @@ def _run_fit_z(window, monkeypatch):
     worker = built["worker"]
     out = {}
     worker.finished = types.SimpleNamespace(
-        emit=lambda locs, dt: out.update(locs=locs)
+        emit=lambda locs, info, dt: out.update(locs=locs, info=info)
     )
     real.run(worker)
-    window._record_applied_lateral(worker)
-    return out["locs"], worker
+    window._report_skipped_lateral(worker)
+    return out["locs"], out["info"], worker
 
 
 def _appended_reference(locs, *entries):
@@ -338,7 +343,7 @@ class TestZFitAppliesThem:
         )
         window = _window(dialog, locs)
 
-        out, worker = _run_fit_z(window, monkeypatch)
+        out, info, _ = _run_fit_z(window, monkeypatch)
 
         np.testing.assert_allclose(
             out["x"].to_numpy(), reference["x"].to_numpy(), atol=1e-6
@@ -350,7 +355,8 @@ class TestZFitAppliesThem:
         np.testing.assert_allclose(
             out["z"].to_numpy(), reference["z"].to_numpy(), atol=1e-6
         )
-        assert worker.applied_lateral_transforms == [
+        assert info[-1]["Step"] == "Fit 3D"
+        assert info[-1]["Lateral corrections applied"] == [
             "astigmatism, affine",
             "chromatic, affine",
         ]
@@ -371,7 +377,7 @@ class TestZFitAppliesThem:
         )
         window = _window(dialog, locs)
 
-        out, _ = _run_fit_z(window, monkeypatch)
+        out, _, _ = _run_fit_z(window, monkeypatch)
 
         plain, _ = zfit.zfit(
             locs,
@@ -402,7 +408,7 @@ class TestZFitAppliesThem:
         status = []
         window = _window(dialog, locs, status=status)
 
-        out, worker = _run_fit_z(window, monkeypatch)
+        out, info, _ = _run_fit_z(window, monkeypatch)
 
         once, _ = zfit.zfit(
             locs,
@@ -414,28 +420,41 @@ class TestZFitAppliesThem:
         np.testing.assert_allclose(
             out["x"].to_numpy(), once["x"].to_numpy(), atol=1e-6
         )
-        assert worker.applied_lateral_transforms == ["astigmatism, affine"]
+        assert info[-1]["Lateral corrections applied"] == [
+            "astigmatism, affine"
+        ]
         assert any("already applied by the calibration" in m for m in status)
 
 
 class TestTheFitLeavesARecord:
-    """The workers throw away the info their fit returns, so the window has
-    to carry what was applied into the saved metadata itself."""
+    """The window saves the metadata its fit returns, which names the
+    corrections the fit applied - a separately loaded one has no other
+    trace in the file."""
 
     @staticmethod
-    def _fit_worker(fit_z, monkeypatch, locs):
-        """``FitWorker`` with the fit itself stubbed out, run to
-        completion."""
+    def _fit_worker(fit_z, monkeypatch, locs, lateral_transforms):
+        """``FitWorker`` around the real ``localize.fit``, with only the
+        cutting and fitting of the spots stubbed out (the fit returns
+        ``locs``), run to completion. Returns the localizations and the
+        metadata it emitted."""
+        monkeypatch.setattr(
+            gui_localize.localize, "_validate_fit_args", lambda *a: None
+        )
         monkeypatch.setattr(
             gui_localize.localize,
-            "fit",
-            lambda **kwargs: (locs, list(INFO)),
+            "get_spots",
+            lambda *a, **k: (None, None),
+        )
+        monkeypatch.setattr(
+            gui_localize.localize,
+            "_dispatch_fit",
+            lambda **kwargs: locs.copy(),
         )
         out = {}
         worker = types.SimpleNamespace(
             movie=None,
-            movie_info=list(INFO),
-            camera_info={},
+            info=list(INFO),
+            camera_info={"Pixelsize": 130, "Gain": 1},
             identifications=locs,
             box=7,
             eps=None,
@@ -444,21 +463,33 @@ class TestTheFitLeavesARecord:
             fit_z=fit_z,
             calibrate_z=False,
             spline_calibration=None,
-            lateral_transforms=[_entry("chromatic", CHROMATIC)],
-            applied_lateral_transforms=[],
+            lateral_transforms=lateral_transforms,
             camera_calibration=None,
             N=len(locs),
             isInterruptionRequested=lambda: False,
-            on_progress=lambda n: None,
-            on_cut_progress=lambda n: None,
+            on_progress=lambda n, maximum: None,
+            on_phase=lambda label, maximum: None,
             progressMade=types.SimpleNamespace(emit=lambda *a: None),
             aborted=types.SimpleNamespace(emit=lambda *a: None),
+            failed=types.SimpleNamespace(
+                emit=lambda message: out.update(failed=message)
+            ),
             finished=types.SimpleNamespace(
-                emit=lambda locs, *a: out.update(locs=locs)
+                emit=lambda locs, info, *a: out.update(locs=locs, info=info)
             ),
         )
         gui_localize.FitWorker.run(worker)
-        return out["locs"], worker
+        assert "failed" not in out, out.get("failed")
+        return out["locs"], out["info"]
+
+    @staticmethod
+    def _applied(info):
+        """Every correction the metadata ``info`` says was applied."""
+        return [
+            description
+            for entry in info
+            for description in entry.get("Lateral corrections applied", [])
+        ]
 
     def test_the_2d_fit_holds_them_back_for_the_z_fit(self, monkeypatch):
         """With a z fit to follow, ``FitWorker`` must not apply them: they
@@ -467,19 +498,23 @@ class TestTheFitLeavesARecord:
         twice."""
         locs = _locs()
 
-        out, worker = self._fit_worker(True, monkeypatch, locs)
+        out, info = self._fit_worker(
+            True, monkeypatch, locs, [_entry("chromatic", CHROMATIC)]
+        )
 
         np.testing.assert_array_equal(
             out["x"].to_numpy(), locs["x"].to_numpy()
         )
-        assert worker.applied_lateral_transforms == []
+        assert self._applied(info) == []
 
     def test_a_2d_fit_applies_them_itself(self, monkeypatch):
-        """Without a z fit there is nothing to wait for, so the same worker
+        """Without a z fit there is nothing to wait for, so the same fit
         applies them and records what it applied."""
         locs = _locs()
 
-        out, worker = self._fit_worker(False, monkeypatch, locs)
+        out, info = self._fit_worker(
+            False, monkeypatch, locs, [_entry("chromatic", CHROMATIC)]
+        )
 
         np.testing.assert_allclose(
             out["x"].to_numpy(), locs["x"].to_numpy() + 5.0
@@ -487,87 +522,58 @@ class TestTheFitLeavesARecord:
         np.testing.assert_allclose(
             out["y"].to_numpy(), locs["y"].to_numpy() + 2.0
         )
-        assert worker.applied_lateral_transforms == ["chromatic, affine"]
+        assert info[-1]["Step"] == "Affine correction"
+        assert info[-1]["Lateral corrections applied"] == ["chromatic, affine"]
+
+    @staticmethod
+    def _save(monkeypatch, extra_info):
+        """Run ``Window.save_locs`` on the metadata ``extra_info``,
+        returning the metadata it saved."""
+        saved = {}
+        monkeypatch.setattr(
+            gui_localize.io,
+            "save_locs",
+            lambda path, locs, info: saved.update(info=info),
+        )
+        window = types.SimpleNamespace(
+            locs=_locs(),
+            extra_info=extra_info,
+            select_locs_columns=lambda: None,
+        )
+        gui_localize.Window.save_locs(window, "out.hdf5")
+        return saved["info"]
 
     def test_save_locs_names_what_was_applied(self, monkeypatch):
         """``Lateral corrections applied`` in the file, as the CLI writes -
-        a separately loaded correction has no other trace in the metadata."""
-        saved = {}
-        monkeypatch.setattr(
-            gui_localize.io,
-            "save_locs",
-            lambda path, locs, info: saved.update(info=info),
+        here a 3D calibration carrying the astigmatism correction and a
+        separately loaded chromatic one."""
+        dialog = _dialog(
+            z_calibration=_calibration(_entry("astigmatism", ASTIG))
         )
-        monkeypatch.setattr(
-            gui_localize.io, "strip_mm_metadata", lambda info: list(info)
+        _load(
+            dialog,
+            {
+                "chromatic.yaml": lib.append_lateral_transform(
+                    {}, _entry("chromatic", CHROMATIC)
+                )
+            },
+            monkeypatch,
         )
-        window = types.SimpleNamespace(
-            locs=_locs(),
-            info=list(INFO),
-            camera_info={"Pixelsize": 130},
-            last_identification_info={},
-            _applied_lateral=["astigmatism, affine", "chromatic, affine"],
-            _region_suffix=None,
-            channels=[],
-            parameters_dialog=types.SimpleNamespace(
-                fit_model=types.SimpleNamespace(
-                    currentText=lambda: "2D elliptical Gaussian"
-                ),
-                fit_optimizer=types.SimpleNamespace(
-                    currentText=lambda: "Least squares"
-                ),
-                fit_z_checkbox=types.SimpleNamespace(isChecked=lambda: True),
-                z_calibration=dict(CALIB_3D),
-                z_calibration_path="astig_3d_calib.yaml",
-                camera_calibration={},
-                affine_calibration_paths=["chromatic.yaml"],
-            ),
-            fit_mode=lambda: gui_localize.FIT_MODE_JOINT,
-            select_locs_columns=lambda: None,
-        )
+        window = _window(dialog, _locs())
+        _, info, _ = _run_fit_z(window, monkeypatch)
 
-        gui_localize.Window.save_locs(window, "out.hdf5")
+        saved = self._save(monkeypatch, info)
 
-        info = saved["info"][-1]
-        assert info["Lateral corrections applied"] == [
+        assert saved == info
+        assert self._applied(saved) == [
             "astigmatism, affine",
             "chromatic, affine",
         ]
-        assert info["Lateral correction paths"] == ["chromatic.yaml"]
 
     def test_nothing_applied_says_nothing(self, monkeypatch):
-        saved = {}
-        monkeypatch.setattr(
-            gui_localize.io,
-            "save_locs",
-            lambda path, locs, info: saved.update(info=info),
-        )
-        monkeypatch.setattr(
-            gui_localize.io, "strip_mm_metadata", lambda info: list(info)
-        )
-        window = types.SimpleNamespace(
-            locs=_locs(),
-            info=list(INFO),
-            camera_info={},
-            last_identification_info={},
-            _applied_lateral=[],
-            _region_suffix=None,
-            channels=[],
-            parameters_dialog=types.SimpleNamespace(
-                fit_model=types.SimpleNamespace(
-                    currentText=lambda: "2D elliptical Gaussian"
-                ),
-                fit_optimizer=types.SimpleNamespace(
-                    currentText=lambda: "Least squares"
-                ),
-                fit_z_checkbox=types.SimpleNamespace(isChecked=lambda: False),
-                camera_calibration={},
-                affine_calibration_paths=[],
-            ),
-            fit_mode=lambda: gui_localize.FIT_MODE_JOINT,
-            select_locs_columns=lambda: None,
-        )
+        _, info = self._fit_worker(False, monkeypatch, _locs(), [])
 
-        gui_localize.Window.save_locs(window, "out.hdf5")
+        saved = self._save(monkeypatch, info)
 
-        assert "Lateral corrections applied" not in saved["info"][-1]
+        assert self._applied(saved) == []
+        assert saved[-1]["Step"] == "Fit 2D"

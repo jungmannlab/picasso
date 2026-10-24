@@ -12,15 +12,19 @@ General purpose library for handling input and output of files.
 from __future__ import annotations
 
 import abc
+import copy
 import datetime
+import functools
 import logging
 import re
 import json
 import os
 import shutil
+import tempfile
 import threading
 import warnings
-from typing import Callable, TYPE_CHECKING
+import weakref
+from typing import Callable, Literal, TYPE_CHECKING
 
 import tifffile
 import yaml
@@ -30,21 +34,18 @@ import numpy as np
 import pandas as pd
 
 if TYPE_CHECKING:
-    from PyQt6 import QtWidgets
+    from . import spinna
 
-from . import lib, __version__
+from . import lib, __version__, docs_url
 
 from .ext import bitplane
-
-if bitplane.IMSWRITER:
-    from .ext.bitplane import IMSFile
+from .ext.bitplane import IMSFile
 
 # Optional vendor readers for Zeiss .czi and Leica .lif movies. Both are
 # Christoph Gohlke's BSD-licensed libraries (same author as tifffile)
 # and require Python >= 3.12, so they are optional dependencies (extras
 # ``czi`` / ``lif``). When absent, the corresponding extensions are
-# simply not advertised and the loaders raise a helpful ImportError,
-# mirroring how ``.ims`` is gated on ``bitplane.IMSWRITER``.
+# simply not advertised and the loaders raise a helpful ImportError.
 try:
     import czifile
 except ImportError:
@@ -53,6 +54,67 @@ try:
     import liffile
 except ImportError:
     liffile = None
+
+__all__ = [
+    # localizations
+    "load_locs",
+    "save_locs",
+    "validate_locs",
+    "get_format_version",
+    "check_format_version",
+    "FORMAT_VERSION",
+    "LOCS_FORMAT_VERSION",
+    "MINIMUM_COLUMNS",
+    "MINIMUM_METADATA_KEYS",
+    "load_info",
+    "save_info",
+    "save_datasets",
+    # movies
+    "load_movie",
+    "load_movie_all",
+    "load_tif_concatenated",
+    "find_tif_movies",
+    "save_raw",
+    "AbstractPicassoMovie",
+    "ConcatenatedTiffMovie",
+    # calibrations
+    "load_any_calibration",
+    "save_any_calibration",
+    "load_calibration",
+    "save_calibration",
+    "load_spline_calibration",
+    "save_spline_calibration",
+    "load_camera_calibration",
+    "save_camera_calibration",
+    # identifications, picks, drift, masks and structures
+    "load_identifications",
+    "save_identifications",
+    "load_picks",
+    "save_picks",
+    "picks_dict",
+    "load_drift",
+    "save_drift",
+    "load_mask",
+    "load_structures",
+    # other software
+    "import_ts",
+    "export_thunderstorm",
+    "import_smap",
+    "export_smap",
+    "import_pyme",
+    "split_pyme_channels",
+    "export_pyme",
+    "export_pyme_multi",
+    "export_txt_imagej",
+    "export_txt_nis",
+    "export_xyz_chimera",
+    "export_3d_visp",
+    # errors
+    "NoMetadataFileError",
+    "FileFormatError",
+    "MissingPixelsizeError",
+    "PathTooLongError",
+]
 
 
 # MicroManager OME-TIFF files make tifffile log a couple of benign
@@ -89,9 +151,156 @@ MOVIE_EXTENSIONS = (
 # abortable; smaller blocks report more often but read more slowly.
 LOCS_BLOCK_SIZE = 1_000_000
 
+#: Version of the file format Picasso writes, as ``"MAJOR.MINOR"``. The
+#: minor version grows with additions that older readers can ignore
+#: (e.g., a new optional column, group or attribute), the major version
+#: when the meaning of existing content changes, so ``load_locs``
+#: refuses files of a newer major version. Format 1.0 stores every
+#: length in nm. Files without a version were written before Picasso
+#: 1.0, with lengths in camera pixels; Picasso converts them when they
+#: are loaded (see ``picasso.legacy``). See ``docs/files.rst``.
+FORMAT_VERSION = "1.0"
+#: The format version of localization files; the same as
+#: ``FORMAT_VERSION``, kept under its earlier name.
+LOCS_FORMAT_VERSION = FORMAT_VERSION
+#: Name of the format marker: the root attribute of an .hdf5 file, the
+#: key of a .yaml file and the header line of a drift .txt file that
+#: hold the format version; ``PICASSO_VERSION_ATTR`` holds the version
+#: of Picasso that wrote the file.
+FORMAT_VERSION_ATTR = "picasso_format"
+PICASSO_VERSION_ATTR = "picasso_version"
+#: Columns and metadata keys every localization file needs, see
+#: ``validate_locs``. ``Pixelsize`` (nm) is needed because the field of
+#: view is given by ``Width`` and ``Height`` in camera pixels.
+MINIMUM_COLUMNS = ("frame", "x", "y", "lpx", "lpy")
+MINIMUM_METADATA_KEYS = ("Width", "Height", "Frames", "Pixelsize")
+
+_log = logging.getLogger(__name__)
+
 
 class NoMetadataFileError(FileNotFoundError):
     """Raised when a movie or localizations file has no metadata sidecar."""
+
+
+class FileFormatError(ValueError):
+    """Raised when a file does not follow the Picasso format: a
+    localization file that lacks required columns or metadata keys or
+    holds invalid values, or any file Picasso writes (localizations,
+    picks, drift, calibrations, ...) in a newer, incompatible format
+    version (see ``check_format_version``)."""
+
+
+class MissingPixelsizeError(FileFormatError):
+    """Raised when a file written before Picasso 1.0 (lengths in camera
+    pixels) is loaded or converted without the camera pixel size that
+    converts it to nm: the file does not record it and none was passed.
+    GUIs catch it to ask the user for the pixel size."""
+
+
+class PathTooLongError(OSError):
+    """Raised on Windows when a file is loaded from a path that Windows
+    cannot open because it is too long: a full path longer than 259
+    characters (without long paths enabled) or a folder or file name
+    longer than 255 characters. Without this check, such a file is
+    reported as missing or unreadable."""
+
+
+# Windows' MAX_PATH counts the terminating null character
+_WINDOWS_MAX_PATH = 259
+_MAX_NAME_LENGTH = 255
+_LONG_PATHS_URL = (
+    "https://learn.microsoft.com/en-us/windows/win32/fileio/"
+    "maximum-file-path-limitation"
+)
+
+
+@functools.cache
+def _windows_long_paths_enabled() -> bool:
+    """Whether Windows allows paths longer than ``_WINDOWS_MAX_PATH``
+    (the registry value ``LongPathsEnabled``, which Windows reads once
+    per process, hence the cache)."""
+    import winreg
+
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SYSTEM\CurrentControlSet\Control\FileSystem",
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, "LongPathsEnabled")
+    except OSError:
+        return False
+    return value == 1
+
+
+def _check_path_length(path: str) -> None:
+    """Raise a readable error if ``path`` is too long to be opened on
+    Windows; does nothing on other systems.
+
+    On Windows, the full path may have at most 259 characters, unless
+    long paths are enabled in Windows (or the path starts with
+    ``\\\\?\\``), and a folder or file name at most 255 characters.
+    Files whose path breaks either limit cannot be opened, which Windows
+    and the file readers report as a missing file or a cryptic error.
+
+    Parameters
+    ----------
+    path : str
+        The path to check.
+
+    Raises
+    ------
+    PathTooLongError
+        If ``path`` is too long to be opened.
+    """
+    if os.name != "nt":
+        return
+    path = os.fspath(path)
+    absolute = os.path.abspath(path)
+    for name in re.split(r"[\\/]", absolute):
+        # Windows counts UTF-16 code units
+        length = len(name.encode("utf-16-le")) // 2
+        if length > _MAX_NAME_LENGTH:
+            raise PathTooLongError(
+                f"The name '{name}' is too long: it has {length} "
+                f"characters, more than the {_MAX_NAME_LENGTH} Windows "
+                f"allows, so {path} cannot be opened. Rename it to a "
+                "shorter name."
+            )
+    if (
+        len(absolute) > _WINDOWS_MAX_PATH
+        and not absolute.startswith("\\\\?\\")
+        and not _windows_long_paths_enabled()
+    ):
+        raise PathTooLongError(
+            f"The path is too long: it has {len(absolute)} characters, "
+            f"more than the {_WINDOWS_MAX_PATH} Windows allows, so "
+            f"{absolute} cannot be opened. Move the file to a folder "
+            "closer to the drive (e.g., C:\\data) or shorten the folder "
+            "and file names. Alternatively, enable long paths in Windows "
+            f"(administrator rights needed): {_LONG_PATHS_URL}"
+        )
+
+
+def _legacy_pixelsize(pixelsize, info, path: str) -> float:
+    """The camera pixel size that converts a file written before Picasso
+    1.0 to nm: ``pixelsize`` if given, else ``Pixelsize`` of ``info``.
+
+    Raises
+    ------
+    MissingPixelsizeError
+        If neither is available.
+    """
+    if pixelsize is None:
+        pixelsize = lib.get_from_metadata(info, "Pixelsize")
+    if pixelsize is None:
+        raise MissingPixelsizeError(
+            f"{path} was written before Picasso 1.0, with lengths in camera "
+            "pixels, and its metadata does not record the camera pixel size "
+            "(Pixelsize). Pass pixelsize (nm) to convert it to nm, or "
+            "convert the file once with picasso convert-units. See "
+            f"{docs_url('files.html#files-legacy')}"
+        )
+    return float(pixelsize)
 
 
 def _user_settings_filename() -> str:
@@ -158,10 +367,220 @@ def notification_sounds_directory() -> str:
     return directory
 
 
+class SpillError(OSError):
+    """Raised when a table cannot be moved to disk or read back, see
+    ``SpilledFrame``."""
+
+
+def _spill_root() -> str:
+    return os.path.join(os.path.expanduser("~"), ".picasso", "spill")
+
+
+def spill_directory() -> str:
+    """Return the folder of the tables moved to disk while a GUI is idle
+    (``~/.picasso/spill``), see ``SpilledFrame``.
+
+    The directory is created if it does not yet exist. It sits next to
+    ``~/.picasso/settings.yaml`` rather than in the system's temporary
+    folder, which the operating system may clean up (e.g., Windows
+    Storage Sense) while the data is still needed.
+
+    Returns
+    -------
+    directory : str
+        ``~/.picasso/spill``.
+    """
+    directory = _spill_root()
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+
+def remove_stale_spills(directory: str | None = None) -> None:
+    """Remove the folders of ``SpilledFrame`` left behind by processes
+    that no longer run, e.g., after a crash.
+
+    Parameters
+    ----------
+    directory : str, optional
+        Folder to clean up. Default is ``~/.picasso/spill``.
+    """
+    import psutil
+
+    directory = _spill_root() if directory is None else directory
+    if not os.path.isdir(directory):
+        return
+    for name in os.listdir(directory):
+        pid = name.split("-", 1)[0]
+        if pid.isdigit() and not psutil.pid_exists(int(pid)):
+            shutil.rmtree(os.path.join(directory, name), ignore_errors=True)
+
+
+class SpilledFrame:
+    """A ``pd.DataFrame`` moved to disk to free its memory, to be read
+    back with ``load``.
+
+    Each column is written to its own ``.npy`` file in a new, private
+    folder of ``spill_directory()``, straight from the column's memory,
+    i.e., without a second copy of the table at a time when memory is
+    short. What was written is checked before the constructor returns,
+    so the caller can then drop the table. The column names, ``attrs``
+    and the index's name stay in memory. The folder is removed by
+    ``discard``, or once nothing references this object any more, or
+    when the interpreter exits; its name starts with the process ID,
+    so that a crashed process' folders are removed later
+    (``remove_stale_spills``).
+
+    Only numeric and boolean columns (and indices) can be moved.
+
+    Parameters
+    ----------
+    frame : pd.DataFrame
+        The table to move to disk.
+    directory : str, optional
+        Folder to create the table's folder in. Default is
+        ``spill_directory()``.
+
+    Attributes
+    ----------
+    path : str
+        The table's folder.
+    n_rows : int
+        Number of rows of the table.
+    nbytes : int
+        Size of the table's columns in bytes.
+
+    Raises
+    ------
+    SpillError
+        If the table cannot be moved: a column that is not numeric
+        (e.g., text), too little free disk space (``nbytes`` plus
+        ``SPILL_DISK_RESERVE``) or a failed write. Nothing is left on
+        disk then.
+    """
+
+    #: Free disk space (bytes) left over after a table was moved to
+    #: disk, so that moving it never fills the disk.
+    SPILL_DISK_RESERVE = 2**30
+
+    def __init__(
+        self, frame: pd.DataFrame, directory: str | None = None
+    ) -> None:
+        index = frame.index
+        self._default_index = (
+            isinstance(index, pd.RangeIndex)
+            and index.start == 0
+            and index.step == 1
+        )
+        dtypes = list(frame.dtypes)
+        if not self._default_index:
+            dtypes.append(index.dtype)
+        for dtype in dtypes:
+            if not isinstance(dtype, np.dtype) or dtype.kind not in "biufcmM":
+                raise SpillError(f"{dtype} data cannot be moved to disk")
+        self.columns = frame.columns
+        self.attrs = dict(frame.attrs)
+        self._index_name = index.name
+        self.n_rows = len(frame)
+        arrays = [frame.iloc[:, i].to_numpy() for i in range(frame.shape[1])]
+        if not self._default_index:
+            arrays.append(index.to_numpy())
+        self.nbytes = sum(array.nbytes for array in arrays)
+        if directory is None:
+            directory = spill_directory()
+        free = shutil.disk_usage(directory).free
+        if free < self.nbytes + self.SPILL_DISK_RESERVE:
+            raise SpillError(
+                f"{self.nbytes / 1e6:.0f} MB do not fit on the disk of"
+                f" {directory} ({free / 1e6:.0f} MB free)"
+            )
+        # private to the user (mode 0700)
+        self.path = tempfile.mkdtemp(prefix=f"{os.getpid()}-", dir=directory)
+        try:
+            for i, array in enumerate(arrays):
+                np.save(self._file(i), array, allow_pickle=False)
+            for i, array in enumerate(arrays):
+                written = np.load(self._file(i), mmap_mode="r")
+                complete = (
+                    written.shape == array.shape
+                    and written.dtype == array.dtype
+                )
+                # closes the file, also before raising, as Windows cannot
+                # remove an open one
+                del written
+                if not complete:
+                    raise SpillError(f"{self._file(i)} was not written")
+        except Exception as error:
+            shutil.rmtree(self.path, ignore_errors=True)
+            if isinstance(error, SpillError):
+                raise
+            raise SpillError(f"writing to {self.path} failed: {error}") from (
+                error
+            )
+        self._remove = weakref.finalize(
+            self, shutil.rmtree, self.path, ignore_errors=True
+        )
+        self._loaded = None  # weak reference to the table read back
+
+    def _file(self, i: int) -> str:
+        return os.path.join(self.path, f"{i}.npy")
+
+    def load(self) -> pd.DataFrame:
+        """Read the table back. The folder stays, see ``discard``.
+
+        While the table read back is in use, loading again returns that
+        same table (see ``loaded``), so that holders of a shared table
+        that read it back one after the other share it again.
+
+        Returns
+        -------
+        frame : pd.DataFrame
+            The table as it was moved to disk.
+
+        Raises
+        ------
+        SpillError
+            If the table cannot be read back, e.g., because its folder
+            was deleted.
+        """
+        frame = self.loaded()
+        if frame is not None:
+            return frame
+        n_arrays = len(self.columns) + (not self._default_index)
+        try:
+            arrays = [
+                np.load(self._file(i), allow_pickle=False)
+                for i in range(n_arrays)
+            ]
+        except Exception as error:
+            raise SpillError(
+                f"reading the table moved to {self.path} failed: {error}"
+            ) from error
+        if any(len(array) != self.n_rows for array in arrays):
+            raise SpillError(f"the table moved to {self.path} is incomplete")
+        if self._default_index:
+            index = pd.RangeIndex(self.n_rows)
+        else:
+            index = pd.Index(arrays.pop(), name=self._index_name)
+        # by position, as column names may repeat; no copies
+        frame = pd.DataFrame(dict(enumerate(arrays)), index=index, copy=False)
+        frame.columns = self.columns
+        frame.attrs = self.attrs
+        self._loaded = weakref.ref(frame)
+        return frame
+
+    def loaded(self) -> pd.DataFrame | None:
+        """The table read back by ``load``, while it is in use, else
+        None."""
+        return None if self._loaded is None else self._loaded()
+
+    def discard(self) -> None:
+        """Remove the table's folder from the disk."""
+        self._remove()
+
+
 def load_raw(
     path: str,
     prompt_info: Callable[[None], tuple[dict, bool]] | None = None,
-    progress: None = None,
 ) -> tuple[np.memmap, list[dict]]:
     """Load a raw movie file and its metadata.
 
@@ -171,8 +590,6 @@ def load_raw(
         The path to the raw movie file.
     prompt_info : Callable, optional
         A function to call for additional information if needed.
-    progress : None, optional
-        A placeholder for progress tracking, not used in this function.
 
     Returns
     -------
@@ -182,6 +599,7 @@ def load_raw(
     info : list of dicts
         A list containing a dictionary with metadata about the movie.
     """
+    _check_path_length(path)
     try:
         info = load_info(path)
     except FileNotFoundError as error:
@@ -218,7 +636,10 @@ def load_ims(
     path : str
         The path to the IMS movie file.
     prompt_info : Callable, optional
-        A function to call for additional information if needed.
+        Called with the channel names of a multi-channel file; returns
+        the channel to load. Without it (e.g. command-line batch
+        processing), or if it returns None (canceled), the first channel
+        is loaded.
 
     Returns
     -------
@@ -226,21 +647,22 @@ def load_ims(
         Custom wrapper around IMS file(s).
     info : list of dicts
         A list containing a dictionary with metadata about the movie.
+
+    Raises
+    ------
+    ValueError
+        If ``prompt_info`` returns a channel the file does not have.
     """
-    if not bitplane.IMSWRITER:
-        raise ImportError(".ims files are only supported on Windows machines.")
+    _check_path_length(path)
     file = IMSFile(path)
 
-    if len(file.channels) > 1:
-        # Default to Channel 0 when causing localizer
-        if prompt_info is None:
-            channel = "Channel 0"
-        else:
-            channel = prompt_info(file.channels)
-        file.set_channel(channel)
-
-    else:
-        channel = "Channel 0"
+    channel = file.channels[0]
+    if len(file.channels) > 1 and prompt_info is not None:
+        choice = prompt_info(file.channels)
+        # Canceling the prompt keeps the first channel, as for .czi/.lif.
+        if choice is not None:
+            file.set_channel(choice)
+            channel = choice
 
     file.read_movie()
 
@@ -287,6 +709,7 @@ def load_ims_all(path: str) -> tuple[list[np.memmap], list[list[dict]]]:
         A list of lists containing dictionaries with metadata about each
         movie channel.
     """
+    _check_path_length(path)
     file = IMSFile(path)
 
     movies = []
@@ -338,7 +761,7 @@ def save_config(CONFIG: dict) -> None:
 
     os.makedirs(user_config_dir(), exist_ok=True)
     with open(config_filename(), "w") as config_file:
-        yaml.dump(CONFIG, config_file, width=1000)
+        _dump_yaml(CONFIG, config_file, width=1000)
 
 
 def save_raw(path: str, movie: lib.IntArray3D, info: dict) -> None:
@@ -359,7 +782,10 @@ def save_raw(path: str, movie: lib.IntArray3D, info: dict) -> None:
 
 
 def save_calibration(path: str, calibration: dict) -> None:
-    """Save calibration file to a .yaml path.
+    """Save a calibration (astigmatism or lateral) to a .yaml path.
+
+    The file carries the format marker (``FORMAT_VERSION_ATTR``), since
+    its lengths (spot widths, lateral corrections) are in nm.
 
     Parameters
     ----------
@@ -368,26 +794,77 @@ def save_calibration(path: str, calibration: dict) -> None:
     calibration : dict
         The calibration to save.
     """
+    calibration = {**calibration, FORMAT_VERSION_ATTR: FORMAT_VERSION}
     with open(path, "w") as f:
-        yaml.dump(calibration, f, default_flow_style=False)
+        _dump_yaml(calibration, f, default_flow_style=False)
 
 
-def load_calibration(path: str) -> dict:
+def _legacy_calibration_to_nm(
+    calibration: dict, pixelsize, path: str, kind: str = "calibration"
+) -> dict:
+    """``calibration`` in nm: converted with ``pixelsize`` if the file
+    (``path``) was written before Picasso 1.0, i.e., lacks the format
+    marker, else unchanged, refusing a newer major format version (see
+    ``check_format_version``; ``kind`` names the file in the error). See
+    ``picasso.legacy.calibration_to_nm``."""
+    if FORMAT_VERSION_ATTR in calibration:
+        check_format_version(calibration[FORMAT_VERSION_ATTR], path, kind=kind)
+        return calibration
+    from . import legacy
+
+    if pixelsize is None:
+        raise MissingPixelsizeError(
+            f"{path} was written before Picasso 1.0, with spot widths and "
+            "lateral corrections in camera pixels. Pass pixelsize (nm) to "
+            "convert it to nm, or convert the file once with picasso "
+            f"convert-units. See {docs_url('files.html#files-legacy')}"
+        )
+    _log.info(
+        "%s was written before Picasso 1.0; converting it to nm with a "
+        "camera pixel size of %g nm.",
+        path,
+        pixelsize,
+    )
+    return legacy.calibration_to_nm(calibration, pixelsize)
+
+
+def load_calibration(path: str, pixelsize: float | None = None) -> dict:
     """Load 3D astigmatic calibration data from a YAML file.
+
+    Calibrations written before Picasso 1.0 store the spot widths of
+    their polynomials in camera pixels; they are converted to nm with
+    ``pixelsize`` (see ``picasso.legacy``).
 
     Parameters
     ----------
     path : str
         The path to the calibration YAML file.
+    pixelsize : float, optional
+        Camera pixel size in nm of the calibration movie, used only for
+        files written before Picasso 1.0. Default is None.
 
     Returns
     -------
     calibration : dict
-        A dictionary containing the 3D astigmatic calibration data.
+        A dictionary containing the 3D astigmatic calibration data and
+        ``path`` under ``"Path"``, which the metadata of the
+        localizations fitted with it record (see ``zfit.zfit``).
+
+    Raises
+    ------
+    ValueError
+        If the file is not a 3D calibration.
+    MissingPixelsizeError
+        If the file was written before Picasso 1.0 and ``pixelsize`` is
+        None.
+    FileFormatError
+        If the file is in a newer major format version, see
+        ``check_format_version``.
     """
+    _check_path_length(path)
     with open(path, "r") as calibration_file:
         try:
-            calibration = yaml.full_load(calibration_file)
+            calibration = _parse_yaml(calibration_file)
         except yaml.composer.ComposerError:
             raise ValueError(
                 "Invalid calibration file: expected a single-document YAML "
@@ -403,6 +880,10 @@ def load_calibration(path: str) -> dict:
             "be a dictionary."
         )
 
+    calibration = _legacy_calibration_to_nm(
+        calibration, pixelsize, path, kind="3D calibration"
+    )
+    calibration["Path"] = path
     return calibration
 
 
@@ -454,27 +935,60 @@ def save_spline_calibration(path: str, calibration: dict) -> None:
         for key, value in calibration.items()
         if key != "coefficients"
     }
+    metadata[FORMAT_VERSION_ATTR] = FORMAT_VERSION
     with h5py.File(path, "w") as f:
         f.create_dataset("coefficients", data=coefficients)
         f.attrs["metadata"] = json.dumps(metadata, default=_json_default)
 
 
-def load_spline_calibration(path: str) -> dict:
+def load_spline_calibration(path: str, pixelsize: float | None = None) -> dict:
     """Load a cubic-spline PSF calibration saved by
     ``save_spline_calibration``.
+
+    The lateral corrections of a calibration written before Picasso 1.0
+    are in camera pixels; they are converted to nm with ``pixelsize``,
+    or else with the ``pixelsize`` the calibration records (see
+    ``picasso.legacy``). The spline knots stay on the camera pixel grid,
+    where the fit takes place.
 
     Parameters
     ----------
     path : str
         Path to the spline calibration HDF5 file.
+    pixelsize : float, optional
+        Camera pixel size in nm, used only for files written before
+        Picasso 1.0. Default is None, i.e., the calibration's own entry.
 
     Returns
     -------
     calibration : dict
         The calibration dictionary, with the coefficient table restored under
-        the ``"coefficients"`` key (float32 numpy array) and all metadata
-        keys alongside it.
+        the ``"coefficients"`` key (float32 numpy array), all metadata
+        keys alongside it and ``path`` under ``"Path"``, which the
+        metadata of the localizations fitted with it record (see
+        ``localize.fit``).
+
+    Raises
+    ------
+    FileFormatError
+        If the file is in a newer major format version, see
+        ``check_format_version``.
     """
+    _check_path_length(path)
+    calibration = _read_spline_calibration(path)
+    if FORMAT_VERSION_ATTR not in calibration and pixelsize is None:
+        pixelsize = calibration.get("pixelsize")
+    calibration = _legacy_calibration_to_nm(
+        calibration, pixelsize, path, kind="spline calibration"
+    )
+    calibration["Path"] = path
+    return calibration
+
+
+def _read_spline_calibration(path: str) -> dict:
+    """The spline calibration stored in ``path`` as written, i.e.,
+    without converting a file written before Picasso 1.0 (see
+    ``load_spline_calibration``)."""
     with h5py.File(path, "r") as f:
         if "coefficients" not in f or "metadata" not in f.attrs:
             raise ValueError(
@@ -493,7 +1007,7 @@ def _is_hdf5_calibration(path: str) -> bool:
     return os.path.splitext(path)[1].lower() in (".hdf5", ".h5")
 
 
-def load_any_calibration(path: str) -> dict:
+def load_any_calibration(path: str, pixelsize: float | None = None) -> dict:
     """Load a calibration of any kind: a cubic-spline PSF calibration
     (HDF5), a Gaussian astigmatism calibration or a standalone affine
     calibration (both YAML).
@@ -501,23 +1015,37 @@ def load_any_calibration(path: str) -> dict:
     Used wherever a calibration is only handled as a carrier of lateral
     corrections (see ``picasso.lib.lateral_transforms``), so no format is
     assumed. Unlike ``load_calibration`` this does not require the
-    astigmatism polynomial coefficients to be present.
+    astigmatism polynomial coefficients to be present. Files written
+    before Picasso 1.0 are converted to nm, see ``load_calibration``.
 
     Parameters
     ----------
     path : str
         Path to the calibration file.
+    pixelsize : float, optional
+        Camera pixel size in nm, used only for files written before
+        Picasso 1.0. Default is None.
 
     Returns
     -------
     calibration : dict
-        The calibration dictionary.
+        The calibration dictionary, with ``path`` under ``"Path"``.
+
+    Raises
+    ------
+    MissingPixelsizeError
+        If the file was written before Picasso 1.0 and ``pixelsize`` is
+        None.
+    FileFormatError
+        If the file is in a newer major format version, see
+        ``check_format_version``.
     """
+    _check_path_length(path)
     if _is_hdf5_calibration(path):
-        return load_spline_calibration(path)
+        return load_spline_calibration(path, pixelsize)
     with open(path, "r") as calibration_file:
         try:
-            calibration = yaml.full_load(calibration_file)
+            calibration = _parse_yaml(calibration_file)
         except yaml.composer.ComposerError:
             raise ValueError(
                 "Invalid calibration file: expected a single-document YAML "
@@ -528,6 +1056,8 @@ def load_any_calibration(path: str) -> dict:
             "Invalid calibration file: expected a YAML mapping. This does "
             "not look like a Picasso calibration file."
         )
+    calibration = _legacy_calibration_to_nm(calibration, pixelsize, path)
+    calibration["Path"] = path
     return calibration
 
 
@@ -611,6 +1141,7 @@ def load_camera_calibration(path: str) -> dict:
         alongside the metadata. ``Path`` is set to ``path``, so a calibration
         that has been moved still reports where it was actually loaded from.
     """
+    _check_path_length(path)
     with h5py.File(path, "r") as f:
         if (
             "offset" not in f
@@ -650,8 +1181,8 @@ def _readable_movie_dims(movie: AbstractPicassoMovie) -> dict:
     dims = {}
     try:
         dims["Frames"] = int(len(movie))
-    except Exception:
-        pass
+    except Exception as error:
+        _log.debug("The number of frames is unknown: %s", error)
     height = getattr(movie, "height", None)
     width = getattr(movie, "width", None)
     if height is None or width is None:
@@ -763,7 +1294,7 @@ def _movie_info_or_prompt(
 def load_tif(
     path: str,
     prompt_info: Callable[[dict], tuple[dict, bool]] | None = None,
-    progress=None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[TiffMultiMap, list[dict]] | None:
     """Load a TIFF movie file and its metadata.
 
@@ -775,10 +1306,15 @@ def load_tif(
         Called with the readable movie dimensions if the embedded
         metadata cannot be parsed, so the user can enter it manually.
         Must return ``(info, save)`` or None if canceled.
-    progress : callable, optional
-        ``callable(done, total)`` invoked as the per-page IFD scan
-        proceeds, so a smooth determinate progress bar can be shown while
-        a large movie is opened. Default is None (no reporting).
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports two phases per TIFF file:
+        "Indexing <file>" (a busy indicator while the pages are
+        counted, ending at the number of pages) and "Reading <file>"
+        over the pages. A file of a multi-file movie gets its position,
+        e.g., "Reading <file> (2/3)". MicroManager "separate image
+        files" report nothing. Default is None.
 
     Returns
     -------
@@ -791,15 +1327,17 @@ def load_tif(
     Returns None if the metadata could not be read and the user
     canceled the manual-metadata fallback dialog.
     """
+    _check_path_length(path)
     # MicroManager can save an acquisition as one single-page TIFF per
     # frame ("separate image files"). If ``path`` is one such frame,
     # assemble the whole folder into a single movie instead of opening a
     # one-frame file.
     separate_paths = _mm_separate_files(path)
-    if separate_paths is not None:
-        movie = MMSeparateTiffMovie(separate_paths)
-    else:
-        movie = TiffMultiMap(path, memmap_frames=False, progress=progress)
+    with lib.tracked_progress(progress, "Opening movie", "page") as progress:
+        if separate_paths is not None:
+            movie = MMSeparateTiffMovie(separate_paths)
+        else:
+            movie = TiffMultiMap(path, memmap_frames=False, progress=progress)
     info = _movie_info_or_prompt(movie, path, prompt_info)
     if info is None:
         return None
@@ -831,6 +1369,7 @@ def load_nd2(
     Returns None if the metadata could not be read and the user
     canceled the manual-metadata fallback dialog.
     """
+    _check_path_length(path)
     movie = ND2Movie(path)
     info = _movie_info_or_prompt(movie, path, prompt_info)
     if info is None:
@@ -867,6 +1406,7 @@ def load_nd2_all(
     Returns None if the metadata could not be read and the user canceled
     the manual-metadata fallback dialog.
     """
+    _check_path_length(path)
     probe = ND2Movie(path)
     n_channels = probe.n_channels
     probe.close()
@@ -912,6 +1452,7 @@ def load_stk(
     Returns None if the metadata could not be read and the user
     canceled the manual-metadata fallback dialog.
     """
+    _check_path_length(path)
     movie = STKMultiMovie(path)
     info = _movie_info_or_prompt(movie, path, prompt_info)
     if info is None:
@@ -943,6 +1484,7 @@ def load_czi(
     info : list[dict]
         A list containing a dictionary with metadata about the movie.
     """
+    _check_path_length(path)
     if czifile is None:
         raise ImportError(
             "Reading .czi files requires the optional 'czifile' package "
@@ -973,6 +1515,7 @@ def load_czi_all(path: str) -> tuple[list[CZIMovie], list[list[dict]]]:
     infos : list of lists of dicts
         Per-channel metadata, each carrying a ``"Channel"`` key.
     """
+    _check_path_length(path)
     if czifile is None:
         raise ImportError(
             "Reading .czi files requires the optional 'czifile' package "
@@ -1016,6 +1559,7 @@ def load_lif(
     info : list[dict]
         A list containing a dictionary with metadata about the movie.
     """
+    _check_path_length(path)
     if liffile is None:
         raise ImportError(
             "Reading .lif files requires the optional 'liffile' package "
@@ -1046,6 +1590,7 @@ def load_lif_all(path: str) -> tuple[list[LIFMovie], list[list[dict]]]:
     infos : list of lists of dicts
         Per-channel metadata, each carrying a ``"Channel"`` key.
     """
+    _check_path_length(path)
     if liffile is None:
         raise ImportError(
             "Reading .lif files requires the optional 'liffile' package "
@@ -1067,7 +1612,7 @@ def load_lif_all(path: str) -> tuple[list[LIFMovie], list[list[dict]]]:
 def load_movie(
     path: str,
     prompt_info=None,
-    progress=None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[AbstractPicassoMovie, list[dict]]:
     """Load a movie file based on its extension and returns the movie
     object and its metadata.
@@ -1082,10 +1627,13 @@ def load_movie(
         Format-specific callback used to obtain missing metadata
         interactively (e.g. to select a channel for multi-channel files
         or to enter movie metadata manually when it cannot be read).
-    progress : callable, optional
-        ``callable(done, total)`` forwarded to the TIFF loader to report
-        per-page progress while a movie is opened. Other formats ignore
-        it (they open effectively instantly). Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. TIFF movies report the phases of
+        ``load_tif``, "Indexing <file>" and "Reading <file>" over the
+        pages of each file; the other formats open effectively
+        instantly and report nothing. Default is None.
 
     Returns
     -------
@@ -1099,8 +1647,11 @@ def load_movie(
     ValueError
         If the file extension is not a supported movie format.
     """
+    _check_path_length(path)
     base, ext = os.path.splitext(path)
     ext = ext.lower()
+    # validated here, so that a bad argument fails for every format
+    lib.normalize_progress(progress)
     if ext == ".raw":
         return load_raw(path, prompt_info=prompt_info)
     elif ext in TIFF_EXTENSIONS:
@@ -1125,7 +1676,7 @@ def load_movie(
 def load_movie_all(
     path: str,
     prompt_info=None,
-    progress=None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[list[AbstractPicassoMovie], list[list[dict]]] | None:
     """Load every channel of a movie file as independent movies.
 
@@ -1142,8 +1693,13 @@ def load_movie_all(
         Manual-metadata fallback callback, forwarded to the formats that
         may need it (.nd2 and the single-channel formats). Channel
         selection is never prompted here - all channels are loaded.
-    progress : None
-        Placeholder for progress tracking, not used.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Forwarded to ``load_movie`` for the
+        single-channel formats, i.e., TIFF movies report "Indexing
+        <file>" and "Reading <file>" over the pages of each file; the
+        multi-channel formats report nothing. Default is None.
 
     Returns
     -------
@@ -1155,7 +1711,9 @@ def load_movie_all(
     Returns None if metadata could not be read and the user canceled the
     manual-metadata fallback dialog.
     """
+    _check_path_length(path)
     ext = os.path.splitext(path)[1].lower()
+    lib.normalize_progress(progress)  # fails early on a bad argument
     if ext == ".ims":
         return load_ims_all(path)
     elif ext == ".czi":
@@ -1173,32 +1731,339 @@ def load_movie_all(
         return [movie], [info]
 
 
-def load_info(
-    path: str,
-    qt_parent: QtWidgets.QWidget | None = None,
-) -> list[dict]:
+_PYTHON_TAG = "tag:yaml.org,2002:python/"
+#: Dict subclasses PyYAML's default dumper tagged in Picasso's .yaml
+#: files; read back as plain dicts without a warning.
+_YAML_DICT_TYPES = (
+    "collections.OrderedDict",
+    "collections.defaultdict",
+    "picasso.lib.AutoDict",
+)
+
+
+class _MetadataLoader(yaml.SafeLoader):
+    """YAML loader for Picasso's .yaml files (metadata, calibrations,
+    picks, structures) that never runs code from the file.
+
+    Reads what ``yaml.SafeLoader`` reads plus the Python-specific tags
+    that PyYAML's default dumper wrote into Picasso's .yaml files before
+    Picasso 1.0: numpy scalars, dtypes and arrays, tuples and dict
+    subclasses. Their values are rebuilt from the data in the file; the
+    Python callables a tag names are never imported or called. Any other
+    Python object is read as its plain data (its arguments or state) and
+    its tag is collected in ``unknown_tags``.
+    """
+
+    def __init__(self, stream) -> None:
+        super().__init__(stream)
+        self.unknown_tags = set()
+
+
+def _yaml_args(loader: _MetadataLoader, node: yaml.Node) -> list:
+    """Arguments of a ``!!python/object/apply`` node, which is either the
+    sequence of arguments or a mapping with an ``args`` entry."""
+    if isinstance(node, yaml.SequenceNode):
+        return loader.construct_sequence(node, deep=True)
+    if isinstance(node, yaml.MappingNode):
+        args = loader.construct_mapping(node, deep=True).get("args")
+        return list(args) if args else []
+    return []
+
+
+def _yaml_numpy_dtype(loader: _MetadataLoader, node: yaml.Node) -> np.dtype:
+    """``!!python/object/apply:numpy.dtype``, e.g. ``args: [f8, ...]``
+    with the byte order in the second entry of ``state``."""
+    args = _yaml_args(loader, node)
+    dtype = np.dtype(str(args[0]))
+    if isinstance(node, yaml.MappingNode):
+        state = loader.construct_mapping(node, deep=True).get("state")
+        if isinstance(state, (list, tuple)) and len(state) > 1:
+            if state[1] in ("<", ">"):
+                dtype = dtype.newbyteorder(state[1])
+    return dtype
+
+
+def _yaml_numpy_scalar(loader: _MetadataLoader, node: yaml.Node):
+    """``!!python/object/apply:numpy...multiarray.scalar``: a dtype and
+    the raw bytes of the value, read back as a plain Python value."""
+    args = _yaml_args(loader, node)
+    if (
+        len(args) == 2
+        and isinstance(args[0], np.dtype)
+        and not args[0].hasobject
+        and isinstance(args[1], bytes)
+    ):
+        return np.frombuffer(args[1], dtype=args[0], count=1)[0].item()
+    loader.unknown_tags.add(node.tag)
+    return args
+
+
+def _yaml_numpy_array(loader: _MetadataLoader, node: yaml.Node):
+    """``!!python/object/apply:numpy...multiarray._reconstruct``: an
+    array whose ``state`` holds its shape, dtype, memory order and raw
+    bytes, read back as a (nested) list."""
+    state = None
+    if isinstance(node, yaml.MappingNode):
+        state = loader.construct_mapping(node, deep=True).get("state")
+    if isinstance(state, (list, tuple)) and len(state) == 5:
+        _, shape, dtype, fortran, data = state
+        if (
+            isinstance(dtype, np.dtype)
+            and not dtype.hasobject
+            and isinstance(data, bytes)
+        ):
+            array = np.frombuffer(data, dtype=dtype).reshape(
+                tuple(shape), order="F" if fortran else "C"
+            )
+            return array.tolist()
+        if isinstance(data, list):  # object arrays list their items
+            return data
+    loader.unknown_tags.add(node.tag)
+    return state
+
+
+def _yaml_python_object(loader: _MetadataLoader, suffix: str, node):
+    """Any other ``!!python/object...`` tag, read as its plain data: the
+    items of dict and list subclasses, else the object's state, else its
+    arguments. Nothing named in the tag is imported."""
+    name = suffix.split(":", 1)[-1]
+    if name not in _YAML_DICT_TYPES:
+        loader.unknown_tags.add(node.tag)
+    if isinstance(node, yaml.MappingNode):
+        value = loader.construct_mapping(node, deep=True)
+        if node.tag.startswith(_PYTHON_TAG + "object:"):
+            return value  # the object's __dict__
+        if "dictitems" in value:
+            return dict(value["dictitems"])
+        if "listitems" in value:
+            return list(value["listitems"])
+        if isinstance(value.get("state"), dict):
+            return value["state"]
+        args = value.get("args") or []
+    elif isinstance(node, yaml.SequenceNode):
+        args = loader.construct_sequence(node, deep=True)
+    else:
+        return loader.construct_scalar(node)
+    if name in _YAML_DICT_TYPES:
+        # OrderedDict([(key, value), ...]); defaultdict(factory)
+        pairs = args[0] if args and isinstance(args[0], list) else []
+        return {key: value for key, value in pairs}
+    return list(args)
+
+
+def _yaml_python_name(loader: _MetadataLoader, suffix: str, node) -> str:
+    """``!!python/name:module.attribute``, read as the name itself."""
+    return suffix
+
+
+for _numpy in ("numpy.core", "numpy._core"):
+    _MetadataLoader.add_constructor(
+        f"{_PYTHON_TAG}object/apply:{_numpy}.multiarray.scalar",
+        _yaml_numpy_scalar,
+    )
+    _MetadataLoader.add_constructor(
+        f"{_PYTHON_TAG}object/apply:{_numpy}.multiarray._reconstruct",
+        _yaml_numpy_array,
+    )
+_MetadataLoader.add_constructor(
+    f"{_PYTHON_TAG}object/apply:numpy.dtype", _yaml_numpy_dtype
+)
+_MetadataLoader.add_constructor(
+    f"{_PYTHON_TAG}tuple",
+    lambda loader, node: tuple(loader.construct_sequence(node, deep=True)),
+)
+_MetadataLoader.add_constructor(
+    f"{_PYTHON_TAG}list",
+    lambda loader, node: loader.construct_sequence(node, deep=True),
+)
+_MetadataLoader.add_constructor(
+    f"{_PYTHON_TAG}dict",
+    lambda loader, node: loader.construct_mapping(node, deep=True),
+)
+for _name, _type in (
+    ("str", str),
+    ("unicode", str),
+    ("int", int),
+    ("long", int),
+    ("float", float),
+    ("complex", complex),
+):
+    _MetadataLoader.add_constructor(
+        f"{_PYTHON_TAG}{_name}",
+        lambda loader, node, _type=_type: _type(loader.construct_scalar(node)),
+    )
+_MetadataLoader.add_constructor(
+    f"{_PYTHON_TAG}bool", yaml.SafeLoader.construct_yaml_bool
+)
+_MetadataLoader.add_constructor(
+    f"{_PYTHON_TAG}none", yaml.SafeLoader.construct_yaml_null
+)
+_MetadataLoader.add_constructor(
+    f"{_PYTHON_TAG}bytes", yaml.SafeLoader.construct_yaml_binary
+)
+_MetadataLoader.add_multi_constructor(f"{_PYTHON_TAG}name:", _yaml_python_name)
+_MetadataLoader.add_multi_constructor(
+    f"{_PYTHON_TAG}object", _yaml_python_object
+)
+
+
+def load_yaml(path: str, *, all_documents: bool = False):
+    """Read a .yaml file written by Picasso, e.g., metadata, picks,
+    calibrations or masks, safely.
+
+    Unlike ``yaml.safe_load``, it also reads the values that Picasso
+    before 1.0 wrote with Python-specific tags, e.g., numpy numbers, which
+    are read as plain Python values. No code named in the file is run, so
+    files from others can be opened.
+
+    Parameters
+    ----------
+    path : str
+        Path to the .yaml file.
+    all_documents : bool, optional
+        If True, return the list of all documents of a multi-document
+        file, e.g., the metadata of localizations, with one document per
+        processing step. Default is False, i.e., the file holds one
+        document.
+
+    Returns
+    -------
+    data : Any
+        The document (usually a dict), or the list of documents if
+        ``all_documents``.
+    """
+    _check_path_length(path)
+    with open(path, "r") as file:
+        return _parse_yaml(file, all_documents=all_documents)
+
+
+def _parse_yaml(stream, *, all_documents: bool = False):
+    """Parse Picasso YAML safely, see ``_MetadataLoader``.
+
+    Parameters
+    ----------
+    stream : file-like or str
+        The open file, or the YAML text.
+    all_documents : bool, optional
+        If True, return the list of all documents of a multi-document
+        file (the metadata of localizations); else the single document.
+        Default is False.
+
+    Returns
+    -------
+    data : Any
+        The document, or the list of documents.
+    """
+    loader = _MetadataLoader(stream)
+    try:
+        if all_documents:
+            data = []
+            while loader.check_data():
+                data.append(loader.get_data())
+        else:
+            data = loader.get_single_data()
+    finally:
+        loader.dispose()
+    if loader.unknown_tags:
+        _log.warning(
+            "%s holds values of Python types that Picasso does not read "
+            "(%s); their data was kept as plain values.",
+            getattr(stream, "name", "The YAML text"),
+            ", ".join(sorted(loader.unknown_tags)),
+        )
+    return data
+
+
+def _plain_yaml_value(value):
+    """``value`` with numpy values, tuples, sets and dict subclasses
+    replaced by the plain types ``yaml.safe_dump`` writes without
+    Python-specific tags, as in the metadata embedded as JSON."""
+    if isinstance(value, dict):
+        return {
+            _plain_yaml_value(key): _plain_yaml_value(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [_plain_yaml_value(item) for item in value]
+    if isinstance(value, np.ndarray):
+        return _plain_yaml_value(value.tolist())
+    if isinstance(value, np.generic):
+        return value.item()
+    return value
+
+
+def _dump_yaml(data, stream, *, all_documents: bool = False, **kwargs):
+    """Write ``data`` as plain YAML that ``load_yaml`` and any other
+    YAML reader read without Python-specific tags.
+
+    Values of types plain YAML cannot hold (e.g., arbitrary objects) fall
+    back to PyYAML's default dumper, as Picasso wrote them before 1.0,
+    with a warning.
+
+    Parameters
+    ----------
+    data : Any
+        The document, or the list of documents if ``all_documents``.
+    stream : file-like
+        The file opened for writing.
+    all_documents : bool, optional
+        If True, ``data`` is a list of documents, written as a
+        multi-document file. Default is False.
+    **kwargs
+        Passed on to ``yaml.safe_dump`` (or ``yaml.safe_dump_all``),
+        e.g. ``default_flow_style``.
+    """
+    if all_documents:
+        plain = [_plain_yaml_value(document) for document in data]
+        safe_dump, dump = yaml.safe_dump_all, yaml.dump_all
+    else:
+        plain = _plain_yaml_value(data)
+        safe_dump, dump = yaml.safe_dump, yaml.dump
+    try:
+        text = safe_dump(plain, **kwargs)
+    except yaml.representer.RepresenterError as error:
+        _log.warning(
+            "%s: %s. Wrote it with Python-specific tags instead.",
+            getattr(stream, "name", "YAML"),
+            error,
+        )
+        text = dump(data, **kwargs)
+    stream.write(text)
+
+
+def load_info(path: str) -> list[dict]:
     """Load metadata from a YAML file associated with the movie file.
+
+    The .yaml file next to ``path`` takes precedence; without one, the
+    metadata embedded in the HDF5 file ``path`` is read. The .yaml file
+    is read safely: values written with Python-specific tags (as Picasso
+    did before 1.0, e.g., for numpy numbers) are rebuilt from their data
+    and no code named in the file is run.
 
     Parameters
     ----------
     path : str
         The path to the movie file, which is used to derive the metadata
         file name.
-    qt_parent : QWidget or None, optional
-        The parent widget for any error messages displayed using Qt.
-        Default is None.
 
     Returns
     -------
     info : list of dict
         A list containing a dictionary with metadata about the movie.
+
+    Raises
+    ------
+    NoMetadataFileError
+        If there is neither a .yaml file nor embedded metadata.
     """
+    _check_path_length(path)
     path_base, path_extension = os.path.splitext(path)
     filename = path_base + ".yaml"
-    # First, try the sidecar .yaml metadata file.
+    # The sidecar .yaml file comes first: it takes precedence over the
+    # metadata embedded in the HDF5 file, so it can be edited by hand.
     try:
         with open(filename, "r") as info_file:
-            return list(yaml.load_all(info_file, Loader=yaml.UnsafeLoader))
+            return _parse_yaml(info_file, all_documents=True)
     except FileNotFoundError:
         pass
     # If absent, fall back to metadata embedded in the HDF5 file itself.
@@ -1208,32 +2073,20 @@ def load_info(
     # Neither the sidecar file nor embedded metadata was found. Files
     # written before Picasso v0.11 carry no embedded metadata, so their
     # .yaml is the only copy.
-    message = (
-        f"Could not find metadata for:\n{path}\nNeither the metadata "
-        f"file:\n{filename}\nnor metadata embedded in the file itself "
-        "could be read."
+    raise NoMetadataFileError(
+        f"Could not find metadata for {path}: neither the metadata file "
+        f"{filename} nor metadata embedded in the file itself could be "
+        "read."
     )
-    print(f"\nAn error occured. {message}")
-    if qt_parent is not None:
-        from PyQt6 import QtWidgets
-
-        QtWidgets.QMessageBox.critical(qt_parent, "An error occured", message)
-    raise NoMetadataFileError(filename)
 
 
-def load_mask(
-    path: str,
-    qt_parent: QtWidgets.QWidget | None = None,
-) -> tuple[lib.FloatArray2D, dict]:
+def load_mask(path: str) -> tuple[lib.FloatArray2D, dict]:
     """Load a mask generated with ``spinna.MaskGenerator``.
 
     Parameters
     ----------
     path : str
         The path to the mask file.
-    qt_parent : QWidget or None, optional
-        The parent widget for any error messages displayed using Qt.
-        Default is None.
 
     Returns
     -------
@@ -1241,46 +2094,115 @@ def load_mask(
         The loaded mask array.
     info : dict
         A dictionary containing metadata about the mask.
+
+    Raises
+    ------
+    TypeError
+        If the file is not a mask saved by SPINNA.
+    FileFormatError
+        If the mask is in a newer major format version, see
+        ``check_format_version``.
     """
+    _check_path_length(path)
     mask = np.float64(np.load(path))
     mask = mask / mask.sum()
     new_path = os.path.splitext(path)[0] + ".yaml"
-    info = load_info(new_path, qt_parent=qt_parent)[0]
+    info = load_info(new_path)[0]
     try:
         value = info["Generated by"]
     except KeyError:
         raise TypeError("Incorrect file loaded.")
     if "SPINNA" not in value:
         raise TypeError("Please load a mask provided by Picasso SPINNA")
+    check_format_version(info.get(FORMAT_VERSION_ATTR), new_path, kind="mask")
     return mask, info
 
 
-def load_picks(  # noqa: C901
+def load_structures(path: str) -> tuple[list[spinna.Structure], list[str]]:
+    """Load structures (``spinna.Structure``'s) saved in a .yaml file,
+    e.g., with ``spinna.Structure.save`` or the SPINNA GUI.
+
+    Parameters
+    ----------
+    path : str
+        Path to the .yaml file with structures.
+
+    Returns
+    -------
+    structures : list of spinna.Structure's
+        List of structures loaded from the file.
+    targets : list of strs
+        List of all unique molecular targets in the structures.
+
+    Raises
+    ------
+    TypeError
+        If the file does not hold structures saved by Picasso SPINNA.
+    """
+    _check_path_length(path)
+    # imported here as picasso.spinna imports this module
+    from .spinna import Structure
+
+    message = (
+        "Incorrect file. Please choose a file that was created with Picasso"
+        " SPINNA."
+    )
+    with open(path, "r") as file:
+        try:
+            info = _parse_yaml(file, all_documents=True)
+        except TypeError:
+            raise TypeError(message)
+    if (
+        not info
+        or not isinstance(info[0], dict)
+        or "Structure title" not in info[0]
+    ):
+        raise TypeError(message)
+    structures = []
+    targets = []
+    for m_info in info:
+        structure = Structure(m_info["Structure title"])
+        for target in m_info["Molecular targets"]:
+            x = m_info[f"{target}_x"]
+            y = m_info[f"{target}_y"]
+            z = m_info[f"{target}_z"]
+            structure.define_coordinates(target, x, y, z)
+            if target not in targets:
+                targets.append(target)
+        structures.append(structure)
+    return structures, targets
+
+
+def load_picks(
     path: str, pixelsize: float | None = None
-) -> tuple[list, str, float]:
-    """Load picks generated with the Picasso GUI.
+) -> tuple[list, str, float | None]:
+    """Load pick regions saved by Picasso Render.
+
+    Positions and sizes are returned in nm. Files written before Picasso
+    1.0 store the positions in camera pixels; they are converted with
+    ``pixelsize`` (see ``picasso.legacy``).
 
     Parameters
     ----------
     path : str
         The path to the picks file.
     pixelsize : float, optional
-        Camera pixel size in nm. Used to convert pick size from nm to
-        camera pixels (which are the units of localizations coordinates).
-        If None, the size will be returned in original units.
+        Camera pixel size in nm, used only for files written before
+        Picasso 1.0. Default is None.
 
     Returns
     -------
     picks : list
-        A list of picks.
+        A list of picks (positions in nm), in the format of the Render
+        window: centers for circles and squares, pairs of end points for
+        rectangles, vertex lists for polygons, corner pairs for boxes and
+        lists of ``(width, path)`` strokes for brush picks.
     shape : str
         The shape of the picks, one of ``lib.PICK_SHAPES``.
-    size : float
-        The size of the picks in camera pixels (if `pixelsize` is
-        provided, otherwise in original units). For circular picks, the
-        size is the diameter; for rectangular picks, the size is the
-        width; for square picks, the size is the side length. None for
-        polygonal, box and brush picks (size not defined).
+    size : float or None
+        The size of the picks in nm: the diameter of circles, the width
+        of rectangles, the side length of squares. None for polygonal,
+        box and brush picks (size not defined).
 
     Raises
     ------
@@ -1288,12 +2210,26 @@ def load_picks(  # noqa: C901
         If the file is not recognized as a picks file, if the pick
         shape is unknown, or if a shape that needs a size does not
         carry one.
+    MissingPixelsizeError
+        If the file was written before Picasso 1.0 and ``pixelsize`` is
+        None.
+
+    Examples
+    --------
+    >>> from picasso import io
+    >>> picks, shape, diameter = io.load_picks("movie_locs_picks.yaml")
+    FileFormatError
+        If the file is in a newer major format version, see
+        ``check_format_version``.
     """
+    _check_path_length(path)
     assert path.endswith(".yaml"), "Picks should be stored in a .yaml file."
 
     # load the file
     with open(path, "r") as f:
-        regions = yaml.full_load(f)
+        regions = _parse_yaml(f)
+    if not isinstance(regions, dict):
+        raise ValueError("Unrecognized picks file")
 
     # Backwards compatibility for old picked region files
     if "Shape" in regions:
@@ -1303,23 +2239,34 @@ def load_picks(  # noqa: C901
     else:
         raise ValueError("Unrecognized picks file")
 
-    pixelsize = 1 if pixelsize is None else pixelsize
+    check_format_version(
+        regions.get(FORMAT_VERSION_ATTR), path, kind="picks file"
+    )
+    if FORMAT_VERSION_ATTR not in regions:
+        from . import legacy
+
+        if pixelsize is None:
+            raise MissingPixelsizeError(
+                f"{path} was written before Picasso 1.0, with positions in "
+                "camera pixels. Pass pixelsize (nm) to convert it to nm, or "
+                "convert the file once with picasso convert-units. See "
+                f"{docs_url('files.html#files-legacy')}"
+            )
+        regions = legacy.picks_to_nm(regions, pixelsize)
 
     # assign loaded picks and pick size
     if shape == "Circle":
         picks = regions["Centers"]
-        # legacy files store the size in camera pixels, without "(nm)"
-        size = _pick_size_from_regions(regions, "Diameter", pixelsize)
+        size = _pick_size_from_regions(regions, "Diameter")
     elif shape == "Rectangle":
         picks = regions["Center-Axis-Points"]
-        size = _pick_size_from_regions(regions, "Width", pixelsize)
+        size = _pick_size_from_regions(regions, "Width")
     elif shape == "Polygon":
         picks = regions["Vertices"]
         size = None
     elif shape == "Square":
         picks = regions["Centers"]
-        # no backward compatibility here, always in nm
-        size = _pick_size_from_regions(regions, "Side Length", pixelsize)
+        size = _pick_size_from_regions(regions, "Side Length")
     elif shape == "Box":
         # each box carries its own extent, so there is no size
         picks = regions["Corners"]
@@ -1329,7 +2276,7 @@ def load_picks(  # noqa: C901
         # form one pick follows from their geometry, so the grouping is
         # re-derived rather than stored
         strokes = [
-            (stroke["Width (nm)"] / pixelsize, stroke["Path"])
+            (stroke["Width (nm)"], stroke["Path"])
             for stroke in regions["Strokes"]
         ]
         picks = lib.merge_brush_strokes(strokes)
@@ -1339,74 +2286,214 @@ def load_picks(  # noqa: C901
     return picks, shape, size
 
 
-def _pick_size_from_regions(
-    regions: dict, key: str, pixelsize: float
-) -> float:
-    """Return a pick size from a loaded picks file, in camera pixels.
+def _pick_size_from_regions(regions: dict, key: str) -> float:
+    """Return a pick size from a loaded picks file, in nm.
 
-    Sizes are stored in nm under ``"<key> (nm)"``; files written by
-    older versions of Picasso store them in camera pixels under the bare
-    ``key``.
+    Sizes are stored in nm under ``"<key> (nm)"`` (files written before
+    Picasso 0.6 stored them in camera pixels under the bare ``key``,
+    which ``legacy.picks_to_nm`` renames).
 
     Parameters
     ----------
     regions : dict
-        Contents of the picks .yaml file.
+        Contents of the picks .yaml file, in nm.
     key : str
         Name of the size entry, e.g., "Diameter".
-    pixelsize : float
-        Camera pixel size in nm.
 
     Returns
     -------
     size : float
-        Pick size in camera pixels.
+        Pick size in nm.
 
     Raises
     ------
     ValueError
-        If neither the nm nor the legacy entry is present.
+        If the entry is not present.
     """
     if f"{key} (nm)" in regions:
-        return regions[f"{key} (nm)"] / pixelsize
-    elif key in regions:
-        return regions[key]
+        return float(regions[f"{key} (nm)"])
     raise ValueError(
         f"Picks file is missing the pick size entry '{key} (nm)'."
     )
 
 
+def picks_dict(picks: list, shape: str, size: float | None = None) -> dict:
+    """The dictionary describing pick regions, in the format of a picks
+    .yaml file (see ``load_picks``).
+
+    Parameters
+    ----------
+    picks : list
+        Picks in the format of the Render window (positions in nm), see
+        ``load_picks``.
+    shape : str
+        The shape of the picks, one of ``lib.PICK_SHAPES``.
+    size : float, optional
+        The size of the picks in nm: the diameter of circles, the width
+        of rectangles, the side length of squares. Not needed (ignored)
+        for polygons, boxes and brush picks. Default is None.
+
+    Returns
+    -------
+    regions : dict
+        Pick shape, size (nm), positions (nm) and the format marker.
+
+    Raises
+    ------
+    ValueError
+        If the shape is unknown or a shape that needs a size has none.
+    """
+    if shape not in lib.PICK_SHAPES:
+        raise ValueError(f"Unrecognized pick shape: {shape}")
+    if shape in ("Circle", "Rectangle", "Square") and size is None:
+        raise ValueError(f"{shape} picks need a size.")
+
+    def point(p) -> list[float]:
+        return [float(p[0]), float(p[1])]
+
+    regions = {}
+    if shape == "Circle":
+        regions["Diameter (nm)"] = float(size)
+        regions["Centers"] = [point(_) for _ in picks]
+    elif shape == "Rectangle":
+        regions["Width (nm)"] = float(size)
+        regions["Center-Axis-Points"] = [
+            [point(a), point(b)] for a, b in picks
+        ]
+    elif shape == "Polygon":
+        regions["Vertices"] = [
+            [point(v) for v in pick] for pick in picks if len(pick)
+        ]
+    elif shape == "Square":
+        regions["Side Length (nm)"] = float(size)
+        regions["Centers"] = [point(_) for _ in picks]
+    elif shape == "Box":
+        # each box carries its own extent, so no size is saved
+        regions["Corners"] = [[point(a), point(b)] for a, b in picks]
+    elif shape == "Brush":
+        # a flat, ordered stroke list: which strokes form one pick
+        # follows from their geometry and is re-derived on loading
+        regions["Strokes"] = [
+            {
+                "Width (nm)": float(stroke[0]),
+                "Path": [point(_) for _ in stroke[1]],
+            }
+            for pick in picks
+            for stroke in pick
+        ]
+    regions["Shape"] = shape
+    regions[FORMAT_VERSION_ATTR] = FORMAT_VERSION
+    return regions
+
+
+def save_picks(
+    path: str, picks: list, shape: str, size: float | None = None
+) -> None:
+    """Save pick regions to a .yaml file that ``load_picks`` reads.
+
+    Parameters
+    ----------
+    path : str
+        The path to the picks file (.yaml).
+    picks : list
+        Picks in the format of the Render window (positions in nm), see
+        ``load_picks``.
+    shape : str
+        The shape of the picks, one of ``lib.PICK_SHAPES``.
+    size : float, optional
+        The size of the picks in nm (diameter, width or side length);
+        not needed for polygons, boxes and brush picks. Default is None.
+
+    Examples
+    --------
+    >>> from picasso import io
+    >>> io.save_picks("picks.yaml", [(1200.0, 850.5)], "Circle", size=100.0)
+    """
+    save_yaml(path, picks_dict(picks, shape, size))
+
+
+def save_yaml(path: str, data) -> None:
+    """Write one document (usually a dict) as plain YAML that
+    ``load_yaml`` and any other YAML reader read.
+
+    Parameters
+    ----------
+    path : str
+        Path to the .yaml file.
+    data : Any
+        The document.
+    """
+    with open(path, "w") as file:
+        _dump_yaml(data, file, default_flow_style=False)
+
+
+#: Header of a drift .txt file written since Picasso 1.0 (numbers in
+#: nm); ``np.loadtxt`` skips it, so older readers still read the numbers.
+_DRIFT_HEADER = "{attr} {version}\ncolumns: {columns} (nm per frame)"
+
+
 def save_drift(path: str, drift: pd.DataFrame) -> None:
-    """Save drift to a .txt file in the format used by the Picasso.
+    """Save drift to a .txt file in the format used by Picasso.
+
+    One row per frame with the columns ``x y`` or ``x y z`` in nm,
+    separated by spaces, after two comment lines: the format marker
+    (``picasso_format 1.0``) and the column names. Files written before
+    Picasso 1.0 have no header, with ``x`` and ``y`` in camera pixels.
 
     Parameters
     ----------
     path : str
         The path to the drift file. Must end in .txt.
     drift : pd.DataFrame
-        A DataFrame with 'x' and 'y' columns and drift values for each
-        frame.
+        A DataFrame with 'x' and 'y' (and optionally 'z') columns and
+        drift values in nm for each frame.
     """
+    columns = ["x", "y"] + (["z"] if "z" in drift.columns else [])
+    header = _DRIFT_HEADER.format(
+        attr=FORMAT_VERSION_ATTR,
+        version=FORMAT_VERSION,
+        columns=" ".join(columns),
+    )
     # Binary handle so the explicit "\r\n" is not itself newline-translated
     # (a text handle writes "\r\r\n" on Windows).
     with open(path, "wb") as f:
-        np.savetxt(f, drift, newline="\r\n")
+        np.savetxt(f, drift[columns].to_numpy(), newline="\r\n", header=header)
 
 
-def load_drift(path: str) -> pd.DataFrame | None:
-    """Load drift from a .txt file generated with the Picasso GUI.
+def _drift_file_version(path: str) -> tuple[int, int] | None:
+    """Format version in the header of a drift .txt file, None if the
+    file has none (written before Picasso 1.0)."""
+    with open(path, "r") as f:
+        for line in f:
+            if not line.startswith("#"):
+                break
+            match = re.search(
+                rf"{FORMAT_VERSION_ATTR}\s*:?\s*(\d+)\.(\d+)", line
+            )
+            if match is not None:
+                return int(match.group(1)), int(match.group(2))
+    return None
+
+
+def load_drift(path: str, pixelsize: float | None = None) -> pd.DataFrame:
+    """Load drift from a .txt file written by Picasso.
+
+    Files written before Picasso 1.0 (no header) store ``x`` and ``y`` in
+    camera pixels; they are converted to nm with ``pixelsize``.
 
     Parameters
     ----------
     path : str
         The path to the drift file. Must end in .txt.
+    pixelsize : float, optional
+        Camera pixel size in nm, used only for files written before
+        Picasso 1.0. Default is None.
 
     Returns
     -------
-    drift_df : pd.DataFrame or None
-        A DataFrame containing the drift information with columns 'frame',
-        'x', 'y', and optionally 'z'. Returns None if the file cannot be
-        loaded.
+    drift : pd.DataFrame
+        A DataFrame containing the drift per frame in nm, with columns
+        'x', 'y', and optionally 'z'.
 
     Raises
     ------
@@ -1415,10 +2502,17 @@ def load_drift(path: str) -> pd.DataFrame | None:
     AssertionError
         If the loaded drift data does not have the expected format (2D
         array with 2 or 3 columns).
+    MissingPixelsizeError
+        If the file was written before Picasso 1.0 and ``pixelsize`` is
+        None.
+    FileFormatError
+        If the file is in a newer major format version, see
+        ``check_format_version``.
     """
+    _check_path_length(path)
     if not path.endswith(".txt"):
         raise ValueError("Drift file must end with .txt")
-    drift = np.loadtxt(path, delimiter=" ")
+    drift = np.loadtxt(path, ndmin=2)
     assert drift.ndim == 2 and drift.shape[1] in [2, 3], (
         "Drift must be a 2D array with 2 or 3 columns (x, y, (z)). "
         f"Loaded array has shape {drift.shape}."
@@ -1426,6 +2520,20 @@ def load_drift(path: str) -> pd.DataFrame | None:
     drift_df = pd.DataFrame(drift[:, :2], columns=["x", "y"])
     if drift.shape[1] == 3:
         drift_df["z"] = drift[:, 2]
+    version = _drift_file_version(path)
+    if version is not None:
+        _refuse_newer_format(version, path, "drift file")
+    else:
+        from . import legacy
+
+        if pixelsize is None:
+            raise MissingPixelsizeError(
+                f"{path} was written before Picasso 1.0, with the drift in "
+                "camera pixels. Pass pixelsize (nm) to convert it to nm, or "
+                "convert the file once with picasso convert-units. See "
+                f"{docs_url('files.html#files-legacy')}"
+            )
+        drift_df = legacy.drift_to_nm(drift_df, pixelsize)
     return drift_df
 
 
@@ -1438,6 +2546,9 @@ SETTINGS_BACKUP_SUFFIX = ".bak"
 # settings file that could not be read; sticky for the process so a GUI
 # can report it once (``dismiss_settings_load_error``)
 _settings_load_error: tuple[str, str | None, tuple | None] | None = None
+# whether that error was reported; the record itself is kept, so that
+# the same file is neither reported again nor taken as readable
+_settings_load_error_dismissed = False
 
 
 def _file_signature(path: str) -> tuple | None:
@@ -1456,14 +2567,14 @@ def _record_broken_settings(path: str, error: BaseException) -> None:
     writes the whole file back, so a file that cannot be read would
     otherwise be silently replaced by the next save, losing every other
     section."""
-    global _settings_load_error
+    global _settings_load_error, _settings_load_error_dismissed
     signature = _file_signature(path)
     if (
         _settings_load_error is not None
         and signature is not None
         and _settings_load_error[2] == signature
     ):
-        return  # this very file was already reported
+        return  # this very file was already recorded (maybe reported)
     kept: str | None = path + SETTINGS_BROKEN_SUFFIX
     try:
         shutil.copy2(path, kept)
@@ -1477,30 +2588,35 @@ def _record_broken_settings(path: str, error: BaseException) -> None:
         f" and a copy of the file was kept as {kept}" if kept else "",
     )
     _settings_load_error = (str(error), kept, signature)
+    _settings_load_error_dismissed = False
 
 
 def settings_load_error() -> tuple[str, str | None] | None:
     """Return the settings load error recorded in this process, if any.
 
     An error is recorded when a settings file could not be read (see
-    ``load_user_settings``) and kept until
-    ``dismiss_settings_load_error`` is called.
+    ``load_user_settings``) and returned until
+    ``dismiss_settings_load_error`` is called; a file that is broken in
+    another way is recorded (and returned) anew.
 
     Returns
     -------
     error : tuple or None
         ``(message, path of the kept copy or None)`` if an error is
-        recorded, None otherwise.
+        recorded and not dismissed, None otherwise.
     """
-    if _settings_load_error is None:
+    if _settings_load_error is None or _settings_load_error_dismissed:
         return None
     return _settings_load_error[:2]
 
 
 def dismiss_settings_load_error() -> None:
-    """Forget a recorded settings load error (after reporting it)."""
-    global _settings_load_error
-    _settings_load_error = None
+    """Mark the recorded settings load error as reported, so that
+    ``settings_load_error`` no longer returns it. The broken file stays
+    recorded: reading it again does not report it again, and
+    ``settings_file_is_broken`` still tells it from a readable one."""
+    global _settings_load_error_dismissed
+    _settings_load_error_dismissed = True
 
 
 def settings_file_is_broken() -> bool:
@@ -1543,7 +2659,7 @@ def load_user_settings() -> lib.AutoDict:
         return lib.AutoDict()
     try:
         with settings_file:
-            settings = yaml.load(settings_file, Loader=yaml.FullLoader)
+            settings = _parse_yaml(settings_file)
     except Exception as error:
         _record_broken_settings(settings_filename, error)
         return lib.AutoDict()
@@ -1582,6 +2698,10 @@ def save_info(
 ) -> None:
     """Save metadata to a YAML file.
 
+    Written as plain YAML, one document per dict: numpy values, tuples
+    and sets are stored as plain numbers and lists, as in the metadata
+    embedded in HDF5 files, so any YAML reader can read the file.
+
     Parameters
     ----------
     path : str
@@ -1593,7 +2713,12 @@ def save_info(
         will be written in block style.
     """
     with open(path, "w") as file:
-        yaml.dump_all(info, file, default_flow_style=default_flow_style)
+        _dump_yaml(
+            info,
+            file,
+            all_documents=True,
+            default_flow_style=default_flow_style,
+        )
 
 
 def _to_dict_walk(node: dict) -> dict:
@@ -1907,7 +3032,7 @@ class AbstractPicassoMovie(abc.ABC):
     def camera_parameters(self, config: dict) -> dict:
         """Get the camera specific parameters.
 
-        These are the gain, the quantum efficiency and the wavelength. They
+        These are the gain and the emission wavelength. They
         depend on camera settings (as described in metadata)
         but the values themselves are given in the config.yaml file.
         Each filetype (nd2, ome-tiff, ..) has their own structure of metadata,
@@ -1923,12 +3048,11 @@ class AbstractPicassoMovie(abc.ABC):
         Returns
         -------
         parameters : dict
-            Keys: gain, qe, wavelength, cam_index, camera. Values are
+            Keys: gain, wavelength, cam_index, camera. Values are
             lists.
         """
         return {
             "gain": [1],
-            "qe": [1],
             "wavelength": [0],
             "cam_index": 0,
             "camera": "None",
@@ -1975,8 +3099,9 @@ class AbstractPicassoMovie(abc.ABC):
         file_handle : file object
             Destination, opened in binary write mode.
         byte_order : str, optional
-            Byte order to write in (``"<"`` or ``">"``). None keeps the
-            movie's own. Default None.
+            Byte order to write in (``"<"`` or ``">"``). None writes the
+            frames as they are read, in the native byte order. Default
+            None.
         """
         pass
 
@@ -2011,13 +3136,19 @@ class ND2Movie(AbstractPicassoMovie):
         # entered metadata (info() then returns None).
         try:
             self.meta = self.get_metadata(self.nd2file)
-        except Exception:
+        except Exception as error:
+            _log.warning(
+                "The metadata of %s could not be read (%s); the movie can "
+                "be loaded with metadata entered by hand.",
+                path,
+                error,
+            )
             self.meta = None
-        self._shape = [
+        self._shape = (
             self.nd2file.sizes[self.frame_axis],
-            self.nd2file.sizes["X"],
             self.nd2file.sizes["Y"],
-        ]
+            self.nd2file.sizes["X"],
+        )
 
     def _validate_nd2_dimensions(self):
         """Check required dimensions and set self.frame_axis.
@@ -2071,8 +3202,8 @@ class ND2Movie(AbstractPicassoMovie):
             names = [c.channel.name for c in self.nd2file.metadata.channels]
             if len(names) == self.n_channels and all(names):
                 self.channels = [str(n) for n in names]
-        except Exception:
-            pass
+        except Exception as error:
+            _log.debug("Channel names of %s not read: %s", self.path, error)
 
     def info(self) -> dict:
         if self.meta is None:
@@ -2191,22 +3322,22 @@ class ND2Movie(AbstractPicassoMovie):
             mmmeta["capturing"] = self.nikontext_to_dict(
                 text_info["capturing"]
             )
-        except Exception:
-            pass
+        except Exception as error:
+            _log.debug("ND2 text info 'capturing' not read: %s", error)
         try:
             mmmeta["AcquisitionDate"] = text_info["date"]
-        except Exception:
-            pass
+        except Exception as error:
+            _log.debug("ND2 text info 'date' not read: %s", error)
         try:
             mmmeta["description"] = self.nikontext_to_dict(
                 text_info["description"]
             )
-        except Exception:
-            pass
+        except Exception as error:
+            _log.debug("ND2 text info 'description' not read: %s", error)
         try:
             mmmeta["optics"] = self.nikontext_to_dict(text_info["optics"])
-        except Exception:
-            pass
+        except Exception as error:
+            _log.debug("ND2 text info 'optics' not read: %s", error)
 
         mmmeta["custom_data"] = nd2file.custom_data
         mmmeta["attributes"] = nd2file.attributes._asdict()
@@ -2370,7 +3501,7 @@ class ND2Movie(AbstractPicassoMovie):
     def camera_parameters(self, config):  # noqa: C901
         """Get the camera specific parameters.
 
-        These are the gain, the quantum efficiency and the wavelength. They
+        These are the gain and the emission wavelength. They
         depend on camera settings (as described in metadata)
         but the values themselves are given in the config.yaml file.
         Each filetype (nd2, ome-tiff, ..) has their own structure of metadata,
@@ -2382,10 +3513,6 @@ class ND2Movie(AbstractPicassoMovie):
           Zyla 4.2:
             Pixelsize: 130
             Baseline: 100
-            Quantum Efficiency:
-              525: 0.7
-              595: 0.72
-              700: 0.64
             Sensitivity Categories:
               - PixelReadoutRate
               - ReadoutMode
@@ -2408,33 +3535,35 @@ class ND2Movie(AbstractPicassoMovie):
         Returns
         -------
         parameters : dict
-            Keys: gain, qe, wavelength, cam_index, camera. Values are
+            Keys: gain, wavelength, cam_index, camera. Values are
             lists.
         """
         parameters = {}
-        info = self.meta
+        # None if the metadata could not be read (entered by hand)
+        info = self.meta or {}
 
-        try:
-            assert "Cameras" in config.keys() and "Camera" in info.keys()
-        except Exception:
+        if "Cameras" not in config or "Camera" not in info:
             raise KeyError("'camera' key not found in metadata or config.")
 
         cameras = config["Cameras"]
         camera = info["Camera"]
 
-        try:
-            assert camera in cameras.keys()
-        except Exception:
+        if camera not in cameras:
             raise KeyError("camera from metadata not found in config.")
 
         index = sorted(list(cameras.keys())).index(camera)
         parameters["cam_index"] = index
         parameters["camera"] = camera
 
-        try:
-            assert "Picasso Metadata" in info
-        except Exception:
-            return {"gain": [1], "qe": [1], "wavelength": [0], "cam_index": 0}
+        if "Picasso Metadata" not in info:
+            _log.warning(
+                "The metadata of %s do not hold the camera settings that "
+                "select the parameters of the camera %r in the camera "
+                "configuration; gain 1 is used.",
+                self.path,
+                camera,
+            )
+            return {"gain": [1], "wavelength": [0], "cam_index": 0}
 
         pm_info = info["Picasso Metadata"]
         # mm_info = info["nd2 Metadata"]
@@ -2451,18 +3580,11 @@ class ND2Movie(AbstractPicassoMovie):
             categories = cam_config["Sensitivity Categories"]
             for _, category in enumerate(categories):
                 parameters["Sensitivity"][category] = pm_info[category]
-        if "Quantum Efficiency" in cam_config:
-            if "Filter Wavelengths" in cam_config:
-                channel = pm_info["Filter"]
-                channels = cam_config["Filter Wavelengths"]
-                if channel in channels:
-                    wavelength = channels[channel]
-                    parameters["wavelength"] = str(wavelength)
-                    parameters["qe"] = cam_config["Quantum Efficiency"][
-                        wavelength
-                    ]
-        if "qe" not in parameters.keys():
-            parameters["qe"] = [1]
+        if "Filter Wavelengths" in cam_config:
+            channel = pm_info.get("Filter")
+            channels = cam_config["Filter Wavelengths"]
+            if channel in channels:
+                parameters["wavelength"] = [str(channels[channel])]
         if "wavelength" not in parameters.keys():
             parameters["wavelength"] = [0]
         return parameters
@@ -2574,7 +3696,6 @@ class _MultiDimMovie(AbstractPicassoMovie):
         the parameters set in the GUI."""
         return {
             "gain": [1],
-            "qe": [1],
             "wavelength": [0],
             "cam_index": 0,
             "camera": "None",
@@ -2631,8 +3752,8 @@ class CZIMovie(_MultiDimMovie):
             names = list(self._image.channels.keys())
             if len(names) == n_channels:
                 channels = [str(n) for n in names]
-        except Exception:
-            pass
+        except Exception as error:
+            _log.debug("Channel names of %s not read: %s", path, error)
         self._select_channel(channels, prompt_info, channel)
 
     def _read_plane(self, index: int) -> np.ndarray:
@@ -2664,8 +3785,13 @@ class CZIMovie(_MultiDimMovie):
             info["Pixelsize"] = round(float(self._mpp[0]) * 1000, 3)
         try:
             info["CZI Metadata"] = _yaml_safe(self._image.attrs)
-        except Exception:
-            pass
+        except Exception as error:
+            _log.warning(
+                "The CZI metadata of %s could not be read (%s) and are "
+                "left out of the metadata.",
+                self.path,
+                error,
+            )
         return info
 
     def close(self):
@@ -2725,8 +3851,8 @@ class LIFMovie(_MultiDimMovie):
             names = self._image.coords.get("C")
             if names is not None and len(names) == n_channels:
                 channels = [str(n) for n in list(names)]
-        except Exception:
-            pass
+        except Exception as error:
+            _log.debug("Channel names of %s not read: %s", path, error)
         self._select_channel(channels, prompt_info, channel)
 
     def _read_plane(self, index: int) -> np.ndarray:
@@ -2756,8 +3882,13 @@ class LIFMovie(_MultiDimMovie):
             info["Pixelsize"] = pixelsize
         try:
             info["LIF Metadata"] = _yaml_safe(self._image.attrs)
-        except Exception:
-            pass
+        except Exception as error:
+            _log.warning(
+                "The LIF metadata of %s could not be read (%s) and are "
+                "left out of the metadata.",
+                self.path,
+                error,
+            )
         return info
 
     def _pixelsize_nm(self) -> float | None:
@@ -2773,8 +3904,8 @@ class LIFMovie(_MultiDimMovie):
             spacing_nm = abs(float(xs[1]) - float(xs[0])) * 1e9
             if 1.0 <= spacing_nm <= 100000.0:
                 return round(spacing_nm, 3)
-        except Exception:
-            pass
+        except Exception as error:
+            _log.debug("Pixel size of %s not read: %s", self.path, error)
         return None
 
     def close(self):
@@ -2790,7 +3921,8 @@ def _yaml_safe(obj):
     ``_locs.yaml``)."""
     try:
         return json.loads(json.dumps(obj, default=str))
-    except Exception:
+    except Exception as error:
+        _log.debug("Metadata kept as text: %s", error)
         return str(obj)
 
 
@@ -2849,8 +3981,13 @@ def _mm_per_image_metadata_from_tifffile(tif: "tifffile.TiffFile") -> dict:
                     mm_info[key] = val
             out["Micro-Manager Metadata"] = mm_info
             out["Camera"] = mm_info.get("Camera", "None")
-    except Exception:
-        pass
+    except Exception as error:
+        _log.warning(
+            "The Micro-Manager metadata of %s could not be read (%s) and "
+            "are left out of the metadata, so its camera is not known.",
+            getattr(tif, "filename", "the TIFF file"),
+            error,
+        )
     return out
 
 
@@ -2880,8 +4017,13 @@ def _mm_acquisition_comments_from_tifffile(tif: "tifffile.TiffFile") -> dict:
             # key is left out if the comments is empty
             if isinstance(summary, str) and summary.strip():
                 out["Micro-Manager Acquisition Comments"] = summary.split("\n")
-    except Exception:
-        pass
+    except Exception as error:
+        _log.warning(
+            "The Micro-Manager acquisition comments of %s could not be read "
+            "(%s) and are left out of the metadata.",
+            getattr(tif, "filename", "the TIFF file"),
+            error,
+        )
     return out
 
 
@@ -2983,7 +4125,24 @@ class _PerThreadFileHandles:
         self._local = threading.local()
 
 
-def _index_pages(pages, progress=None) -> int:
+def _tiff_phase_name(path: str, counter: str | None) -> str:
+    """Name of a TIFF file in the progress phase labels, with its
+    position in a multi-file movie (e.g. ``"2/3"``) if given."""
+    name = os.path.basename(path)
+    return f"{name} ({counter})" if counter else name
+
+
+def _join_counters(outer: str | None, index: int, n: int) -> str | None:
+    """Position label of the ``index``-th (0-based) of ``n`` files, within
+    the position ``outer`` of an enclosing multi-file movie, e.g.
+    ``"2/3, part 1/2"``; None for a single file without ``outer``."""
+    inner = f"{index + 1}/{n}" if n > 1 else None
+    if outer and inner:
+        return f"{outer}, part {inner}"
+    return outer or inner
+
+
+def _index_pages(pages, progress: lib.Progress) -> int:
     """Return the number of IFDs in ``pages``, walking the IFD chain in
     chunks so that a long scan stays reportable and abortable.
 
@@ -2991,13 +4150,14 @@ def _index_pages(pages, progress=None) -> int:
     ible call - minutes for a movie with many frames on network storage,
     where every IFD costs a round trip. Reading a page only extends the
     chain up to that index (see ``tifffile.TiffPages._seek``), so the
-    walk is done here one chunk of pages at a time, calling
-    ``progress(done, 0)`` in between. The total is 0 because the frame
-    count is precisely what is not known yet; raising inside ``progress``
-    aborts the scan.
+    walk is done here one chunk of pages at a time, reporting the pages
+    counted so far with ``progress.set_value`` in between. The caller
+    runs this in a phase of unknown maximum (0, a busy indicator),
+    because the page count is precisely what is not known yet; a
+    tracker that raises ``lib.OperationCanceled`` aborts the scan.
     """
     CHUNK = 2000  # IFDs walked per progress report
-    if progress is None or not isinstance(pages, tifffile.TiffPages):
+    if not isinstance(pages, tifffile.TiffPages):
         return len(pages)
     if getattr(pages, "_indexed", False):  # chain already walked
         return len(pages)
@@ -3008,8 +4168,18 @@ def _index_pages(pages, progress=None) -> int:
         except IndexError:  # the chain ended within the last chunk
             break
         done += CHUNK
-        progress(done, 0)
+        progress.set_value(done)
     return len(pages)
+
+
+def _frames_tofile(movie, file_handle, byte_order: str | None) -> None:
+    """Write the frames of ``movie``, which are read in the native byte
+    order, to ``file_handle`` as raw binary in ``byte_order`` (``"<"``
+    or ``">"``; None for the native one)."""
+    for image in movie:
+        if byte_order is not None:
+            image = image.astype(image.dtype.newbyteorder(byte_order))
+        image.tofile(file_handle)
 
 
 class TiffMap(_PerThreadFileHandles):
@@ -3034,7 +4204,14 @@ class TiffMap(_PerThreadFileHandles):
     (slower to open but reads the file) and drops the stray IFD so
     ``n_frames`` matches the real number of image planes."""
 
-    def __init__(self, path: str, verbose: bool = False, progress=None):
+    def __init__(
+        self,
+        path: str,
+        verbose: bool = False,
+        progress: lib.Progress | Literal["console"] | None = None,
+        *,
+        _counter: str | None = None,
+    ):
         """Open the TIFF file and extract its frame layout.
 
         The geometry, data type and per-page layout needed for lazy
@@ -3046,16 +4223,33 @@ class TiffMap(_PerThreadFileHandles):
             Path to the TIFF file.
         verbose : bool, optional
             If True, print the path being read. Default is False.
-        progress : callable, optional
-            ``callable(done, total)`` invoked as the per-page IFD scan
-            in ``_build_offsets`` proceeds, so the GUI can show a smooth
-            determinate bar while a single large movie is opened. It is
-            throttled to at most ~200 calls per file. Default is None.
+        progress : lib.Progress, "console" or None, optional
+            Progress tracker, see ``picasso.lib.Progress``: e.g. a
+            ``lib.ProgressDialog``, "console" for a tqdm bar in the
+            console, or None for no reporting. Reports "Indexing <file>"
+            (a busy indicator while the pages are counted, ending at
+            their number) and "Reading <file>" over the pages, reported
+            at most ~200 times. If the lightweight page parsing fails
+            (see the class docstring), both phases run again. Default
+            is None.
+        _counter : str, optional
+            Position of the file in a multi-file movie (e.g. ``"2/3"``),
+            appended to the phase labels. Default is None.
         """
         if verbose:
             print("Reading info from {}".format(path))
         self.path = os.path.abspath(path)
         self._tif = tifffile.TiffFile(self.path)
+        try:
+            with lib.tracked_progress(progress, unit="page") as progress:
+                self._open(_tiff_phase_name(self.path, _counter), progress)
+        except BaseException:  # e.g. canceled: do not leak the file
+            self._tif.close()
+            raise
+
+    def _open(self, name: str, progress: lib.Progress) -> None:
+        """Read the frame layout of the opened TIFF file, see
+        ``__init__``; ``name`` labels the progress phases."""
 
         # Choose the per-frame list. Zeiss LSM interleaves a
         # reduced-size thumbnail IFD after every image, so tif.pages
@@ -3124,15 +4318,16 @@ class TiffMap(_PerThreadFileHandles):
         # the file with the right number of frames, as the pre-tifffile
         # reader did.
         try:
-            self._offsets, self.n_frames = self._build_offsets(progress)
+            self._offsets, self.n_frames = self._build_offsets(name, progress)
         except RuntimeError:
             # Flipping useframes in place is cache-safe (Picasso never
             # enables tifffile's page cache, so no stale TiffFrames are
             # held) and keeps the already-discovered IFD offset list. The
             # LSM branch above uses full TiffPages and never raises here.
+            # The retry starts its progress phases anew.
             self._tif.pages.useframes = False
             self._pages = self._tif.pages
-            self._offsets, self.n_frames = self._build_offsets(progress)
+            self._offsets, self.n_frames = self._build_offsets(name, progress)
 
         # Per-thread binary handles for the fast offset-based read path
         # (see _PerThreadFileHandles). The decode lock only guards the slow
@@ -3185,7 +4380,9 @@ class TiffMap(_PerThreadFileHandles):
             n *= dim
         return n if n > 1 else None
 
-    def _build_offsets(self, progress=None) -> tuple[list[int] | None, int]:
+    def _build_offsets(
+        self, name: str, progress: lib.Progress
+    ) -> tuple[list[int] | None, int]:
         """Return ``(offsets, n_frames)`` for the movie.
 
         ``n_frames`` is the number of genuine image planes: a stray
@@ -3202,11 +4399,25 @@ class TiffMap(_PerThreadFileHandles):
         against the keyframe, so this is also where the "incompatible
         keyframe" RuntimeError surfaces; __init__ catches it and retries
         with full-page parsing, where the stray IFD has its real shape
-        and is dropped below."""
+        and is dropped below.
+
+        Reports the phases "Indexing <name>" (unknown maximum while the
+        pages are counted, then ending at their number) and "Reading
+        <name>" over the pages, each ending at its maximum."""
         # Counting the pages walks the IFD chain, which is the whole cost
         # of opening a compressed movie (the branch below returns without
         # touching the pages again), so it is reported in chunks too.
+        lib.start_phase(progress, f"Indexing {name}", 0, unit="page")
         n_pages = _index_pages(self._pages, progress)
+        progress.setMaximum(n_pages)
+        progress.set_value(n_pages)
+
+        if self._imagej_planes is not None:
+            n_planes = self._imagej_planes
+            lib.start_phase(progress, f"Reading {name}", n_planes)
+            result = self._build_offsets_imagej()
+            progress.set_value(n_planes)
+            return result
 
         # Throttle progress reports to at most ~200 per file so a
         # multi-thousand-frame movie does not flood the GUI event queue
@@ -3214,18 +4425,19 @@ class TiffMap(_PerThreadFileHandles):
         step = max(1, n_pages // 200)
 
         def report(done: int) -> None:
-            if progress is not None and (done % step == 0 or done == n_pages):
-                progress(done, n_pages)
+            if done % step == 0:
+                progress.set_value(done)
 
-        if self._imagej_planes is not None:
-            return self._build_offsets_imagej(progress)
-
+        lib.start_phase(progress, f"Reading {name}", n_pages)
         if not self._uncompressed:
-            return self._build_offsets_compressed(n_pages, report)
+            result = self._build_offsets_compressed(n_pages, report)
+        else:
+            result = self._build_offsets_uncompressed(report)
+        # also when a stray trailing IFD ended the scan early
+        progress.set_value(n_pages)
+        return result
 
-        return self._build_offsets_uncompressed(report)
-
-    def _build_offsets_imagej(self, progress=None) -> tuple[list[int], int]:
+    def _build_offsets_imagej(self) -> tuple[list[int], int]:
         """Derive offsets for an ImageJ contiguous stack.
 
         ImageJ writes one IFD, then every plane's data laid out
@@ -3244,8 +4456,6 @@ class TiffMap(_PerThreadFileHandles):
         except OSError:
             pass
         offsets = [base + i * self._frame_nbytes for i in range(n)]
-        if progress is not None:
-            progress(n, n)
         return offsets, n
 
     def _build_offsets_compressed(
@@ -3314,7 +4524,7 @@ class TiffMap(_PerThreadFileHandles):
         # thread reads through its private handle, and the compressed
         # fallback takes _decode_lock), so concurrent reads can overlap.
         if isinstance(it, tuple):
-            if isinstance(it, int) or np.issubdtype(it[0], np.integer):
+            if isinstance(it[0], (int, np.integer)):
                 return self[it[0]][it[1:]]
             elif isinstance(it[0], slice):
                 indices = range(*it[0].indices(self.n_frames))
@@ -3328,14 +4538,9 @@ class TiffMap(_PerThreadFileHandles):
                         return stack[:, it[1], it[2]]
                     else:
                         raise IndexError
-            elif it[0] == Ellipsis:
-                stack = self[it[0]]
-                if len(it) == 2:
-                    return stack[:, it[1]]
-                elif len(it) == 3:
-                    return stack[:, it[1], it[2]]
-                else:
-                    raise IndexError
+            elif it[0] is Ellipsis:
+                # as in NumPy, ``...`` stands for the leading axes
+                return self[...][it]
         elif isinstance(it, slice):
             indices = range(*it.indices(self.n_frames))
             return np.array([self.get_frame(_) for _ in indices])
@@ -3425,11 +4630,7 @@ class TiffMap(_PerThreadFileHandles):
         self._tif.close()
 
     def tofile(self, file_handle, byte_order=None):
-        do_byteswap = byte_order != self._tif_byte_order
-        for image in self:
-            if do_byteswap:
-                image = image.byteswap()
-            image.tofile(file_handle)
+        _frames_tofile(self, file_handle, byte_order)
 
 
 class STKMovie(AbstractPicassoMovie, _PerThreadFileHandles):
@@ -3507,7 +4708,7 @@ class STKMovie(AbstractPicassoMovie, _PerThreadFileHandles):
         # No shared lock: get_frame reads through this thread's private
         # handle, so concurrent reads overlap instead of serializing.
         if isinstance(it, tuple):
-            if isinstance(it[0], int) or np.issubdtype(it[0], np.integer):
+            if isinstance(it[0], (int, np.integer)):
                 return self[it[0]][it[1:]]
             elif isinstance(it[0], slice):
                 indices = range(*it[0].indices(self.n_frames))
@@ -3520,14 +4721,9 @@ class STKMovie(AbstractPicassoMovie, _PerThreadFileHandles):
                     return stack[:, it[1], it[2]]
                 else:
                     raise IndexError
-            elif it[0] == Ellipsis:
-                stack = self[it[0]]
-                if len(it) == 2:
-                    return stack[:, it[1]]
-                elif len(it) == 3:
-                    return stack[:, it[1], it[2]]
-                else:
-                    raise IndexError
+            elif it[0] is Ellipsis:
+                # as in NumPy, ``...`` stands for the leading axes
+                return self[...][it]
         elif isinstance(it, slice):
             indices = range(*it.indices(self.n_frames))
             return np.array([self.get_frame(_) for _ in indices])
@@ -3584,7 +4780,6 @@ class STKMovie(AbstractPicassoMovie, _PerThreadFileHandles):
     def camera_parameters(self, config: dict) -> dict:
         return {
             "gain": [1],
-            "qe": [1],
             "wavelength": [0],
             "cam_index": 0,
             "camera": "None",
@@ -3631,11 +4826,7 @@ class STKMovie(AbstractPicassoMovie, _PerThreadFileHandles):
         self._close_handles()
 
     def tofile(self, file_handle, byte_order=None):
-        do_byteswap = byte_order != self._byte_order
-        for image in self:
-            if do_byteswap:
-                image = image.byteswap()
-            image.tofile(file_handle)
+        _frames_tofile(self, file_handle, byte_order)
 
     @property
     def dtype(self):
@@ -3701,14 +4892,9 @@ class STKMultiMovie(AbstractPicassoMovie):
 
     def __getitem__(self, it):  # noqa: C901
         if isinstance(it, tuple):
-            if it[0] == Ellipsis:
-                stack = self[it[0]]
-                if len(it) == 2:
-                    return stack[:, it[1]]
-                elif len(it) == 3:
-                    return stack[:, it[1], it[2]]
-                else:
-                    raise IndexError
+            if it[0] is Ellipsis:
+                # as in NumPy, ``...`` stands for the leading axes
+                return self[...][it]
             elif isinstance(it[0], slice):
                 indices = range(*it[0].indices(self.n_frames))
                 stack = np.array([self.get_frame(_) for _ in indices])
@@ -3748,11 +4934,33 @@ class STKMultiMovie(AbstractPicassoMovie):
         return self._dtype
 
     def get_frame(self, index: int) -> lib.IntArray2D:
+        """Load one frame from the STK file that holds it.
+
+        Parameters
+        ----------
+        index : int
+            Frame index in the combined movie; negative values count
+            from the end.
+
+        Returns
+        -------
+        frame : lib.IntArray2D
+            ``(height, width)`` raw camera counts.
+
+        Raises
+        ------
+        IndexError
+            If ``index`` is out of range.
+        """
+        if index < 0:
+            index += self.n_frames
         for i in range(self.n_maps):
             if self.cum_n_frames[i] <= index < self.cum_n_frames[i + 1]:
                 break
         else:
-            raise IndexError
+            raise IndexError(
+                f"Frame {index} out of range for {self.n_frames} frames."
+            )
         return self.maps[i][index - self.cum_n_frames[i]]
 
     def info(self) -> dict:
@@ -3764,7 +4972,6 @@ class STKMultiMovie(AbstractPicassoMovie):
     def camera_parameters(self, config: dict) -> dict:
         return {
             "gain": [1],
-            "qe": [1],
             "wavelength": [0],
             "cam_index": 0,
             "camera": "None",
@@ -3775,40 +4982,44 @@ class STKMultiMovie(AbstractPicassoMovie):
             map_.tofile(file_handle, byte_order)
 
 
-def _scaled_progress(progress, j: int, n: int):
-    """Return a per-component progress callback that reports into the
-    ``j``-th of ``n`` equal slices of a composite progress bar.
-
-    Movies assembled from several files (a multi-file OME set, or several
-    files concatenated across folders) open one component at a time, each
-    reporting its own ``(done, total)``. Weighting the slices by frame
-    count is not possible before the components are opened, so every one
-    gets an equal share. ``SCALE`` sub-steps per component keep a
-    single-component movie animating smoothly across ``0..SCALE``.
-    Returns None when ``progress`` is None (no reporting).
-    """
-    SCALE = 1000
-    if progress is None:
-        return None
-
-    def callback(done, total):
-        if total > 0:
-            progress(int((j + done / total) * SCALE), n * SCALE)
-
-    return callback
+def _open_components(open_one, items: list, progress) -> list:
+    """Open the components of a multi-file movie in turn with
+    ``open_one(index, item, progress)``, closing those already opened if
+    one fails (e.g. because the user canceled), so no file is leaked."""
+    components = []
+    try:
+        for j, item in enumerate(items):
+            components.append(open_one(j, item, progress))
+    except BaseException:
+        for component in components:
+            try:
+                component.close()
+            except Exception:  # noqa: BLE001 - the first error matters
+                pass
+        raise
+    return components
 
 
 class TiffMultiMap(AbstractPicassoMovie):
     """Read ``.ome.tif`` files created by MicroManager. Single files are
     maxed out at 4GB, so this class orchestrates reading from single
-    files, each accessed by ``TiffMap``."""
+    files, each accessed by ``TiffMap``.
+
+    ``progress`` (a ``lib.Progress``, "console" or None, see
+    ``picasso.lib.Progress``) reports the phases of ``TiffMap`` for each
+    file, "Indexing <file> (j/n)" and "Reading <file> (j/n)" over its
+    pages. ``_counter`` is the position of this movie in an enclosing
+    multi-file movie (see ``ConcatenatedTiffMovie``), prepended to the
+    file positions in the phase labels."""
 
     def __init__(
         self,
         path: str,
         memmap_frames: bool = False,
         verbose: bool = False,
-        progress=None,
+        progress: lib.Progress | Literal["console"] | None = None,
+        *,
+        _counter: str | None = None,
     ):
         super().__init__()
         self.path = os.path.abspath(path)
@@ -3833,17 +5044,20 @@ class TiffMultiMap(AbstractPicassoMovie):
         self.paths = [self.path] + [
             path for index, path in sorted(paths_indices)
         ]
-        # A multi-file OME movie is opened as several TiffMaps; each gets
-        # an equal slice of the composite progress range.
+        # A multi-file OME movie is opened as several TiffMaps, each
+        # reporting its own phases, labeled with its position.
         n_maps = len(self.paths)
-        self.maps = [
-            TiffMap(
+
+        def open_map(j: int, path: str, progress: lib.Progress) -> TiffMap:
+            return TiffMap(
                 path,
                 verbose=verbose,
-                progress=_scaled_progress(progress, j, n_maps),
+                progress=progress,
+                _counter=_join_counters(_counter, j, n_maps),
             )
-            for j, path in enumerate(self.paths)
-        ]
+
+        with lib.tracked_progress(progress, unit="page") as progress:
+            self.maps = _open_components(open_map, self.paths, progress)
         self.n_maps = len(self.maps)
         self.n_frames_per_map = [_.n_frames for _ in self.maps]
         self.n_frames = sum(self.n_frames_per_map)
@@ -3865,14 +5079,9 @@ class TiffMultiMap(AbstractPicassoMovie):
 
     def __getitem__(self, it):  # noqa: C901
         if isinstance(it, tuple):
-            if it[0] == Ellipsis:
-                stack = self[it[0]]
-                if len(it) == 2:
-                    return stack[:, it[1]]
-                elif len(it) == 3:
-                    return stack[:, it[1], it[2]]
-                else:
-                    raise IndexError
+            if it[0] is Ellipsis:
+                # as in NumPy, ``...`` stands for the leading axes
+                return self[...][it]
             elif isinstance(it[0], slice):
                 indices = range(*it[0].indices(self.n_frames))
                 stack = np.array([self.get_frame(_) for _ in indices])
@@ -3912,12 +5121,33 @@ class TiffMultiMap(AbstractPicassoMovie):
         return self._dtype
 
     def get_frame(self, index: int) -> lib.IntArray2D:
-        # TODO deal with negative numbers
+        """Load one frame from the file that holds it.
+
+        Parameters
+        ----------
+        index : int
+            Frame index in the combined movie; negative values count
+            from the end.
+
+        Returns
+        -------
+        frame : lib.IntArray2D
+            ``(height, width)`` raw camera counts.
+
+        Raises
+        ------
+        IndexError
+            If ``index`` is out of range.
+        """
+        if index < 0:
+            index += self.n_frames
         for i in range(self.n_maps):
             if self.cum_n_frames[i] <= index < self.cum_n_frames[i + 1]:
                 break
         else:
-            raise IndexError
+            raise IndexError(
+                f"Frame {index} out of range for {self.n_frames} frames."
+            )
         return self.maps[i][index - self.cum_n_frames[i]]
 
     def info(self):
@@ -3929,7 +5159,7 @@ class TiffMultiMap(AbstractPicassoMovie):
     def camera_parameters(self, config: dict) -> dict:  # noqa: C901
         """Get the camera specific parameters.
 
-        These are the gain, the quantum efficiency and the wavelength. They
+        These are the gain and the emission wavelength. They
         depend on camera settings (as described in metadata)
         but the values themselves are given in the config.yaml file.
         Each filetype (nd2, ome-tiff, ..) has their own structure of metadata,
@@ -3947,36 +5177,49 @@ class TiffMultiMap(AbstractPicassoMovie):
         Returns
         -------
         parameters : dict
-            Keys: gain, qe, wavelength, cam_index, camera. Values are
+            Keys: gain, wavelength, cam_index, camera. Values are
             lists.
         """
-        # return {'gain': [1], 'qe': [1], 'wavelength': [0], 'cam_index': 0}
         parameters = {}
-        info = self.meta
+        # set by ``info``, which may not have been called yet
+        info = getattr(self, "meta", None)
+        if info is None:
+            info = self.info()
+        default = {"gain": [1], "wavelength": [0], "cam_index": 0}
 
-        try:
-            assert "Cameras" in config and "Camera" in info
-        except Exception:
-            return {"gain": [1], "qe": [1], "wavelength": [0], "cam_index": 0}
-            # raise KeyError("'camera' key not found in metadata or config.")
+        if "Cameras" not in config or "Camera" not in info:
+            _log.debug(
+                "No camera configuration or no camera in the metadata of %s.",
+                self.path,
+            )
+            return default
 
         cameras = config["Cameras"]
         camera = info["Camera"]
 
-        try:
-            assert camera in list(cameras.keys())
-        except Exception:
-            return {"gain": [1], "qe": [1], "wavelength": [0], "cam_index": 0}
-            # raise KeyError('camera from metadata not found in config.')
+        if camera not in cameras:
+            _log.warning(
+                "The camera %r of %s is not in the camera configuration "
+                "(%s); gain 1 is used.",
+                camera,
+                self.path,
+                ", ".join(map(repr, cameras)),
+            )
+            return default
 
         index = sorted(list(cameras.keys())).index(camera)
         parameters["cam_index"] = index
         parameters["camera"] = camera
 
-        try:
-            assert "Micro-Manager Metadata" in info
-        except Exception:
-            return {"gain": [1], "qe": [1], "wavelength": [0], "cam_index": 0}
+        if "Micro-Manager Metadata" not in info:
+            _log.warning(
+                "The metadata of %s do not hold the Micro-Manager settings "
+                "that select the parameters of the camera %r in the camera "
+                "configuration; gain 1 is used.",
+                self.path,
+                camera,
+            )
+            return default
 
         mm_info = info["Micro-Manager Metadata"]
         cam_config = config["Cameras"][camera]
@@ -4006,20 +5249,13 @@ class TiffMultiMap(AbstractPicassoMovie):
                 if property_name in mm_info:
                     exp_setting = mm_info[camera + "-" + category]
                     parameters["Sensitivity"][category] = exp_setting
-        if "Quantum Efficiency" in cam_config:
-            if "Channel Device" in cam_config:
-                channel_device = cam_config["Channel Device"]
-                channel_device_name = channel_device["Name"]
-                channels = channel_device["Emission Wavelengths"]
-                channel = mm_info.get(channel_device_name)
-                if channel in channels:
-                    wavelength = channels[channel]
-                    parameters["wavelength"] = [str(wavelength)]
-                    parameters["qe"] = [
-                        cam_config["Quantum Efficiency"][wavelength]
-                    ]
-        if "qe" not in parameters.keys():
-            parameters["qe"] = [1]
+        if "Channel Device" in cam_config:
+            channel_device = cam_config["Channel Device"]
+            channel_device_name = channel_device["Name"]
+            channels = channel_device["Emission Wavelengths"]
+            channel = mm_info.get(channel_device_name)
+            if channel in channels:
+                parameters["wavelength"] = [str(channels[channel])]
         if "wavelength" not in parameters.keys():
             parameters["wavelength"] = [0]
         return parameters
@@ -4200,16 +5436,26 @@ def find_mm_separate_first(directory: str) -> str | None:
     return None
 
 
-def _open_tif_component(path: str, verbose: bool = False, progress=None):
+def _open_tif_component(
+    path: str,
+    verbose: bool,
+    progress: lib.Progress,
+    counter: str | None,
+):
     """Open one TIFF movie for concatenation, applying the same dispatch
     as :func:`load_tif`: a MicroManager "separate image files" frame
-    opens its whole folder, anything else opens as a (possibly
-    multi-file) ``TiffMultiMap``."""
+    opens its whole folder (reporting no progress), anything else opens
+    as a (possibly multi-file) ``TiffMultiMap``, whose phase labels carry
+    ``counter``, the position of the movie (e.g. ``"2/3"``)."""
     separate_paths = _mm_separate_files(path)
     if separate_paths is not None:
         return MMSeparateTiffMovie(separate_paths, verbose=verbose)
     return TiffMultiMap(
-        path, memmap_frames=False, verbose=verbose, progress=progress
+        path,
+        memmap_frames=False,
+        verbose=verbose,
+        progress=progress,
+        _counter=counter,
     )
 
 
@@ -4233,9 +5479,29 @@ class ConcatenatedTiffMovie(TiffMultiMap):
     otherwise a ``ValueError`` names the offending file. Metadata is
     taken from the first component, with ``Frames`` set to the total and
     the source paths recorded (see :meth:`info`).
+
+    Parameters
+    ----------
+    paths : list of str
+        The TIFF movies to concatenate, in the order their frames should
+        appear.
+    verbose : bool, optional
+        If True, print each path being read. Default is False.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports two phases per file,
+        "Indexing <file> (j/n)" (a busy indicator while the pages are
+        counted, ending at their number) and "Reading <file> (j/n)"
+        over its pages. Default is None.
     """
 
-    def __init__(self, paths: list[str], verbose: bool = False, progress=None):
+    def __init__(
+        self,
+        paths: list[str],
+        verbose: bool = False,
+        progress: lib.Progress | Literal["console"] | None = None,
+    ):
         # Deliberately skip TiffMultiMap.__init__, which would discover
         # the components by name next to a single file; here they are
         # given (mirroring how MMSeparateTiffMovie builds its own state).
@@ -4246,14 +5512,13 @@ class ConcatenatedTiffMovie(TiffMultiMap):
         self.path = self.paths[0]
         self.dir = os.path.dirname(self.path)
         n_paths = len(self.paths)
-        self.maps = [
-            _open_tif_component(
-                path,
-                verbose=verbose,
-                progress=_scaled_progress(progress, j, n_paths),
-            )
-            for j, path in enumerate(self.paths)
-        ]
+
+        def open_component(j: int, path: str, progress: lib.Progress):
+            counter = _join_counters(None, j, n_paths)
+            return _open_tif_component(path, verbose, progress, counter)
+
+        with lib.tracked_progress(progress, unit="page") as progress:
+            self.maps = _open_components(open_component, self.paths, progress)
         self.n_maps = len(self.maps)
         self.n_frames_per_map = [_.n_frames for _ in self.maps]
         self.n_frames = sum(self.n_frames_per_map)
@@ -4425,7 +5690,7 @@ def find_tif_movies(
 def load_tif_concatenated(
     paths: list[str],
     prompt_info: Callable[[dict], tuple[dict, bool]] | None = None,
-    progress=None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[ConcatenatedTiffMovie, list[dict]] | None:
     """Load several TIFF files as one movie, concatenated along frames.
 
@@ -4442,9 +5707,13 @@ def load_tif_concatenated(
         Called with the readable movie dimensions if the first file's
         metadata cannot be parsed, so the user can enter it manually.
         Must return ``(info, save)`` or None if canceled.
-    progress : callable, optional
-        ``callable(done, total)`` invoked as the files are scanned, so a
-        determinate progress bar can be shown. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports two phases per file,
+        "Indexing <file> (j/n)" (a busy indicator while the pages are
+        counted, ending at their number) and "Reading <file> (j/n)"
+        over its pages. Default is None.
 
     Returns
     -------
@@ -4456,7 +5725,10 @@ def load_tif_concatenated(
     Returns None if the metadata could not be read and the user
     canceled the manual-metadata fallback dialog.
     """
-    movie = ConcatenatedTiffMovie(paths, progress=progress)
+    for path in paths:
+        _check_path_length(path)
+    with lib.tracked_progress(progress, "Opening movie", "page") as progress:
+        movie = ConcatenatedTiffMovie(paths, progress=progress)
     info = _movie_info_or_prompt(movie, movie.path, prompt_info)
     if info is None:
         return None
@@ -4479,26 +5751,31 @@ def save_datasets(path: str, info: dict, **kwargs) -> None:
     """
     # cannot use df.to_hdf for backward compatibility with older Picasso
     with h5py.File(path, "w") as locs_file:
+        _write_format_attrs(locs_file)
         for key, val in kwargs.items():
             rec_locs = val.to_records(index=False)
             locs_file.create_dataset(key, data=rec_locs)
         embedded = _write_metadata_dataset(locs_file, info)
-    if _save_metadata_in_yaml() or not embedded:
-        base, ext = os.path.splitext(path)
-        info_path = base + ".yaml"
-        save_info(info_path, info)
+    _write_sidecar(path, info, embedded)
 
 
 def save_locs(
     path: str,
     locs: pd.DataFrame,
     info: list[dict],
+    *,
     render_index: bool | str | object = "auto",
 ) -> None:
     """Save localization data to an HDF5 file.
 
     The localizations are written with float32 floating-point columns
-    and a uint32 ``frame`` (see ``lib.ensure_sanity``).
+    and a uint32 ``frame`` (see ``lib.ensure_sanity``). The file records
+    the format version (``LOCS_FORMAT_VERSION``) and the Picasso version
+    in its root attributes, see ``get_format_version``. The metadata is
+    embedded in the file and, depending on the user settings, also saved
+    as a .yaml file next to it; an existing .yaml file there is always
+    overwritten, since it takes precedence when loading (see
+    ``load_info``).
 
     Parameters
     ----------
@@ -4525,16 +5802,420 @@ def save_locs(
     # cannot use to_hdf for backward compatibility with older Picasso
     rec_locs = locs.to_records(index=False)
     with h5py.File(path, "w") as locs_file:
+        _write_format_attrs(locs_file)
         locs_file.create_dataset("locs", data=rec_locs)
         embedded = _write_metadata_dataset(locs_file, info)
         if pyramid is not None:
             from . import spatial_index
 
             spatial_index.save_render_index(locs_file, pyramid)
-    if _save_metadata_in_yaml() or not embedded:
-        base, ext = os.path.splitext(path)
-        info_path = base + ".yaml"
+    _write_sidecar(path, info, embedded)
+
+
+def _write_sidecar(path: str, info: list[dict], embedded: bool) -> None:
+    """Write the .yaml metadata file next to the HDF5 file ``path``.
+
+    Written if the user settings ask for it (``Save metadata in .yaml``),
+    if the metadata could not be embedded in the HDF5 file, or if a .yaml
+    file is already there: it takes precedence over the embedded
+    metadata when loading (see ``load_info``), so a stale one would hide
+    the metadata just saved.
+    """
+    info_path = os.path.splitext(path)[0] + ".yaml"
+    if _save_metadata_in_yaml() or not embedded or os.path.exists(info_path):
         save_info(info_path, info)
+
+
+def _write_format_attrs(hdf_file: h5py.File) -> None:
+    """Record the format version and the Picasso version in the root
+    attributes of an open localization file, see
+    ``get_format_version``."""
+    hdf_file.attrs[FORMAT_VERSION_ATTR] = LOCS_FORMAT_VERSION
+    hdf_file.attrs[PICASSO_VERSION_ATTR] = __version__
+
+
+def _read_root_attrs(path: str, names: tuple[str, ...]) -> dict:
+    """The root attributes ``names`` of an HDF5 file that has them; an
+    empty dict if the file cannot be opened (the caller reports that
+    when reading the localizations)."""
+
+    def read(**kwargs) -> dict:
+        with h5py.File(path, "r", **kwargs) as hdf_file:
+            return {
+                name: hdf_file.attrs[name]
+                for name in names
+                if name in hdf_file.attrs
+            }
+
+    try:
+        return read()
+    except OSError:
+        # HDF5 files on network storage can fail to open with the default
+        # file locking, see _load_info_from_hdf5
+        try:
+            return read(locking=False)
+        except OSError:
+            return {}
+
+
+def _parse_format_version(value, path: str = "") -> tuple[int, int]:
+    """``(major, minor)`` of a format version ``"MAJOR.MINOR"``."""
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    match = re.fullmatch(r"\s*(\d+)\.(\d+)\s*", str(value))
+    if match is None:
+        raise FileFormatError(
+            f"{path or 'The file'} records the format version {value!r}, "
+            "which is not of the form MAJOR.MINOR."
+        )
+    return int(match.group(1)), int(match.group(2))
+
+
+def get_format_version(path: str) -> tuple[int, int] | None:
+    """Version of the format of a localization file.
+
+    The version is stored by ``save_locs`` as the root attribute
+    ``picasso_format`` (``FORMAT_VERSION_ATTR``), next to
+    ``picasso_version``, the version of Picasso that wrote the file. See
+    ``LOCS_FORMAT_VERSION`` for what the major and minor versions mean.
+
+    Parameters
+    ----------
+    path : str
+        Path to the .hdf5 localization file.
+
+    Returns
+    -------
+    version : tuple of int or None
+        ``(major, minor)``, e.g. ``(1, 0)``. None for files that record
+        no version: those written before Picasso 1.0 and by other
+        software.
+
+    Raises
+    ------
+    FileFormatError
+        If the recorded version is not of the form ``"MAJOR.MINOR"``.
+
+    Examples
+    --------
+    >>> from picasso import io
+    >>> io.get_format_version("movie_locs.hdf5")
+    (1, 0)
+    """
+    value = _read_root_attrs(path, (FORMAT_VERSION_ATTR,)).get(
+        FORMAT_VERSION_ATTR
+    )
+    if value is None:
+        return None
+    return _parse_format_version(value, path)
+
+
+def check_format_version(
+    version, path: str = "", *, kind: str = "file"
+) -> tuple[int, int] | None:
+    """Check that Picasso can read a file of the given format version.
+
+    Every file Picasso writes records the version of its format (see
+    ``FORMAT_VERSION_ATTR``). A file of a newer major version was
+    written by a newer Picasso that changed the meaning of its content,
+    so reading it as the current format would give wrong results. The
+    loaders of Picasso run this check; call it when reading such a file
+    yourself, e.g., a .yaml file loaded with ``load_yaml``.
+
+    Parameters
+    ----------
+    version : str, bytes or None
+        The version recorded in the file, ``"MAJOR.MINOR"``, e.g., the
+        value of the key ``picasso_format`` of a .yaml file. None for
+        files without the marker (written before Picasso 1.0).
+    path : str, optional
+        The file, named in the error. Default is "", i.e., not named.
+    kind : str, optional
+        What the file is, named in the error, e.g., "picks file".
+        Default is "file".
+
+    Returns
+    -------
+    version : tuple of int or None
+        ``(major, minor)``, e.g. ``(1, 0)``. None if ``version`` is
+        None.
+
+    Raises
+    ------
+    FileFormatError
+        If the version is of a newer major version than
+        ``FORMAT_VERSION``, or not of the form ``"MAJOR.MINOR"``.
+
+    Examples
+    --------
+    >>> from picasso import io
+    >>> picks = io.load_yaml("movie_locs_picks.yaml")
+    >>> io.check_format_version(
+    ...     picks.get(io.FORMAT_VERSION_ATTR),
+    ...     "movie_locs_picks.yaml",
+    ...     kind="picks file",
+    ... )
+    (1, 0)
+    """
+    if version is None:
+        return None
+    version = _parse_format_version(version, path)
+    _refuse_newer_format(version, path, kind)
+    return version
+
+
+def _refuse_newer_format(
+    version: tuple[int, int],
+    path: str,
+    kind: str,
+    writer: str | None = None,
+) -> None:
+    """Raise ``FileFormatError`` if the format ``version`` of the
+    ``kind`` file ``path`` (written by Picasso ``writer``, if known) is
+    of a newer major version than ``FORMAT_VERSION``."""
+    supported = _parse_format_version(FORMAT_VERSION)
+    if version[0] <= supported[0]:
+        return
+    written_by = f", written by Picasso {writer}" if writer else ""
+    raise FileFormatError(
+        f"{path or 'The file'} is in the {kind} format "
+        f"{version[0]}.{version[1]}{written_by}. This version of "
+        f"Picasso ({__version__}) reads the formats up to "
+        f"{supported[0]}.x. Please update Picasso to open the file. "
+        f"See {docs_url('files.html#files-format-versions')}"
+    )
+
+
+def _check_format_version(path: str) -> tuple[int, int] | None:
+    """Format version of the localization file ``path`` (None for files
+    written before Picasso 1.0), refusing a newer major version.
+
+    Raises
+    ------
+    FileFormatError
+        If the file is in a format of a newer major version than
+        ``LOCS_FORMAT_VERSION``, i.e., written by a newer Picasso that
+        changed the meaning of its content.
+    """
+    attrs = _read_root_attrs(path, (FORMAT_VERSION_ATTR, PICASSO_VERSION_ATTR))
+    if FORMAT_VERSION_ATTR not in attrs:
+        return None
+    version = _parse_format_version(attrs[FORMAT_VERSION_ATTR], path)
+    writer = attrs.get(PICASSO_VERSION_ATTR)
+    if isinstance(writer, bytes):
+        writer = writer.decode("utf-8", errors="replace")
+    _refuse_newer_format(version, path, "localization file", writer)
+    return version
+
+
+def _rename_legacy_columns(locs: pd.DataFrame) -> pd.DataFrame:
+    """``locs`` with the column ``likelihood`` (the name of the
+    log-likelihood column before Picasso 0.11) renamed ``log_likelihood``."""
+    if "likelihood" in locs.columns and "log_likelihood" not in locs.columns:
+        locs = locs.rename(columns={"likelihood": "log_likelihood"})
+    return locs
+
+
+def _upgrade_legacy_locs(
+    locs: pd.DataFrame,
+    info: list[dict],
+    pixelsize: float | None,
+    path: str,
+) -> tuple[pd.DataFrame, list[dict]]:
+    """A table (localizations, cluster centers, pick properties) and its
+    metadata from a file written before Picasso 1.0 in the current
+    format: lengths in camera pixels become nm (see
+    ``picasso.legacy``) and the column ``likelihood`` becomes
+    ``log_likelihood``. The conversion is logged.
+
+    Raises
+    ------
+    MissingPixelsizeError
+        If neither ``pixelsize`` nor the metadata give the pixel size.
+    """
+    from . import legacy
+
+    locs = _rename_legacy_columns(locs)
+    pixelsize = _legacy_pixelsize(pixelsize, info, path)
+    _log.info(
+        "%s was written before Picasso 1.0; its lengths are converted from "
+        "camera pixels to nm with a camera pixel size of %g nm.",
+        path,
+        pixelsize,
+    )
+    locs = legacy.locs_to_nm(locs, pixelsize, copy=False)
+    info = legacy.info_to_nm(
+        info, pixelsize, columns=locs.columns, source=path
+    )
+    return locs, info
+
+
+#: Picasso version since which a dark time counts the frames without
+#: signal, one frame fewer than before (see ``postprocess.dark_times``)
+_DARK_TIMES_CHANGED = (0, 11, 3)
+
+
+def _version_tuple(text) -> tuple[int, int, int] | None:
+    """``(major, minor, patch)`` of the first version number in ``text``,
+    e.g. ``"Picasso v0.9.6 Dark"``; None if there is none."""
+    match = re.search(r"(\d+)\.(\d+)(?:\.(\d+))?", str(text))
+    if match is None:
+        return None
+    return tuple(int(part or 0) for part in match.groups())
+
+
+def _dark_times_version(info: list[dict]) -> tuple[int, int, int] | None:
+    """Picasso version of the newest metadata entry recording that dark
+    times were computed (``picasso dark``), or None if there is none or
+    it names no version."""
+    for entry in reversed(info):
+        if not isinstance(entry, dict):
+            continue
+        step = entry.get("Step")
+        generated_by = str(entry.get("Generated by", ""))
+        if step == "Dark" or (
+            step is None and re.search(r"\bDark\b", generated_by)
+        ):
+            return _version_tuple(entry.get("Picasso version", generated_by))
+    return None
+
+
+def _check_dark_times(
+    locs: pd.DataFrame,
+    info: list[dict],
+    format_version: tuple[int, int] | None,
+    path: str,
+) -> None:
+    """Warn if the dark times of ``locs`` may follow the convention of
+    Picasso before 0.11.3, when they were one frame longer: the metadata
+    records them as computed by such a version, or the file was written
+    before Picasso 1.0 and does not say."""
+    if "dark" not in locs.columns:
+        return
+    version = _dark_times_version(info)
+    if version is None and format_version is not None:
+        return  # computed by other software, which Picasso cannot judge
+    if version is None or version < _DARK_TIMES_CHANGED:
+        _log.warning(
+            "%s: the dark times (column 'dark') may have been computed "
+            "before Picasso 0.11.3, when dark times were one frame longer "
+            "than now. Compute them again (e.g., picasso dark) before "
+            "comparing them with dark times computed now.",
+            path,
+        )
+
+
+def validate_locs(
+    locs: pd.DataFrame,
+    info: list[dict] | dict,
+    *,
+    path: str | None = None,
+) -> None:
+    """Check that localizations and their metadata meet the minimum
+    requirements of the Picasso format.
+
+    The localizations need the columns ``MINIMUM_COLUMNS`` (``frame``,
+    ``x``, ``y``, ``lpx`` and ``lpy``, lengths in nm) and the metadata
+    the keys ``MINIMUM_METADATA_KEYS`` (``Width``, ``Height`` and
+    ``Frames``, the size of the movie in camera pixels and frames, and
+    ``Pixelsize``, the camera pixel size in nm); frames count from 0.
+    Called by ``load_locs``, so files of other software can be checked
+    before they are opened in Picasso.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+    info : list of dict or dict
+        Their metadata.
+    path : str or None, optional
+        The file the localizations come from, named in the error
+        message. Default is None.
+
+    Raises
+    ------
+    FileFormatError
+        If a column or a metadata key is missing, or if frames are
+        negative. ``MissingPixelsizeError`` (a ``FileFormatError``) if
+        ``Pixelsize`` is the only thing missing, so GUIs can ask for it.
+    """
+    source = path if path is not None else "The localizations"
+    missing_columns = [c for c in MINIMUM_COLUMNS if c not in locs.columns]
+    missing_keys = [
+        key
+        for key in MINIMUM_METADATA_KEYS
+        if lib.get_from_metadata(info, key) is None
+    ]
+    problems = []
+    if missing_columns:
+        names = ", ".join(f"'{c}'" for c in missing_columns)
+        noun = "column" if len(missing_columns) == 1 else "columns"
+        problems.append(f"the {noun} {names}")
+    if missing_keys:
+        names = ", ".join(f"'{key}'" for key in missing_keys)
+        noun = "key" if len(missing_keys) == 1 else "keys"
+        problems.append(f"the metadata {noun} {names}")
+    if missing_keys == ["Pixelsize"] and not missing_columns:
+        # the one key a user can supply on the spot (GUIs ask for it)
+        raise MissingPixelsizeError(
+            f"{source} lacks the metadata key 'Pixelsize', the camera pixel "
+            "size in nm. Pass pixelsize (nm) or add it to the metadata. See "
+            f"{docs_url('files.html#files-minimum-requirements')}"
+        )
+    if problems:
+        raise FileFormatError(
+            f"{source} lacks {' and '.join(problems)}. Localization files "
+            "need the columns frame, x, y, lpx and lpy (positions and "
+            "precisions in nm) and the metadata keys Width, Height and "
+            "Frames (camera pixels, frames) and Pixelsize (nm). See "
+            f"{docs_url('files.html#files-minimum-requirements')}"
+        )
+    frame = locs["frame"].to_numpy()
+    # unsigned frames, as Picasso writes them, need no check
+    n_negative = 0 if frame.dtype.kind == "u" else np.count_nonzero(frame < 0)
+    if n_negative:
+        raise FileFormatError(
+            f"{source} holds {n_negative:,} localizations with negative "
+            "frame numbers; frames count from 0 for the first frame."
+        )
+
+
+def _report_dropped_locs(
+    locs: pd.DataFrame,
+    kept: pd.DataFrame,
+    info: list[dict],
+    path: str,
+) -> None:
+    """Warn if ``lib.ensure_sanity`` dropped localizations of the file
+    ``path`` while loading it (``locs`` as read, ``kept`` as returned),
+    hinting at a wrong pixel size or canvas if most lie beyond the field
+    of view."""
+    n_dropped = len(locs) - len(kept)
+    if n_dropped == 0:
+        return
+    width, height = lib.field_of_view(info)
+    message = (
+        f"{n_dropped:,} of {len(locs):,} localizations in {path} were not "
+        "loaded: they have missing or infinite values, lie outside the "
+        f"field of view ({width:,.0f} x {height:,.0f} nm) "
+        "or have negative values (e.g., coordinates or precisions)."
+    )
+    x = locs["x"].to_numpy()
+    y = locs["y"].to_numpy()
+    with np.errstate(invalid="ignore"):
+        n_outside = int(np.count_nonzero((x >= width) | (y >= height)))
+    if n_outside > len(locs) / 2:
+        message += (
+            f" Most of them lie beyond the field of view: x reaches "
+            f"{np.nanmax(x):,.1f} and y {np.nanmax(y):,.1f} nm. Since "
+            "Picasso 1.0, x and y are in nm, and a file without the "
+            "picasso_format attribute is taken to be in camera pixels, "
+            "i.e., multiplied by Pixelsize: a file written in nm by other "
+            "software needs the attribute (see "
+            f"{docs_url('files.html#files-legacy')}). Else Width, Height "
+            "or Pixelsize in the metadata are too small."
+        )
+    _log.warning(message)
 
 
 def _render_index_to_save(locs: pd.DataFrame, info: list[dict], render_index):
@@ -4592,24 +6273,26 @@ def _raise_if_truncated(path: str, error: OSError) -> None:
     ) from error
 
 
-def _read_locs_dataset(path: str, progress=None) -> pd.DataFrame:
+def _read_locs_dataset(path: str, progress: lib.Progress) -> pd.DataFrame:
     """Read the ``locs`` dataset of an .hdf5 file in row blocks.
 
     Picasso writes the localizations as a single h5py compound dataset
     (see ``save_locs``), which is read here one block of rows at a time
-    so that ``progress(done, total)`` can report - and, by raising,
-    abort - a long read. Files whose ``locs`` node is not such a dataset
-    (e.g. written by ``pandas.DataFrame.to_hdf``) fall back to
-    ``pandas.read_hdf``, which reads them in one go.
+    so that ``progress`` can report - and, by raising
+    ``lib.OperationCanceled``, abort - a long read. Files whose ``locs``
+    node is not such a dataset (e.g. written by
+    ``pandas.DataFrame.to_hdf``) fall back to ``pandas.read_hdf``, which
+    reads them in one go.
 
     Parameters
     ----------
     path : str
         The path to the HDF5 file containing localization data.
-    progress : callable or None, optional
-        Called as ``progress(done, total)`` after each block of rows
-        with the number of localizations read so far. Raising inside it
-        aborts the read.
+    progress : lib.Progress
+        Normalized progress tracker (see ``lib.normalize_progress``).
+        Reports the phase "Loading localizations" over the
+        localizations, after each block of rows (a busy indicator for
+        the pandas fallback, ending at the number of localizations).
 
     Returns
     -------
@@ -4635,6 +6318,9 @@ def _read_locs_dataset(path: str, progress=None) -> pd.DataFrame:
 
             if names is not None:
                 n_locs = len(dataset)
+                lib.start_phase(
+                    progress, "Loading localizations", n_locs, unit="loc"
+                )
                 # fill one contiguous array per column, such that no copy of
                 # the whole dataset is needed to build the DataFrame
                 columns = {
@@ -4646,31 +6332,54 @@ def _read_locs_dataset(path: str, progress=None) -> pd.DataFrame:
                     block = dataset[start:stop]
                     for name in names:
                         columns[name][start:stop] = block[name]
-                    if progress is not None:
-                        progress(stop, n_locs)
+                    progress.set_value(stop)
                 return pd.DataFrame(columns, copy=False)
 
     # Non-compound HDF5 layouts are handled by PyTables/pandas.
-    return pd.read_hdf(path, key="locs")
+    lib.start_phase(progress, "Loading localizations", 0, unit="loc")
+    locs = pd.read_hdf(path, key="locs")
+    progress.setMaximum(len(locs))
+    progress.set_value(len(locs))
+    return locs
 
 
 def load_locs(
     path: str,
-    qt_parent: QtWidgets.QWidget | None = None,
-    progress=None,
+    *,
+    pixelsize: float | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Load localization data from an HDF5 file.
+
+    The file is checked against the Picasso format: a file of a newer,
+    incompatible format version (see ``get_format_version``) and a file
+    without the required columns or metadata keys (see
+    ``validate_locs``) raise ``FileFormatError``. Files written before
+    Picasso 1.0 are brought to the current format: their lengths,
+    stored in camera pixels, are converted to nm with the ``Pixelsize``
+    of the metadata or ``pixelsize`` (see ``picasso.legacy``), and the
+    column ``likelihood`` becomes ``log_likelihood``. Localizations with
+    missing or infinite values, outside the field of view or with
+    negative values are dropped (see ``lib.ensure_sanity``) with a
+    warning logged by the ``picasso.io`` logger.
+
+    The metadata is read from the .yaml file next to the HDF5 file if
+    there is one, else from the HDF5 file itself, see ``load_info``.
 
     Parameters
     ----------
     path : str
         The path to the HDF5 file containing localization data.
-    qt_parent : QWidget or None, optional
-        Parent widget for any Qt-related operations, default is None.
-    progress : callable or None, optional
-        Called as ``progress(done, total)`` while the localizations are
-        read, see ``_read_locs_dataset``. Raising inside it aborts the
-        read.
+    pixelsize : float, optional
+        Camera pixel size in nm, used only for files written before
+        Picasso 1.0 whose metadata does not record it. Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Loading localizations" over
+        the localizations, after each block of a million; a tracker
+        that raises ``lib.OperationCanceled`` aborts the read. Default
+        is None.
 
     Returns
     -------
@@ -4689,31 +6398,44 @@ def load_locs(
     KeyError
         If the "locs" dataset is not found in the HDF5 file, indicating
         that the file does not contain the expected localization data.
+    FileFormatError
+        If the file is of a newer major format version, lacks required
+        columns or metadata keys, or holds negative frame numbers.
+    MissingPixelsizeError
+        If the file was written before Picasso 1.0 and neither its
+        metadata nor ``pixelsize`` give the camera pixel size.
+
+    Examples
+    --------
+    >>> from picasso import io
+    >>> locs, info = io.load_locs("movie_locs.hdf5")
+    >>> locs, info = io.load_locs("old_locs.hdf5", pixelsize=130)  # 0.x file
     """
+    _check_path_length(path)
     if path.endswith(".csv"):
         raise ValueError(
             "If you wish to load a ThunderSTORM .csv file, use "
             "picasso.io.import_ts instead."
         )
-    try:
-        locs = _read_locs_dataset(path, progress=progress)
-    except KeyError as e:  # if "locs" key not found
-        print(
-            f"\nAn error occured. File: {path} does not contain a "
-            "'locs' dataset."
-        )
-        if qt_parent is not None:
-            from PyQt6 import QtWidgets
-
-            QtWidgets.QMessageBox.critical(
-                qt_parent,
-                "An error occured",
-                f"File: {path} does not contain a 'locs' dataset.",
-            )
-        raise KeyError(e)
-    info = load_info(path, qt_parent=qt_parent)
-    locs = lib.ensure_sanity(locs, info)
-    return locs, info
+    # checked first, so a file of a newer format is not read in full
+    format_version = _check_format_version(path)
+    with lib.tracked_progress(
+        progress, "Loading localizations", unit="loc"
+    ) as progress:
+        locs = _read_locs_dataset(path, progress)
+    info = load_info(path)
+    # validated before the conversion, so that every missing column and
+    # key is named at once; a pixel size given for a legacy file counts
+    check_info = info
+    if format_version is None and pixelsize is not None:
+        check_info = info + [{"Pixelsize": float(pixelsize)}]
+    validate_locs(locs, check_info, path=path)
+    if format_version is None:
+        locs, info = _upgrade_legacy_locs(locs, info, pixelsize, path)
+    _check_dark_times(locs, info, format_version, path)
+    kept = lib.ensure_sanity(locs, info)
+    _report_dropped_locs(locs, kept, info, path)
+    return kept, info
 
 
 def save_identifications(
@@ -4735,25 +6457,19 @@ def save_identifications(
     # cannot use df.to_hdf for backward compatibility with older Picasso
     rec_ids = identifications.to_records(index=False)
     with h5py.File(path, "w") as ids_file:
+        _write_format_attrs(ids_file)
         ids_file.create_dataset("identifications", data=rec_ids)
         embedded = _write_metadata_dataset(ids_file, info)
-    if _save_metadata_in_yaml() or not embedded:
-        base, ext = os.path.splitext(path)
-        info_path = base + ".yaml"
-        save_info(info_path, info)
+    _write_sidecar(path, info, embedded)
 
 
-def load_identifications(
-    path: str, qt_parent: QtWidgets.QWidget | None = None
-) -> tuple[pd.DataFrame, list[dict]]:
+def load_identifications(path: str) -> tuple[pd.DataFrame, list[dict]]:
     """Load spot identifications from an HDF5 file.
 
     Parameters
     ----------
     path : str
         The path to the HDF5 file containing the identifications.
-    qt_parent : QWidget or None, optional
-        Parent widget for any Qt-related operations, default is None.
 
     Returns
     -------
@@ -4766,63 +6482,44 @@ def load_identifications(
     ------
     KeyError
         If the "identifications" dataset is not found in the HDF5 file.
+    OSError
+        If the file is not an HDF5 file.
     """
+    _check_path_length(path)
+    import tables
+
     try:
         identifications = pd.read_hdf(path, key="identifications")
-    except KeyError as e:
-        print(
-            f"\nAn error occured. File: {path} does not contain an "
-            "'identifications' dataset."
-        )
-        if qt_parent is not None:
-            from PyQt6 import QtWidgets
-
-            QtWidgets.QMessageBox.critical(
-                qt_parent,
-                "An error occured",
-                f"File: {path} does not contain an 'identifications' "
-                "dataset.",
-            )
-        raise KeyError(e)
-    info = load_info(path, qt_parent=qt_parent)
+    except KeyError as error:
+        raise KeyError(
+            f"File: {path} does not contain an 'identifications' dataset."
+        ) from error
+    except tables.HDF5ExtError as error:
+        raise OSError(f"File: {path} is not an HDF5 file.") from error
+    info = load_info(path)
     return identifications, info
 
 
-def load_clusters(path: str) -> pd.DataFrame:
-    """Load cluster data from an HDF5 file.
-
-    Parameters
-    ----------
-    path : str
-        The path to the HDF5 file containing cluster data.
-
-    Returns
-    -------
-    clusters : pd.DataFrame
-        The cluster data loaded from the file.
-    """
-    try:
-        clusters = pd.read_hdf(path, key="clusters")
-    except KeyError:
-        clusters = pd.read_hdf(path, key="locs")
-    return clusters
-
-
 def load_filter(
-    path: str,
-    qt_parent: QtWidgets.QWidget | None = None,
+    path: str, pixelsize: float | None = None
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Load localization data from an HDF5 file, checking for different
     possible keys for the localization data. This function is used to
-    handle files that may contain localization data under different
-    keys such as 'locs', 'groups', or 'clusters'.
+    handle files that may contain localization data under the keys
+    'locs' or 'groups'.
+
+    Files of a newer, incompatible format version are refused and
+    those written before Picasso 1.0 are brought to the current format
+    (lengths in nm), as in ``load_locs``. Unlike there, the columns are
+    not checked, so tables of any kind can be opened.
 
     Parameters
     ----------
     path : str
         The path to the HDF5 file containing localization data.
-    qt_parent : QWidget | None, optional
-        Parent widget for any Qt-related operations, default is None.
+    pixelsize : float, optional
+        Camera pixel size in nm, used only for files written before
+        Picasso 1.0 whose metadata does not record it. Default is None.
 
     Returns
     -------
@@ -4831,24 +6528,33 @@ def load_filter(
     info : list[dict]
         Metadata information loaded from the file, typically a list of
         dictionaries containing various metadata fields.
+
+    Raises
+    ------
+    FileFormatError
+        If the file is of a newer major format version.
+    MissingPixelsizeError
+        If the file was written before Picasso 1.0 and neither its
+        metadata nor ``pixelsize`` give the camera pixel size.
     """
+    _check_path_length(path)
+    format_version = _check_format_version(path)
     try:
         locs = pd.read_hdf(path, key="locs")
-        info = load_info(path, qt_parent=qt_parent)
+        info = load_info(path)
     except KeyError:
-        try:
-            locs = pd.read_hdf(path, key="groups")
-            info = load_info(path, qt_parent=qt_parent)
-        except KeyError:
-            locs = pd.read_hdf(path, key="clusters")
-            info = []
+        locs = pd.read_hdf(path, key="groups")
+        info = load_info(path)
+    if format_version is None:
+        locs, info = _upgrade_legacy_locs(locs, info, pixelsize, path)
     return locs, info
 
 
 def export_txt_imagej(
     path: str, locs: pd.DataFrame, info: list[dict] | None = None
 ) -> None:
-    """Export localizations to a text file compatible with ImageJ.
+    """Export localizations to a text file compatible with ImageJ: the
+    columns ``frame``, ``x`` and ``y`` (nm) without a header.
 
     Parameters
     ----------
@@ -4874,7 +6580,7 @@ def export_txt_imagej(
 
 
 def export_txt_nis(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
-    """Export localizations as .txt for NIS.
+    """Export localizations as .txt for NIS (lengths in nm).
 
     Parameters
     ----------
@@ -4883,7 +6589,8 @@ def export_txt_nis(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
     locs : pd.DataFrame
         The localization data to be exported.
     info : list of dicts
-        Metadata dictionaries.
+        Metadata dictionaries. Ignored but kept for compatibility with
+        other export functions.
     """
     z_header = b"X\tY\tZ\tChannel\tWidth\tBG\tLength\tArea\tFrame\r\n"
     fmt_z = [
@@ -4908,7 +6615,6 @@ def export_txt_nis(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         "%.i",
         "%.i",
     ]
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     columns_original = [
         "x",
         "y",
@@ -4922,7 +6628,6 @@ def export_txt_nis(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         columns_original.remove("z")
     loctxt = locs[columns_original].copy()
     loctxt["frame"] += 1
-    loctxt[["x", "y", "sx"]] *= pixelsize
     loctxt["Channel"] = 1
     loctxt["Length"] = 1
     loctxt["bg"] = loctxt["bg"].round().astype(int)
@@ -4945,7 +6650,7 @@ def export_xyz_chimera(
     path: str, locs: pd.DataFrame, info: list[dict]
 ) -> None:
     """Export localizations as .xyz for CHIMERA. The file contains
-    only x, y, z. Raise a warning if no z coordinate found.
+    only x, y, z (nm). Raise a warning if no z coordinate found.
 
     Parameters
     ----------
@@ -4954,13 +6659,12 @@ def export_xyz_chimera(
     locs : pd.DataFrame
         The localization data to be exported.
     info : list of dicts
-        Metadata dictionaries.
+        Metadata dictionaries. Ignored but kept for compatibility with
+        other export functions.
     """
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     if "z" in locs.columns:
         loctxt = locs[["x", "y", "z"]].copy()
         loctxt["molecule"] = 1
-        loctxt[["x", "y"]] *= pixelsize
         loctxt = loctxt[["molecule", "x", "y", "z"]]
         with open(path, "wb") as f:
             f.write(b"Molecule export\r\n")
@@ -4979,8 +6683,8 @@ def export_xyz_chimera(
 
 
 def export_3d_visp(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
-    """Export localizations as .3d for ViSP. Show a warning if no z
-    coordinate found.
+    """Export localizations as .3d for ViSP (lengths in nm). Show a
+    warning if no z coordinate found.
 
     Parameters
     ----------
@@ -4989,12 +6693,11 @@ def export_3d_visp(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
     locs : pd.DataFrame
         The localization data to be exported.
     info : list of dicts
-        Metadata dictionaries.
+        Metadata dictionaries. Ignored but kept for compatibility with
+        other export functions.
     """
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     if "z" in locs.columns:
         loctxt = locs[["x", "y", "z", "photons", "frame"]].copy()
-        loctxt[["x", "y"]] *= pixelsize
         loctxt["frame"] = loctxt["frame"].astype(int)
         with open(path, "wb") as f:
             np.savetxt(
@@ -5013,7 +6716,8 @@ def export_3d_visp(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
 def export_thunderstorm(
     path: str, locs: pd.DataFrame, info: list[dict]
 ) -> None:
-    """Export localizations as .csv for ThunderSTORM.
+    """Export localizations as .csv for ThunderSTORM (lengths in nm, as
+    in Picasso).
 
     Parameters
     ----------
@@ -5022,9 +6726,9 @@ def export_thunderstorm(
     locs : pd.DataFrame
         The localization data to be exported.
     info : list of dicts
-        Metadata dictionaries.
+        Metadata dictionaries. Ignored but kept for compatibility with
+        other export functions.
     """
-    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     columns_original = [
         "frame",
         "x",
@@ -5046,11 +6750,8 @@ def export_thunderstorm(
     loctxt["photons"] = loctxt["photons"].astype(np.int32)
     loctxt["bg"] = loctxt["bg"].astype(np.int32)
     loctxt["id"] = np.arange(len(loctxt), dtype=np.int32)
-    loctxt[["x", "y", "sx", "sy"]] *= pixelsize
     loctxt["bkgstd [photon]"] = 0
-    loctxt["uncertainty_xy [nm]"] = (
-        (loctxt["lpx"] + loctxt["lpy"]) / 2 * pixelsize
-    )
+    loctxt["uncertainty_xy [nm]"] = (loctxt["lpx"] + loctxt["lpy"]) / 2
     column_mapper = {
         "x": "x [nm]",
         "y": "y [nm]",
@@ -5108,6 +6809,17 @@ def _sanitize_column_name(name: str) -> str:
     return name
 
 
+def _canvas_pixels(values, pixelsize: float) -> int:
+    """The number of camera pixels that holds coordinates ``values``
+    (nm): ``floor(max / pixelsize) + 1``, since ``lib.ensure_sanity``
+    keeps coordinates strictly below the canvas size; at least 1."""
+    values = np.asarray(values, dtype=np.float64)
+    values = values[np.isfinite(values)]
+    if not len(values):
+        return 1
+    return max(1, int(np.floor(values.max() / float(pixelsize))) + 1)
+
+
 def import_ts(path: str, pixelsize: float) -> tuple[pd.DataFrame, list[dict]]:
     """Import localization data from a ThunderSTORM .csv file.
 
@@ -5120,16 +6832,19 @@ def import_ts(path: str, pixelsize: float) -> tuple[pd.DataFrame, list[dict]]:
     path : str
         The path to the ThunderSTORM .csv file.
     pixelsize : float
-        Camera pixel size in nm. Picasso saves xy coordinates in units
-        of camera pixels.
+        Camera pixel size in nm, recorded in the metadata; the field of
+        view (``Width`` and ``Height``, camera pixels) is derived from
+        the coordinates with it.
 
     Returns
     -------
     locs : pd.DataFrame
-        The localization data imported from the file.
+        The localization data imported from the file (lengths in nm, as
+        in ThunderSTORM).
     info : list of dicts
         Minimal metadata information.
     """
+    _check_path_length(path)
     expected_columns = [
         "frame",
         "x [nm]",
@@ -5166,18 +6881,18 @@ def import_ts(path: str, pixelsize: float) -> tuple[pd.DataFrame, list[dict]]:
     frames = data["frame"].astype(int)
     # make sure frames start at zero:
     frames = frames - np.min(frames)
-    x = data["x [nm]"] / pixelsize
-    y = data["y [nm]"] / pixelsize
+    x = data["x [nm]"]
+    y = data["y [nm]"]
     photons = data["intensity [photon]"].astype(int)
 
     bg = data["offset [photon]"].astype(int)
-    lpx = data["uncertainty_xy [nm]"] / pixelsize
-    lpy = data["uncertainty_xy [nm]"] / pixelsize
+    lpx = data["uncertainty_xy [nm]"]
+    lpy = data["uncertainty_xy [nm]"]
 
     if "z [nm]" in data.columns:
         z = data["z [nm]"]
-        sx = data["sigma1 [nm]"] / pixelsize
-        sy = data["sigma2 [nm]"] / pixelsize
+        sx = data["sigma1 [nm]"]
+        sy = data["sigma2 [nm]"]
         locs = pd.DataFrame(
             {
                 "frame": frames.astype(np.uint32),
@@ -5193,8 +6908,8 @@ def import_ts(path: str, pixelsize: float) -> tuple[pd.DataFrame, list[dict]]:
             }
         )
     else:
-        sx = data["sigma [nm]"] / pixelsize
-        sy = data["sigma [nm]"] / pixelsize
+        sx = data["sigma [nm]"]
+        sy = data["sigma [nm]"]
         locs = pd.DataFrame(
             {
                 "frame": frames.astype(np.uint32),
@@ -5227,11 +6942,10 @@ def import_ts(path: str, pixelsize: float) -> tuple[pd.DataFrame, list[dict]]:
 
     locs.sort_values(kind="quicksort", by="frame", inplace=True)
 
-    img_info = {}
-    img_info["Generated by"] = f"Picasso v{__version__} csv2hdf"
+    img_info = lib.step_info("csv2hdf")
     img_info["Frames"] = int(np.max(frames)) + 1
-    img_info["Height"] = int(np.ceil(np.max(y)))
-    img_info["Width"] = int(np.ceil(np.max(x)))
+    img_info["Height"] = _canvas_pixels(y, pixelsize)
+    img_info["Width"] = _canvas_pixels(x, pixelsize)
     img_info["Pixelsize"] = float(pixelsize)
 
     base, ext = os.path.splitext(path)
@@ -5332,36 +7046,36 @@ def _read_smap_loc(path: str) -> dict:
 
 
 def _smap_psf_widths(loc: dict, n: int, pixelsize: float):
-    """Return ``(sx, sy)`` PSF widths in px, converted from SMAP's nm.
+    """Return ``(sx, sy)`` PSF widths in nm, as SMAP stores them.
 
-    A neutral 1 px default is used when the corresponding field is
-    absent.
+    A neutral default of one camera pixel (``pixelsize`` nm) is used
+    when the corresponding field is absent.
     """
     if "PSFxnm" in loc:
-        sx = loc["PSFxnm"] / pixelsize
+        sx = loc["PSFxnm"]
     else:
-        sx = np.ones(n)
+        sx = np.full(n, float(pixelsize))
     if "PSFynm" in loc:
-        sy = loc["PSFynm"] / pixelsize
+        sy = loc["PSFynm"]
     elif "PSFxnm" in loc:
         sy = sx
     else:
-        sy = np.ones(n)
+        sy = np.full(n, float(pixelsize))
     return sx, sy
 
 
-def _smap_locprec(loc: dict, n: int, pixelsize: float):
-    """Return ``(lpx, lpy)`` localization precision in px.
+def _smap_locprec(loc: dict, n: int):
+    """Return ``(lpx, lpy)`` localization precision in nm.
 
     SMAP stores a single combined value (``locprecnm``); some files use
     separate ``locprecxnm``/``locprecynm`` instead.
     """
     if "locprecnm" in loc:
-        lpx = loc["locprecnm"] / pixelsize
-        lpy = loc["locprecnm"] / pixelsize
+        lpx = loc["locprecnm"]
+        lpy = loc["locprecnm"]
     elif "locprecxnm" in loc:
-        lpx = loc["locprecxnm"] / pixelsize
-        lpy = loc.get("locprecynm", loc["locprecxnm"]) / pixelsize
+        lpx = loc["locprecxnm"]
+        lpy = loc.get("locprecynm", loc["locprecxnm"])
     else:
         lpx = np.zeros(n)
         lpy = np.zeros(n)
@@ -5410,16 +7124,19 @@ def import_smap(
     path : str
         The path to the SMAP ``_sml.mat`` file.
     pixelsize : float
-        Camera pixel size in nm. Picasso saves xy coordinates in units
-        of camera pixels, while SMAP stores them in nm.
+        Camera pixel size in nm, recorded in the metadata; the field of
+        view (``Width`` and ``Height``, camera pixels) is derived from
+        the coordinates with it.
 
     Returns
     -------
     locs : pd.DataFrame
-        The localization data imported from the file.
+        The localization data imported from the file (lengths in nm, as
+        in SMAP).
     info : list of dicts
         Minimal metadata information.
     """
+    _check_path_length(path)
     loc = _read_smap_loc(path)
     missing = [c for c in ("xnm", "ynm", "frame") if c not in loc]
     if missing:
@@ -5433,8 +7150,8 @@ def import_smap(
     # offset, mirroring import_ts).
     frames = loc["frame"].astype(np.int64)
     frames = frames - np.min(frames)
-    x = loc["xnm"] / pixelsize
-    y = loc["ynm"] / pixelsize
+    x = loc["xnm"]
+    y = loc["ynm"]
 
     data = {
         "frame": frames.astype(np.uint32),
@@ -5455,7 +7172,7 @@ def import_smap(
     bg = loc["bg"] if "bg" in loc else np.zeros(n)
     data["bg"] = np.broadcast_to(bg, (n,)).astype(np.float32)
 
-    lpx, lpy = _smap_locprec(loc, n, pixelsize)
+    lpx, lpy = _smap_locprec(loc, n)
     data["lpx"] = np.asarray(lpx, dtype=np.float32)
     data["lpy"] = np.asarray(lpy, dtype=np.float32)
 
@@ -5467,11 +7184,10 @@ def import_smap(
     locs = pd.DataFrame(data)
     locs.sort_values(kind="quicksort", by="frame", inplace=True)
 
-    img_info = {}
-    img_info["Generated by"] = f"Picasso v{__version__} smap2hdf"
+    img_info = lib.step_info("smap2hdf")
     img_info["Frames"] = int(np.max(frames)) + 1
-    img_info["Height"] = int(np.ceil(np.max(y)))
-    img_info["Width"] = int(np.ceil(np.max(x)))
+    img_info["Height"] = _canvas_pixels(y, pixelsize)
+    img_info["Width"] = _canvas_pixels(x, pixelsize)
     img_info["Pixelsize"] = float(pixelsize)
 
     return locs, [img_info]
@@ -5518,15 +7234,15 @@ def export_smap(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         return values.reshape(-1, 1)
 
     loc = {
-        # SMAP frames are 1-based.
+        # SMAP frames are 1-based; lengths are in nm in both.
         "frame": column("frame") + 1,
-        "xnm": column("x") * pixelsize,
-        "ynm": column("y") * pixelsize,
+        "xnm": column("x"),
+        "ynm": column("y"),
         "phot": column("photons"),
         "bg": column("bg"),
-        "locprecnm": (column("lpx") + column("lpy")) / 2 * pixelsize,
-        "PSFxnm": column("sx") * pixelsize,
-        "PSFynm": column("sy") * pixelsize,
+        "locprecnm": (column("lpx") + column("lpy")) / 2,
+        "PSFxnm": column("sx", pixelsize),
+        "PSFynm": column("sy", pixelsize),
         "channel": np.zeros((n, 1)),
     }
     if "z" in locs.columns:
@@ -5534,12 +7250,13 @@ def export_smap(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         if "lpz" in locs.columns:
             loc["locprecznm"] = column("lpz")  # already in nm
 
+    # SMAP's field of view is in camera pixels
     width = lib.get_from_metadata(info, "Width")
     height = lib.get_from_metadata(info, "Height")
     if width is None:
-        width = int(np.ceil(locs["x"].max()))
+        width = _canvas_pixels(locs["x"], pixelsize)
     if height is None:
-        height = int(np.ceil(locs["y"].max()))
+        height = _canvas_pixels(locs["y"], pixelsize)
     px_um = float(pixelsize) / 1000.0
     smap_info = {
         "Width": float(width),
@@ -5553,3 +7270,775 @@ def export_smap(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         "fileformat": {"name": "sml"},
     }
     savemat(path, out, do_compression=True)
+
+
+# PyME (python-microscopy, PYMEVisualize) localization files
+
+#: Extensions of PyME localization files: ``.h5r`` holds the raw fit
+#: results of PyME's localization, ``.hdf`` the (processed) localizations
+#: saved by PYMEVisualize. PyME recognizes HDF5 files only by these.
+PYME_EXTENSIONS = (".h5r", ".hdf")
+
+#: Nested fields of PyME's raw fit results that describe the fit itself
+#: (ROI slices, starting parameters) rather than the localization.
+_PYME_SKIPPED_PREFIXES = ("slicesUsed_", "startParams_")
+
+#: Picasso columns that ``export_pyme_multi`` converts to PyME columns,
+#: i.e., which are not copied as they are.
+_PYME_EXPORTED_COLUMNS = (
+    "frame",
+    "x",
+    "y",
+    "z",
+    "lpx",
+    "lpy",
+    "lpz",
+    "sx",
+    "sy",
+    "photons",
+    "bg",
+)
+
+
+def is_pyme_file(path: str) -> bool:
+    """Whether ``path`` names a PyME localization file (``.h5r`` or
+    ``.hdf``; a Picasso ``.hdf5`` file is not one).
+
+    Parameters
+    ----------
+    path : str
+        Path to a file.
+
+    Returns
+    -------
+    bool
+        True for the ``.h5r`` and ``.hdf`` extensions.
+    """
+    return os.path.splitext(path)[1].lower() in PYME_EXTENSIONS
+
+
+def _pyme_flatten(records: np.ndarray) -> dict[str, np.ndarray]:
+    """Flatten a (nested) structured array into columns named the way
+    PyME does, i.e., ``fitResults.x0`` becomes ``fitResults_x0``.
+
+    Fields that hold arrays rather than one value per localization are
+    skipped.
+    """
+    columns = {}
+
+    def visit(values: np.ndarray, prefix: str) -> None:
+        names = values.dtype.names
+        if names is None:
+            if values.ndim == 1:
+                columns[prefix] = values
+            return
+        for name in names:
+            visit(values[name], f"{prefix}_{name}" if prefix else name)
+
+    visit(records, "")
+    return columns
+
+
+def _pyme_table_columns(table) -> set[str]:
+    """Flattened column names of a PyTables table."""
+    return {name.replace("/", "_") for name in table.colpathnames}
+
+
+def _pyme_find_table(h5file, path: str):
+    """The table of a PyME file holding the localizations.
+
+    Like PYMEVisualize, the first table with ``x`` and ``y`` columns is
+    used, preferring ``FitResults`` in ``.h5r`` and ``Localizations``
+    in ``.hdf`` files. The fiducials (``DriftResults``) are used only if
+    there is no other table.
+    """
+    tables_ = h5file.list_nodes("/", classname="Table")
+    is_h5r = path.lower().endswith(".h5r")
+    preferred = "FitResults" if is_h5r else "Localizations"
+    order = {preferred: 0, "DriftResults": 2}
+    tables_ = sorted(tables_, key=lambda t: order.get(t._v_name, 1))
+    for table in tables_:
+        names = _pyme_table_columns(table)
+        if {"x", "y"} <= names or {"fitResults_x0", "fitResults_y0"} <= names:
+            return table
+    raise ValueError(
+        f"PyME file {path} does not contain a table of localizations "
+        "(no table with x and y columns). Found tables: "
+        f"{[t._v_name for t in tables_]}."
+    )
+
+
+def _pyme_metadata_value(value):
+    """Convert a PyME metadata value into a JSON-serializable Python
+    object, or None if it cannot be represented."""
+    if isinstance(value, bytes):
+        value = value.decode("utf-8", errors="replace")
+    elif isinstance(value, np.generic):
+        value = value.item()
+    elif isinstance(value, np.ndarray):
+        value = value.tolist()
+    try:
+        json.dumps(value, default=_json_default)
+    except (TypeError, ValueError):
+        return None
+    return value
+
+
+def _pyme_read_metadata(h5file) -> dict:
+    """Read PyME metadata (attributes of the groups under ``/MetaData``)
+    into a flat dictionary with keys such as ``"voxelsize.x"``."""
+    metadata = {}
+    if "/MetaData" not in h5file:
+        return metadata
+    for group in h5file.walk_groups("/MetaData"):
+        prefix = group._v_pathname[len("/MetaData") :].strip("/")
+        prefix = prefix.replace("/", ".")
+        attrs = group._v_attrs
+        for name in attrs._f_list("user"):
+            try:
+                value = getattr(attrs, name)
+            except Exception as error:  # noqa: BLE001 - unreadable pickles
+                _log.debug("PyME metadata %s not read: %s", name, error)
+                continue
+            value = _pyme_metadata_value(value)
+            if value is not None:
+                metadata[f"{prefix}.{name}" if prefix else name] = value
+    return metadata
+
+
+def _pyme_read(path: str) -> tuple[dict[str, np.ndarray], dict]:
+    """Read the localizations and metadata of a PyME file.
+
+    Returns
+    -------
+    columns : dict
+        Flattened localization columns, see ``_pyme_flatten``.
+    metadata : dict
+        Flat PyME metadata, see ``_pyme_read_metadata``.
+    """
+    import tables
+
+    with tables.open_file(path, "r") as h5file:
+        records = _pyme_find_table(h5file, path).read()
+        metadata = _pyme_read_metadata(h5file)
+    columns = {
+        name: values
+        for name, values in _pyme_flatten(records).items()
+        if not name.startswith(_PYME_SKIPPED_PREFIXES)
+    }
+    return columns, metadata
+
+
+def _pyme_pixelsize_from_metadata(metadata: dict) -> float | None:
+    """Camera pixel size (nm) from PyME metadata, which stores it in um
+    as ``voxelsize.x``; None if it is missing or invalid."""
+    value = metadata.get("voxelsize.x")
+    if isinstance(value, (int, float)) and value > 0:
+        return 1000.0 * float(value)
+    return None
+
+
+def pyme_pixelsize(path: str) -> float | None:
+    """Read the camera pixel size stored in a PyME localization file.
+
+    Parameters
+    ----------
+    path : str
+        Path to the PyME ``.h5r`` or ``.hdf`` file.
+
+    Returns
+    -------
+    pixelsize : float or None
+        Camera pixel size in nm (PyME stores ``voxelsize.x`` in um), or
+        None if the file does not store it or cannot be read.
+    """
+    import tables
+
+    try:
+        with tables.open_file(path, "r") as h5file:
+            if "/MetaData/voxelsize" not in h5file:
+                return None
+            attrs = h5file.get_node("/MetaData/voxelsize")._v_attrs
+            value = _pyme_metadata_value(getattr(attrs, "x", None))
+    except Exception as error:  # noqa: BLE001 - not a readable HDF5 file
+        _log.debug("PyME pixel size of %s not read: %s", path, error)
+        return None
+    return _pyme_pixelsize_from_metadata({"voxelsize.x": value})
+
+
+def _pyme_photons_per_count(metadata: dict) -> float | None:
+    """Photons per camera count, ``Camera.ElectronsPerCount /
+    Camera.TrueEMGain``, from PyME metadata; None if unknown."""
+    per_count = metadata.get("Camera.ElectronsPerCount")
+    gain = metadata.get("Camera.TrueEMGain", 1)
+    if not isinstance(per_count, (int, float)) or per_count <= 0:
+        return None
+    if not isinstance(gain, (int, float)) or gain <= 0:
+        return None
+    return float(per_count) / float(gain)
+
+
+def _pyme_picasso_infos(metadata: dict) -> list[list[dict]] | None:
+    """Picasso metadata of each channel stored by ``export_pyme_multi``
+    (``Picasso.Info``), or None if there is none."""
+    raw = metadata.get("Picasso.Info")
+    if not isinstance(raw, str):
+        return None
+    try:
+        infos = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(infos, list) or not all(
+        isinstance(info, list) and info and isinstance(info[0], dict)
+        for info in infos
+    ):
+        return None
+    return infos
+
+
+def _pyme_restore_info(
+    restored: list[dict], imported: list[dict], probe: int | None = None
+) -> list[dict]:
+    """Picasso metadata of a channel exported by ``export_pyme_multi``,
+    updated with the canvas (and its offset, see ``lib.fit_canvas``) of
+    the imported localizations.
+
+    Parameters
+    ----------
+    restored : list of dicts
+        Picasso metadata stored in the PyME file.
+    imported : list of dicts
+        Metadata created by ``import_pyme``.
+    probe : int or None, optional
+        PyME channel (``probe``) of the localizations, if split.
+
+    Returns
+    -------
+    info : list of dicts
+        ``restored`` with the imported canvas and a dictionary on the
+        import appended.
+    """
+    canvas_keys = (*lib.CANVAS_OFFSET_KEYS, *lib.CAMERA_SIZE_KEYS)
+    info = copy.deepcopy(restored)
+    for inf in info:
+        for key in canvas_keys:
+            inf.pop(key, None)
+        for key in ("Width", "Height"):
+            if key in inf:
+                inf[key] = imported[0][key]
+    # Render reads the canvas from the first dictionary
+    info[0]["Width"] = imported[0]["Width"]
+    info[0]["Height"] = imported[0]["Height"]
+    added = {
+        key: value
+        for key, value in imported[0].items()
+        if key in ("Generated by", "PyME metadata", *canvas_keys)
+    }
+    if probe is not None:
+        added["PyME probe"] = probe
+    info.append(added)
+    return info
+
+
+def import_pyme(
+    path: str, pixelsize: float | None = None
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Import localization data from a PyME (python-microscopy,
+    PYMEVisualize) file.
+
+    Reads both the raw fit results of PyME's localization (``.h5r``,
+    table ``FitResults`` with nested ``fitResults``/``fitError``
+    fields) and the localizations saved by PYMEVisualize (``.hdf``,
+    usually table ``Localizations``). PyME stores x, y, z, the PSF
+    widths and the localization precisions in nm and frames as ``t``
+    (``tIndex`` in ``.h5r``), starting at 0. The columns are converted
+    as follows (the first column found is used):
+
+    - ``frame``: ``t``, ``tIndex``.
+    - ``x``, ``y``: ``x``/``fitResults_x0``, ``y``/``fitResults_y0`` (nm).
+    - ``z``: ``z``, ``fitResults_z0`` (nm). Omitted if all values are
+      zero, i.e., for 2D data, for which PYMEVisualize adds ``z = 0``.
+    - ``lpx``, ``lpy``: ``error_x``/``fitError_x0``,
+      ``error_y``/``fitError_y0`` (nm; one is used for both if only one
+      is present, 0 if neither is).
+    - ``lpz``: ``error_z``, ``fitError_z0`` (nm), 3D data only.
+    - ``sx``, ``sy``: ``sigx``/``fitResults_sigmax``,
+      ``sigy``/``fitResults_sigmay``, otherwise ``sig``/
+      ``fitResults_sigma`` for both (nm; one camera pixel if absent).
+    - ``photons``: ``nPhotons``. Otherwise the integral of the fitted
+      Gaussian, ``2 pi A sx sy`` (``A``/``fitResults_A`` is the peak
+      amplitude in camera counts), converted to photons with
+      ``Camera.ElectronsPerCount / Camera.TrueEMGain`` from the
+      metadata. **If the metadata does not store the camera
+      conversion, the photons are given in camera counts.** 1 if there
+      is no amplitude or PSF width.
+    - ``bg``: ``bg`` (files exported by Picasso), otherwise
+      ``fitResults_background + subtractedBackground`` (camera counts
+      per pixel, converted to photons as above), otherwise 0.
+
+    All other numeric columns (e.g., ``A``, ``probe``, ``nchi2``,
+    ``clumpIndex``, ``dbscanClumpID``) are kept as extra columns, with
+    their names sanitized. Several channels stored in one file (PyME's
+    ``probe`` column) can be split with ``split_pyme_channels``.
+
+    If a localization lies left of or above the camera image, e.g.,
+    after drift correction, the canvas is extended with
+    ``lib.fit_canvas`` rather than removing the localization. Files
+    exported by Picasso (``export_pyme_multi``) with a single channel
+    get their Picasso metadata back.
+
+    Parameters
+    ----------
+    path : str
+        The path to the PyME ``.h5r`` or ``.hdf`` file.
+    pixelsize : float or None, optional
+        Camera pixel size in nm, used only if the file does not store
+        it (``voxelsize.x``). Default is None.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        The localization data imported from the file.
+    info : list of dicts
+        Minimal metadata information, including the PyME metadata
+        (``"PyME metadata"``).
+
+    Raises
+    ------
+    ValueError
+        If the file contains no localizations or stores no pixel size
+        and ``pixelsize`` is not given.
+    """
+    _check_path_length(path)
+    columns, metadata = _pyme_read(path)
+    file_pixelsize = _pyme_pixelsize_from_metadata(metadata)
+    if file_pixelsize is not None:
+        pixelsize = file_pixelsize
+    elif pixelsize is None:
+        raise ValueError(
+            f"PyME file {path} does not store the camera pixel size "
+            "(voxelsize.x); please provide it."
+        )
+    pixelsize = float(pixelsize)
+
+    used = set()
+
+    def take(*names: str) -> np.ndarray | None:
+        """The first of the given columns present (as float64), marked
+        as converted, i.e., not copied as an extra column."""
+        for name in names:
+            if name in columns:
+                used.add(name)
+                return columns[name].astype(np.float64)
+        return None
+
+    x = take("x", "fitResults_x0")
+    y = take("y", "fitResults_y0")
+    if x is None or y is None:
+        raise ValueError(f"PyME file {path} has no x and y columns.")
+    n = len(x)
+
+    t = take("t", "tIndex")
+    if t is None:
+        frames = np.zeros(n, dtype=np.int64)
+    else:
+        frames = np.rint(np.nan_to_num(t)).astype(np.int64)
+        if n and frames.min() < 0:
+            frames -= frames.min()
+
+    data = {
+        "frame": frames.astype(np.uint32),
+        "x": x.astype(np.float32),  # nm in both PyME and Picasso
+        "y": y.astype(np.float32),
+    }
+
+    z = take("z", "fitResults_z0")
+    is_3d = z is not None and bool(np.any(np.nan_to_num(z) != 0))
+    if is_3d:
+        data["z"] = z.astype(np.float32)  # nm in both PyME and Picasso
+
+    lpx = take("error_x", "fitError_x0")
+    lpy = take("error_y", "fitError_y0")
+    if lpx is None:
+        lpx = lpy
+    if lpy is None:
+        lpy = lpx
+    if lpx is None:
+        lpx = lpy = np.zeros(n)
+    data["lpx"] = lpx.astype(np.float32)
+    data["lpy"] = lpy.astype(np.float32)
+    if is_3d:
+        lpz = take("error_z", "fitError_z0")
+        if lpz is not None:
+            data["lpz"] = lpz.astype(np.float32)
+
+    sx = take("sigx", "fitResults_sigmax")
+    sy = take("sigy", "fitResults_sigmay")
+    if sx is None or sy is None:
+        sigma = take("sig", "fitResults_sigma")
+        sx = sigma if sx is None else sx
+        sy = sigma if sy is None else sy
+    if sx is None:
+        sx = sy
+    if sy is None:
+        sy = sx
+    has_sigma = sx is not None
+    if not has_sigma:
+        sx = sy = np.full(n, pixelsize)  # one camera pixel
+
+    per_count = _pyme_photons_per_count(metadata)
+    to_photons = 1.0 if per_count is None else per_count
+    photons = take("nPhotons")
+    if photons is None:
+        # the amplitude is kept as an extra column, too
+        amplitude = columns.get("A", columns.get("fitResults_A"))
+        if amplitude is not None and has_sigma:
+            # the amplitude is per camera pixel, so the widths are taken
+            # in camera pixels
+            photons = (
+                amplitude.astype(np.float64)
+                * 2
+                * np.pi
+                * (sx / pixelsize)
+                * (sy / pixelsize)
+                * to_photons
+            )
+        else:
+            photons = np.ones(n)
+    data["photons"] = photons.astype(np.float32)
+    data["sx"] = sx.astype(np.float32)
+    data["sy"] = sy.astype(np.float32)
+
+    bg = take("bg")
+    if bg is None:
+        bg = take("fitResults_background")
+        if bg is not None:
+            subtracted = take("subtractedBackground")
+            if subtracted is not None:
+                bg = bg + subtracted
+            bg = bg * to_photons
+        else:
+            bg = np.zeros(n)
+    data["bg"] = bg.astype(np.float32)
+
+    for name, values in columns.items():
+        if name in used or values.dtype.kind not in "biuf":
+            continue
+        name = _sanitize_column_name(name)
+        if name in data:
+            continue
+        if values.dtype.kind == "f":
+            values = values.astype(np.float32)
+        data[name] = values
+
+    locs = pd.DataFrame(data)
+    locs.sort_values(kind="quicksort", by="frame", inplace=True)
+    locs.reset_index(drop=True, inplace=True)
+
+    # the canvas covers the camera ROI and every localization
+    width = metadata.get("Camera.ROIWidth")
+    height = metadata.get("Camera.ROIHeight")
+    width = int(width) if isinstance(width, (int, float)) else 0
+    height = int(height) if isinstance(height, (int, float)) else 0
+    width = max(width, _canvas_pixels(data["x"], pixelsize))
+    height = max(height, _canvas_pixels(data["y"], pixelsize))
+
+    img_info = lib.step_info("pyme2hdf")
+    img_info["Frames"] = int(np.max(frames)) + 1 if n else 1
+    img_info["Height"] = max(height, 1)
+    img_info["Width"] = max(width, 1)
+    img_info["Pixelsize"] = pixelsize
+    img_info["PyME metadata"] = {
+        key: value
+        for key, value in metadata.items()
+        if not key.startswith("Picasso.")
+    }
+    info = [img_info]
+    # localizations left of or above the camera image are kept
+    lib.fit_canvas([locs], [info])
+
+    restored = _pyme_picasso_infos(metadata)
+    if restored is not None and len(restored) == 1:
+        info = _pyme_restore_info(restored[0], info)
+    return locs, info
+
+
+def split_pyme_channels(
+    path: str, locs: pd.DataFrame, info: list[dict]
+) -> list[tuple[str, pd.DataFrame, list[dict]]]:
+    """Split localizations imported with ``import_pyme`` into one
+    channel per PyME ``probe`` value.
+
+    PyME stores several channels in one file with an integer ``probe``
+    column, Picasso one channel per file.
+
+    Parameters
+    ----------
+    path : str
+        The path to the PyME file the localizations were imported from.
+    locs : pd.DataFrame
+        Localizations returned by ``import_pyme``.
+    info : list of dicts
+        Metadata returned by ``import_pyme``.
+
+    Returns
+    -------
+    channels : list of tuples
+        ``(path, locs, info)`` per channel, sorted by ``probe``. With a
+        single channel, the input is returned (without a constant
+        ``probe`` column). Otherwise, each channel's path is
+        ``<base>_probe<k><ext>``, its localizations do not contain the
+        ``probe`` column and its metadata is the Picasso metadata stored
+        by ``export_pyme_multi`` (if present) or a copy of ``info``,
+        with the probe value added (``"PyME probe"``).
+    """
+    if "probe" not in locs.columns:
+        return [(path, locs, info)]
+    probes = np.rint(locs["probe"].to_numpy(dtype=np.float64))
+    values = np.unique(probes[np.isfinite(probes)]).astype(np.int64)
+    if len(values) <= 1:
+        return [(path, locs.drop(columns="probe"), info)]
+
+    restored = None
+    try:
+        import tables
+
+        with tables.open_file(path, "r") as h5file:
+            restored = _pyme_picasso_infos(_pyme_read_metadata(h5file))
+    except Exception as error:  # noqa: BLE001 - restoring is optional
+        _log.debug("Picasso metadata of %s not restored: %s", path, error)
+        restored = None
+    if restored is not None and list(values) != list(range(len(restored))):
+        restored = None
+
+    base, ext = os.path.splitext(path)
+    channels = []
+    for value in values:
+        channel_locs = locs[probes == value].drop(columns="probe")
+        channel_locs = channel_locs.reset_index(drop=True)
+        if restored is not None:
+            channel_info = _pyme_restore_info(
+                restored[value], info, int(value)
+            )
+        else:
+            channel_info = copy.deepcopy(info)
+            channel_info[-1]["PyME probe"] = int(value)
+        channels.append(
+            (f"{base}_probe{value}{ext}", channel_locs, channel_info)
+        )
+    return channels
+
+
+def _pyme_channel_table(
+    locs: pd.DataFrame, info: list[dict], pixelsize: float, probe: int
+) -> pd.DataFrame:
+    """PyME columns of one channel, see ``export_pyme_multi``."""
+    n = len(locs)
+    # PyME's coordinates refer to the camera image, i.e., without the
+    # translation of the canvas (see lib.fit_canvas)
+    offset_x, offset_y = (
+        lib.get_from_metadata(info, key, 0) for key in lib.CANVAS_OFFSET_KEYS
+    )
+
+    def column(name: str, default: float = 0.0) -> np.ndarray:
+        """A Picasso column as float64, or a default-filled one if the
+        column is absent."""
+        if name in locs.columns:
+            return locs[name].to_numpy(dtype=np.float64)
+        return np.full(n, default, dtype=np.float64)
+
+    table = {
+        "x": column("x") - offset_x,  # nm in both PyME and Picasso
+        "y": column("y") - offset_y,
+        "t": column("frame").astype(np.int32),
+        "error_x": column("lpx"),
+        "error_y": column("lpy"),
+        "nPhotons": column("photons"),
+        "sigx": column("sx", pixelsize),
+        "sigy": column("sy", pixelsize),
+        "bg": column("bg"),
+    }
+    if "z" in locs.columns:
+        table["z"] = column("z")  # nm in both PyME and Picasso
+        if "lpz" in locs.columns:
+            table["error_z"] = column("lpz")
+    for key, values in table.items():
+        if values.dtype.kind == "f":
+            table[key] = values.astype(np.float32)
+    table["probe"] = np.full(n, probe, dtype=np.int32)
+
+    for name in locs.columns:
+        if name in _PYME_EXPORTED_COLUMNS:
+            continue
+        values = locs[name].to_numpy()
+        if values.dtype.kind not in "biuf":
+            continue
+        name = _sanitize_column_name(name)
+        if name not in table:
+            table[name] = values
+    return pd.DataFrame(table)
+
+
+def _pyme_write_metadata(h5file, entries: dict) -> None:
+    """Write PyME metadata, i.e., ``"a.b.c": value`` as the attribute
+    ``c`` of the group ``/MetaData/a/b``."""
+    for key, value in entries.items():
+        *groups, name = key.split(".")
+        where = "/".join(["", "MetaData", *groups])
+        if where in h5file:
+            group = h5file.get_node(where)
+        else:
+            parent, child = where.rsplit("/", 1)
+            group = h5file.create_group(
+                parent or "/", child, createparents=True
+            )
+        group._f_setattr(name, value)
+
+
+def export_pyme(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
+    """Export localizations as a PyME ``.hdf`` file that PYMEVisualize
+    opens, see ``export_pyme_multi``.
+
+    Parameters
+    ----------
+    path : str
+        The path where the file will be saved. The ``.hdf`` extension
+        is enforced.
+    locs : pd.DataFrame
+        The localization data to be exported.
+    info : list of dicts
+        Metadata dictionaries.
+    """
+    export_pyme_multi(path, [locs], [info])
+
+
+def export_pyme_multi(
+    path: str,
+    locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+    *,
+    channel_names: list[str] | None = None,
+) -> None:
+    """Export one or more channels as a single PyME ``.hdf`` file that
+    PYMEVisualize opens (the format of its "Save filtered
+    localizations").
+
+    The localizations are stored in the table ``Localizations`` with
+    the PyME columns (lengths in nm):
+
+    - ``x``, ``y``: ``x``, ``y`` converted to nm.
+    - ``t``: ``frame``.
+    - ``z``, ``error_z``: ``z``, ``lpz`` (3D data only).
+    - ``error_x``, ``error_y``: ``lpx``, ``lpy`` converted to nm.
+    - ``nPhotons``: ``photons``.
+    - ``sigx``, ``sigy``: ``sx``, ``sy`` converted to nm.
+    - ``bg``: ``bg`` (photons per pixel).
+    - ``probe``: the index of the channel, i.e., PyME shows the
+      channels as ``chan0``, ``chan1``, etc.
+
+    All other numeric columns (e.g., ``group``, ``net_gradient``) are
+    copied as they are. With several channels, only the columns present
+    in all of them are stored.
+
+    Note that the PyME columns ``A`` (peak amplitude in camera counts)
+    and ``sig`` are not written: PYMEVisualize filters the
+    localizations by these by default (``sig`` between 95 and 200 nm),
+    which would hide localizations without notice. Its default filter
+    of ``error_x`` and ``error_y`` (below 30 nm) applies, though, and
+    may need to be changed in PYMEVisualize.
+
+    Like in PyME, the coordinates refer to the camera image, i.e., a
+    translation of the canvas (``lib.fit_canvas``, e.g., after moving a
+    channel beyond the top left edge) is undone.
+
+    The metadata stores the pixel size (``voxelsize.x``/``.y`` in um),
+    the camera image size (``Camera.ROIWidth``/``ROIHeight``) and
+    Picasso's metadata of each channel (``Picasso.Info``, a JSON
+    string), which ``import_pyme`` and ``split_pyme_channels`` restore.
+
+    Parameters
+    ----------
+    path : str
+        The path where the file will be saved. The ``.hdf`` extension
+        is enforced, as PyME does not recognize ``.hdf5`` files.
+    locs : list of pd.DataFrames
+        The localizations of each channel.
+    infos : list of lists of dicts
+        Metadata of each channel.
+    channel_names : list of strs or None, optional
+        Names of the channels, stored as ``Picasso.ChannelNames``.
+        Default is None, i.e., not stored.
+
+    Raises
+    ------
+    ValueError
+        If no channel is given or the channels' pixel sizes differ.
+    """
+    import tables
+
+    if not len(locs) or len(locs) != len(infos):
+        raise ValueError(
+            "Provide the localizations and the metadata of each channel."
+        )
+    pixelsizes = [
+        float(lib.get_from_metadata(info, "Pixelsize", raise_error=True))
+        for info in infos
+    ]
+    if not np.allclose(pixelsizes, pixelsizes[0]):
+        raise ValueError(
+            "All channels exported to one PyME file need the same pixel "
+            f"size; found {pixelsizes} nm."
+        )
+    pixelsize = pixelsizes[0]
+
+    path = os.path.splitext(path)[0] + ".hdf"
+    tables_ = [
+        _pyme_channel_table(locs_, info, pixelsize, probe)
+        for probe, (locs_, info) in enumerate(zip(locs, infos))
+    ]
+    # only the columns present in all channels
+    records = pd.concat(tables_, join="inner", ignore_index=True)
+    records = records.to_records(index=False)
+
+    def camera_size(axis: int) -> int:
+        """Size of the camera image along x (0) or y (1), i.e., the
+        canvas without its translation (see lib.fit_canvas)."""
+        sizes = []
+        for info in infos:
+            size = lib.get_from_metadata(info, lib.CAMERA_SIZE_KEYS[axis])
+            if size is None:
+                size = lib.get_from_metadata(info, ("Width", "Height")[axis])
+            if size is not None:
+                sizes.append(int(size))
+        return max(sizes, default=0)
+
+    metadata = {
+        "voxelsize.x": pixelsize / 1000,
+        "voxelsize.y": pixelsize / 1000,
+        "voxelsize.units": "um",
+    }
+    width, height = camera_size(0), camera_size(1)
+    if width and height:
+        metadata["Camera.ROIWidth"] = width
+        metadata["Camera.ROIHeight"] = height
+    try:
+        metadata["Picasso.Info"] = json.dumps(
+            [list(info) for info in infos],
+            default=_json_default,
+            ensure_ascii=True,
+        )
+    except (TypeError, ValueError) as e:
+        warnings.warn(
+            "Could not store the Picasso metadata in the PyME file "
+            f"({type(e).__name__}: {e}).",
+            stacklevel=2,
+        )
+    if channel_names is not None:
+        metadata["Picasso.ChannelNames"] = json.dumps(
+            list(channel_names), ensure_ascii=True
+        )
+
+    filters = tables.Filters(complevel=5, complib="zlib", shuffle=True)
+    with tables.open_file(path, "w") as h5file:
+        h5file.create_table("/", "Localizations", obj=records, filters=filters)
+        _pyme_write_metadata(h5file, metadata)

@@ -9,7 +9,9 @@ DOI: https://doi.org/10.1038/s41467-026-70198-5.
 G5M is based on the sklearn implementation of Gaussian Mixture Modeling
 (GMM) with numba optimizations for fitting, as well as for kmeans++
 initialization. Several modifications for molecular mapping in DNA-PAINT
-are added, for example, localization cloud shape modeling.
+are added, for example, localization cloud shape modeling. License of
+the parts adapted from scikit-learn (BSD-3-Clause):
+``LICENSES/scikit-learn-LICENSE.txt``.
 
 :authors: Rafal Kowalewski
 :copyright: Copyright (c) 2023-2026 Jungmann Lab, MPI of Biochemistry
@@ -21,7 +23,7 @@ import time
 from abc import ABCMeta, abstractmethod
 from concurrent.futures import ProcessPoolExecutor
 from itertools import chain as itchain
-from typing import Literal, TYPE_CHECKING
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -29,10 +31,9 @@ from numba import njit
 from scipy.special import erf
 from sklearn.utils import check_random_state
 
-from . import lib, zfit, __version__, docs_url
+from . import lib, zfit, docs_url
 
-if TYPE_CHECKING:
-    from PyQt6 import QtWidgets  # only used in type annotations
+__all__ = ["g5m", "sum_G5Ms"]
 
 # default min. number of localizations per molecule
 MIN_LOCS = 10
@@ -59,7 +60,7 @@ COVARIANCE_TYPES = ("spherical", "diagonal", "rotated")
 fastmath = True
 
 
-@njit(fastmath=fastmath)
+@njit(fastmath=fastmath, cache=True)
 def _max_along_axis1(
     X: lib.FloatArray2D, final_shape: tuple[int]
 ) -> lib.FloatArray1D:
@@ -69,7 +70,7 @@ def _max_along_axis1(
     return output
 
 
-@njit(fastmath=fastmath)
+@njit(fastmath=fastmath, cache=True)
 def _sum_along_axis0(
     X: lib.FloatArray2D, final_shape: tuple[int]
 ) -> lib.FloatArray1D:
@@ -79,7 +80,7 @@ def _sum_along_axis0(
     return output
 
 
-@njit(fastmath=fastmath)
+@njit(fastmath=fastmath, cache=True)
 def _sum_along_axis1(
     X: lib.FloatArray2D, final_shape: tuple[int]
 ) -> lib.FloatArray1D:
@@ -89,7 +90,7 @@ def _sum_along_axis1(
     return output
 
 
-@njit(fastmath=fastmath)
+@njit(fastmath=fastmath, cache=True)
 def _mean_along_axis1(
     X: lib.FloatArray2D, final_shape: tuple[int]
 ) -> lib.FloatArray1D:
@@ -97,7 +98,7 @@ def _mean_along_axis1(
     return output / X.shape[1]
 
 
-@njit(fastmath=fastmath)
+@njit(fastmath=fastmath, cache=True)
 def _logsumexp_axis1(
     X: lib.FloatArray2D, final_shape: tuple[int]
 ) -> lib.FloatArray1D:
@@ -113,7 +114,7 @@ def _logsumexp_axis1(
     return output
 
 
-@njit(fastmath=fastmath)
+@njit(fastmath=fastmath, cache=True)
 def _matmul(a: lib.FloatArray2D, b: lib.FloatArray2D) -> lib.FloatArray2D:
     """Matrix multiplication, assuming that the shapes are
     compatible."""
@@ -127,7 +128,7 @@ def _matmul(a: lib.FloatArray2D, b: lib.FloatArray2D) -> lib.FloatArray2D:
     return c
 
 
-@njit(fastmath=fastmath)
+@njit(fastmath=fastmath, cache=True)
 def _square_elements_1d(X: lib.FloatArray1D) -> lib.FloatArray1D:
     output = np.zeros(X.shape, dtype=X.dtype)
     for i in range(X.shape[0]):
@@ -135,7 +136,7 @@ def _square_elements_1d(X: lib.FloatArray1D) -> lib.FloatArray1D:
     return output
 
 
-@njit(fastmath=fastmath)
+@njit(fastmath=fastmath, cache=True)
 def _square_elements_2d(X: lib.FloatArray2D) -> lib.FloatArray2D:
     m, n = X.shape
     output = np.zeros((m, n), dtype=X.dtype)
@@ -145,7 +146,7 @@ def _square_elements_2d(X: lib.FloatArray2D) -> lib.FloatArray2D:
     return output
 
 
-@njit(fastmath=fastmath)
+@njit(fastmath=fastmath, cache=True)
 def _poly1d(
     coeffs: lib.FloatArray1D, xs: lib.FloatArray1D
 ) -> lib.FloatArray1D:
@@ -163,7 +164,7 @@ def _poly1d(
     return out
 
 
-@njit(fastmath=fastmath)
+@njit(fastmath=fastmath, cache=True)
 def _circular_weighted_mean_angle(
     resp: lib.FloatArray2D,  # shape (n_samples, n_components)
     angles: lib.FloatArray1D,  # shape (n_samples,), radians
@@ -202,7 +203,7 @@ def _circular_weighted_mean_angle(
     return theta
 
 
-@njit(fastmath=fastmath)
+@njit(fastmath=fastmath, cache=True)
 def _assemble_covs_3D_rot(
     cov_maj: lib.FloatArray1D,
     cov_min: lib.FloatArray1D,
@@ -244,7 +245,7 @@ def _assemble_covs_3D_rot(
     return covs
 
 
-@njit(fastmath=fastmath)
+@njit(fastmath=fastmath, cache=True)
 def _precision_chol_3D_rot(covs: lib.FloatArray3D) -> lib.FloatArray3D:
     """Cholesky decomposition of the precision matrices, for the block
     covariance produced by ``_assemble_covs_3D_rot``.
@@ -286,7 +287,7 @@ def _precision_chol_3D_rot(covs: lib.FloatArray3D) -> lib.FloatArray3D:
 # mu are large, which is the case for our data. To avoid this, we first
 # calculate (x - mu) and then square it (x and mu values are similar,
 # thus the instability is avoided). Note: precision = 1/sigma**2
-@njit(fastmath=fastmath)
+@njit(fastmath=fastmath, cache=True)
 def _gauss_exponential_term_2D(
     X: lib.FloatArray2D,  # shape (n_samples, 2)
     means: lib.FloatArray2D,  # shape (n_components, 2)
@@ -302,7 +303,7 @@ def _gauss_exponential_term_2D(
     return sq_diff
 
 
-@njit(fastmath=fastmath)
+@njit(fastmath=fastmath, cache=True)
 def _gauss_exponential_term_3D(
     X: lib.FloatArray2D,  # shape (n_samples, 3)
     means: lib.FloatArray2D,  # shape (n_components, 3)
@@ -320,7 +321,7 @@ def _gauss_exponential_term_3D(
     return sq_diff
 
 
-@njit(fastmath=fastmath)
+@njit(fastmath=fastmath, cache=True)
 def _gauss_exponential_term_3D_rot(
     X: lib.FloatArray2D,  # shape (n_samples, 3)
     means: lib.FloatArray2D,  # shape (n_components, 3)
@@ -349,7 +350,7 @@ def _gauss_exponential_term_3D_rot(
 
 
 # kmeans++ init, adopted from sklearn, numba implementation #
-@njit
+@njit(cache=True)
 def _euclidean_distances(
     X: lib.FloatArray2D,
     Y: lib.FloatArray2D,
@@ -389,7 +390,7 @@ def _euclidean_distances(
     return distances  # squared distances
 
 
-@njit
+@njit(cache=True)
 def _kmeans_plusplus(
     X: lib.FloatArray2D,
     n_components: int,
@@ -882,7 +883,7 @@ class G5M(metaclass=ABCMeta):
 
 
 # 2D G5M functions and classes #
-@njit
+@njit(cache=True)
 def _check_G5M_resolution_2D(
     means: lib.FloatArray2D,
     weights: lib.FloatArray1D,
@@ -947,7 +948,7 @@ def _check_G5M_resolution_2D(
     return True
 
 
-@njit
+@njit(cache=True)
 def _initialize_G5M_2D(
     X: lib.FloatArray2D, n_init: int, n_components: int, random_state: int
 ) -> tuple[lib.FloatArray2D, lib.FloatArray3D, lib.FloatArray2D]:
@@ -982,7 +983,7 @@ def _initialize_G5M_2D(
     )
 
 
-@njit
+@njit(cache=True)
 def _estimate_gaussian_parameters_2D(
     X: lib.FloatArray2D,
     resp: lib.FloatArray2D,
@@ -996,7 +997,7 @@ def _estimate_gaussian_parameters_2D(
     )
 
 
-@njit
+@njit(cache=True)
 def _estimate_log_gaussian_prob_2D(
     X: lib.FloatArray2D,
     means: lib.FloatArray2D,
@@ -1008,7 +1009,7 @@ def _estimate_log_gaussian_prob_2D(
     return -0.5 * (2 * np.log(2 * np.pi) + log_prob) + log_det
 
 
-@njit
+@njit(cache=True)
 def _e_step_2D(
     X: lib.FloatArray2D,
     weights: lib.FloatArray1D,
@@ -1023,7 +1024,7 @@ def _e_step_2D(
     return np.mean(log_prob_norm), log_resp.astype(np.float64)
 
 
-@njit
+@njit(cache=True)
 def _m_step_2D(
     X: lib.FloatArray2D,
     log_resp: lib.FloatArray2D,
@@ -1160,7 +1161,6 @@ def _run_g5m_group_2D(
     min_locs: int = MIN_LOCS,
     loc_prec_handle: Literal["local", "abs"] = "local",
     sigma_bounds: tuple[float, float] = (MIN_SIGMA_FACTOR, MAX_SIGMA_FACTOR),
-    pixelsize: float = 130.0,
     max_rounds_without_best_bic: int = MAX_ROUNDS_WITHOUT_BEST_BIC,
     bootstrap_check: bool = False,
     max_locs_per_cluster: int = np.inf,
@@ -1184,10 +1184,8 @@ def _run_g5m_group_2D(
         Bounds for the standard deviation (sigma) of the Gaussian
         components. If local loc. prec. is used, the bounds specify the
         margin of error in units of localization precision. Else,
-        absolute bounds on sigma. Default is (`MIN_SIGMA_FACTOR`,
+        absolute bounds on sigma in nm. Default is (`MIN_SIGMA_FACTOR`,
         `MAX_SIGMA_FACTOR`).
-    pixelsize : float, optional
-        Camera pixel size in nm. Default is 130.0.
     max_rounds_without_best_bic : int, optional
         Maximum number of rounds without BIC improvement to terminate
         the search for optimal G5M n_components. Default is
@@ -1239,7 +1237,7 @@ def _run_g5m_group_2D(
     if g5m is None or len(g5m.valid_idx) == 0:
         return None, None
 
-    return _convert_G5M_results(g5m, locs_group, pixelsize, bootstrap_check)
+    return _convert_G5M_results(g5m, locs_group, bootstrap_check)
 
 
 class G5M_2D(G5M):
@@ -1353,7 +1351,7 @@ class G5M_2D(G5M):
 
 
 # 3D G5M functions and classes #
-@njit
+@njit(cache=True)
 def _check_G5M_resolution_3D(
     means: lib.FloatArray2D,
     weights: lib.FloatArray1D,
@@ -1421,7 +1419,7 @@ def _check_G5M_resolution_3D(
     return True
 
 
-@njit
+@njit(cache=True)
 def _initialize_G5M_3D(
     X: lib.FloatArray2D, n_init: int, n_components: int, random_state: int
 ) -> tuple[lib.FloatArray2D, lib.FloatArray3D, lib.FloatArray3D]:
@@ -1456,7 +1454,7 @@ def _initialize_G5M_3D(
     )
 
 
-@njit
+@njit(cache=True)
 def _estimate_gaussian_parameters_3D(
     X: lib.FloatArray2D,
     resp: lib.FloatArray2D,
@@ -1464,7 +1462,7 @@ def _estimate_gaussian_parameters_3D(
     return _estimate_gaussian_parameters_diag_cov(X, resp)
 
 
-@njit
+@njit(cache=True)
 def _estimate_log_gaussian_prob_3D(
     X: lib.FloatArray2D,
     means: lib.FloatArray2D,
@@ -1479,7 +1477,7 @@ def _estimate_log_gaussian_prob_3D(
     return -0.5 * (3 * np.log(2 * np.pi) + log_prob) + log_det
 
 
-@njit
+@njit(cache=True)
 def _e_step_3D(
     X: lib.FloatArray2D,
     weights: lib.FloatArray1D,
@@ -1494,7 +1492,7 @@ def _e_step_3D(
     return np.mean(log_prob_norm), log_resp.astype(np.float64)
 
 
-@njit
+@njit(cache=True)
 def _clip_covs_3D(
     covs,
     min_cov_x,
@@ -1519,7 +1517,7 @@ def _clip_covs_3D(
             covs[i, 2] = max_cov_z[i]
 
 
-@njit
+@njit(cache=True)
 def _m_step_3D(
     X: lib.FloatArray2D,
     log_resp: lib.FloatArray2D,
@@ -1637,7 +1635,7 @@ def _m_step_3D(
 # (cos a, -sin a) with internal angle a, and localize saves
 # angle = -rad2deg(a), so the saved angle is already the standard-
 # convention angle of the sx axis and needs no sign flip here.
-@njit
+@njit(cache=True)
 def _estimate_gaussian_parameters_3D_rot(
     X: lib.FloatArray2D,
     resp: lib.FloatArray2D,
@@ -1706,7 +1704,7 @@ def _estimate_gaussian_parameters_3D_rot(
     )
 
 
-@njit
+@njit(cache=True)
 def _estimate_log_gaussian_prob_3D_rot(
     X: lib.FloatArray2D,
     means: lib.FloatArray2D,
@@ -1724,7 +1722,7 @@ def _estimate_log_gaussian_prob_3D_rot(
     return -0.5 * (3 * np.log(2 * np.pi) + log_prob) + log_det
 
 
-@njit
+@njit(cache=True)
 def _e_step_3D_rot(
     X: lib.FloatArray2D,
     weights: lib.FloatArray1D,
@@ -1739,7 +1737,7 @@ def _e_step_3D_rot(
     return np.mean(log_prob_norm), log_resp.astype(np.float64)
 
 
-@njit
+@njit(cache=True)
 def _check_G5M_resolution_3D_rot(
     means: lib.FloatArray2D,
     weights: lib.FloatArray1D,
@@ -1781,7 +1779,7 @@ def _check_G5M_resolution_3D_rot(
     return True
 
 
-@njit
+@njit(cache=True)
 def _initialize_G5M_3D_rot(
     X: lib.FloatArray2D, n_init: int, n_components: int, random_state: int
 ) -> tuple[lib.FloatArray2D, lib.FloatArray3D, lib.FloatArray4D]:
@@ -1827,7 +1825,7 @@ def _initialize_G5M_3D_rot(
     )
 
 
-@njit
+@njit(cache=True)
 def _m_step_3D_rot(
     X: lib.FloatArray2D,
     log_resp: lib.FloatArray2D,
@@ -2062,7 +2060,7 @@ def _run_g5m_group_3D(
     min_locs: int = MIN_LOCS,
     loc_prec_handle: Literal["local", "abs"] = "local",
     sigma_bounds: tuple[float, float] = (MIN_SIGMA_FACTOR, MAX_SIGMA_FACTOR),
-    pixelsize: float = 130.0,
+    pixelsize: float | None = None,
     mode: Literal["astigmatism", "spline"] = "astigmatism",
     covariance_type: Literal["diagonal", "rotated"] = "diagonal",
     max_rounds_without_best_bic: int = MAX_ROUNDS_WITHOUT_BEST_BIC,
@@ -2078,8 +2076,9 @@ def _run_g5m_group_3D(
         Localizations.
     calibration : dict or None
         Astigmatism calibration dictionary with the keys "X
-        Coefficients", "Y Coefficients" and "Magnification factor".
-        Required for ``mode="astigmatism"``, may be None for spline.
+        Coefficients", "Y Coefficients" (spot widths in nm against z in
+        nm) and "Magnification factor". Required for
+        ``mode="astigmatism"``, may be None for spline.
         See https://picassosr.readthedocs.io/en/latest/localize/3d-calibration.html#localize-3d-calibration.  # noqa: E501
     min_locs : int, optional
         Minimum number of localizations per component. Default is
@@ -2093,10 +2092,13 @@ def _run_g5m_group_3D(
         Bounds for the standard deviation (sigma) of the Gaussian
         components. If loc_prec_handle is "local", the bounds specify
         the margin of error in units of localization precision. Else,
-        the bounds specify the absolute bounds on sigma. Default is
-        (`MIN_SIGMA_FACTOR`, `MAX_SIGMA_FACTOR`).
+        the bounds specify the absolute bounds on sigma in nm. Default
+        is (`MIN_SIGMA_FACTOR`, `MAX_SIGMA_FACTOR`).
     pixelsize : float, optional
-        Camera pixel size in nm. Default is 130.0.
+        Camera pixel size in nm. Only used to derive the axial
+        localization precision (``zfit.axial_localization_precision``,
+        whose spot width uncertainty formulas work in camera pixels)
+        when the localizations lack an ``lpz`` column. Default is None.
     mode : {"astigmatism", "spline"}, optional
         Fitting mode of the input localizations. "spline" uses a plain
         diagonal 3D model and reads lpz directly from the locs. Default
@@ -2143,9 +2145,18 @@ def _run_g5m_group_3D(
                 "Spline mode requires an 'lpz' column in the "
                 "localizations (produced by the spline 3D fit)."
             )
+        if pixelsize is None:
+            raise ValueError(
+                "The localizations have no 'lpz' column; deriving it from "
+                "the calibration needs the camera pixel size (Pixelsize, "
+                "nm) in the metadata."
+            )
         locs_group = locs_group.copy()
         locs_group["lpz"] = zfit.axial_localization_precision(
-            locs_group, [{"Pixelsize": pixelsize}], calibration, "gausslq"
+            locs_group,
+            [{"Pixelsize": pixelsize}],
+            calibration=calibration,
+            fitting_method="gausslq",
         )
     # check that the number of localizations is within the limits
     n_locs = len(locs_group)
@@ -2157,8 +2168,6 @@ def _run_g5m_group_3D(
     else:
         lp = np.ones((len(locs_group), 3))  # dummy
     X = locs_group[["x", "y", "z"]].to_numpy()
-    X[:, 2] /= pixelsize  # convert z to camera pixels
-    lp[:, 2] /= pixelsize  # convert lpz to camera pixels
 
     if covariance_type == "rotated":
         # the "angle" column is written by picasso.localize in degrees;
@@ -2182,7 +2191,7 @@ def _run_g5m_group_3D(
     if g5m is None or len(g5m.valid_idx) == 0:
         return None, None
 
-    return _convert_G5M_results(g5m, locs_group, pixelsize, bootstrap_check)
+    return _convert_G5M_results(g5m, locs_group, bootstrap_check)
 
 
 class G5M_3D(G5M):
@@ -2370,7 +2379,7 @@ class G5M_3D(G5M):
 
 
 # G5M (2D/3D) functions and classes #
-@njit
+@njit(cache=True)
 def _estimate_gaussian_parameters_diag_cov(
     X: lib.FloatArray2D,
     resp: lib.FloatArray2D,
@@ -2512,9 +2521,7 @@ def _bootstrap_sem(
     return sem
 
 
-def _select_X_and_estep(
-    g5m: G5M, locs_group: pd.DataFrame, pixelsize: float
-) -> tuple:
+def _select_X_and_estep(g5m: G5M, locs_group: pd.DataFrame) -> tuple:
     """Localization coordinates and the E-step matching the G5M's shape.
 
     Parameters
@@ -2523,21 +2530,17 @@ def _select_X_and_estep(
         Fitted G5M.
     locs_group : pd.DataFrame
         Localizations that g5m was fitted to.
-    pixelsize : float
-        Camera pixel size in nm.
 
     Returns
     -------
     X : np.ndarray
-        ``(n_locs, 2)`` or ``(n_locs, 3)`` coordinates, z converted to
-        camera pixels.
+        ``(n_locs, 2)`` or ``(n_locs, 3)`` coordinates (nm).
     e_step : callable
         ``_e_step_2D``, ``_e_step_3D`` or ``_e_step_3D_rot``, matching
         ``g5m.covariance_type``.
     """
     if "z" in locs_group.columns:
         X = locs_group[["x", "y", "z"]].to_numpy()
-        X[:, 2] /= pixelsize  # convert z to camera pixels
         if g5m.covariance_type == "rotated":
             e_step = _e_step_3D_rot
         else:
@@ -2557,34 +2560,36 @@ def _shape_columns(
     resp: np.ndarray,
     rsum: np.ndarray,
     locs_group: pd.DataFrame,
-    pixelsize: float,
 ) -> dict:
     """Fitted/relative width columns for the centers DataFrame.
 
+    The fitted widths (``fitted_sigma*``) are in nm; the relative widths
+    (``rel_sigma*``) are the fitted widths over the (responsibility-
+    weighted) mean localization precision of the component, unitless.
     Handles the 2D/3D and diagonal/rotated covariance layouts; see
     :func:`_convert_G5M_results`.
     """
     if not is_3d:
-        sigma = np.sqrt(covariances) * pixelsize
+        sigma = np.sqrt(covariances)
         lp = locs_group[["lpx", "lpy"]].mean(axis=1).to_numpy()
         weighted_lp = ((resp * lp.reshape(-1, 1)).sum(0) / rsum).reshape(-1)
-        rel_sigma = sigma / weighted_lp / pixelsize
+        rel_sigma = sigma / weighted_lp
         return {"fitted_sigma": sigma, "rel_sigma": rel_sigma}
 
-    z = means[:, 2] * pixelsize
+    z = means[:, 2]
     if rotated:
         # marginal (camera-axis) widths, so that fitted_sigma_x/y/z keep
         # the same meaning as for the diagonal model
         marginal = np.diagonal(covariances, axis1=1, axis2=2)
-        sigma_x = np.sqrt(marginal[:, 0]) * pixelsize
-        sigma_y = np.sqrt(marginal[:, 1]) * pixelsize
-        sigma_z = np.sqrt(marginal[:, 2]) * pixelsize
+        sigma_x = np.sqrt(marginal[:, 0])
+        sigma_y = np.sqrt(marginal[:, 1])
+        sigma_z = np.sqrt(marginal[:, 2])
         # principal axes of the xy block; eigh returns ascending
         # eigenvalues, so the major axis is the second one
         eigvals, eigvecs = np.linalg.eigh(covariances[:, :2, :2])
         eigvals = np.maximum(eigvals, 0.0)
-        sigma_minor = np.sqrt(eigvals[:, 0]) * pixelsize
-        sigma_major = np.sqrt(eigvals[:, 1]) * pixelsize
+        sigma_minor = np.sqrt(eigvals[:, 0])
+        sigma_major = np.sqrt(eigvals[:, 1])
         axis_ratio = sigma_major / sigma_minor
         # orientation of the major axis, in the same convention as the
         # "angle" column written by picasso.localize: degrees wrapped
@@ -2592,11 +2597,11 @@ def _shape_columns(
         angle = np.rad2deg(np.arctan2(eigvecs[:, 1, 1], eigvecs[:, 0, 1]))
         angle = np.mod(angle + 90.0, 180.0) - 90.0
     else:
-        sigma_x = np.sqrt(covariances[:, 0]) * pixelsize
-        sigma_y = np.sqrt(covariances[:, 1]) * pixelsize
-        sigma_z = np.sqrt(covariances[:, 2]) * pixelsize
+        sigma_x = np.sqrt(covariances[:, 0])
+        sigma_y = np.sqrt(covariances[:, 1])
+        sigma_z = np.sqrt(covariances[:, 2])
 
-    lpz = sem[:, 2] * pixelsize
+    lpz = sem[:, 2]
     weighted_lpx = (
         (resp * locs_group["lpx"].to_numpy().reshape(-1, 1)).sum(0) / rsum
     ).reshape(-1)
@@ -2612,8 +2617,8 @@ def _shape_columns(
         "fitted_sigma_x": sigma_x,
         "fitted_sigma_y": sigma_y,
         "fitted_sigma_z": sigma_z,
-        "rel_sigma_x": sigma_x / weighted_lpx / pixelsize,
-        "rel_sigma_y": sigma_y / weighted_lpy / pixelsize,
+        "rel_sigma_x": sigma_x / weighted_lpx,
+        "rel_sigma_y": sigma_y / weighted_lpy,
         "rel_sigma_z": sigma_z / weighted_lpz,
     }
     if rotated:
@@ -2624,8 +2629,8 @@ def _shape_columns(
         columns.update(
             fitted_sigma_major=sigma_major,
             fitted_sigma_minor=sigma_minor,
-            rel_sigma_major=sigma_major / weighted_lpxy / pixelsize,
-            rel_sigma_minor=sigma_minor / weighted_lpxy / pixelsize,
+            rel_sigma_major=sigma_major / weighted_lpxy,
+            rel_sigma_minor=sigma_minor / weighted_lpxy,
             axis_ratio=axis_ratio,
             angle=angle,
         )
@@ -2633,7 +2638,7 @@ def _shape_columns(
 
 
 def _binding_event_counts(
-    g5m: G5M, locs_group: pd.DataFrame, pixelsize: float, is_3d: bool
+    g5m: G5M, locs_group: pd.DataFrame, is_3d: bool
 ) -> np.ndarray:
     """Number of binding events assigned to each G5M component.
 
@@ -2647,8 +2652,6 @@ def _binding_event_counts(
         Fitted G5M.
     locs_group : pd.DataFrame
         Localizations of one cluster, expected in frame order.
-    pixelsize : float
-        Camera pixel size in nm, used to convert z to camera pixels.
     is_3d : bool
         Whether the localizations are 3D.
 
@@ -2666,8 +2669,7 @@ def _binding_event_counts(
     ]
     if is_3d:
         z_events = [
-            np.mean(_) / pixelsize
-            for _ in np.split(locs_group["z"].to_numpy(), split_idx)
+            np.mean(_) for _ in np.split(locs_group["z"].to_numpy(), split_idx)
         ]
         X_events = np.stack((x_events, y_events, z_events)).T
     else:
@@ -2746,13 +2748,12 @@ def _ordered_center_columns(
 def _convert_G5M_results(
     g5m: G5M,
     locs_group: pd.DataFrame,
-    pixelsize: float = 130.0,
     bootstrap: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Extract G5M components as ``pd.DataFrame`` in the format of
     localizations - frame, spatial coordinates, standard errors of the
     means, fitted sigma and number of localizations corresponding to
-    the centers, etc.
+    the centers, etc. Every length is in nm, like the localizations.
 
     Parameters
     ----------
@@ -2760,8 +2761,6 @@ def _convert_G5M_results(
         Fitted G5M.
     locs_group : pd.DataFrame
         Localizations that g5m was fitted to.
-    pixelsize : float, optional
-        Camera pixel size in nm. Default is 130.0.
     bootstrap : bool, optional
         If True, the standard error of the means (SEM) is calculated
         using bootstrapping. If False, the standard, single Gaussian
@@ -2781,7 +2780,7 @@ def _convert_G5M_results(
     weights = g5m.weights
     # find responsibilites which are used for weighted averaging of
     # properties per component
-    X, e_step = _select_X_and_estep(g5m, locs_group, pixelsize)
+    X, e_step = _select_X_and_estep(g5m, locs_group)
     is_3d = X.shape[1] == 3
     log_prob = g5m.estimate_weighted_log_prob(X)
     sample_scores = _logsumexp_axis1(log_prob, (X.shape[0],))
@@ -2841,7 +2840,6 @@ def _convert_G5M_results(
         resp,
         rsum,
         locs_group,
-        pixelsize,
     )
 
     # extract frame info and group_input
@@ -2870,7 +2868,7 @@ def _convert_G5M_results(
     # and assign them to molecules - sticky events will likely have only
     # one or two such events associated, then find the closest G5M
     # component to each event, accounting for a component with none
-    n_events = _binding_event_counts(g5m, locs_group, pixelsize, is_3d)
+    n_events = _binding_event_counts(g5m, locs_group, is_3d)
 
     # convert to DataFrame
     base_columns = {
@@ -2993,7 +2991,7 @@ def sum_G5Ms(g5ms: list[G5M]) -> G5M:
     return sum_g5m
 
 
-@njit
+@njit(cache=True)
 def _fit_G5M(
     X: np.ndarray,
     min_locs: int,
@@ -3168,59 +3166,102 @@ def _fit_G5M(
     return best_params, converged, valid_idx
 
 
-def _run_g5m_in_clusters(
-    i: int,
-    n_groups_task: int,
-    locs: pd.DataFrame,
-    min_locs: int,
-    loc_prec_handle: Literal["local", "abs"],
-    sigma_bounds: tuple[float, float],
-    pixelsize: float,
-    max_rounds_without_best_bic: int,
-    bootstrap_check: bool,
-    calibration: dict | None,
-    max_locs_per_cluster: int,
-    mode: Literal["astigmatism", "spline"] = "astigmatism",
-    covariance_type: Literal["diagonal", "rotated"] = "diagonal",
-) -> tuple[pd.DataFrame, pd.DataFrame]:
-    """Run G5M for a given group of localizations clusters. See
-    :func:`g5m` for a detailed explanation of the parameters.
+def _sort_by_group(locs: pd.DataFrame) -> tuple[pd.DataFrame, np.ndarray]:
+    """Sort localizations by group, keeping the row order within each
+    group.
 
-    Note that the arguments are passed positionally by
-    ``_run_g5m_parallel``, so their order must be kept in sync there.
+    Splitting the sorted localizations into contiguous slices replaces
+    one ``locs[locs["group"] == group]`` scan of all localizations per
+    group, and lets each parallel task receive only its own groups.
 
     Parameters
     ----------
-    i : int
-        Index of the first group to analyze.
-    n_groups_task : int
-        Number of groups to analyze.
     locs : pd.DataFrame
-        Clustered localizations with a "group" column.
-    min_locs : int
-        Minimum number of localizations per component.
-    loc_prec_handle : {"local", "abs"}
-        How to handle sigma bounds, see :func:`g5m`.
-    sigma_bounds : tuple
-        Bounds for the standard deviation (sigma) of the Gaussian
-        components, see :func:`g5m`.
-    pixelsize : float
-        Camera pixel size in nm.
-    max_rounds_without_best_bic : int
-        Maximum number of rounds without BIC improvement to terminate
-        the search for optimal G5M n_components.
-    bootstrap_check : bool
-        If True, the SEM is calculated using bootstrapping.
+        Localizations with a "group" column.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        Localizations sorted by group (stable, i.e., the rows of each
+        group keep their original order).
+    bounds : np.ndarray
+        ``(n_groups + 1,)`` row offsets; group ``i`` occupies rows
+        ``bounds[i]:bounds[i + 1]`` of the sorted localizations.
+    """
+    groups = locs["group"].to_numpy()
+    if not len(groups):
+        return locs, np.zeros(1, dtype=np.int64)
+    if np.any(groups[1:] < groups[:-1]):
+        order = np.argsort(groups, kind="stable")
+        locs = locs.iloc[order]
+        groups = groups[order]
+    bounds = np.concatenate(
+        ([0], np.flatnonzero(np.diff(groups)) + 1, [len(groups)])
+    )
+    return locs, bounds
+
+
+def _run_g5m_group(
+    locs_group: pd.DataFrame,
+    *,
+    calibration: dict | None,
+    mode: Literal["astigmatism", "spline"],
+    covariance_type: Literal["spherical", "diagonal", "rotated"],
+    **kwargs,
+) -> tuple[pd.DataFrame, pd.DataFrame] | tuple[None, None]:
+    """Run G5M for one group of localizations, dispatching to
+    :func:`_run_g5m_group_3D` or :func:`_run_g5m_group_2D`.
+
+    Parameters
+    ----------
+    locs_group : pd.DataFrame
+        Localizations of one group.
     calibration : dict or None
-        Astigmatism calibration dictionary. Only used for 3D data with
-        ``mode="astigmatism"``.
-    max_locs_per_cluster : int
-        Maximum number of localizations per cluster accepted for G5M.
-    mode : {"astigmatism", "spline"}, optional
-        Fitting mode of the input 3D localizations. Default is
-        "astigmatism".
-    covariance_type : {"diagonal", "rotated"}, optional
-        Shape of the 3D G5M components. Default is "diagonal".
+        Astigmatism calibration dictionary, 3D only.
+    mode : {"astigmatism", "spline"}
+        Fitting mode of the 3D localizations, ignored for 2D.
+    covariance_type : {"spherical", "diagonal", "rotated"}
+        Shape of the G5M components, ignored for 2D.
+    **kwargs
+        Arguments shared by the 2D and 3D runners (``min_locs``,
+        ``loc_prec_handle``, ``sigma_bounds``,
+        ``max_rounds_without_best_bic``, ``bootstrap_check`` and
+        ``max_locs_per_cluster``) plus the 3D runner's ``pixelsize``,
+        which the 2D one does not take.
+
+    Returns
+    -------
+    centers : pd.DataFrame or None
+        Centers of the G5M components in the format of localizations.
+    clustered_locs : pd.DataFrame or None
+        Localizations with assigned cluster labels, based on the G5M
+        components.
+    """
+    if "z" in locs_group.columns:
+        return _run_g5m_group_3D(
+            locs_group,
+            calibration,
+            mode=mode,
+            covariance_type=covariance_type,
+            **kwargs,
+        )
+    kwargs.pop("pixelsize", None)
+    return _run_g5m_group_2D(locs_group, **kwargs)
+
+
+def _run_g5m_in_clusters(
+    locs: pd.DataFrame, **kwargs
+) -> tuple[list[pd.DataFrame], list[pd.DataFrame]]:
+    """Run G5M for each group in a slice of localizations sorted by
+    group. Executed by the worker processes of ``_run_g5m_parallel``.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations of one or more whole groups, sorted by group (see
+        :func:`_sort_by_group`).
+    **kwargs
+        Arguments passed to :func:`_run_g5m_group`.
 
     Returns
     -------
@@ -3233,32 +3274,11 @@ def _run_g5m_in_clusters(
     """
     centers = []
     clustered_locs = []
-    for group in np.unique(locs.group)[i : i + n_groups_task]:
-        if "z" in locs.columns:
-            centers_, clustered_locs_ = _run_g5m_group_3D(
-                locs_group=locs[locs["group"] == group],
-                calibration=calibration,
-                min_locs=min_locs,
-                loc_prec_handle=loc_prec_handle,
-                sigma_bounds=sigma_bounds,
-                pixelsize=pixelsize,
-                mode=mode,
-                covariance_type=covariance_type,
-                max_rounds_without_best_bic=max_rounds_without_best_bic,
-                bootstrap_check=bootstrap_check,
-                max_locs_per_cluster=max_locs_per_cluster,
-            )
-        else:
-            centers_, clustered_locs_ = _run_g5m_group_2D(
-                locs_group=locs[locs["group"] == group],
-                min_locs=min_locs,
-                loc_prec_handle=loc_prec_handle,
-                sigma_bounds=sigma_bounds,
-                pixelsize=pixelsize,
-                max_rounds_without_best_bic=max_rounds_without_best_bic,
-                bootstrap_check=bootstrap_check,
-                max_locs_per_cluster=max_locs_per_cluster,
-            )
+    _, bounds = _sort_by_group(locs)
+    for start, stop in zip(bounds[:-1], bounds[1:]):
+        centers_, clustered_locs_ = _run_g5m_group(
+            locs.iloc[start:stop], **kwargs
+        )
         if centers_ is not None and len(centers_):
             centers.append(centers_)
             clustered_locs.append(clustered_locs_)
@@ -3266,63 +3286,33 @@ def _run_g5m_in_clusters(
 
 
 def _run_g5m_parallel(
-    locs: pd.DataFrame,
-    *,
-    min_locs: int = MIN_LOCS,
-    loc_prec_handle: Literal["local", "abs"] = "local",
-    sigma_bounds: tuple[float, float] = (MIN_SIGMA_FACTOR, MAX_SIGMA_FACTOR),
-    pixelsize: float = 130.0,
-    max_rounds_without_best_bic: int = MAX_ROUNDS_WITHOUT_BEST_BIC,
-    bootstrap_check: bool = False,
-    calibration: dict | None = None,
-    max_locs_per_cluster: int = np.inf,
-    mode: Literal["astigmatism", "spline"] = "astigmatism",
-    covariance_type: Literal["diagonal", "rotated"] = "diagonal",
+    locs: pd.DataFrame, bounds: np.ndarray, **kwargs
 ) -> list:
     """Run G5M in parallel using multiprocessing. See :func:`g5m` for a
     detailed explanation of the parameters.
 
+    The groups are split into ``N_TASKS`` tasks and each task is sent
+    only the localizations of its own groups.
+
     Parameters
     ----------
     locs : pd.DataFrame
-        Clustered localizations with a "group" column.
-    min_locs : int, optional
-        Minimum number of localizations per component. Default is
-        `MIN_LOCS`.
-    loc_prec_handle : {"local", "abs"}, optional
-        How to handle sigma bounds, see :func:`g5m`. Default is
-        "local".
-    sigma_bounds : tuple, optional
-        Bounds for the standard deviation (sigma) of the Gaussian
-        components, see :func:`g5m`. Default is `(MIN_SIGMA_FACTOR,
-        MAX_SIGMA_FACTOR)`.
-    pixelsize : float, optional
-        Camera pixel size in nm. Default is 130.0.
-    max_rounds_without_best_bic : int, optional
-        Maximum number of rounds without BIC improvement to terminate
-        the search for optimal G5M n_components. Default is
-        `MAX_ROUNDS_WITHOUT_BEST_BIC`.
-    bootstrap_check : bool, optional
-        If True, the SEM is calculated using bootstrapping. Default is
-        False.
-    calibration : dict or None, optional
-        Astigmatism calibration dictionary. Only used for 3D data with
-        ``mode="astigmatism"``. Default is None.
-    max_locs_per_cluster : int, optional
-        Maximum number of localizations per cluster accepted for G5M.
-        Default is np.inf.
-    mode : {"astigmatism", "spline"}, optional
-        Fitting mode of the input 3D localizations. Default is
-        "astigmatism".
-    covariance_type : {"diagonal", "rotated"}, optional
-        Shape of the 3D G5M components. Default is "diagonal".
+        Clustered localizations sorted by group, see
+        :func:`_sort_by_group`.
+    bounds : np.ndarray
+        Row offsets of the groups in ``locs``, see
+        :func:`_sort_by_group`.
+    **kwargs
+        Arguments passed to :func:`_run_g5m_group`.
 
     Returns
     -------
+    executor : ProcessPoolExecutor
+        The executor running the tasks; the caller shuts it down.
     fs : list
-        List of futures.
+        List of futures, ``N_TASKS`` of them.
     """
-    n_groups = len(np.unique(locs["group"]))
+    n_groups = len(bounds) - 1
     n_workers = lib.n_workers(0.35)
     groups_per_task = [
         (
@@ -3332,29 +3322,19 @@ def _run_g5m_parallel(
         )
         for _ in range(N_TASKS)
     ]
-    start_indices = np.cumsum([0] + groups_per_task[:-1])
+    start_indices = np.cumsum([0] + groups_per_task)
     fs = []
     executor = ProcessPoolExecutor(n_workers)
-    for i, n_groups_task in zip(start_indices, groups_per_task):
-        fs.append(
-            executor.submit(
-                _run_g5m_in_clusters,
-                i,
-                n_groups_task,
-                locs,
-                min_locs,
-                loc_prec_handle,
-                sigma_bounds,
-                pixelsize,
-                max_rounds_without_best_bic,
-                bootstrap_check,
-                calibration,
-                max_locs_per_cluster,
-                mode,
-                covariance_type,
+    try:
+        for first, last in zip(start_indices[:-1], start_indices[1:]):
+            locs_task = locs.iloc[bounds[first] : bounds[last]]
+            fs.append(
+                executor.submit(_run_g5m_in_clusters, locs_task, **kwargs)
             )
-        )
-    return fs
+    except BaseException:
+        executor.shutdown(wait=False, cancel_futures=True)
+        raise
+    return executor, fs
 
 
 def _g5m(
@@ -3362,92 +3342,74 @@ def _g5m(
     min_locs: int,
     loc_prec_handle: Literal["local", "abs"],
     sigma_bounds: tuple[float, float],
-    pixelsize: float,
+    pixelsize: float | None,
     max_rounds_without_best_bic: int,
     bootstrap_check: bool,
     calibration: dict | None,
     max_locs_per_cluster: int,
-    asynch: bool,
-    n_steps: int,
-    progress: lib.ProgressType,
+    parallel: bool,
+    progress: lib.Progress,
     mode: Literal["astigmatism", "spline"] = "astigmatism",
     covariance_type: Literal["diagonal", "rotated"] = "diagonal",
 ) -> tuple[list[pd.DataFrame], list[pd.DataFrame]]:
-    """Run G5M with or without multiprocessing. The function returns the
+    """Run G5M, in a process pool if ``parallel``. The function returns the
     centers of the G5M components and localizations with assigned cluster
-    labels. See ``g5m`` for parameters explanation."""
-    if asynch:  # run G5M using multiprocessing
-        fs = _run_g5m_parallel(
-            locs,
-            min_locs=min_locs,
-            loc_prec_handle=loc_prec_handle,
-            sigma_bounds=sigma_bounds,
-            pixelsize=pixelsize,
-            max_rounds_without_best_bic=max_rounds_without_best_bic,
-            bootstrap_check=bootstrap_check,
-            calibration=calibration,
-            max_locs_per_cluster=max_locs_per_cluster,
-            mode=mode,
-            covariance_type=covariance_type,
-        )
-
-        # display progress
+    labels. See ``g5m`` for parameters explanation; ``progress`` is a
+    normalized tracker, see ``g5m`` for the phase it reports."""
+    group_kwargs = dict(
+        min_locs=min_locs,
+        loc_prec_handle=loc_prec_handle,
+        sigma_bounds=sigma_bounds,
+        pixelsize=pixelsize,
+        max_rounds_without_best_bic=max_rounds_without_best_bic,
+        bootstrap_check=bootstrap_check,
+        calibration=calibration,
+        max_locs_per_cluster=max_locs_per_cluster,
+        mode=mode,
+        covariance_type=covariance_type,
+    )
+    locs, bounds = _sort_by_group(locs)
+    if parallel:  # run G5M in a process pool
+        lib.start_phase(progress, "Running G5M", N_TASKS, unit="task")
+        progress.set_value(0)
+        executor, fs = _run_g5m_parallel(locs, bounds, **group_kwargs)
         try:
-            while lib.n_futures_done(fs) < n_steps:
-                n_done = lib.n_futures_done(fs)
+            # report the finished tasks until all are done
+            n_done = lib.n_futures_done(fs)
+            while n_done < len(fs):
                 progress.set_value(n_done)
                 time.sleep(0.2)
+                n_done = lib.n_futures_done(fs)
+            progress.set_value(N_TASKS)
+            results = [f.result() for f in fs]
         except BaseException:
             # e.g. canceled in the GUI (lib.OperationCanceled): drop the
             # tasks not started yet instead of running them to the end
-            for f in fs:
-                f.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
             raise
+        executor.shutdown()
 
         # extract centers from futures
-        centers = [_.result()[0] for _ in fs if len(_.result())]
+        centers = [_[0] for _ in results if len(_)]
         centers = list(itchain(*centers))
-        clustered_locs = [_.result()[1] for _ in fs if len(_.result())]
+        clustered_locs = [_[1] for _ in results if len(_)]
         clustered_locs = list(itchain(*clustered_locs))
 
-    else:  # run G5M without multiprocessing
+    else:  # run G5M in this process
+        n_groups = len(bounds) - 1
+        lib.start_phase(progress, "Running G5M", n_groups, unit="group")
+        progress.set_value(0)
         centers = []
         clustered_locs = []
-        for i, group in enumerate(np.unique(locs["group"])):
-            if "z" in locs.columns:
-                centers_, clustered_locs_ = _run_g5m_group_3D(
-                    locs[locs["group"] == group],
-                    calibration=calibration,
-                    min_locs=min_locs,
-                    loc_prec_handle=loc_prec_handle,
-                    sigma_bounds=sigma_bounds,
-                    pixelsize=pixelsize,
-                    mode=mode,
-                    covariance_type=covariance_type,
-                    max_rounds_without_best_bic=max_rounds_without_best_bic,
-                    bootstrap_check=bootstrap_check,
-                    max_locs_per_cluster=max_locs_per_cluster,
-                )
-            else:
-                centers_, clustered_locs_ = _run_g5m_group_2D(
-                    locs[locs["group"] == group],
-                    min_locs=min_locs,
-                    loc_prec_handle=loc_prec_handle,
-                    sigma_bounds=sigma_bounds,
-                    pixelsize=pixelsize,
-                    max_rounds_without_best_bic=max_rounds_without_best_bic,
-                    bootstrap_check=bootstrap_check,
-                    max_locs_per_cluster=max_locs_per_cluster,
-                )
+        for i, (start, stop) in enumerate(zip(bounds[:-1], bounds[1:])):
+            centers_, clustered_locs_ = _run_g5m_group(
+                locs.iloc[start:stop], **group_kwargs
+            )
             if centers_ is not None and len(centers_):
                 centers.append(centers_)
                 clustered_locs.append(clustered_locs_)
-
-            progress.set_value(i)
-
-    # complete and close the progress tracker
-    progress.set_value(n_steps)
-    progress.close()
+            progress.set_value(i + 1)
+        progress.set_value(n_groups)
 
     return centers, clustered_locs
 
@@ -3577,30 +3539,6 @@ def _resolve_group_column(
     return locs
 
 
-def _build_g5m_progress(callback_parent, n_steps: int):
-    """Progress tracker for :func:`g5m`, matching ``lib.normalize_progress``.
-
-    A parent widget builds a ``lib.ProgressDialog`` for it; "console" uses
-    tqdm; a ready-made tracker (anything with the ``ProgressDialog``
-    interface) is driven directly instead of being wrapped.
-    """
-    if callback_parent is None or callback_parent == "console":
-        progress = lib.normalize_progress(
-            callback_parent, description="Running G5M..."
-        )
-        progress.setMaximum(n_steps)
-    elif callable(getattr(callback_parent, "set_value", None)):
-        progress = callback_parent
-        progress.zero_progress("Running G5M...")
-        progress.setMaximum(n_steps)
-    else:  # a parent widget: build the dialog for it
-        progress = lib.ProgressDialog(
-            "Running G5M...", 0, n_steps, callback_parent
-        )
-        progress.set_value(0)
-    return progress
-
-
 def _g5m_info(
     locs: pd.DataFrame,
     centers: pd.DataFrame,
@@ -3610,13 +3548,12 @@ def _g5m_info(
     covariance_type: str,
     loc_prec_handle: str,
     sigma_bounds: tuple,
-    pixelsize: float,
     mode: str,
     calibration: dict | None,
 ) -> dict:
     """The info dictionary :func:`g5m` appends for one run."""
     new_info = {
-        "Generated by": f"Picasso v{__version__} G5M",
+        **lib.step_info("G5M"),
         "Model determination": "BIC",
         "Number of molecules": int(len(centers)),
         "Min. no. locs per molecule": int(min_locs),
@@ -3632,10 +3569,7 @@ def _g5m_info(
         new_info["Sigma bounds (factors)"] = [float(_) for _ in sigma_bounds]
         new_info["Sigma bounds method"] = "Local"
     else:
-        new_info["Sigma bounds (nm)"] = [
-            float(sigma_bounds[0] * pixelsize),
-            float(sigma_bounds[1] * pixelsize),
-        ]
+        new_info["Sigma bounds (nm)"] = [float(_) for _ in sigma_bounds]
         new_info["Sigma bounds method"] = "Abs"
     if "z" in locs.columns:
         new_info["Fit mode"] = mode
@@ -3692,22 +3626,23 @@ def g5m(
     ] = "auto",
     postprocess: bool = True,
     max_locs_per_cluster: int = np.inf,
-    asynch: bool = True,
+    parallel: bool = True,
     group_column: Literal["group", "group_input"] = "group",
-    callback_parent: (
-        QtWidgets.QMainWindow | Literal["console"] | None
-    ) = "console",
-) -> tuple[pd.DataFrame, pd.DataFrame, list[dict]]:
-    """Run G5M with or without multiprocessing. The function returns
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> tuple[pd.DataFrame | None, list[dict], pd.DataFrame | None]:
+    """Run G5M, in a process pool if ``parallel``. The function returns
     the centers of the G5M components and localizations with assigned
     cluster labels.
 
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations.
+        Localizations, clustered (``group`` column), with every length
+        in nm.
     info : list
-        Information dictionaries.
+        Information dictionaries. The camera pixel size ("Pixelsize",
+        nm) is needed only to derive the axial localization precision
+        of 3D astigmatism localizations that lack an ``lpz`` column.
     min_locs : int, optional
         Minimum number of localizations per component. Used to filter
         out components with too few localizations that likely represent
@@ -3721,7 +3656,7 @@ def g5m(
         Bounds for the standard deviation (sigma) of the Gaussian
         components. If local loc. prec. is used, the bounds specify the
         margin of error in units of localization precision. Else,
-        absolute bounds on sigma. Default is `(MIN_SIGMA_FACTOR,
+        absolute bounds on sigma in nm. Default is `(MIN_SIGMA_FACTOR,
         MAX_SIGMA_FACTOR)`.
     max_rounds_without_best_bic : int, optional
         Maximum number of rounds without BIC improvement to terminate
@@ -3731,8 +3666,9 @@ def g5m(
         using bootstrapping. If False, the standard, single Gaussian SEM
         is used as approximation. Default is False.
     calibration : dict, optional
-        Astigmatism calibration dictionary with x and y coefficients and
-        magnification factor. Only required for 3D data fit with
+        Astigmatism calibration dictionary with x and y coefficients
+        (spot widths in nm against z in nm, see ``io.load_calibration``)
+        and magnification factor. Only required for 3D data fit with
         ``mode="astigmatism"``. Ignored for spline. Default is None.
     mode : {"astigmatism", "spline"}, optional
         Fitting mode of the input 3D localizations. "astigmatism"
@@ -3762,31 +3698,42 @@ def g5m(
         Maximum number of localizations per cluster accepted for G5M.
         Used to avoid fitting to fiducial markers. Such clusters are
         ignored. Default is np.inf.
-    asynch : bool, optional
-        If True, G5M is run in parallel using multiprocessing. Default
-        is True.
+    parallel : bool, optional
+        If True, the clusters are fitted in a pool of worker processes
+        (35% of the CPU cores, see ``lib.n_workers``); if False, one
+        after another in the calling process. Default is True.
     group_column : {"group", "group_input"}, optional
         Name of the column used to group localizations into clusters
         prior to G5M. Use "group_input" when the "group" column has been
         overwritten but the original cluster ids are preserved in
         "group_input". Default is "group".
-    callback_parent : QMainWindow, ProgressType, "console" or None, optional
-        Where progress is reported. A parent widget builds a
-        ``lib.ProgressDialog`` for it; "console" uses tqdm; None
-        displays nothing. A ready-made progress tracker (anything with
-        the ``ProgressDialog`` interface, see
-        ``lib.normalize_progress``) can also be passed and is driven
-        directly. Default is "console".
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Running G5M" over the
+        ``N_TASKS`` parallel tasks if ``parallel``, else over the
+        clusters. Default is None.
 
     Returns
     -------
     centers : pd.DataFrame
-        Centers of the G5M components in the format of localizations.
+        Centers of the G5M components in the format of localizations:
+        ``x``, ``y``, ``z``, their standard errors ``lpx``, ``lpy``,
+        ``lpz`` and the fitted widths ``fitted_sigma*`` in nm, the
+        relative widths ``rel_sigma*`` (fitted width over the mean
+        localization precision of the component) unitless. The
+        log-likelihoods (``mol_log_likelihood``,
+        ``group_log_likelihood``) are log densities per nm (squared or
+        cubed). None if no molecules were found.
+    info : list of dicts
+        Metadata of both ``centers`` and ``clustered_locs``: ``info``
+        with an entry recording the G5M run appended, see
+        ``lib.append_metadata``.
     clustered_locs : pd.DataFrame
         Localizations with assigned cluster labels, based on the G5M
-        components.
-    info : list
-        Updated information dictionaries.
+        components, and their ``log_likelihood`` under the G5M (a log
+        density per nm squared or cubed). None if no molecules were
+        found.
     """
     _validate_g5m_args(loc_prec_handle, sigma_bounds, group_column, mode, locs)
     locs = _resolve_group_column(locs, group_column)
@@ -3795,9 +3742,8 @@ def g5m(
     # metadata) sees the concrete model that was actually used
     covariance_type = _resolve_covariance_type(covariance_type, locs, mode)
 
+    # only needed to derive lpz for astigmatism data that lack it
     pixelsize = lib.get_from_metadata(info, "Pixelsize")
-    if pixelsize is None:
-        raise ValueError("Camera pixel size must be provided in info.")
 
     # astigmatism 3D data requires a calibration; spline 3D data recovers
     # z (and lpz) directly, so no calibration is needed
@@ -3809,34 +3755,38 @@ def g5m(
             + docs_url("localize/3d-calibration.html#localize-3d-calibration")
         )
 
-    # determine how many steps are displayed in the progress bar
-    n_steps = N_TASKS if asynch else len(np.unique(locs["group"]))
-    # everything below drives the same ProgressDialog-like interface (see
-    # lib.normalize_progress), so a ready-made tracker can be passed
-    # instead of a parent window.
-    progress = _build_g5m_progress(callback_parent, n_steps)
-
-    centers, clustered_locs = _g5m(
-        locs,
-        min_locs=min_locs,
-        loc_prec_handle=loc_prec_handle,
-        sigma_bounds=sigma_bounds,
-        pixelsize=pixelsize,
-        max_rounds_without_best_bic=max_rounds_without_best_bic,
-        bootstrap_check=bootstrap_check,
-        calibration=calibration,
-        max_locs_per_cluster=max_locs_per_cluster,
-        asynch=asynch,
-        n_steps=n_steps,
-        progress=progress,
-        mode=mode,
-        covariance_type=covariance_type,
-    )
+    with lib.tracked_progress(progress, "Running G5M") as progress:
+        centers, clustered_locs = _g5m(
+            locs,
+            min_locs=min_locs,
+            loc_prec_handle=loc_prec_handle,
+            sigma_bounds=sigma_bounds,
+            pixelsize=pixelsize,
+            max_rounds_without_best_bic=max_rounds_without_best_bic,
+            bootstrap_check=bootstrap_check,
+            calibration=calibration,
+            max_locs_per_cluster=max_locs_per_cluster,
+            parallel=parallel,
+            progress=progress,
+            mode=mode,
+            covariance_type=covariance_type,
+        )
     # stack centers to form a pd.DataFrame in the format of localizations
+    entry_args = (
+        min_locs,
+        max_rounds_without_best_bic,
+        bootstrap_check,
+        covariance_type,
+        loc_prec_handle,
+        sigma_bounds,
+        mode,
+        calibration,
+    )
     if len(centers):
         centers = pd.concat(centers, ignore_index=True)
     else:  # no molecules found, return None
-        return None, None, info
+        entry = _g5m_info(locs, centers, *entry_args)
+        return None, lib.append_metadata(info, entry), None
     # assing group ids to the clustered localizations
     max_label = 0
     for i, clustered_locs_ in enumerate(clustered_locs):
@@ -3846,22 +3796,9 @@ def g5m(
     clustered_locs = pd.concat(clustered_locs, ignore_index=True)
 
     # update info
-    new_info = _g5m_info(
-        locs,
-        centers,
-        min_locs,
-        max_rounds_without_best_bic,
-        bootstrap_check,
-        covariance_type,
-        loc_prec_handle,
-        sigma_bounds,
-        pixelsize,
-        mode,
-        calibration,
-    )
-    info = info + [new_info]
+    info = lib.append_metadata(info, _g5m_info(locs, centers, *entry_args))
     if postprocess:
         centers, clustered_locs = _postprocess_g5m(
             centers, clustered_locs, info
         )
-    return centers, clustered_locs, info
+    return centers, info, clustered_locs
