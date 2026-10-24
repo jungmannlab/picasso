@@ -246,6 +246,15 @@ def main() -> None:
         file.write("Updates:\n  Disabled: true\n")
     folder = tempfile.mkdtemp(prefix="picasso_smoke_")
     env = dict(os.environ, HOME=home, USERPROFILE=home)
+    if sys.platform == "win32":
+        # Windows resolves the AppData folders (e.g., Numba's cache) inside
+        # USERPROFILE and fails if they do not exist
+        for name, subfolder in (
+            ("APPDATA", "Roaming"),
+            ("LOCALAPPDATA", "Local"),
+        ):
+            env[name] = os.path.join(home, "AppData", subfolder)
+            os.makedirs(env[name])
     try:
         if not args.gui_only:
             check_analysis(picasso, folder, env)
