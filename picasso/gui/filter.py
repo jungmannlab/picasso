@@ -30,6 +30,7 @@ from matplotlib.backends.backend_qt5agg import (
     FigureCanvasQTAgg,
     NavigationToolbar2QT,
 )
+from matplotlib.backend_tools import Cursors
 from matplotlib.widgets import SpanSelector, RectangleSelector
 
 from .. import (
@@ -236,6 +237,9 @@ class PlotWindow(QtWidgets.QWidget):
         Main window.
     figure : plt.Figure
         Matplotlib figure.
+    selectors : list
+        The span and rectangle selectors of the plot, see
+        ``cancel_selection``.
 
     Parameters
     ----------
@@ -248,6 +252,7 @@ class PlotWindow(QtWidgets.QWidget):
         self.main_window = main_window
         self.figure = plt.Figure(constrained_layout=True)
         self.canvas = FigureCanvasQTAgg(self.figure)
+        self.selectors = []
         self.plot()
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
@@ -269,9 +274,30 @@ class PlotWindow(QtWidgets.QWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
 
+        # in the window, as the canvas does not take the keyboard focus
+        cancel = QtGui.QShortcut(
+            QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape), self
+        )
+        cancel.activated.connect(self.cancel_selection)
+
     def refresh(self) -> None:
         self.plot()
         self.update()
+
+    def cancel_selection(self) -> None:
+        """Stop drawing the selection, without filtering (Esc).
+
+        Matplotlib's own Esc only hides the selection, which the next
+        mouse move draws again and the release applies.
+        """
+        for selector in self.selectors:
+            if selector._eventpress is None:  # not being drawn
+                continue
+            # without the press, the selector ignores the moves and the
+            # release
+            selector._eventpress = None
+            selector.clear()
+            self.canvas.set_cursor(Cursors.POINTER)
 
     def plot(self) -> None:
         pass
@@ -331,6 +357,7 @@ class HistWindow(PlotWindow):
         if data.dtype.kind == "f":
             data = data[np.isfinite(data)]
         self.figure.clear()
+        self.selectors = []
         style.style_figure(self.figure)
         axes = self.figure.add_subplot(111)
         style.style_axes(axes)
@@ -356,6 +383,7 @@ class HistWindow(PlotWindow):
             useblit=True,
             props=style.selection,
         )
+        self.selectors = [self.span]
         self.canvas.draw()
 
     def on_span_select(self, xmin: float, xmax: float) -> None:
@@ -406,6 +434,7 @@ class Hist2DWindow(PlotWindow):
         style = self.main_window.plot_style
         x, y = self.main_window.get_columns([self.field_x, self.field_y])
         self.figure.clear()
+        self.selectors = []
         style.style_figure(self.figure)
         self.span_x = self.span_y = None
         if len(x) == 0:
@@ -522,6 +551,11 @@ class Hist2DWindow(PlotWindow):
                 useblit=True,
                 props=style.selection,
             )
+        self.selectors = [
+            selector
+            for selector in (self.selector, self.span_x, self.span_y)
+            if selector is not None
+        ]
         self.canvas.draw()
 
     def on_span_select_x(self, xmin: float, xmax: float) -> None:

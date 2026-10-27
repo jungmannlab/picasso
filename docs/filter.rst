@@ -30,6 +30,8 @@ Filtering of localizations
    or 2D histogram. The selected area will be shaded (in orange by default).
    Each localization event with histogram properties outside the selected area
    is immediately removed from the localization list.
+   Press :kbd:`Esc` before releasing the mouse button to stop drawing the
+   selection without filtering.
 4. Save the filtered localization table by selecting ``File > Save``.
 
 The look of the histograms is set in ``Plot > Plot settings...``, or with the
