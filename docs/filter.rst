@@ -82,6 +82,23 @@ In the menu bar, click ``Filter > Filter numerically...`` (:kbd:`Ctrl+F`). A dia
 
 The limits are inclusive: localizations with values equal to ``min`` or ``max`` are kept. Localizations with non-finite values (NaN, infinity) in the column are always removed.
 
+.. _filter-undo:
+
+Undo and redo
+~~~~~~~~~~~~~
+
+``Filter > Undo`` (:kbd:`Ctrl+Z`) takes back the last step: a selection in a
+1D or 2D histogram, a numerical filter, a filter by
+:ref:`expression <filter-expression>`, the
+:ref:`filters from metadata <filter-metadata>` (all their steps at once) or
+``Filter > Remove columns...``, which brings the columns back. ``Filter >
+Redo`` (:kbd:`Ctrl+Shift+Z`, :kbd:`Ctrl+Y` on Windows) applies the step again.
+Both are also on the toolbar, where hovering over the button shows the step.
+
+The last 10 steps can be undone. A new step after an undo replaces the steps
+undone, and opening a file starts anew. Saving writes the localizations and the
+filter steps currently shown, i.e., without the steps undone.
+
 .. _filter-expression:
 
 Filtering by expression

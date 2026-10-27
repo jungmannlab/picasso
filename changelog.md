@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 26-OCT-2026 CEST
+Last change: 27-OCT-2026 CEST
 
 ## 1.0.0
 
@@ -125,6 +125,8 @@ Last change: 26-OCT-2026 CEST
 - Fixed: the drift-corrected localizations that Localize saves after undrifting by AIM or from fiducials did not record the undrifting in their metadata.
 
 ### Filter
+- Undo and redo: `Filter > Undo` (Ctrl+Z) and `Filter > Redo` (Ctrl+Shift+Z), also on the toolbar, take back and reapply the last 10 filters and removals of columns. See the [documentation](https://picassosr.readthedocs.io/en/latest/filter.html#filter-undo).
+- Fixed: removing a column whose histogram was open raised an error; its histograms now close.
 - Filtering by expression: `Filter > Filter by expression...` for universal filtering with comparisons, logic, arithmetic, functions and statistics over the shown localizations. See the [documentation](https://picassosr.readthedocs.io/en/latest/filter.html#filter-expression).
 - The metadata of a filtered file lists its filter steps in the order they were applied.
 - Filters from metadata can also be applied by dragging the .yaml file into the Filter window.
