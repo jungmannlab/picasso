@@ -44,6 +44,8 @@ dialog; see :ref:`render-pick-shapes` for all shapes.
   desired polygon. The right button deletes the last selected vertex instead.
   The polygon can be closed by clicking with the left button on the starting
   vertex.
+- ``File > Undo`` (:kbd:`Ctrl+Z`) takes back the picks added or removed one
+  by one, see :ref:`render-undo`.
 
 .. _render-measure:
 
@@ -71,6 +73,9 @@ is even placed. Chaining several left clicks measures a multi-segment path.
   left-clicking again.
 * While in this frozen state, a **further** right click *deletes* the most
   recently finalized set. Repeating it removes the previous sets one by one.
+
+``File > Undo`` (:kbd:`Ctrl+Z`) takes back the points one by one and brings
+back deleted sets, see :ref:`render-undo`.
 
 Distances and lines are only drawn within a set, never across sets, so
 multiple independent measurements can be displayed at the same time.

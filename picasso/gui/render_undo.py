@@ -6,7 +6,9 @@ Undo and Redo in Picasso: Render (File > Undo, File > Redo).
 
 Every action that changes the localizations of the loaded channels,
 e.g., the Move tool, drift correction, removing localizations or
-linking, is one step of the ``History`` of its ``View``:
+linking, is one step of the ``History`` of its ``View``, and so is every
+action that changes the picks or the measured points (the overlays,
+kept whole, as they are small):
 
 - When the step begins, the state of every channel is taken
   (``ChannelState``). It holds references, not copies, so taking it
@@ -30,7 +32,9 @@ The steps keep at most ``idle.SPILL_MIN_BYTES`` in memory. The tables of
 a step that does not fit are moved to disk (``io.SpilledFrame``) in the
 background and read back when the step is undone, so that the history
 does not multiply the memory used by large data sets. At most
-``UNDO_LIMIT`` steps are kept.
+``UNDO_LIMIT`` steps that change the localizations are kept, and at most
+``OVERLAY_UNDO_LIMIT`` that change only the overlays, so that clicking
+picks does not push out a drift correction.
 
 This module does not know the window: the ``View`` takes the states
 (``History.take``), applies the records (``View._apply_history_step``)
@@ -46,7 +50,7 @@ import logging
 import queue
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import NamedTuple
 
 import numpy as np
@@ -55,8 +59,13 @@ import pandas as pd
 from .. import io
 from . import idle
 
-#: Number of steps that can be undone in a Render window.
+#: Number of steps that change the localizations that can be undone in
+#: a Render window.
 UNDO_LIMIT = 10
+
+#: Number of steps that change only the picks or the measured points
+#: that can be undone in a Render window.
+OVERLAY_UNDO_LIMIT = 50
 
 #: Longest step name shown in the tooltips of Undo and Redo.
 LABEL_LENGTH = 60
@@ -420,7 +429,7 @@ class _Table:
 @dataclass(eq=False)
 class Step:
     """One step of the history: the records of the channels it changed
-    and, if it changed them, the group colors and the picks.
+    and, if it changed them, the group colors and the overlays.
 
     Attributes
     ----------
@@ -431,15 +440,22 @@ class Step:
     group_color : np.ndarray or list
         The group colors (``View.group_color``) to put back, or
         ``UNCHANGED``.
-    picks : tuple or None
-        The picks, their shapes and sizes to put back, None if the step
-        did not change them.
+    overlays : dict
+        The overlays the step changed, to put back, by name: ``"picks"``
+        (the picks, their shapes and sizes) and ``"points"`` (the
+        measured points), see ``View._overlay_state``.
     """
 
     label: str
     records: dict[int, ChannelRecord]
     group_color: object = UNCHANGED
-    picks: tuple | None = None
+    overlays: dict[str, object] = field(default_factory=dict)
+
+    @property
+    def changes_locs(self) -> bool:
+        """Whether the step changes the localizations or the group
+        colors, rather than only the overlays (see ``UNDO_LIMIT``)."""
+        return bool(self.records) or self.group_color is not UNCHANGED
 
     def tables(self) -> list[_Table]:
         return [r.table for r in self.records.values() if r.table is not None]
@@ -462,10 +478,10 @@ class Step:
         )
 
     def opposite(
-        self, channels: Channels, group_color: object, picks: tuple | None
+        self, channels: Channels, group_color: object, overlays: dict
     ) -> Step:
         """The step that puts back the current state (the arguments) of
-        the channels, group colors and picks this step changes."""
+        the channels, group colors and overlays this step changes."""
         return Step(
             self.label,
             {
@@ -478,7 +494,7 @@ class Step:
                 for index, record in self.records.items()
             },
             UNCHANGED if self.group_color is UNCHANGED else group_color,
-            None if self.picks is None else picks,
+            {name: overlays[name] for name in self.overlays},
         )
 
     def unshare(self, channels: Channels) -> None:
@@ -499,7 +515,7 @@ class _Begun:
     label: str
     channels: list[ChannelState]
     group_color: object
-    picks: tuple | None
+    overlays: dict[str, object]
 
 
 class History:
@@ -540,6 +556,12 @@ class History:
         """Name of the step to redo, None if there is none."""
         return self._redo[-1].label if self._redo else None
 
+    @property
+    def overlays_taken(self) -> tuple[str, ...]:
+        """Names of the overlays taken for the step being recorded, whose
+        current state ``record`` needs, see ``take``."""
+        return () if self._begun is None else tuple(self._begun.overlays)
+
     def begin(self, label: str) -> bool:
         """Begin a step named ``label``.
 
@@ -559,10 +581,10 @@ class History:
         self,
         channels: Channels,
         group_color: object,
-        picks: tuple | None = None,
+        overlays: dict | None = None,
     ) -> None:
-        """Take the state of ``channels`` (and of the picks, if given)
-        before the outermost step."""
+        """Take the state of ``channels`` and of the ``overlays`` given
+        (by name, see ``Step.overlays``) before the outermost step."""
         self._begun = _Begun(
             self._label,
             [
@@ -575,7 +597,7 @@ class History:
                 )
             ],
             group_color,
-            picks,
+            dict(overlays or {}),
         )
 
     def end(self) -> bool:
@@ -594,7 +616,7 @@ class History:
         self,
         channels: Channels,
         group_color: object,
-        picks: tuple | None = None,
+        overlays: dict | None = None,
     ) -> bool:
         """Record the outermost step from the state taken and the current
         state (the arguments), if anything changed.
@@ -618,32 +640,50 @@ class History:
             if record is not None:
                 records[index] = record
         group_changed = group_color is not begun.group_color
-        picks_changed = begun.picks is not None and not _equal(
-            begun.picks, picks
-        )
-        if not records and not group_changed and not picks_changed:
+        overlays = overlays or {}
+        changed_overlays = {
+            name: state
+            for name, state in begun.overlays.items()
+            if not _equal(state, overlays.get(name))
+        }
+        if not records and not group_changed and not changed_overlays:
             return False
         step = Step(
             shorten(begun.label),
             records,
             begun.group_color if group_changed else UNCHANGED,
-            begun.picks if picks_changed else None,
+            changed_overlays,
         )
         self._undo.append(step)
-        for dropped in self._undo[:-UNDO_LIMIT]:
-            dropped.discard()
-        del self._undo[:-UNDO_LIMIT]
+        self._trim()
         for dropped in self._redo:
             dropped.discard()
         self._redo.clear()
         self._store(step)
         return True
 
+    def _trim(self) -> None:
+        """Drop the oldest steps beyond the limits. Beyond
+        ``UNDO_LIMIT``, the oldest step that changes the localizations
+        goes with all steps before it, which may depend on it (e.g.,
+        picks before the canvas was translated); a step that changes
+        only the overlays depends on none, so beyond
+        ``OVERLAY_UNDO_LIMIT``, the oldest one goes alone."""
+        locs_steps = [s for s in self._undo if s.changes_locs]
+        if len(locs_steps) > UNDO_LIMIT:
+            first_kept = self._undo.index(locs_steps[-UNDO_LIMIT])
+            for dropped in self._undo[:first_kept]:
+                dropped.discard()
+            del self._undo[:first_kept]
+        overlay_steps = [s for s in self._undo if not s.changes_locs]
+        for dropped in overlay_steps[:-OVERLAY_UNDO_LIMIT]:
+            self._undo.remove(dropped)
+
     def undo(
         self,
         channels: Channels,
         group_color: object,
-        picks: tuple,
+        overlays: dict,
         apply: Callable[[Step], None],
     ) -> bool:
         """Undo the last step: ``apply(step)`` puts back its records,
@@ -656,8 +696,8 @@ class History:
             The current channels.
         group_color : np.ndarray or list
             The current group colors.
-        picks : tuple
-            The current picks, their shapes and sizes.
+        overlays : dict
+            The current overlays by name, see ``Step.overlays``.
         apply : callable
             Puts back the records of the step given and redraws.
 
@@ -677,19 +717,19 @@ class History:
             is cleared then.
         """
         return self._swap(
-            self._undo, self._redo, channels, group_color, picks, apply
+            self._undo, self._redo, channels, group_color, overlays, apply
         )
 
     def redo(
         self,
         channels: Channels,
         group_color: object,
-        picks: tuple,
+        overlays: dict,
         apply: Callable[[Step], None],
     ) -> bool:
         """Redo the last step undone, see ``undo``."""
         return self._swap(
-            self._redo, self._undo, channels, group_color, picks, apply
+            self._redo, self._undo, channels, group_color, overlays, apply
         )
 
     def _swap(
@@ -698,7 +738,7 @@ class History:
         target: list[Step],
         channels: Channels,
         group_color: object,
-        picks: tuple,
+        overlays: dict,
         apply: Callable[[Step], None],
     ) -> bool:
         if not source or self.busy:
@@ -708,7 +748,7 @@ class History:
             self.clear()
             raise StaleHistoryError(step.label)
         source.pop()
-        opposite = step.opposite(channels, group_color, picks)
+        opposite = step.opposite(channels, group_color, overlays)
         self._applying = True
         try:
             apply(step)

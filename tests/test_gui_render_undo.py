@@ -3,13 +3,14 @@
 Covers the steps recorded for the actions that change the
 localizations (the Move tool, Apply expression, removing localizations
 in picks, applying drift, removing columns, synchronizing and unfolding
-groups, linking), what a step keeps (only the columns that changed,
-arrays that keep neither changing nor the current localizations in
-memory, the disk for large steps), picks, points and the view following
+groups, linking) and the picks and measured points, what a step keeps
+(only the columns that changed, arrays that keep neither changing nor
+the current localizations in memory, the disk for large steps), picks,
+points and the view following
 an undone translation of the canvas, when the history is forgotten or
-remapped, linked windows, the actions in the File menu, and the guard
-that every method of Render that changes the localizations records a
-step.
+remapped, linked windows, the actions in the File menu, and the guards
+that every method of Render that changes the localizations, the picks
+or the measured points records a step.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -19,6 +20,7 @@ from __future__ import annotations
 
 import ast
 import gc
+import inspect
 import time
 import weakref
 
@@ -456,6 +458,129 @@ def test_undo_linking(single, qt_offscreen, monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Picks and measurements
+# ---------------------------------------------------------------------------
+
+
+def test_undo_and_redo_picks(window):
+    view = window.view
+    view.add_pick((650.0, 780.0), shape="Circle", size=200.0)
+    view.add_pick((1300.0, 1300.0), shape="Square", size=300.0)
+    assert view.history.undo_label == "Add pick"
+    view.undo()
+    assert view._picks == [(650.0, 780.0)]
+    assert view._pick_shapes == ["Circle"]
+    assert view._pick_sizes == [200.0]
+    assert window.info_dialog.n_picks.text() == "1"
+    view.redo()
+    assert view._picks == [(650.0, 780.0), (1300.0, 1300.0)]
+    assert view._pick_shapes == ["Circle", "Square"]
+    assert view._pick_sizes == [200.0, 300.0]
+
+
+def test_undo_clearing_picks(window):
+    view = window.view
+    picks = [(650.0, 780.0), ((100.0, 100.0), (900.0, 400.0))]
+    view._set_picks(picks, ["Circle", "Rectangle"], [200.0, 80.0])
+    view.clear_picks()
+    assert view.history.undo_label == "Clear picks"
+    view.undo()
+    assert view._picks == picks
+    assert view._pick_shapes == ["Circle", "Rectangle"]
+    assert view._pick_sizes == [200.0, 80.0]
+    view.redo()
+    assert view._picks == []
+
+
+def test_undo_polygon_vertices_one_by_one(window):
+    """Drawing a polygon adds its vertices to the pick in place; each
+    step keeps the polygon as it was."""
+    view = window.view
+    vertices = [(100.0, 100.0), (1000.0, 100.0), (1000.0, 1000.0)]
+    for vertex in vertices:
+        view.add_polygon_point(vertex, QtCore.QPoint(0, 0))
+    assert view._picks == [vertices]
+    assert view.history.undo_label == "Add polygon vertex"
+    view.undo()
+    assert view._picks == [vertices[:2]]
+    view.undo()
+    view.undo()
+    assert view._picks == []
+    for _ in vertices:
+        view.redo()
+    assert view._picks == [vertices]
+    view.remove_polygon_point()
+    assert view.history.undo_label == "Remove polygon vertex"
+    view.undo()
+    assert view._picks == [vertices]
+
+
+def test_undo_measurements(window):
+    view = window.view
+    a, b, c = (130.0, 130.0), (260.0, 130.0), (500.0, 500.0)
+    view.add_point(a)
+    view.add_point(b)
+    assert view.history.undo_label == "Add measure point"
+    view.finalize_measure_set()  # not a step of its own
+    view.add_point(c)
+    view.remove_points()
+    assert view.history.undo_label == "Clear measurements"
+    assert view._points == [] and view._point_sets == []
+    view.undo()
+    assert view._points == [c] and view._point_sets == [[a, b]]
+    view.undo()  # c
+    assert view._points == [] and view._point_sets == [[a, b]]
+    view.undo()  # b
+    assert view._points == [a] and view._point_sets == []
+    view.redo()
+    view.redo()
+    view.finalize_measure_set()
+    view.remove_last_measure_set()
+    assert view.history.undo_label == "Remove measurement"
+    assert view._point_sets == [[a, b]]
+    view.undo()
+    assert view._point_sets == [[a, b], [c]]
+
+
+def test_undoing_picks_leaves_the_localizations(window, monkeypatch):
+    view = window.view
+    locs = list(view.locs)
+    view.add_pick((650.0, 780.0))
+    (step,), _ = _steps(view)
+    assert not step.records and set(step.overlays) == {"picks"}
+    invalidated = []
+    monkeypatch.setattr(view, "invalidate_locs_index", invalidated.append)
+    view.undo()
+    view.redo()
+    assert all(a is b for a, b in zip(view.locs, locs))
+    assert not invalidated
+
+
+def test_picks_and_measurements_have_their_own_limit(window, monkeypatch):
+    """Clicking picks does not push out the steps that changed the
+    localizations; forgetting one of those forgets the steps before
+    it."""
+    monkeypatch.setattr(render_undo, "UNDO_LIMIT", 2)
+    monkeypatch.setattr(render_undo, "OVERLAY_UNDO_LIMIT", 3)
+    view = window.view
+    _apply(window, monkeypatch, "x += 1", view.locs_paths[0])
+    for i in range(5):
+        view.add_pick((100.0 * (i + 1), 100.0))
+    undo, _ = _steps(view)
+    labels = [step.label for step in undo]
+    assert labels == ["Apply expression: x += 1"] + ["Add pick"] * 3
+    _apply(window, monkeypatch, "x += 2", view.locs_paths[0])
+    view.add_point((130.0, 130.0))
+    _apply(window, monkeypatch, "x += 3", view.locs_paths[0])
+    undo, _ = _steps(view)
+    assert [step.label for step in undo] == [
+        "Apply expression: x += 2",
+        "Add measure point",
+        "Apply expression: x += 3",
+    ]
+
+
+# ---------------------------------------------------------------------------
 # The history
 # ---------------------------------------------------------------------------
 
@@ -659,4 +784,113 @@ def test_locs_mutation_is_recorded_for_undo(cls_name, fn_name, node):
         f"{cls_name}.{fn_name} changes the localizations without "
         "recording a step to undo: wrap the change in "
         "`with self.undo_step(<name of the action>)`"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Every action that changes the picks or the measured points records a step
+# ---------------------------------------------------------------------------
+
+#: Attributes holding the picks and the measured points.
+_OVERLAY_ATTRIBUTES = {
+    "_pick_list",
+    "_pick_shapes",
+    "_pick_sizes",
+    "_picks",
+    "_points",
+    "_point_sets",
+}
+#: Methods that change the picks without recording a step.
+_PICK_HELPERS = {"_set_picks", "_keep_picks", "_remove_picks_at"}
+_LIST_CHANGES = {"append", "pop", "extend", "insert", "remove", "clear"}
+
+#: Methods that change the picks or the measured points without
+#: recording a step.
+_OVERLAYS_NOT_RECORDED = {
+    ("View", "__init__"),
+    ("View", "_apply_history_step"),  # puts a step back
+    # helpers of the steps of their callers
+    ("View", "_picks"),  # the setter
+    ("View", "_set_picks"),
+    ("View", "_keep_picks"),
+    ("View", "_remove_picks_at"),
+    ("View", "_translate_overlays"),  # follows a translated canvas
+    # freezing the set of points being measured only regroups them
+    ("View", "finalize_measure_set"),
+    # drops the polygon being drawn when the pick tool changes; undoing
+    # the step of its last vertex brings it back
+    ("View", "on_pick_shape_changed"),
+    # part of opening a file, which forgets the steps
+    ("Window", "_apply_saved_rotation"),
+}
+
+
+def _changed_attribute(node) -> str | None:
+    while isinstance(node, ast.Subscript):  # e.g., self._picks[-1]
+        node = node.value
+    return node.attr if isinstance(node, ast.Attribute) else None
+
+
+def _changes_overlays(node) -> bool:
+    if isinstance(node, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+        targets = (
+            node.targets if isinstance(node, ast.Assign) else [node.target]
+        )
+        return any(
+            isinstance(sub, ast.Attribute)
+            and sub.attr in _OVERLAY_ATTRIBUTES
+            and isinstance(sub.ctx, ast.Store)
+            for target in targets
+            for sub in ast.walk(target)
+        )
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        name = node.func.attr
+        return name in _PICK_HELPERS or (
+            name in _LIST_CHANGES
+            and _changed_attribute(node.func.value) in _OVERLAY_ATTRIBUTES
+        )
+    return False
+
+
+def _overlay_methods():
+    """``(class, method, node)`` for every method in ``gui.render`` that
+    changes the picks or the measured points."""
+    tree = ast.parse(inspect.getsource(gui_render))
+    for cls in [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]:
+        for fn in cls.body:
+            if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if any(_changes_overlays(node) for node in ast.walk(fn)):
+                yield cls.name, fn.name, fn
+
+
+def test_the_overlay_guard_finds_the_pick_actions():
+    found = {(c, f) for c, f, _ in _overlay_methods()}
+    assert {
+        ("View", "add_pick"),
+        ("View", "add_polygon_point"),
+        ("View", "clear_picks"),
+        ("View", "add_point"),
+        ("View", "remove_points"),
+    } <= found
+    assert _OVERLAYS_NOT_RECORDED <= found  # no stale entries
+
+
+@pytest.mark.parametrize(
+    "cls_name,fn_name,node",
+    [pytest.param(c, f, n, id=f"{c}.{f}") for c, f, n in _overlay_methods()],
+)
+def test_overlay_change_is_recorded_for_undo(cls_name, fn_name, node):
+    """An action that changes the picks or the measured points without
+    recording a step cannot be undone. Add to ``_OVERLAYS_NOT_RECORDED``
+    only a method that is part of another one's step or not an action
+    of the user's."""
+    if (cls_name, fn_name) in _OVERLAYS_NOT_RECORDED:
+        pytest.skip("not an action of its own")
+    source = ast.unparse(node)  # with the decorators
+    assert "undo_step(" in source or "records_undo_step(" in source, (
+        f"{cls_name}.{fn_name} changes the picks or the measured points "
+        "without recording a step to undo: wrap the change in "
+        "`with self.undo_step(<name of the action>, picks=True)` (or "
+        "points=True)"
     )

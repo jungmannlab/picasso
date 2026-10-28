@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 27-OCT-2026 CEST
+Last change: 28-OCT-2026 CEST
 
 ## 1.0.0
 
@@ -33,7 +33,7 @@ Last change: 27-OCT-2026 CEST
 - **Render has been largely rewritten for fast and interactive rendering of localizations even for large, multiplex datasets. GPU via the package ``wgpu`` has been added for cross-platform support**. More details in the section **Technical details on Render update** below. See these links for the relevant user guides: [navigation](https://picassosr.readthedocs.io/en/latest/render.html#render-navigation), [user_settings](https://picassosr.readthedocs.io/en/latest/render/performance.html#render-cpu-usage), [GPU](https://picassosr.readthedocs.io/en/latest/render/performance.html#render-gpu-rendering).
 - `View > 3D view` (Ctrl+Shift+R, replacing *Update rotation window*) opens the rotation window on the single selected pick or, without a pick, on the current field of view, so any region can be inspected in 3D by zooming to it; pressed again on unchanged content it only raises the window.
 - **Linked windows** that share user-selected attributes, see [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-view.html#render-new-linked-window).
-- **Undo and redo** for most actions that affect localizations, e.g., drift correction. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-file.html#render-undo).
+- **Undo and redo** for most actions that affect localizations, e.g., drift correction, and for picks and measurements. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-file.html#render-undo).
 - New blur methods *Adaptive Histogram (Quad-Tree)* and *Jittered Triangulation* (Baddeley, Cannell & Soeller, *Microsc. Microanal.* 2010). See the [blur documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-blur).
 - Picks of different sizes and shapes allowed, see the [documentation](https://picassosr.readthedocs.io/en/latest/render/picking.html#render-pick-sizes).
 - The display settings (main and 3D window) show the minimum blur only for the Gaussian blur methods that use it.

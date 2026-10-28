@@ -3476,49 +3476,50 @@ class RotationWindow(QtWidgets.QMainWindow):
         """
         if self.view_rot.pick_shape is None:
             return  # the field of view is shown: no pick to move
-        if self.view_rot.pick_shape in ["Circle", "Square"]:
-            x = self.window.view._picks[0][0]
-            y = self.window.view._picks[0][1]
-            self.window.view._picks = [(x + dx, y + dy)]  # main window
-            self.view_rot.pick = (x + dx, y + dy)  # view rotation
-        elif self.view_rot.pick_shape in ["Rectangle", "Box"]:
-            # both are defined by two points: the ends of the center
-            # axis for a rectangle, two opposite corners for a box
-            (xs, ys), (xe, ye) = self.window.view._picks[0]
-            self.window.view._picks = [
-                (
+        with self.window.view.undo_step("Move pick", picks=True):
+            if self.view_rot.pick_shape in ["Circle", "Square"]:
+                x = self.window.view._picks[0][0]
+                y = self.window.view._picks[0][1]
+                self.window.view._picks = [(x + dx, y + dy)]  # main window
+                self.view_rot.pick = (x + dx, y + dy)  # view rotation
+            elif self.view_rot.pick_shape in ["Rectangle", "Box"]:
+                # both are defined by two points: the ends of the center
+                # axis for a rectangle, two opposite corners for a box
+                (xs, ys), (xe, ye) = self.window.view._picks[0]
+                self.window.view._picks = [
+                    (
+                        (xs + dx, ys + dy),
+                        (xe + dx, ye + dy),
+                    )
+                ]  # main window
+                self.view_rot.pick = (
                     (xs + dx, ys + dy),
                     (xe + dx, ye + dy),
-                )
-            ]  # main window
-            self.view_rot.pick = (
-                (xs + dx, ys + dy),
-                (xe + dx, ye + dy),
-            )  # view rotation
-        elif self.view_rot.pick_shape == "Polygon":
-            new_pick = []
-            for point in self.window.view._picks[0]:
-                new_pick.append((point[0] + dx, point[1] + dy))
-            self.window.view._picks = [new_pick] + []  # main window
-            self.view_rot.pick = new_pick  # view rotation
-        elif self.view_rot.pick_shape == "Brush":
-            # shift every point of every stroke, keeping their widths
-            new_pick = [
-                (
-                    stroke[0],
-                    [(x + dx, y + dy) for x, y in stroke[1]],
-                )
-                for stroke in self.window.view._picks[0]
-            ]
-            self.window.view._picks = [new_pick]  # main window
-            self.view_rot.pick = new_pick  # view rotation
-        # the main window keeps only the moved pick, with its own shape
-        # and size rather than those of the pick tool
-        self.window.view._set_picks(
-            self.window.view._picks,
-            self.view_rot.pick_shape,
-            self.view_rot.pick_size,
-        )
+                )  # view rotation
+            elif self.view_rot.pick_shape == "Polygon":
+                new_pick = []
+                for point in self.window.view._picks[0]:
+                    new_pick.append((point[0] + dx, point[1] + dy))
+                self.window.view._picks = [new_pick] + []  # main window
+                self.view_rot.pick = new_pick  # view rotation
+            elif self.view_rot.pick_shape == "Brush":
+                # shift every point of every stroke, keeping their widths
+                new_pick = [
+                    (
+                        stroke[0],
+                        [(x + dx, y + dy) for x, y in stroke[1]],
+                    )
+                    for stroke in self.window.view._picks[0]
+                ]
+                self.window.view._picks = [new_pick]  # main window
+                self.view_rot.pick = new_pick  # view rotation
+            # the main window keeps only the moved pick, with its own shape
+            # and size rather than those of the pick tool
+            self.window.view._set_picks(
+                self.window.view._picks,
+                self.view_rot.pick_shape,
+                self.view_rot.pick_size,
+            )
 
         self.window.view.update_scene()  # update scene in main window
 

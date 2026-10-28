@@ -22,7 +22,7 @@ import warnings
 import os.path
 from math import ceil
 from collections import Counter
-from functools import partial
+from functools import partial, wraps
 from typing import Callable, Generator, Literal
 from PIL import Image
 
@@ -366,6 +366,22 @@ def check_pick_shapes(*shapes: str) -> Callable:
 
 #: Decorator verifying if the picks are circular.
 check_circular_picks = check_pick_shapes("Circle")
+
+
+def records_undo_step(label: str, **overlays: bool) -> Callable:
+    """Decorator factory recording a ``View`` method as one step to
+    undo, see ``View.undo_step``, which takes ``label`` and
+    ``overlays``."""
+
+    def decorator(f: Callable) -> Callable:
+        @wraps(f)
+        def wrapper(self, *args, **kwargs):
+            with self.undo_step(label, **overlays):
+                return f(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
 
 
 def _describe_pick_shapes(shape: str | list[str]) -> str:
@@ -12426,9 +12442,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             size = None
         elif size is None:
             size = self._tool_pick_size(shape)
-        self._picks.append(position)
-        self._pick_shapes.append(shape)
-        self._pick_sizes.append(size)
+        with self.undo_step("Add pick", picks=True):
+            self._picks.append(position)
+            self._pick_shapes.append(shape)
+            self._pick_sizes.append(size)
         self.update_pick_info_short()
         if update_scene:
             self.update_scene(picks_only=True)
@@ -12442,8 +12459,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """Add several picks of one shape, see ``add_pick``; ``size``
         may hold the size of each pick."""
         sizes = size if np.ndim(size) else [size] * len(positions)
-        for position, size_ in zip(positions, sizes):
-            self.add_pick(position, False, shape, size_)
+        with self.undo_step("Add picks", picks=True):
+            for position, size_ in zip(positions, sizes):
+                self.add_pick(position, False, shape, size_)
         self.update_scene(picks_only=True)
 
     def _set_picks(
@@ -12541,10 +12559,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             Shape of the picks to resize.
         """
         size = self._tool_pick_size(shape)
-        self._pick_sizes = [
-            size if shape_ == shape else size_
-            for shape_, size_ in zip(self._pick_shapes, self._pick_sizes)
-        ]
+        with self.undo_step("Resize picks", picks=True):
+            self._pick_sizes = [
+                size if shape_ == shape else size_
+                for shape_, size_ in zip(self._pick_shapes, self._pick_sizes)
+            ]
         self.update_scene(picks_only=True)
 
     def add_box_pick(self, end_position: QtCore.QPoint) -> None:
@@ -12635,8 +12654,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             else:
                 kept.append(i)
         merged.append(stroke)
-        self._keep_picks(kept)
-        self.add_pick(merged, update_scene=False, shape="Brush")
+        with self.undo_step("Paint brush stroke", picks=True):
+            self._keep_picks(kept)
+            self.add_pick(merged, update_scene=False, shape="Brush")
 
         self.update_pick_info_short()
         self.update_scene(picks_only=True)
@@ -12647,10 +12667,12 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         update_scene: bool = True,
     ) -> None:
         """Add a point at a given position for measuring distances."""
-        self._points.append(position)
+        with self.undo_step("Add measure point", points=True):
+            self._points.append(position)
         if update_scene:
             self.update_scene()
 
+    @records_undo_step("Add polygon vertex", picks=True)
     def add_polygon_point(
         self,
         point_movie: QtCore.QPoint,
@@ -13597,7 +13619,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     @check_pick
     def clear_picks(self) -> None:
         """Delete all picks."""
-        self._set_picks([], [])
+        with self.undo_step("Clear picks", picks=True):
+            self._set_picks([], [])
         self.window.info_dialog.n_picks.setText(str(len(self._picks)))
         self.update_scene(picks_only=True)
 
@@ -15179,7 +15202,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return
         tools_dlg = self.window.tools_settings_dialog
         picks, shape, size = loaded
-        self._set_picks(picks, shape, size)
+        with self.undo_step("Load pick regions", picks=True):
+            self._set_picks(picks, shape, size)
         # every pick keeps its shape and size; with one shape, the pick
         # tool takes it, and the size if shared, so new picks match
         if isinstance(shape, str):
@@ -15344,7 +15368,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             euclidean_distances(self._picks, picks) < radii[np.newaxis, :],
             axis=1,
         )
-        self._keep_picks(np.flatnonzero(~covered).tolist())
+        with self.undo_step("Subtract pick regions", picks=True):
+            self._keep_picks(np.flatnonzero(~covered).tolist())
 
         self.update_pick_info_short()
         self.update_scene(picks_only=True)
@@ -15613,7 +15638,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
     @contextlib.contextmanager
     def undo_step(
-        self, label: str, *, picks: bool = False
+        self, label: str, *, picks: bool = False, points: bool = False
     ) -> Generator[None, None, None]:
         """Record the changes of the localizations made inside as one
         step that File > Undo takes back (see ``picasso.gui.render_undo``).
@@ -15630,22 +15655,32 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             If True, the picks are put back as well, for an action that
             changes them. Default is False: undoing a step leaves the
             picks as they are, apart from following a translated canvas.
+        points : bool, optional
+            If True, the measured points are put back as well, for an
+            action that changes them. Default is False.
         """
-        self.begin_undo_step(label, picks=picks)
+        self.begin_undo_step(label, picks=picks, points=points)
         try:
             yield
         finally:
             self.end_undo_step()
 
-    def begin_undo_step(self, label: str, *, picks: bool = False) -> None:
+    def begin_undo_step(
+        self, label: str, *, picks: bool = False, points: bool = False
+    ) -> None:
         """Begin a step to undo, which ``end_undo_step`` records, e.g.,
         on the press and on the release of the mouse; see
         ``undo_step``."""
         if self.history.begin(label):
+            names = [
+                name
+                for name, taken in (("picks", picks), ("points", points))
+                if taken
+            ]
             self.history.take(
                 self._history_channels(),
                 self.group_color,
-                self._picks_state() if picks else None,
+                self._overlay_state(names),
             )
 
     def end_undo_step(self) -> None:
@@ -15655,7 +15690,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             self.history.record(
                 self._history_channels(),
                 self.group_color,
-                self._picks_state(),
+                self._overlay_state(self.history.overlays_taken),
             )
             self.window.update_undo_actions()
 
@@ -15664,17 +15699,31 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             self.locs, self.infos, self._drift, self._driftfiles
         )
 
-    def _picks_state(self) -> tuple[list, list, list]:
-        """The picks, their shapes and sizes."""
-        return (
-            list(self._pick_list),
-            list(self._pick_shapes),
-            list(self._pick_sizes),
-        )
+    def _overlay_state(
+        self, names: tuple[str, ...] | list[str] = ("picks", "points")
+    ) -> dict[str, tuple]:
+        """Copies of the overlays ``names`` that steps put back (see
+        ``render_undo.Step.overlays``): ``"picks"``, the picks, their
+        shapes and sizes, and ``"points"``, the measured points being
+        drawn and the finished sets. Polygons are copied, as drawing
+        them adds to them in place."""
+        state = {}
+        if "picks" in names:
+            state["picks"] = (
+                render_link.copy_picks(self._pick_list),
+                list(self._pick_shapes),
+                list(self._pick_sizes),
+            )
+        if "points" in names:
+            state["points"] = (
+                list(self._points),
+                [list(points) for points in self._point_sets],
+            )
+        return state
 
     def undo(self) -> None:
-        """Undo the last step that changed the localizations
-        (File > Undo)."""
+        """Undo the last step that changed the localizations, the picks
+        or the measured points (File > Undo)."""
         self._undo_or_redo(redo=False)
 
     def redo(self) -> None:
@@ -15691,7 +15740,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             change(
                 self._history_channels(),
                 self.group_color,
-                self._picks_state(),
+                self._overlay_state(),
                 self._apply_history_step,
             )
         except render_undo.StaleHistoryError:
@@ -15734,12 +15783,20 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 self._drift[channel], self._driftfiles[channel] = record.drift
         if step.group_color is not render_undo.UNCHANGED:
             self.group_color = step.group_color
-        if step.picks is not None:
-            self._set_picks(*step.picks)
-            self.window.info_dialog.n_picks.setText(str(len(self._picks)))
+        if "picks" in step.overlays:
+            picks, shapes, sizes = step.overlays["picks"]
+            self._set_picks(render_link.copy_picks(picks), shapes, sizes)
+            self.update_pick_info_short()
+        if "points" in step.overlays:
+            points, point_sets = step.overlays["points"]
+            self._points = list(points)
+            self._point_sets = [list(p) for p in point_sets]
         dx, dy = np.subtract(self._canvas_offset(), offset)
         if dx or dy:
             self._shift_canvas_overlays(float(dx), float(dy))
+        if not step.changes_locs:
+            self.update_scene(picks_only=True)
+            return
         for channel in step.records:
             self.invalidate_locs_index(channel)
         self.image = None
@@ -16921,7 +16978,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 i += 1
 
         # remove picks
-        self._remove_picks_at(removelist)
+        with self.undo_step("Select picks", picks=True):
+            self._remove_picks_at(removelist)
 
         self.n_picks = len(self._picks)
 
@@ -17068,7 +17126,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                     if i is None:  # cancel
                         break
                     i += 1
-        self._remove_picks_at(removelist)
+        with self.undo_step("Select picks", picks=True):
+            self._remove_picks_at(removelist)
         self.n_picks = len(self._picks)
         self.update_pick_info_short()
         self.update_scene()
@@ -17117,7 +17176,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 removelist = self._iterate_plot_dialog_picks(
                     all_picked_locs, is_multi, colors, PlotDialog
                 )
-        self._remove_picks_at(removelist)
+        with self.undo_step("Select picks", picks=True):
+            self._remove_picks_at(removelist)
         self.n_picks = len(self._picks)
         self.update_pick_info_short()
         self.update_scene()
@@ -17145,7 +17205,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 removelist = self._iterate_plot_dialog_picks(
                     all_picked_locs, is_multi, colors, PlotDialogIso
                 )
-        self._remove_picks_at(removelist)
+        with self.undo_step("Select picks", picks=True):
+            self._remove_picks_at(removelist)
         self.n_picks = len(self._picks)
         self.update_pick_info_short()
         self.update_scene()
@@ -17285,7 +17346,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             )
         if saved_locs:
             self._save_cluster_results(saved_locs, clustered_locs, channel)
-        self._remove_picks_at(removelist)
+        with self.undo_step("Cluster in pick", picks=True):
+            self._remove_picks_at(removelist)
         self.n_picks = len(self._picks)
         self.update_pick_info_short()
         self.update_scene()
@@ -17385,7 +17447,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 removelist = self._find_picks_outside_range(
                     loccount, channels, minlocs, maxlocs
                 )
-                self._remove_picks_at(removelist)
+                with self.undo_step("Filter picks by count", picks=True):
+                    self._remove_picks_at(removelist)
                 self.n_picks = len(self._picks)
                 self.update_pick_info_short()
         self.update_scene()
@@ -17646,7 +17709,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         # also of the next circular picks
         self.window.tools_settings_dialog.pick_shape.setCurrentText("Circle")
         self.window.tools_settings_dialog.pick_diameter.setValue(box)
-        self.add_picks(picks, shape="Circle", size=box)
+        with self.undo_step("Pick fiducials", picks=True):
+            self.add_picks(picks, shape="Circle", size=box)
 
     def plot_profile(self) -> None:
         """Plot the profile of the current rectangular pick."""
@@ -17830,7 +17894,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 sizes += [median] * (len(new_picks) - n_picks)
             else:
                 sizes += [None] * (len(new_picks) - n_picks)
-            self._set_picks(new_picks, pick_shape, sizes)
+            with self.undo_step("Pick similar", picks=True):
+                self._set_picks(new_picks, pick_shape, sizes)
             self.update_pick_info_short()
             self.update_scene(picks_only=True)
 
@@ -17984,7 +18049,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                     hit.append(i)
             elif lib.point_in_pick(x, y, pick, shape, size):
                 hit.append(i)
-        self._remove_picks_at(hit)
+        with self.undo_step("Remove pick", picks=True):
+            self._remove_picks_at(hit)
         self.update_pick_info_short()
         self.update_scene(picks_only=True)
 
@@ -18022,6 +18088,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             )
             self.update_scene(resample_locs=True)
 
+    @records_undo_step("Remove polygon vertex", picks=True)
     def remove_polygon_point(self) -> None:
         """Remove the last point from the last polygon. If there is
         only one point in the polygon, the whole polygon is removed.
@@ -18047,8 +18114,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
     def remove_points(self) -> None:
         """Remove all distance measurement points and sets."""
-        self._points = []
-        self._point_sets = []
+        with self.undo_step("Clear measurements", points=True):
+            self._points = []
+            self._point_sets = []
         self._measure_following = True
         self._measure_cursor = None
         self.update_cursor()
@@ -18069,7 +18137,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     def remove_last_measure_set(self) -> None:
         """Delete the most recently finalized measurement set."""
         if self._point_sets:
-            self._point_sets.pop()
+            with self.undo_step("Remove measurement", points=True):
+                self._point_sets.pop()
             self.update_scene()
 
     def render_scene(

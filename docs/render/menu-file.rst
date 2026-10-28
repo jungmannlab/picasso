@@ -301,8 +301,9 @@ Undo and redo
 -------------
 
 ``Undo`` (:kbd:`Ctrl+Z`)
-   Takes back the last step that changed the localizations. The button on
-   the toolbar names the step when you hover over it.
+   Takes back the last step that changed the localizations, the picks or
+   the measurements. The button on the toolbar names the step when you
+   hover over it.
 ``Redo`` (:kbd:`Ctrl+Shift+Z`, :kbd:`Ctrl+Y` on Windows)
    Redoes the last step undone by putting back its result rather than
    running it again, e.g., a drift correction is not computed again. A new
@@ -322,27 +323,39 @@ These actions are steps:
 - ``Link localizations``, ``Select central frames localizations`` and
   ``Combine localizations in picks``;
 - ``Align channels``;
-- ``Track particles`` (see :doc:`tracking`).
+- ``Track particles`` (see :doc:`tracking`);
+- picks: adding and removing them with the :ref:`Pick tool <render-pick>`
+  (each click, each polygon vertex and each brush stroke is a step),
+  ``Clear picks``, ``Load pick regions``, ``Subtract pick regions``,
+  ``Pick similar``, ``Pick fiducials``, ``Filter picks by count``, the picks
+  removed in ``Select picks`` and ``Cluster in pick``, ``Apply to all`` of the
+  pick sizes, and moving the pick in the :doc:`3D view <3d>`;
+- measurements: each point added with the :ref:`Measure tool
+  <render-measure>`, removing the last set and ``Clear measurements``.
 
 Undoing a step brings back the localizations of the channels it changed, with
 their metadata and drift. If the step moved the canvas, e.g., a channel
 dragged beyond the top left edge, the picks, the measured points and the view
-move back with it. Otherwise the picks stay as they are, except that undoing
-``Unfold groups/picks`` brings back the picks it used.
+move back with it. Otherwise, undoing a step that changed the localizations
+leaves the picks as they are, except that undoing ``Unfold groups/picks``
+brings back the picks it used.
 
 .. _render-undo-history:
 
 The history of steps
 ~~~~~~~~~~~~~~~~~~~~
 
-Each Render window keeps its last 10 steps.
+Each Render window keeps its last 10 steps that changed the localizations
+and, so that clicking picks does not push those out, its last 50 steps that
+changed only the picks or the measurements. Steps older than the 10th last
+step that changed the localizations are forgotten with it.
 
 - Opening or closing a file clears the history.
 - So does a change of a channel shared with a :ref:`linked window
   <render-new-linked-window>`, in the window that takes the change over; the
   window where the change was made keeps its history.
-- Picks, measurements, display settings, opening and closing files, and
-  ``Stitch tiles`` are not steps.
+- Display settings, the view, opening and closing files, and ``Stitch
+  tiles`` are not steps.
 - The drift ``.txt`` files written by drift correction stay on disk after an
   undo.
 

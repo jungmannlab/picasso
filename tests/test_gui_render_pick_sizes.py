@@ -432,6 +432,9 @@ class TestThreeDWindow:
             assert view._picks == [(2100.0, 1950.0)]
             assert view._pick_shapes == ["Circle"]
             assert view._pick_sizes == [300.0]
+            # File > Undo moves it back
+            view.undo()
+            assert view._picks == [(2000.0, 2000.0)]
         finally:
             window.window_rot.view_rot.stop_render_worker()
             view.stop_render_worker()
