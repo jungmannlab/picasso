@@ -12,10 +12,6 @@ behaves and looks.
 Zoom
 ----
 
-.. rst-class:: shortcut
-
-Shortcut: :kbd:`Ctrl+Z`
-
 Selects the zoom tool. Dragging a rectangle with the left mouse button (in any
 direction) zooms into it; a right click (or :kbd:`Esc`) while dragging cancels
 it. Dragging with the right mouse button pans. Panning is also available
@@ -96,8 +92,8 @@ eye.
   ``Tools settings`` (:kbd:`Ctrl+T`) dialog: *Select...* opens a list of the
   loaded channels with a checkbox each. By default, the first channel is
   dragged.
-- *Undo last move* in the ``Tools settings`` dialog reverses the moves one by
-  one.
+- ``File > Undo`` (:kbd:`Ctrl+Z`) reverses the moves one by one, see
+  :ref:`render-undo`.
 
 Normally, localizations outside the image (x or y at or beyond ``Width`` or
 ``Height`` in the metadata, or negative) would be removed when saving.
@@ -152,8 +148,8 @@ Define the settings of the tools:
     pick's axis are checked separately;
   - ``Annotate picks``, which shows the index of each pick next to it;
   - ``Display circular picks as points``.
-- The **Move** section selects the channels dragged with the move tool and
-  undoes the last move, see :ref:`render-move`.
+- The **Move** section selects the channels dragged with the move tool, see
+  :ref:`render-move`.
 
 .. _render-tool-appearance:
 

@@ -5,8 +5,8 @@ These tests drive the real mouse handlers of a ``View`` and cover the
 live preview, the growth of the canvas (so no localization is removed
 when saving), the translation of every channel, the picks and the
 measured points when a channel is dragged beyond the top left edge,
-the undo, and the Apply expression dialog, which shares the canvas
-handling.
+undoing a move (File > Undo), and the Apply expression dialog, which
+shares the canvas handling.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -187,10 +187,8 @@ def test_drag_within_canvas(window):
         int(np.floor(x0.max() / PIXELSIZE + 2)) + 1
     )
     assert view.infos[1][0]["Width"] == WIDTH
-    assert view._move_undo == [
-        ((0,), pytest.approx(2 * PIXELSIZE), pytest.approx(0))
-    ]
-    assert window.tools_settings_dialog.move_undo_button.isEnabled()
+    assert view.history.undo_label == "Move"
+    assert window.undo_action.isEnabled()
 
 
 def test_drag_beyond_top_left_translates_everything(window, tmp_path):
@@ -251,17 +249,19 @@ def test_undo_restores_the_registration(window):
     view = window.view
     diff = (view.locs[0]["x"] - view.locs[1]["x"]).to_numpy().copy()
     _drag(view, -10, 0)
-    view.undo_move()
+    view.undo()
     np.testing.assert_allclose(
         view.locs[0]["x"] - view.locs[1]["x"], diff, atol=ATOL
     )
-    assert view.infos[0][-1][gui_render.MANUAL_SHIFT_KEYS[0]] == 0
-    assert not view._move_undo
-    assert not window.tools_settings_dialog.move_undo_button.isEnabled()
+    assert gui_render.MANUAL_SHIFT_KEYS[0] not in view.infos[0][-1]
+    assert view.history.undo_label is None
+    assert not window.undo_action.isEnabled()
     for locs in view.locs:
         assert locs["x"].min() >= 0
     # the canvas is back to the camera image
-    assert view.infos[0][-1][lib.CANVAS_OFFSET_KEYS[0]] == 0
+    assert (
+        lib.get_from_metadata(view.infos[0], lib.CANVAS_OFFSET_KEYS[0], 0) == 0
+    )
     assert view.infos[0][0]["Width"] == WIDTH
 
 
@@ -299,8 +299,9 @@ def test_several_channels_are_dragged_together(window):
         assert info[-1][gui_render.MANUAL_SHIFT_KEYS[1]] == pytest.approx(
             PIXELSIZE
         )
-    assert view._move_undo[-1][0] == (0, 1)
-    view.undo_move()
+    undo, _ = view.history.steps()
+    assert set(undo[-1].records) == {0, 1}
+    view.undo()
     np.testing.assert_allclose(view.locs[0]["x"], x0, atol=ATOL)
     np.testing.assert_allclose(view.locs[1]["x"], x1, atol=ATOL)
     for info in view.infos:
@@ -313,7 +314,8 @@ def test_selected_channel_is_dragged(window):
     window.tools_settings_dialog.set_move_channels((1,))
     _drag(view, 1, 0)
     np.testing.assert_array_equal(view.locs[0]["x"], x0)
-    assert view._move_undo[-1][0] == (1,)
+    undo, _ = view.history.steps()
+    assert set(undo[-1].records) == {1}
 
 
 def test_click_without_drag_changes_nothing(window):
@@ -321,7 +323,7 @@ def test_click_without_drag_changes_nothing(window):
     x0 = view.locs[0]["x"].to_numpy().copy()
     _drag(view, 0, 0)
     np.testing.assert_array_equal(view.locs[0]["x"], x0)
-    assert not view._move_undo
+    assert view.history.undo_label is None
 
 
 def test_adding_a_channel_joins_the_translated_frame(window, tmp_path):

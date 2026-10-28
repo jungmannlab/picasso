@@ -6,7 +6,7 @@ None for them. These tests drive the real mouse handlers of a ``View``
 to cover the drag, the removal, the YAML round trip and the metadata,
 which is where the None size would otherwise surface as a
 ``TypeError``. For the brush they also cover the merging of overlapping
-strokes and the undo of the last one.
+strokes.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry

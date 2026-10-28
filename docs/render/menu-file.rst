@@ -294,6 +294,66 @@ loaded ones.
       picks, shape, size = io.load_picks("movie_locs_picks.yaml")
 
 
+.. _render-undo:
+.. _render-redo:
+
+Undo and redo
+-------------
+
+``Undo`` (:kbd:`Ctrl+Z`)
+   Takes back the last step that changed the localizations. The button on
+   the toolbar names the step when you hover over it.
+``Redo`` (:kbd:`Ctrl+Shift+Z`, :kbd:`Ctrl+Y` on Windows)
+   Redoes the last step undone by putting back its result rather than
+   running it again, e.g., a drift correction is not computed again. A new
+   step after an undo replaces the steps undone.
+
+These actions are steps:
+
+- moving channels with the :ref:`Move tool <render-move>`;
+- drift correction: ``Undrift by AIM``, ``Undrift by RCC``,
+  ``Undrift from picked`` and ``Apply drift from an external file``, also a
+  drift file dropped onto the window (see :doc:`drift`);
+- ``Apply expression to localizations`` (see :ref:`render-apply-expressions`);
+  applied to all channels, it is one step;
+- ``Remove localizations in picks``;
+- ``Remove columns``, ``Synchronize groups across channels`` and
+  ``Unfold groups/picks``;
+- ``Link localizations``, ``Select central frames localizations`` and
+  ``Combine localizations in picks``;
+- ``Align channels``;
+- ``Track particles`` (see :doc:`tracking`).
+
+Undoing a step brings back the localizations of the channels it changed, with
+their metadata and drift. If the step moved the canvas, e.g., a channel
+dragged beyond the top left edge, the picks, the measured points and the view
+move back with it. Otherwise the picks stay as they are, except that undoing
+``Unfold groups/picks`` brings back the picks it used.
+
+.. _render-undo-history:
+
+The history of steps
+~~~~~~~~~~~~~~~~~~~~
+
+Each Render window keeps its last 10 steps.
+
+- Opening or closing a file clears the history.
+- So does a change of a channel shared with a :ref:`linked window
+  <render-new-linked-window>`, in the window that takes the change over; the
+  window where the change was made keeps its history.
+- Picks, measurements, display settings, opening and closing files, and
+  ``Stitch tiles`` are not steps.
+- The drift ``.txt`` files written by drift correction stay on disk after an
+  undo.
+
+A step keeps only what it changed, e.g., only the x and y coordinates after a
+move, but the whole channel after ``Remove localizations in picks``. So that
+large data sets do not take several times the memory, the history keeps at
+most 200 MB in memory. Larger steps are moved to ``~/.picasso/spill``, as for
+the :ref:`release of memory while idle <user-settings-file>`, and read back
+when they are undone, which may take a moment. They are deleted when the
+history no longer needs them and when Picasso closes.
+
 .. _render-export-roi-imaris:
 
 Export ROI for Imaris

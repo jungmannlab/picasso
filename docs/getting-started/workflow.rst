@@ -393,8 +393,8 @@ structure is smeared along the path of the drift.
 3. Save the corrected localizations with ``File > Save localizations...``
    (``<file>_render.hdf5``). Use this file for all further analysis.
 
-The drift is also saved as a ``.txt`` file, and ``Postprocess > Undo drift``
-reverts the correction.
+The drift is also saved as a ``.txt`` file, and ``File > Undo``
+(:kbd:`Ctrl+Z`) reverts the correction.
 
 More: :doc:`/render/drift`, including a second correction round using
 structures in the image as markers, which can refine the result further.

@@ -196,6 +196,13 @@ changed:
        :ref:`render-grid`.
    * - ``Tools > Filter picks by number of localizations...``
      - ``Tools > Filter picks by count...``
+   * - Render, ``Postprocess > Undo drift``
+     - ``File > Undo`` (Ctrl+Z), which takes back the last step that changed
+       the localizations, e.g., a drift correction, see :ref:`render-undo`.
+   * - Render, *Apply expression*: ``uspiral`` to reverse ``spiral R N``
+     - ``File > Undo``.
+   * - Render, ``Tools > Zoom`` (Ctrl+Z)
+     - No shortcut; Ctrl+Z is ``File > Undo``.
    * - Brush picks: a right click undoes the last stroke
      - A right click removes the pick under the cursor, as for the other pick
        shapes, see :doc:`render/picking`.

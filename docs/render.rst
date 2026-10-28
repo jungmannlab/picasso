@@ -87,8 +87,8 @@ Navigating the image
 What the mouse buttons do on the image depends on the active
 tool, selected in the ``Tools`` menu:
 
-- :ref:`Zoom <render-zoom>` (:kbd:`Ctrl+Z`, the default): drag with the left
-  button to zoom into a rectangle, drag with the right button to pan.
+- :ref:`Zoom <render-zoom>` (the default): drag with the left button to zoom
+  into a rectangle, drag with the right button to pan.
 - :ref:`Pick <render-pick>` (:kbd:`Ctrl+P`) selects regions of localizations
   for further analysis (see :doc:`render/picking`): the left button draws a
   pick, the right button removes the pick under the cursor, whatever its
@@ -241,7 +241,8 @@ Topics
       :link: render/menu-file
       :link-type: doc
 
-      Opening, saving and exporting localizations and pick regions.
+      Opening, saving and exporting localizations and pick regions; undo and
+      redo.
 
    .. grid-item-card:: :octicon:`eye;1.5em;sd-mr-1` View menu
       :link: render/menu-view

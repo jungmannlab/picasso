@@ -801,47 +801,36 @@ def test_apply_flip_exchanges_x_and_z(cmd, window_3d, monkeypatch):
     np.testing.assert_allclose(view.locs[0]["z"], x, atol=1e-2)
 
 
-def test_apply_spiral_and_undo(window, monkeypatch, answers):
+def test_apply_spiral_and_undo(window, monkeypatch):
     before = _xy(window.view)
     _apply(window, monkeypatch, "spiral 200 3")
     spiraled = _xy(window.view)
     assert not np.allclose(spiraled, before)
     assert np.abs(spiraled - before).max() <= 200 + 1e-3  # the radius
-    _apply(window, monkeypatch, "uspiral")
-    np.testing.assert_allclose(_xy(window.view), before, atol=1e-3)
-    answers.record_messages()
-    _apply(window, monkeypatch, "uspiral")  # undone already
-    assert answers.messages == ["Localizations have not been spiraled yet."]
-    np.testing.assert_allclose(_xy(window.view), before, atol=1e-3)
-
-
-def test_apply_undo_spiral_needs_a_spiral(window, monkeypatch, answers):
-    answers.record_messages()
-    before = _xy(window.view)
-    _apply(window, monkeypatch, "uspiral")
-    assert answers.messages == ["Localizations have not been spiraled yet."]
+    window.view.undo()  # File > Undo
     np.testing.assert_array_equal(_xy(window.view), before)
+    window.view.redo()
+    np.testing.assert_array_equal(_xy(window.view), spiraled)
 
 
 def test_apply_spiral_beyond_the_edge_and_undo(window, monkeypatch):
     """A spiral beyond the canvas grows it, which translates the
-    localizations; undoing the spiral must restore them in the new
-    frame."""
+    localizations; undoing the spiral restores them and the canvas."""
     from picasso import lib
 
-    def camera_frame() -> np.ndarray:
-        info = window.view.infos[0]
-        offset = [
-            lib.get_from_metadata(info, key, default=0.0) or 0.0
+    def offset() -> list[float]:
+        return [
+            lib.get_from_metadata(window.view.infos[0], key, 0)
             for key in lib.CANVAS_OFFSET_KEYS
         ]
-        return _xy(window.view) - np.array(offset)
 
-    before = camera_frame()
+    before = _xy(window.view)
     _apply(window, monkeypatch, "spiral 2000 1")
     assert window.view.locs[0]["x"].min() >= 0
-    _apply(window, monkeypatch, "uspiral")
-    np.testing.assert_allclose(camera_frame(), before, atol=1e-2)
+    assert any(offset())  # translated
+    window.view.undo()
+    np.testing.assert_array_equal(_xy(window.view), before)
+    assert not any(offset())
 
 
 # ---------------------------------------------------------------------------

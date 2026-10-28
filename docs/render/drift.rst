@@ -163,11 +163,10 @@ tend to diverge. RCC can only correct x and y coordinates (not 3D).
 Inspecting, undoing and reapplying drift
 ----------------------------------------
 
-The ``Postprocess`` menu (see :doc:`menu-postprocess`) has three more drift
-commands:
+``File > Undo`` (:kbd:`Ctrl+Z`) takes a drift correction back and
+``File > Redo`` applies it again, see :ref:`render-undo`. The ``Postprocess``
+menu (see :doc:`menu-postprocess`) has two more drift commands:
 
-``Undo drift``
-   Undo previous drift correction. Can be pressed again to redo.
 ``Show drift``
    After drift correction, a drift file is created. If the drift file is
    present, the drift can be displayed with this option.

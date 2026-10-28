@@ -43,13 +43,6 @@ Undrift by RCC
 Performs drift correction by redundant cross-correlation. See
 :ref:`render-rcc`.
 
-.. _render-undo-drift:
-
-Undo drift
-----------
-
-Undo previous drift correction. See :ref:`render-drift-tools`.
-
 .. _render-show-drift:
 
 Show drift
@@ -462,7 +455,10 @@ This tool allows you to apply expressions to localizations, for example:
   present (side projection), similar for ``flip y z``.
 - ``spiral r n`` will plot each localization over the time of the movie in a
   spiral with radius r and n number of turns (e.g., to detect repetitive
-  binding), ``uspiral`` to reverse.
+  binding).
+
+``File > Undo`` (:kbd:`Ctrl+Z`) takes an expression back, see
+:ref:`render-undo`.
 
 .. note::
 

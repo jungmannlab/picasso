@@ -259,6 +259,10 @@ def test_render_move_to_pick_without_picks(render_window, messages):
     assert messages[-1][0] == "Pick Error"
 
 
-def test_render_undo_drift_without_drift(render_window, messages):
-    render_window.view.undo_drift()
-    assert messages[-1][0] == "Undo drift"
+def test_render_undo_and_redo_without_history(render_window, messages):
+    n_messages = len(messages)
+    render_window.view.undo()
+    render_window.view.redo()
+    assert len(messages) == n_messages
+    assert not render_window.undo_action.isEnabled()
+    assert not render_window.redo_action.isEnabled()

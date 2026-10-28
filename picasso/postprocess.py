@@ -4757,10 +4757,15 @@ def _apply_drift(locs: pd.DataFrame, drift: pd.DataFrame) -> pd.DataFrame:
     the drift is already in the correct format and that the number of
     frames matches."""
     frames = locs["frame"]
-    locs["x"] -= drift["x"].iloc[frames].to_numpy()
-    locs["y"] -= drift["y"].iloc[frames].to_numpy()
+    columns = ["x", "y"]
     if "z" in drift.columns and "z" in locs.columns:
-        locs["z"] -= drift["z"].iloc[frames].to_numpy()
+        columns.append("z")
+    # new arrays rather than written into the existing ones, which may be
+    # kept elsewhere, e.g., by the undo history of Render
+    for column in columns:
+        locs[column] = (
+            locs[column].to_numpy() - drift[column].iloc[frames].to_numpy()
+        )
     return locs
 
 

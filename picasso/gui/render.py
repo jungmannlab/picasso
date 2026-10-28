@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import sys
 import copy
+import contextlib
 import logging
 import threading
 import time
@@ -22,7 +23,7 @@ import os.path
 from math import ceil
 from collections import Counter
 from functools import partial
-from typing import Callable, Literal
+from typing import Callable, Generator, Literal
 from PIL import Image
 
 import matplotlib
@@ -71,6 +72,7 @@ from .render_worker import (  # noqa: F401
 from . import idle
 from . import render_link
 from . import render_spt
+from . import render_undo
 from .convert_units import ConvertUnitsDialog
 from .grid_settings import GridGroupBox
 from .overlay_style import OverlayStyleWidget
@@ -519,8 +521,8 @@ class ApplyDialog(lib.Dialog):
     ``spiral 200 3``
         Plot each localization over time in a spiral with radius 200
         nm and 3 turns.
-    ``uspiral``
-        Undo the last spiral action.
+
+    File > Undo takes an expression back, see ``View.undo``.
     """
 
     DOCS_URL = docs_url(
@@ -564,7 +566,7 @@ class ApplyDialog(lib.Dialog):
             "- 'flip x z' to exchange x- and z-axes.\n"
             "- 'spiral R N' to plot each localization over time in a spiral\n"
             "  with radius R nm and N turns.\n"
-            "- 'uspiral' to undo the last spiral action."
+            "File > Undo takes an expression back."
         )
         layout.addWidget(exp_label, 2, 1)
         self.cmd = QtWidgets.QLineEdit()
@@ -1427,7 +1429,7 @@ class DatasetDialog(lib.Dialog):
         """Delete the drift-correction data of channel ``i``, if
         any was provided."""
         view = self.window.view
-        for items in (view._drift, view._driftfiles, view.currentdrift):
+        for items in (view._drift, view._driftfiles):
             if i < len(items):
                 del items[i]
 
@@ -1478,7 +1480,8 @@ class DatasetDialog(lib.Dialog):
         # remove the channel from test clustering dialog
         self.window.test_clusterer_dialog.channels.removeItem(i)
         self.window.tools_settings_dialog.remove_move_channel(i)
-        self.window.view.clear_move_undo()
+        # the steps to undo refer to the channels by their index
+        self.window.view.clear_undo_history()
 
     def close_file(self, i: int | str, render=True) -> None:
         """Close a given channel (defined by its index of name) and
@@ -8035,13 +8038,6 @@ class ToolsSettingsDialog(lib.Dialog):
             "translation is saved in the metadata."
         )
         self._update_move_channels_label()
-        self.move_undo_button = QtWidgets.QPushButton("Undo last move")
-        self.move_undo_button.setToolTip(
-            "Undo the last move of a channel done with the Move tool."
-        )
-        self.move_undo_button.setEnabled(False)
-        self.move_undo_button.clicked.connect(self.window.view.undo_move)
-        move_grid.addWidget(self.move_undo_button, 1, 0, 1, 3)
 
         # how the tools are drawn, one tab per tool; collapsed by
         # default to keep the dialog compact
@@ -8214,11 +8210,6 @@ class ToolsSettingsDialog(lib.Dialog):
         self.move_channels_label.setToolTip(
             "\n".join(paths[i] for i in channels if i < len(paths))
         )
-
-    def update_move_undo(self) -> None:
-        """Enable the Move tool's undo button if there is a move to
-        undo."""
-        self.move_undo_button.setEnabled(bool(self.window.view._move_undo))
 
     def auto_overlay_color(self) -> QtGui.QColor:
         """Automatic color of the tool overlays: yellow on a dark and
@@ -11525,8 +11516,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
     Attributes
     ----------
-    currentdrift : list
-        Contains the most up-to-date drift for each channel.
     custom_cmap : np.array
         Custom colormap loaded from .npy, see ``DisplaySettingsDialog``.
     _drift : list
@@ -11538,6 +11527,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         Important for single channel data with group info (picked or
         clustered locs); contains an integer index for each loc
         defining its color.
+    history : render_undo.History
+        The steps that changed the localizations, for File > Undo and
+        Redo, see ``undo_step``.
     image : np.array
         Unprocessed image of rendered localizations
     index_blocks : list
@@ -11555,9 +11547,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     _mode : {'Zoom', 'Pick', 'Measure', 'Move'}
         Defines current mode (zoom, pick, measure or move), use in
         mouseEvents.
-    _move_undo : list
-        Finished moves of the Move tool, ``(channels, dx, dy)`` in nm,
-        most recent last.
     n_locs : int
         Number of localizations loaded; if multichannel, the sum is
         given.
@@ -11693,21 +11682,19 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         # collection
         self.spatial_statistic_windows: dict[str, QtWidgets.QWidget] = {}
         # Move tool: the channels being dragged, the press position and
-        # the coordinates at the press (nm), the current shift and the
-        # finished moves, (channels, dx, dy), for undo
+        # the coordinates at the press (nm) and the current shift
         self._move_channels = ()
         self._move_start = None
         self._move_origin = None
         self._move_shift = (0.0, 0.0)
         self._move_cursor = None  # display position of the shift label
-        self._move_undo = []
+        self.history = render_undo.History()
         # track the cursor without a pressed button for live measuring
         self.setMouseTracking(True)
         self.index_blocks = []
         self.render_index = []
         self._drift = []
         self._driftfiles = []
-        self.currentdrift = []
         self.x_render_state = False
         self.x_locs = None
         # background loading (see ``LocsLoadWorker``)
@@ -11905,7 +11892,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         drift = self._load_drift(info[-1])
         self._drift.append(drift)
         self._driftfiles.append(None)
-        self.currentdrift.append(None)
 
         self._prepare_render_by_property(locs)
 
@@ -11936,9 +11922,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.window.test_clusterer_dialog.channels.addItem(
             os.path.basename(path)
         )
-        # the Move tool's undo stores channel indices
         self.window.tools_settings_dialog.add_move_channel()
-        self.clear_move_undo()
+        # the steps to undo cover the channels loaded when they were
+        # made, and fitting the canvas may have moved those
+        self.clear_undo_history()
 
     def _metadata_pixelsize(self, path: str, info: list[dict]) -> float:
         """Camera pixel size (nm) stored in ``info``. Files written
@@ -12219,7 +12206,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             # the drift state as it is in the source, not as on disk
             self._drift[-1] = source._drift[i]
             self._driftfiles[-1] = source._driftfiles[i]
-            self.currentdrift[-1] = source.currentdrift[i]
             if not share:
                 self._copy_drift(len(self.locs) - 1)
         if channels:
@@ -12229,13 +12215,16 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """Replace the drift state of ``channel`` with copies."""
         drift = self._drift[channel]
         self._drift[channel] = None if drift is None else drift.copy()
-        self.currentdrift[channel] = copy.deepcopy(self.currentdrift[channel])
 
     def adopt_shared_channels(
         self, source: View, pairs: list[tuple[int, int]]
     ) -> None:
         """Take over channels that a linked window changed (replaced or
         modified in place) and drop everything derived from them.
+
+        The steps to undo no longer match the channels then, so they are
+        forgotten, unless this view is making or undoing a step, of
+        which the change is part.
 
         Parameters
         ----------
@@ -12245,13 +12234,14 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             ``(j, i)``: channel ``j`` of this view is channel ``i`` of
             ``source``.
         """
+        if not self.history.busy:
+            self.clear_undo_history()
         for j, i in pairs:
             locs = source.locs[i]
             self.locs[j] = locs
             self.infos[j] = source.infos[i]
             self._drift[j] = source._drift[i]
             self._driftfiles[j] = source._driftfiles[i]
-            self.currentdrift[j] = source.currentdrift[i]
             # set directly: ``invalidate_locs_index`` would report the
             # change back to the linked windows
             self.index_blocks[j] = None
@@ -12308,7 +12298,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             self.render_index,
             self._drift,
             self._driftfiles,
-            self.currentdrift,
         ):
             permute(items)
         # the cached image holds one plane per channel; render again
@@ -12316,10 +12305,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.median_lp = np.mean(
             [np.median(self.locs[0]["lpx"]), np.median(self.locs[0]["lpy"])]
         )
-        self._move_undo = [
-            (tuple(new_index[i] for i in channels), dx, dy)
-            for channels, dx, dy in self._move_undo
-        ]
+        self.history.reorder(order)
         if getattr(self, "profile_channels", None) is not None:
             self.profile_channels = [
                 new_index[i] for i in self.profile_channels
@@ -12333,7 +12319,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         tools_dialog = window.tools_settings_dialog
         permute(tools_dialog._move_selection)
         tools_dialog._update_move_channels_label()
-        tools_dialog.update_move_undo()
         clusterer = window.test_clusterer_dialog
         current = clusterer.channels.currentIndex()
         clusterer.channels.blockSignals(True)
@@ -12356,10 +12341,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if mask_dialog.save_all.isChecked():
             permute(mask_dialog.index_locs)
             permute(mask_dialog.index_locs_out)
-        for spiral in (window.x_spiral, window.y_spiral):
-            moved = {new_index[i]: v for i, v in spiral.items()}
-            spiral.clear()
-            spiral.update(moved)
         if window.metadata_dialog.isVisible():
             window.show_metadata()
         # linked windows compare the channels position by position to
@@ -12756,23 +12737,27 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             def align():
                 return postprocess.align(locs, infos, method="rcc")
 
-        self.locs, infos = lib.run_with_status(
+        aligned, infos = lib.run_with_status(
             align, "Aligning channels...", self
         )
-        for channel, info in enumerate(infos):
-            # a new list, the old one may be shared with linked windows
-            self.infos[channel] = info
-        if not keep_non_overlapping_setting():
-            try:
-                self.locs = postprocess.remove_non_overlapping_locs(self.locs)
-            except ValueError:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Align channels",
-                    "The aligned channels do not overlap, so all"
-                    " localizations were kept.",
-                )
-        self.update_scene(resample_locs=True)
+        with self.undo_step("Align channels"):
+            self.locs = aligned
+            for channel, info in enumerate(infos):
+                # a new list, the old one may be shared with linked windows
+                self.infos[channel] = info
+            if not keep_non_overlapping_setting():
+                try:
+                    self.locs = postprocess.remove_non_overlapping_locs(
+                        self.locs
+                    )
+                except ValueError:
+                    QtWidgets.QMessageBox.warning(
+                        self,
+                        "Align channels",
+                        "The aligned channels do not overlap, so all"
+                        " localizations were kept.",
+                    )
+            self.update_scene(resample_locs=True)
 
     @check_pick
     def combine(self) -> None:
@@ -12788,24 +12773,23 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             "Combining localizations in picks", 0, 0, self
         )
         try:
-            self.locs[channel], self.infos[channel] = (
-                postprocess.combine_locs_in_picks(
-                    self.locs[channel],
-                    self.infos[channel],
-                    **self._pick_args(),
-                    index_blocks=index_blocks,
-                    progress=progress,
-                )
+            locs, info = postprocess.combine_locs_in_picks(
+                self.locs[channel],
+                self.infos[channel],
+                **self._pick_args(),
+                index_blocks=index_blocks,
+                progress=progress,
             )
         finally:
             progress.close()
 
-        if "group" in self.locs[channel].columns:
-            self.group_color = render.get_group_color(
-                self.locs[channel], shuffle=True
-            )
-
-        self.update_scene(resample_locs=True)
+        with self.undo_step("Combine localizations in picks"):
+            self.locs[channel], self.infos[channel] = locs, info
+            if "group" in self.locs[channel].columns:
+                self.group_color = render.get_group_color(
+                    self.locs[channel], shuffle=True
+                )
+            self.update_scene(resample_locs=True)
 
     def link(self) -> None:
         """Link localizations, i.e., combine localizations likely
@@ -12851,18 +12835,20 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return results
 
         def apply(results: list[tuple]) -> None:
-            for c, linked_locs, linked_info in results:
-                self.locs[c] = linked_locs
-                # a new list, the old one may be shared with linked windows
-                self.infos[c] = linked_info
-            grouped = [
-                locs for _, locs, _ in results if "group" in locs.columns
-            ]
-            if grouped:
-                self.group_color = render.get_group_color(
-                    grouped[-1], shuffle=True
-                )
-            self.update_scene(resample_locs=True)
+            with self.undo_step("Link localizations"):
+                for c, linked_locs, linked_info in results:
+                    self.locs[c] = linked_locs
+                    # a new list, the old one may be shared with linked
+                    # windows
+                    self.infos[c] = linked_info
+                grouped = [
+                    locs for _, locs, _ in results if "group" in locs.columns
+                ]
+                if grouped:
+                    self.group_color = render.get_group_color(
+                        grouped[-1], shuffle=True
+                    )
+                self.update_scene(resample_locs=True)
             if skipped:
                 names = "\n".join(
                     os.path.basename(self.locs_paths[c]) for c in skipped
@@ -12921,11 +12907,12 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 ),
             )
             return
-        self.locs[channel] = locs
-        # a new list, the old one may be shared with linked windows
-        self.infos[channel] = info
-        self.group_color = render.get_group_color(locs, shuffle=True)
-        self.update_scene(resample_locs=True)
+        with self.undo_step("Select central frames"):
+            self.locs[channel] = locs
+            # a new list, the old one may be shared with linked windows
+            self.infos[channel] = info
+            self.group_color = render.get_group_color(locs, shuffle=True)
+            self.update_scene(resample_locs=True)
 
     def dbscan(self) -> None:
         """Get a channel, parameters and path for DBSCAN."""
@@ -15135,8 +15122,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                     ),
                 )
                 return
-            for ch in range(len(self.locs_paths)):
-                self._load_drift_drop(ch, drift)
+            with self.undo_step("Apply drift"):  # one step to undo
+                for ch in range(len(self.locs_paths)):
+                    self._load_drift_drop(ch, drift)
         else:
             self._load_drift_drop(channel, drift)
 
@@ -15543,6 +15531,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         )
         if not channels:
             return
+        # one step to undo, recorded on the release
+        self.begin_undo_step("Move")
         self._move_channels = channels
         self._move_start = self.map_to_movie(event.pos())
         # the columns are replaced, never modified, while dragging, so
@@ -15575,8 +15565,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.update_scene(interactive=True)
 
     def _mouse_release_move(self, event: QtCore.QEvent) -> None:
-        """Finish dragging: fit the canvas and remember the move for
-        undo."""
+        """Finish dragging: fit the canvas and record the move as a
+        step to undo."""
         if not self._move_channels:
             return
         channels = self._move_channels
@@ -15587,40 +15577,15 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self._move_shift = (0.0, 0.0)
         self._move_cursor = None
         event.accept()
-        if dx == 0 and dy == 0:
-            self.update_cursor()
-            return
-        for i in channels:
-            self._record_manual_shift(i, dx, dy)
-        self._move_undo.append((channels, dx, dy))
-        self.window.tools_settings_dialog.update_move_undo()
-        self.locs_moved(channels)
-
-    def undo_move(self) -> None:
-        """Undo the last move done with the Move tool.
-
-        The undone channels always fit the canvas as it is refitted
-        afterwards (see ``lib.fit_canvas``).
-        """
-        if not self._move_undo or self._move_channels:
-            return
-        channels, dx, dy = self._move_undo.pop()
-        for i in channels:
-            locs = self.locs[i]
-            self._set_channel_xy(
-                i,
-                locs["x"].to_numpy() - np.float32(dx),
-                locs["y"].to_numpy() - np.float32(dy),
-            )
-            self._record_manual_shift(i, -dx, -dy)
-        self.window.tools_settings_dialog.update_move_undo()
-        self.locs_moved(channels)
-
-    def clear_move_undo(self) -> None:
-        """Forget the moves of the Move tool, e.g., when the channels
-        change and the stored channel indices become invalid."""
-        self._move_undo = []
-        self.window.tools_settings_dialog.update_move_undo()
+        try:
+            if dx == 0 and dy == 0:  # nothing moved: no step is recorded
+                self.update_cursor()
+                return
+            for i in channels:
+                self._record_manual_shift(i, dx, dy)
+            self.locs_moved(channels)
+        finally:
+            self.end_undo_step()
 
     def _set_channel_xy(
         self, channel: int, x: lib.FloatArray1D, y: lib.FloatArray1D
@@ -15644,6 +15609,158 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 lib.get_from_metadata(info, key, 0.0) + shift
             )
 
+    # --- Undo and Redo, see render_undo --- #
+
+    @contextlib.contextmanager
+    def undo_step(
+        self, label: str, *, picks: bool = False
+    ) -> Generator[None, None, None]:
+        """Record the changes of the localizations made inside as one
+        step that File > Undo takes back (see ``picasso.gui.render_undo``).
+
+        Steps inside another step belong to it, e.g., each channel of an
+        action applied to all of them. Nothing is recorded if nothing
+        changed.
+
+        Parameters
+        ----------
+        label : str
+            Name of the action, shown in the tooltips of Undo and Redo.
+        picks : bool, optional
+            If True, the picks are put back as well, for an action that
+            changes them. Default is False: undoing a step leaves the
+            picks as they are, apart from following a translated canvas.
+        """
+        self.begin_undo_step(label, picks=picks)
+        try:
+            yield
+        finally:
+            self.end_undo_step()
+
+    def begin_undo_step(self, label: str, *, picks: bool = False) -> None:
+        """Begin a step to undo, which ``end_undo_step`` records, e.g.,
+        on the press and on the release of the mouse; see
+        ``undo_step``."""
+        if self.history.begin(label):
+            self.history.take(
+                self._history_channels(),
+                self.group_color,
+                self._picks_state() if picks else None,
+            )
+
+    def end_undo_step(self) -> None:
+        """End a step begun with ``begin_undo_step`` and, for the
+        outermost one, record it."""
+        if self.history.end():
+            self.history.record(
+                self._history_channels(),
+                self.group_color,
+                self._picks_state(),
+            )
+            self.window.update_undo_actions()
+
+    def _history_channels(self) -> render_undo.Channels:
+        return render_undo.Channels(
+            self.locs, self.infos, self._drift, self._driftfiles
+        )
+
+    def _picks_state(self) -> tuple[list, list, list]:
+        """The picks, their shapes and sizes."""
+        return (
+            list(self._pick_list),
+            list(self._pick_shapes),
+            list(self._pick_sizes),
+        )
+
+    def undo(self) -> None:
+        """Undo the last step that changed the localizations
+        (File > Undo)."""
+        self._undo_or_redo(redo=False)
+
+    def redo(self) -> None:
+        """Redo the last step undone (File > Redo)."""
+        self._undo_or_redo(redo=True)
+
+    def _undo_or_redo(self, redo: bool) -> None:
+        # not while a step is made, e.g., channels are dragged
+        if self._move_channels or lib_qt.gui_busy():
+            return
+        change = self.history.redo if redo else self.history.undo
+        title = "Redo" if redo else "Undo"
+        try:
+            change(
+                self._history_channels(),
+                self.group_color,
+                self._picks_state(),
+                self._apply_history_step,
+            )
+        except render_undo.StaleHistoryError:
+            QtWidgets.QMessageBox.information(
+                self,
+                title,
+                "The localizations were changed in a way that cannot be"
+                " undone (e.g., by a plugin), so the steps to undo and"
+                " redo were forgotten.",
+            )
+        except io.SpillError as error:
+            QtWidgets.QMessageBox.warning(
+                self,
+                title,
+                f"The step could not be read back from the disk ({error}),"
+                " so the steps to undo and redo were forgotten.",
+            )
+        self.window.update_undo_actions()
+
+    def _apply_history_step(self, step: render_undo.Step) -> None:
+        """Put back what ``step`` holds (see ``undo``) and redraw.
+
+        Picks, measured points and the viewport follow the canvas if the
+        step translated it (see ``fit_canvas``).
+        """
+        offset = self._canvas_offset()
+        for channel, record in step.records.items():
+            if record.table is not None:
+                table = record.table.load()
+                if record.full:
+                    self.locs[channel] = table
+                else:
+                    # new arrays, as for the Move tool
+                    locs = self.locs[channel]
+                    for name in table.columns:
+                        locs[name] = table[name].to_numpy()
+            if record.info is not None:
+                self.infos[channel] = record.info
+            if record.drift is not None:
+                self._drift[channel], self._driftfiles[channel] = record.drift
+        if step.group_color is not render_undo.UNCHANGED:
+            self.group_color = step.group_color
+        if step.picks is not None:
+            self._set_picks(*step.picks)
+            self.window.info_dialog.n_picks.setText(str(len(self._picks)))
+        dx, dy = np.subtract(self._canvas_offset(), offset)
+        if dx or dy:
+            self._shift_canvas_overlays(float(dx), float(dy))
+        for channel in step.records:
+            self.invalidate_locs_index(channel)
+        self.image = None
+        self.update_scene(resample_locs=True)
+
+    def clear_undo_history(self) -> None:
+        """Forget the steps to undo and redo, e.g., when channels are
+        added or closed."""
+        self.history.clear()
+        self.window.update_undo_actions()
+
+    def _canvas_offset(self) -> tuple[float, float]:
+        """The canvas offset (nm) of the first channel, whose frame
+        picks and measured points are in, see ``lib.fit_canvas``."""
+        if not self.infos:
+            return (0.0, 0.0)
+        return tuple(
+            float(lib.get_from_metadata(self.infos[0], key, 0))
+            for key in lib.CANVAS_OFFSET_KEYS
+        )
+
     def fit_canvas(self) -> list[int]:
         """Fit the canvas of all channels to their localizations (see
         ``lib.fit_canvas``). If the channels are translated (the
@@ -15662,15 +15779,18 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             # that of the first channel
             dx, dy = shifts[0]
             if dx or dy:
-                self._translate_overlays(dx, dy)
-                # no viewport yet while the first file is being added
-                if getattr(self, "viewport", None):
-                    self.viewport = render.shift_viewport(
-                        self.viewport, dx, dy
-                    )
+                self._shift_canvas_overlays(dx, dy)
             for i in translated:
                 self.invalidate_locs_index(i)
         return translated
+
+    def _shift_canvas_overlays(self, dx: float, dy: float) -> None:
+        """Move picks, measured points and the viewport by ``(dx, dy)``
+        nm along with the localizations of a translated canvas."""
+        self._translate_overlays(dx, dy)
+        # no viewport yet while the first file is being added
+        if getattr(self, "viewport", None):
+            self.viewport = render.shift_viewport(self.viewport, dx, dy)
 
     def locs_moved(
         self, channels: int | list[int] | tuple[int, ...], sanitize=False
@@ -17873,8 +17993,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """Get channel for removing picked localizations."""
         channel = self.get_channel_all_seq("Remove picked localizations")
         if channel is len(self.locs_paths):  # apply to all channels
-            for channel in range(len(self.locs)):
-                self._remove_picked_locs(channel)
+            with self.undo_step("Remove localizations in picks"):
+                for channel in range(len(self.locs)):
+                    self._remove_picked_locs(channel)
         elif channel is not None:  # apply to a single channel
             self._remove_picked_locs(channel)
 
@@ -17889,16 +18010,17 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         channel : int
             Index of the channel were localizations are removed.
         """
-        # a new list, the old one may be shared with linked windows
-        self.locs[channel], self.infos[channel] = (
-            postprocess.remove_locs_in_picks(
-                self.locs[channel],
-                self.infos[channel],
-                **self._pick_args(),
-                index_blocks=self._circle_pick_index(channel),
+        with self.undo_step("Remove localizations in picks"):
+            # a new list, the old one may be shared with linked windows
+            self.locs[channel], self.infos[channel] = (
+                postprocess.remove_locs_in_picks(
+                    self.locs[channel],
+                    self.infos[channel],
+                    **self._pick_args(),
+                    index_blocks=self._circle_pick_index(channel),
+                )
             )
-        )
-        self.update_scene(resample_locs=True)
+            self.update_scene(resample_locs=True)
 
     def remove_polygon_point(self) -> None:
         """Remove the last point from the last polygon. If there is
@@ -18825,12 +18947,13 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return results
 
         def apply(results: list[tuple]) -> None:
-            for c, locs, new_info, drift in results:
-                self.locs[c] = locs
-                self.infos[c] = new_info
-                self.invalidate_locs_index(c)
-                self.add_drift(c, drift)
-            self.update_scene(resample_locs=True)
+            with self.undo_step("Undrift by AIM"):
+                for c, locs, new_info, drift in results:
+                    self.locs[c] = locs
+                    self.infos[c] = new_info
+                    self.invalidate_locs_index(c)
+                    self.add_drift(c, drift)
+                self.update_scene(resample_locs=True)
             if len(channels) == 1:
                 self.show_drift()
 
@@ -18874,15 +18997,16 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return results
 
         def apply(results: list[tuple]) -> None:
-            for c, locs, new_info, drift in results:
-                self.locs[c] = locs
-                # a new list, the old one may be shared with linked windows
-                self.infos[c] = new_info
-                self.invalidate_locs_index(c)
-                self.add_drift(c, drift)
-                self._drift[c] = drift
-                self.currentdrift[c] = copy.copy(drift)
-            self.update_scene(resample_locs=True)
+            with self.undo_step("Undrift by RCC"):
+                for c, locs, new_info, drift in results:
+                    self.locs[c] = locs
+                    # a new list, the old one may be shared with linked
+                    # windows
+                    self.infos[c] = new_info
+                    self.invalidate_locs_index(c)
+                    self.add_drift(c, drift)
+                    self._drift[c] = drift
+                self.update_scene(resample_locs=True)
             if len(channels) == 1:
                 self.show_drift()
 
@@ -19004,12 +19128,13 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return results
 
         def apply(results: list[tuple]) -> None:
-            for channel, locs, new_info, drift in results:
-                self.locs[channel] = locs
-                self.infos[channel] = new_info
-                self.invalidate_locs_index(channel)
-                self.add_drift(channel, drift)
-            self.update_scene(resample_locs=True)
+            with self.undo_step("Undrift from picked"):
+                for channel, locs, new_info, drift in results:
+                    self.locs[channel] = locs
+                    self.infos[channel] = new_info
+                    self.invalidate_locs_index(channel)
+                    self.add_drift(channel, drift)
+                self.update_scene(resample_locs=True)
 
         def keep_indices() -> None:
             for channel, locs, index in built:
@@ -19038,40 +19163,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             index = self.window.link_render_index(self.locs[channel])
         return index
 
-    def undo_drift(self) -> None:
-        """Get a channel to undo drift."""
-        channel = self.get_channel("Undo drift")
-        if channel is None:
-            return
-        if self.currentdrift[channel] is None:
-            QtWidgets.QMessageBox.information(
-                self,
-                "Undo drift",
-                "No drift correction to undo. Please undrift first.",
-            )
-            return
-        self._undo_drift(channel)
-
-    def _undo_drift(self, channel: int) -> None:
-        """Delete the latest drift in a given channel.
-
-        Parameters
-        ----------
-        channel : int
-            Channel index to undo drift.
-        """
-        drift = self.currentdrift[channel]
-        drift["x"] = -drift["x"]
-        drift["y"] = -drift["y"]
-        if "z" in drift.columns:
-            drift["z"] = -drift["z"]
-        self.locs[channel], _ = postprocess.apply_drift(
-            self.locs[channel], self.infos[channel], drift=drift
-        )
-        self.invalidate_locs_index(channel)
-        self.add_drift(channel, drift)
-        self.update_scene(resample_locs=True)
-
     def add_drift(self, channel: int, drift: pd.DataFrame) -> None:
         """Assign attributes and save .txt drift file.
 
@@ -19099,7 +19190,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 else:
                     self._drift[channel]["z"] = drift["z"]
 
-        self.currentdrift[channel] = copy.copy(drift)
         io.save_drift(driftfile, self._drift[channel])
 
     def apply_drift(self) -> None:
@@ -19117,29 +19207,31 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 drift = self._read_drift_file(path, channel)
                 if drift is None:  # canceled
                     return
-                self._apply_drift(channel, drift)
-                self._driftfiles[channel] = path
+                with self.undo_step("Apply drift"):
+                    self._apply_drift(channel, drift)
+                    self._driftfiles[channel] = path
 
     def _apply_drift(self, channel: int, drift: pd.DataFrame) -> None:
         """Shift localizations in a given channel based on drift from a
         .txt file. The drift is recorded in the metadata on saving
         (``Last driftfile``)."""
-        # a new list, the old one may be shared with linked windows
-        self.locs[channel], self.infos[channel] = postprocess.apply_drift(
-            self.locs[channel], self.infos[channel], drift=drift
-        )
-        self._drift[channel] = drift
-        self.currentdrift[channel] = copy.copy(drift)
-        self.invalidate_locs_index(channel)
-        self.update_scene(resample_locs=True)
+        with self.undo_step("Apply drift"):
+            # a new list, the old one may be shared with linked windows
+            self.locs[channel], self.infos[channel] = postprocess.apply_drift(
+                self.locs[channel], self.infos[channel], drift=drift
+            )
+            self._drift[channel] = drift
+            self.invalidate_locs_index(channel)
+            self.update_scene(resample_locs=True)
 
     def sync_groups(self) -> None:
         """Remove localizations whose group field is not found in all
         channels."""
         if len(self.locs_paths) < 2:
             return
-        self.locs = lib.sync_groups(self.locs)
-        self.update_scene(resample_locs=True)
+        with self.undo_step("Synchronize groups"):
+            self.locs = lib.sync_groups(self.locs)
+            self.update_scene(resample_locs=True)
 
     def unfold_groups_square(self) -> None:
         """Shifts grouped localizations onto a square grid with a chosen
@@ -19193,16 +19285,18 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if not ok:
             return
 
-        self.locs[0], self.infos[0] = lib.unfold_localizations_square(
-            locs,
-            self.infos[0],
-            n_square=n_square,
-            spacing=spacing,
-        )
-        if remove_group:  # discard groups and reset picks
-            self.locs[0].drop(columns="group", inplace=True)
-            self._set_picks([], [])
-        self.update_scene(resample_locs=True)
+        # the picks are used up, so they come back with Undo
+        with self.undo_step("Unfold groups", picks=True):
+            self.locs[0], self.infos[0] = lib.unfold_localizations_square(
+                locs,
+                self.infos[0],
+                n_square=n_square,
+                spacing=spacing,
+            )
+            if remove_group:  # discard groups and reset picks
+                self.locs[0].drop(columns="group", inplace=True)
+                self._set_picks([], [])
+            self.update_scene(resample_locs=True)
         self.fit_in_view()
 
     def _update_cursor_circle(self, size: float) -> None:
@@ -19609,12 +19703,6 @@ class Window(QtWidgets.QMainWindow):
         Instance of the class for displaying rendered localizations.
     window_rot : RotationWindow
         Instance of the class for displaying 3D data with rotation.
-    x_spiral : dict[int, np.array]
-        x displacement (nm) of the last spiral action in
-        ``ApplyDialog``, keyed by channel index.
-    y_spiral : dict[int, np.array]
-        y displacement (nm) of the last spiral action in
-        ``ApplyDialog``, keyed by channel index.
     """
 
     DOCS_URL = docs_url("render.html")
@@ -19822,9 +19910,6 @@ class Window(QtWidgets.QMainWindow):
         # [position, R, G, B] stops in [0, 1]. Populated from
         # ~/.picasso/settings.yaml in load_user_settings.
         self.custom_colormaps_stops: dict[str, list[list[float]]] = {}
-        # x/y coordinates before the last spiral action, keyed by channel
-        self.x_spiral: dict[int, np.ndarray] = {}
-        self.y_spiral: dict[int, np.ndarray] = {}
 
         # set up dialogs
         self.display_settings_dlg = DisplaySettingsDialog(self)
@@ -19906,6 +19991,15 @@ class Window(QtWidgets.QMainWindow):
         save_picks_action.triggered.connect(self.save_picks)
         load_picks_action = file_menu.addAction("Load pick regions...")
         load_picks_action.triggered.connect(self.load_picks)
+
+        # enabled while there is a step to undo/redo
+        file_menu.addSeparator()
+        self.undo_action = file_menu.addAction("Undo")
+        self.undo_action.setShortcut(QtGui.QKeySequence.StandardKey.Undo)
+        self.undo_action.triggered.connect(self.view.undo)
+        self.redo_action = file_menu.addAction("Redo")
+        self.redo_action.setShortcut(QtGui.QKeySequence.StandardKey.Redo)
+        self.redo_action.triggered.connect(self.view.redo)
 
         file_menu.addSeparator()
         export_current_action = file_menu.addAction("Export current view...")
@@ -20053,7 +20147,6 @@ class Window(QtWidgets.QMainWindow):
         zoom_tool_action = tools_actiongroup.addAction(
             QtGui.QAction("Zoom", tools_menu, checkable=True)
         )
-        zoom_tool_action.setShortcut("Ctrl+Z")
         tools_menu.addAction(zoom_tool_action)
         zoom_tool_action.setChecked(True)
         pick_tool_action = tools_actiongroup.addAction(
@@ -20178,9 +20271,6 @@ class Window(QtWidgets.QMainWindow):
         )
         undrift_action = postprocess_menu.addAction("Undrift by RCC...")
         undrift_action.triggered.connect(self.view.undrift_rcc)
-        drift_action = postprocess_menu.addAction("Undo drift")
-        drift_action.setIcon(theme.icon("undo"))
-        drift_action.triggered.connect(self.view.undo_drift)
         show_drift_action = postprocess_menu.addAction("Show drift")
         show_drift_action.setIcon(theme.icon("profile"))
         show_drift_action.triggered.connect(self.view.show_drift)
@@ -20348,6 +20438,9 @@ class Window(QtWidgets.QMainWindow):
                 (save_picked_action, "save-picked", "Save picked"),
                 (export_current_action, "export-view", "Export view"),
                 None,
+                (self.undo_action, "undo"),
+                (self.redo_action, "redo"),
+                None,
                 (zoom_tool_action, "tool-zoom"),
                 (pick_tool_action, "tool-pick"),
                 (measure_tool_action, "tool-measure"),
@@ -20382,6 +20475,7 @@ class Window(QtWidgets.QMainWindow):
             menu.setDisabled(True)
         for action in self.data_actions:
             action.setEnabled(False)
+        self.update_undo_actions()
 
         self._plugins_loaded = plugins_loaded
         # reconnect the rebuilt view and dialogs (``remove_locs``)
@@ -21137,11 +21231,19 @@ class Window(QtWidgets.QMainWindow):
                 channels = range(len(self.view.locs_paths))
             else:
                 channels = [channel]
-            for channel in channels:
-                self._apply_cmd(cmd, channel)
+            # one step to undo for all channels
+            with self.view.undo_step(f"Apply expression: {cmd.strip()}"):
+                for channel in channels:
+                    self._apply_cmd(cmd, channel)
 
     def _apply_cmd(self, cmd: str, channel: int) -> None:
         """Apply the expression ``cmd`` to the given ``channel``."""
+        with self.view.undo_step(f"Apply expression: {cmd.strip()}"):
+            self._apply_cmd_unrecorded(cmd, channel)
+
+    def _apply_cmd_unrecorded(self, cmd: str, channel: int) -> None:
+        """Apply the expression ``cmd`` to the given ``channel``, as
+        part of the step to undo of ``_apply_cmd``."""
         input = cmd.split()
         if input[0] == "flip" and len(input) == 3:
             # Distinguish flipping in xy and z
@@ -21182,38 +21284,27 @@ class Window(QtWidgets.QMainWindow):
             x = self.view.locs[channel]["frame"] / scale_time
             dx = (x * np.cos(x) / scale_x * radius).to_numpy()
             dy = (x * np.sin(x) / scale_x * radius).to_numpy()
-            # the displacement is stored rather than the coordinates,
-            # since a spiral beyond the canvas grows it, which
-            # translates the localizations
-            self.x_spiral[channel] = dx
-            self.y_spiral[channel] = dy
 
             self.view.locs[channel]["x"] = self.view.locs[channel]["x"] + dx
             self.view.locs[channel]["y"] = self.view.locs[channel]["y"] + dy
 
-        elif input[0] == "uspiral":
-            try:
-                locs = self.view.locs[channel]
-                locs["x"] = locs["x"] - self.x_spiral.pop(channel)
-                locs["y"] = locs["y"] - self.y_spiral.pop(channel)
-                self.display_settings_dlg.render_check.setChecked(False)
-            except KeyError:
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Uspiral error",
-                    "Localizations have not been spiraled yet.",
-                )
         else:
             locs = self.view.locs[channel]
             code = compile(cmd, "<expression>", "exec")
+            # copies of the columns the expression names: one changed in
+            # place (e.g., "x += 100") must not change the arrays that
+            # the step to undo keeps (pandas 2 writes into them)
+            names = set(code.co_names).intersection(locs.columns)
+            copies = {name: locs[name].copy() for name in names}
             columns = {name: locs[name] for name in locs.columns}
+            columns.update(copies)
             exec(code, columns)
-            # write back the columns the expression names: a column
-            # changed in place (e.g., "x += 100") is a copy from pandas 3
-            # on (Copy-on-Write) and a rebound one (e.g., "x = x * 2")
-            # never changed the localizations
-            for name in set(code.co_names).intersection(locs.columns):
-                locs[name] = columns[name]
+            # write back the named columns that changed, in place or
+            # rebound (e.g., "x = x * 2")
+            for name in names:
+                value = columns[name]
+                if value is not copies[name] or not value.equals(locs[name]):
+                    locs[name] = value
         # localizations moved beyond the canvas grow it instead of
         # being removed when saving; the columns are replaced with
         # copies since the expression may have changed them in place
@@ -21381,9 +21472,10 @@ class Window(QtWidgets.QMainWindow):
             }
             locs.drop(columns=to_remove, inplace=True)
 
-            self.view.locs[channel] = locs
-            self.view.infos[channel] = info + [new_info]
-            self.view.update_scene(resample_locs=True)
+            with self.view.undo_step("Remove columns"):
+                self.view.locs[channel] = locs
+                self.view.infos[channel] = info + [new_info]
+                self.view.update_scene(resample_locs=True)
 
     def save_pick_properties(self) -> None:
         """Save pick properties in a given channel (or channels)."""
@@ -21655,6 +21747,22 @@ class Window(QtWidgets.QMainWindow):
         """
         if self.link_group is not None:
             self.link_group.notify(self, key)
+
+    def update_undo_actions(self) -> None:
+        """Enable File > Undo and Redo if there is a step to undo or
+        redo, named in their tooltips."""
+        history = self.view.history
+        for action, label, text in (
+            (self.undo_action, history.undo_label, "Undo"),
+            (self.redo_action, history.redo_label, "Redo"),
+        ):
+            action.setEnabled(label is not None)
+            if label:
+                text = f"{text}: {label}"
+            shortcut = action.shortcut().toString(
+                QtGui.QKeySequence.SequenceFormat.NativeText
+            )
+            action.setToolTip(f"{text} ({shortcut})" if shortcut else text)
 
     def link_channels_changed(self, changes: list[tuple]) -> None:
         """Pass changed channels on to the linked windows sharing them;

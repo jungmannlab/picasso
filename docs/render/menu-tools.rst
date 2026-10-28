@@ -6,7 +6,7 @@ Tools Menu
 The first four entries select the active tool, and ``Tools settings...``
 (:kbd:`Ctrl+T`) sets how the tools behave and look; see :doc:`tools`:
 
-- ``Zoom`` (:kbd:`Ctrl+Z`), see :ref:`render-zoom`;
+- ``Zoom``, see :ref:`render-zoom`;
 - ``Pick`` (:kbd:`Ctrl+P`), see :ref:`render-pick`;
 - ``Measure`` (:kbd:`Ctrl+M`), see :ref:`render-measure`;
 - ``Move`` (:kbd:`Ctrl+G`), see :ref:`render-move`;
