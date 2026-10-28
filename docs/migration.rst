@@ -1189,6 +1189,8 @@ and ``min_blur_width`` in nm, as ``disp_px_size`` already was:
 - **Overlays.** ``render.draw_scalebar`` and ``draw_points`` lost
   ``pixelsize`` and take nm; ``render.optimal_scalebar_length`` takes the
   width of the image in nm instead of ``(pixelsize, width)``.
+  ``render.draw_scalebar`` also lost ``text_spacer``: the gap between the
+  bar and its length follows the font size.
 - **Imaris export.** ``ext.bitplane.numpy_to_imaris`` takes the rendered
   pixel size ``disp_px_size`` (nm) instead of ``oversampling`` and
   ``pixelsize``.

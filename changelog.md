@@ -50,6 +50,7 @@ Last change: 28-OCT-2026 CEST
 - FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*).
 - `picasso.render` is distributed as a package (`kernels`, `geometry`, `splat`, `scene`, `overlays_qt`, `animation`, `backend`, `gpu`); every former `picasso.render.*` name is still importable from `picasso.render`.
 - 2D/3D grid available for reference, either as the full grid or as axes with ticks and labels only.
+- Customizable scale bar. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-scale-bar).
 - The axes icon in the bottom left corner of the 3D view was removed (along with `View > Show/hide rotation`).
 - Rectangular pick minimum length set to 5 display pixels.
 - A right click with the *Brush* pick removes the pick under the cursor, as for the other pick shapes (it undid the last stroke).

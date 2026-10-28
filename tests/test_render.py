@@ -1749,6 +1749,122 @@ class TestDrawing:
         assert lit[95].sum() == 30  # a row through the bar
         assert lit.any(axis=1).sum() == 10  # the bar's thickness
 
+    @pytest.mark.parametrize(
+        "position, rows, columns",
+        [
+            # 120 x 120 pixels, a bar of 30 x 4 pixels, margins (10, 6)
+            ("bottom right", (110, 114), (80, 110)),
+            ("bottom center", (110, 114), (45, 75)),
+            ("bottom left", (110, 114), (10, 40)),
+            ("top right", (6, 10), (80, 110)),
+            ("top center", (6, 10), (45, 75)),
+            ("top left", (6, 10), (10, 40)),
+        ],
+    )
+    def test_draw_scalebar_positions(self, position, rows, columns):
+        out = render.draw_scalebar(
+            _fresh_canvas(),
+            FULL_VIEWPORT,
+            scalebar_length_nm=1040,
+            display_length=False,
+            display_height=4,
+            margin=(10, 6),
+            position=position,
+        )
+        lit = _qimage_to_array(out)[..., :3].any(axis=-1)
+        assert list(np.flatnonzero(lit.any(axis=1))) == list(range(*rows))
+        assert list(np.flatnonzero(lit.any(axis=0))) == list(range(*columns))
+
+    @pytest.mark.parametrize("position", ["bottom right", "top left"])
+    @pytest.mark.parametrize("label_position", ["above", "below"])
+    def test_draw_scalebar_label_position(self, position, label_position):
+        """The length is printed above or below the bar, and the bar
+        with its length keeps the vertical margin."""
+        out = render.draw_scalebar(
+            _fresh_canvas(),
+            FULL_VIEWPORT,
+            scalebar_length_nm=1040,
+            display_height=4,
+            margin=(10, 6),
+            position=position,
+            label_position=label_position,
+        )
+        rgb = _qimage_to_array(out)[..., :3]
+        both = rgb.any(axis=-1)
+        # the bar's rows are white along its whole length of 30 pixels,
+        # unlike the antialiased text
+        full = (rgb == 255).all(axis=-1).sum(axis=1) >= 30
+        bar_rows = np.flatnonzero(full)
+        text_rows = np.flatnonzero(both.any(axis=1) & ~full)
+        assert len(bar_rows) == 4 and len(text_rows)
+        if label_position == "above":
+            assert text_rows.max() < bar_rows.min()
+        else:
+            assert text_rows.min() > bar_rows.max()
+        lit_rows = np.flatnonzero(both.any(axis=1))
+        if position.startswith("top"):
+            assert lit_rows.min() >= 6
+        else:
+            assert lit_rows.max() <= 120 - 6 - 1
+
+    def test_draw_scalebar_bold_and_italic_change_the_text(self):
+        def draw(**kwargs):
+            return _qimage_to_array(
+                render.draw_scalebar(
+                    _fresh_canvas(), FULL_VIEWPORT, 1040, **kwargs
+                )
+            )
+
+        plain = draw()
+        assert not np.array_equal(plain, draw(bold=True))
+        assert not np.array_equal(plain, draw(italic=True))
+        assert not np.array_equal(draw(bold=True), draw(italic=True))
+
+    def test_draw_scalebar_background(self):
+        kwargs = dict(
+            scalebar_length_nm=1040,
+            display_length=False,
+            color=QtGui.QColor("black"),
+        )
+        canvas = _fresh_canvas()
+        canvas.fill(QtGui.QColor(128, 128, 128))
+        out = _qimage_to_array(
+            render.draw_scalebar(
+                canvas, FULL_VIEWPORT, background_opacity=1.0, **kwargs
+            )
+        )
+        # a white box around the black bar, gray elsewhere
+        assert (out[95, 60, :3] == 0).all()  # the bar
+        assert (out[95, 120 - 35 - 30 - 2, :3] == 255).all()  # the box
+        assert (out[5, 5, :3] == 128).all()
+
+    @pytest.mark.parametrize(
+        "length, units, expected",
+        [
+            (500, "nm", "500 nm"),
+            (1500, "nm", "1500 nm"),
+            (1500, "um", "1.5 µm"),
+            (250, "um", "0.25 µm"),
+            (500, "auto", "500 nm"),
+            (1000, "auto", "1 µm"),
+            (12.5, "nm", "12.5 nm"),
+        ],
+    )
+    def test_scalebar_length_text(self, length, units, expected):
+        assert render._format_scalebar_length(length, units) == expected
+
+    @pytest.mark.parametrize(
+        "kwargs",
+        [
+            {"position": "middle"},
+            {"label_position": "left"},
+            {"units": "mm"},
+        ],
+    )
+    def test_draw_scalebar_rejects_unknown_options(self, kwargs):
+        with pytest.raises(ValueError):
+            render.draw_scalebar(_fresh_canvas(), FULL_VIEWPORT, 500, **kwargs)
+
     def test_draw_legend(self):
         canvas = _fresh_canvas()
         before = _qimage_to_array(canvas)

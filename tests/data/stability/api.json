@@ -292,6 +292,7 @@
   "draw_picks",
   "draw_points",
   "draw_scalebar",
+  "SCALEBAR_POSITIONS",
   "optimal_scalebar_length",
   "draw_legend",
   "GridOverlay",

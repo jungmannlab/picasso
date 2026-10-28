@@ -75,6 +75,7 @@ from . import render_spt
 from . import render_undo
 from .convert_units import ConvertUnitsDialog
 from .grid_settings import GridGroupBox
+from .scalebar_settings import ScaleBarGroupBox
 from .overlay_style import OverlayStyleWidget
 from .rotation import RotationWindow, source_key
 from .app import run_gui
@@ -9766,11 +9767,12 @@ class DisplaySettingsDialog(lib.Dialog):
     render_check : QCheckBox
         Tick to activate parameter rendering.
     scalebar : QSpinBox
-        Contains the scale bar's length (nm).
-    scalebar_groupbox : CollapsibleGroupBox
+        Contains the scale bar's length (nm), ``scalebar_groupbox.length``.
+    scalebar_groupbox : ScaleBarGroupBox
         Group with options for customizing scale bar, tick to display.
     scalebar_text : QCheckBox
-        Tick to display scale bar's length (nm).
+        Tick to display scale bar's length (nm),
+        ``scalebar_groupbox.print_length``.
     _silent_disp_px_update : bool
         True if update display pixel size in background.
     """
@@ -10094,35 +10096,14 @@ class DisplaySettingsDialog(lib.Dialog):
         }
 
         # Scalebar
-        self.scalebar_groupbox = lib.CollapsibleGroupBox("Scale bar")
-        self.scalebar_groupbox.setCheckable(True)
-        self.scalebar_groupbox.setChecked(False)
-        self.scalebar_groupbox.toggled.connect(self.update_scene)
+        self.scalebar_groupbox = ScaleBarGroupBox(
+            optimal_length=self.window.view.optimal_scalebar_length
+        )
+        self.scalebar_groupbox.changed.connect(self.update_scene)
         vbox.addWidget(self.scalebar_groupbox)
-        scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox.content)
-        scalebar_length_label = QtWidgets.QLabel("Scale bar length (nm):")
-        scalebar_length_label.setToolTip("Set the length of the scale bar.")
-        scalebar_grid.addWidget(scalebar_length_label, 0, 0)
-        self.scalebar = QtWidgets.QSpinBox()
-        self.scalebar.setRange(1, 100000)
-        self.scalebar.setValue(500)
-        self.scalebar.setKeyboardTracking(False)
-        self.scalebar.valueChanged.connect(self.update_scene)
-        self.scalebar.valueChanged.connect(self._uncheck_optimal_scalebar)
-        scalebar_grid.addWidget(self.scalebar, 0, 1)
-        self.scalebar_text = QtWidgets.QCheckBox("Print scale bar length")
-        self.scalebar_text.setToolTip("Display the length of the scale bar?")
-        self.scalebar_text.stateChanged.connect(self.update_scene)
-        scalebar_grid.addWidget(self.scalebar_text, 1, 0)
-        self.optimal_scalebar_check = QtWidgets.QCheckBox("Automatic length")
-        self.optimal_scalebar_check.setChecked(True)
-        self.optimal_scalebar_check.setToolTip(
-            "Change scale bar to roughly 1/8 of the window's width."
-        )
-        self.optimal_scalebar_check.stateChanged.connect(
-            self.window.view.set_optimal_scalebar
-        )
-        scalebar_grid.addWidget(self.optimal_scalebar_check, 1, 1)
+        self.scalebar = self.scalebar_groupbox.length
+        self.scalebar_text = self.scalebar_groupbox.print_length
+        self.optimal_scalebar_check = self.scalebar_groupbox.auto_length
 
         # Grid
         self.grid_box = GridGroupBox(
@@ -10280,14 +10261,6 @@ class DisplaySettingsDialog(lib.Dialog):
             if not path or error is not None:
                 self.colormap.setCurrentText("magma")
         self.update_scene()
-
-    def _uncheck_optimal_scalebar(self, *args) -> None:
-        """Uncheck the automatic scale bar checkbox when the user
-        manually changes the scale bar length."""
-        if self.optimal_scalebar_check.isChecked():
-            self.optimal_scalebar_check.blockSignals(True)
-            self.optimal_scalebar_check.setChecked(False)
-            self.optimal_scalebar_check.blockSignals(False)
 
     def on_disp_px_changed(self, value: int) -> None:
         """Set new display pixel size, update contrast and update scene
@@ -13826,39 +13799,33 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             style=style,
         )
 
-    def draw_scalebar(self, image: QtGui.QImage) -> QtGui.QImage:
-        """Draw a scalebar.
+    def draw_scalebar(
+        self, image: QtGui.QImage, force: bool = False
+    ) -> QtGui.QImage:
+        """Draw the scale bar set in the Display Settings, if shown.
 
         Parameters
         ----------
         image : QImage
             Image containing rendered localizations.
+        force : bool, optional
+            If True, draw the scale bar also while it is hidden.
+            Default False.
 
         Returns
         -------
         image : QImage
             Image with the drawn scalebar.
         """
-        color = (
-            QtGui.QColor("white")
-            if not self.window.dataset_dialog.wbackground.isChecked()
-            else QtGui.QColor("black")
+        # the text is as large as the windows' text on screen, see
+        # theme.unscaled_text for exports
+        scalebar_box = self.window.display_settings_dlg.scalebar_groupbox
+        return scalebar_box.draw(
+            image,
+            self.viewport,
+            self.window.dataset_dialog.wbackground.isChecked(),
+            force=force,
         )
-        d_dialog = self.window.display_settings_dlg
-        if d_dialog.scalebar_groupbox.isChecked():
-            image = render.draw_scalebar(
-                image=image,
-                viewport=self.viewport,
-                scalebar_length_nm=d_dialog.scalebar.value(),
-                display_length=d_dialog.scalebar_text.isChecked(),
-                color=color,
-                # as large as the windows' text on screen, see
-                # theme.unscaled_text for exports
-                text_fontsize=theme.scaled_text_size(
-                    render.SCALEBAR_FONT_SIZE
-                ),
-            )
-        return image
 
     def draw_grid(
         self,
@@ -14811,11 +14778,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 scalebar = scalebar_box.isChecked()
                 if not scalebar:
                     spath = os.path.splitext(path)[0] + "_scalebar.png"
-                    scalebar_box.setChecked(True)
-                    self.set_optimal_scalebar(force=True)
-                    qimage_scale = self.draw_scalebar(qimage)
+                    self.set_optimal_scalebar(force=True, silent=True)
+                    qimage_scale = self.draw_scalebar(qimage, force=True)
                     qimage_scale.save(spath)
-                    scalebar_box.setChecked(False)
 
     def get_channel(self, title: str = "Choose a channel") -> int | None:
         """Open an input dialog to ask for a channel. Return the channel
@@ -18955,20 +18920,27 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """
         self.zoom(width / self.display_width())
 
+    def optimal_scalebar_length(self) -> int | None:
+        """Automatic scale bar length (nm): approx. 1/8 of the current
+        viewport's width, rounded; None without a view."""
+        if getattr(self, "viewport", None) is None:
+            return None
+        return render.optimal_scalebar_length(
+            render.viewport_width(self.viewport)
+        )
+
     def set_optimal_scalebar(
         self, force: bool = False, silent: bool = False
     ) -> None:
         """Set scalebar to approx. 1/8 of the current viewport's width."""
-        optimal_scalebar_checked = (
-            self.window.display_settings_dlg.optimal_scalebar_check.isChecked()
-        )
-        if force or optimal_scalebar_checked:
-            width = render.viewport_width(self.viewport)
-            scalebar = render.optimal_scalebar_length(width)
-            scalebar_spinbox = self.window.display_settings_dlg.scalebar
-            scalebar_spinbox.blockSignals(True)
-            scalebar_spinbox.setValue(scalebar)
-            scalebar_spinbox.blockSignals(False)
+        scalebar_box = self.window.display_settings_dlg.scalebar_groupbox
+        if force or scalebar_box.auto_length.isChecked():
+            length = self.optimal_scalebar_length()
+            if length is None:
+                return
+            scalebar_box.length.blockSignals(True)
+            scalebar_box.length.setValue(length)
+            scalebar_box.length.blockSignals(False)
             if not silent:
                 self.update_scene()
 
@@ -20646,6 +20618,16 @@ class Window(QtWidgets.QMainWindow):
         settings["Render"][
             "Grid3D"
         ] = self.window_rot.display_settings_dlg.grid_box.settings()
+        settings["Render"]["ScaleBar"] = (
+            self.display_settings_dlg.scalebar_groupbox.settings(
+                include_length=False
+            )
+        )
+        settings["Render"]["ScaleBar3D"] = (
+            self.window_rot.display_settings_dlg.scalebar_groupbox.settings(
+                include_length=False
+            )
+        )
         settings["Render"][
             "Tracks"
         ] = self.display_settings_dlg.tracks_box.settings()
@@ -20692,6 +20674,8 @@ class Window(QtWidgets.QMainWindow):
                 )
                 if not ok:
                     return
+            if getattr(self.view, "qimage", None) is None:
+                self.view.update_scene()  # nothing drawn yet
             # exported with the text sizes they always had, not those of
             # the windows: compose the view again for the export
             with theme.unscaled_text():
@@ -20708,16 +20692,17 @@ class Window(QtWidgets.QMainWindow):
         """Save the current view to ``path`` and, without a scale bar
         shown, a copy with a scale bar (see ``export_current``)."""
         if not scalebar:
-            self.display_settings_dlg.scalebar_groupbox.setChecked(True)
-            self.view.set_optimal_scalebar(force=True)
-            qimage_scale = self.view.draw_scalebar(self.view.qimage)
+            self.view.set_optimal_scalebar(force=True, silent=True)
+            # a copy: the view's image stays without the scale bar
+            qimage_scale = self.view.draw_scalebar(
+                self.view.qimage.copy(), force=True
+            )
             new_path, ext = os.path.splitext(path)
             new_path = new_path + "_scalebar" + ext
             if path.endswith(".pdf"):
                 render.export_qimage_to_pdf(qimage_scale, new_path, dpi=dpi)
             else:
                 qimage_scale.save(new_path)
-            self.display_settings_dlg.scalebar_groupbox.setChecked(False)
         self.save_qimage_to_path(path, self.view.qimage, dpi=dpi)
 
     def save_qimage_to_path(
@@ -20940,12 +20925,15 @@ class Window(QtWidgets.QMainWindow):
         self.export_current_info(path, **kwargs)
 
         # export an extra image with scalebar if necessary
-        if not self.display_settings_dlg.scalebar_groupbox.isChecked():
-            qimage_scale = render.draw_scalebar(
-                image=qimage,
-                viewport=kwargs["viewport"],
-                scalebar_length_nm=self.display_settings_dlg.scalebar.value(),
-            )
+        scalebar_box = self.display_settings_dlg.scalebar_groupbox
+        if not scalebar_box.isChecked():
+            with theme.unscaled_text():
+                qimage_scale = scalebar_box.draw(
+                    qimage,
+                    kwargs["viewport"],
+                    self.dataset_dialog.wbackground.isChecked(),
+                    force=True,
+                )
             new_path, ext = os.path.splitext(path)
             new_path = new_path + "_scalebar" + ext
             self.save_qimage_to_path(new_path, qimage_scale, dpi=dpi)
@@ -21330,6 +21318,14 @@ class Window(QtWidgets.QMainWindow):
         )
         self.window_rot.display_settings_dlg.grid_box.load_settings(
             render_settings.get("Grid3D")
+        )
+        # the look of the scale bars of the 2D and 3D windows; each
+        # session starts with the automatic length
+        self.display_settings_dlg.scalebar_groupbox.load_settings(
+            render_settings.get("ScaleBar"), include_length=False
+        )
+        self.window_rot.display_settings_dlg.scalebar_groupbox.load_settings(
+            render_settings.get("ScaleBar3D"), include_length=False
         )
         # the look of the tracks of single-particle tracking
         self.display_settings_dlg.tracks_box.load_settings(

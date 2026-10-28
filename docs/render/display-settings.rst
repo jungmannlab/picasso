@@ -197,9 +197,35 @@ Jittered Triangulation
 Scale bar
 ~~~~~~~~~
 
-Tick ``Scale bar`` to show a scale bar of ``Scale bar length (nm)``.
-``Automatic length`` keeps it at roughly 1/8 of the window width as you zoom,
-and ``Print scale bar length`` prints the length next to it.
+Tick ``Scale bar`` to show a scale bar of ``Length (nm)``; its settings are
+grayed out while it is unticked. ``Automatic length`` keeps it at roughly 1/8
+of the window width as you zoom; typing a length switches it off.
+
+The other settings set the look of the scale bar:
+
+- ``Position``: one of the four corners or centered at the top or bottom
+  (default ``Bottom right``).
+- ``Margin x`` and ``Margin y``: the distance from the nearest side and from
+  the top or bottom edge, in screen pixels. The vertical margin includes the
+  printed length. The centered positions do not use ``Margin x``.
+- ``Thickness`` of the bar, in screen pixels.
+- ``Color`` of the bar and its length; ``Auto`` (default) is white on a dark
+  and black on a white background.
+- ``Background``: the opacity of a box behind the scale bar that keeps it
+  readable over bright localizations, black behind a light and white behind
+  a dark scale bar. ``None`` (default) draws no box.
+- ``Print length`` prints the length of the scale bar, in ``nm``, ``µm`` or,
+  with ``Automatic``, in µm from 1 µm on and nm below. ``Label`` places it
+  ``Above the bar`` or ``Below the bar``, and ``Font``, ``Font size``,
+  ``Bold`` and ``Italic`` set its font. These settings are grayed out while the length is
+  not printed.
+
+``Reset`` restores the default look and keeps the length. The look of the
+scale bar and ``Print length`` are restored at the next start (``ScaleBar``
+in the :ref:`user-settings-file`); each start shows the automatic length and
+a hidden scale bar. Exported images show the
+scale bar as set here; when it is hidden, ``File > Export current view`` saves
+a second image with it (``_scalebar``).
 
 .. dropdown:: Python
    :icon: code
@@ -213,6 +239,34 @@ and ``Print scale bar length`` prints the length next to it.
       from picasso import render
 
       length_nm = render.optimal_scalebar_length(width_nm=8320)
+
+   ``render.draw_scalebar`` draws a scale bar onto a rendered image (a
+   ``QImage``, e.g., from ``render.render_scene``) of the field of view
+   ``viewport`` (nm), with the same settings as the dialog;
+   ``render.SCALEBAR_POSITIONS`` lists the positions.
+
+   .. code-block:: python
+
+      from PyQt6 import QtGui
+      from picasso import render
+
+      image = render.draw_scalebar(
+          image,
+          viewport=((0, 0), (8320, 8320)),  # (y_min, x_min), (y_max, x_max)
+          scalebar_length_nm=1000,
+          display_length=True,
+          color=QtGui.QColor("white"),
+          display_height=6,  # thickness (px)
+          margin=(20, 20),  # (x, y) (px)
+          text_fontsize=24,
+          position="top left",
+          label_position="below",
+          units="auto",  # "nm", "um" or "auto"
+          font_family="Arial",
+          bold=True,
+          italic=False,
+          background_opacity=0.5,
+      )
 
 .. _render-grid:
 

@@ -75,6 +75,7 @@ from PyQt6 import QtCore, QtWidgets
 
 from .. import io, lib, render
 from .grid_settings import GridGroupBox
+from .scalebar_settings import ScaleBarGroupBox
 
 
 @dataclass(frozen=True)
@@ -178,7 +179,7 @@ CATEGORIES = (
         "scalebar",
         "Scale bar",
         "Display",
-        "Scale bar visibility, length and label.",
+        "Scale bar visibility, length and appearance.",
     ),
     LinkCategory(
         "grid",
@@ -258,15 +259,7 @@ WATCHED_WIDGETS = {
             "render_check",
         ),
     ),
-    "scalebar": (
-        "display_settings_dlg",
-        (
-            "scalebar_groupbox",
-            "scalebar",
-            "scalebar_text",
-            "optimal_scalebar_check",
-        ),
-    ),
+    "scalebar": ("display_settings_dlg", ("scalebar_groupbox",)),
     "grid": ("display_settings_dlg", ("grid_box",)),
     "background_legend": ("dataset_dialog", ("wbackground", "legend")),
     "slicer": (
@@ -292,14 +285,14 @@ def widget_signal(widget: QtCore.QObject):
     ----------
     widget : QObject
         A checkbox, group box, spin box, combo box, slider, button
-        group or grid group box.
+        group, or grid or scale bar group box.
 
     Returns
     -------
     signal : pyqtBoundSignal
         The widget's change signal.
     """
-    if isinstance(widget, GridGroupBox):
+    if isinstance(widget, (GridGroupBox, ScaleBarGroupBox)):
         return widget.changed
     if isinstance(widget, QtWidgets.QButtonGroup):
         return widget.buttonToggled
@@ -816,14 +809,11 @@ class LinkGroup(QtCore.QObject):
 
     @staticmethod
     def _apply_scalebar(src, dst) -> None:
-        s = src.display_settings_dlg
-        d = dst.display_settings_dlg
-        mirror_widget(s.scalebar_groupbox, d.scalebar_groupbox)
-        mirror_widget(s.scalebar_text, d.scalebar_text)
-        # a manual length unchecks "Automatic length", so it goes first
-        if not s.optimal_scalebar_check.isChecked():
-            mirror_widget(s.scalebar, d.scalebar)
-        mirror_widget(s.optimal_scalebar_check, d.optimal_scalebar_check)
+        s = src.display_settings_dlg.scalebar_groupbox
+        d = dst.display_settings_dlg.scalebar_groupbox
+        # an automatic length follows each window's own zoom
+        d.load_settings(s.settings())
+        d.setChecked(s.isChecked())
 
     @staticmethod
     def _apply_grid(src, dst) -> None:

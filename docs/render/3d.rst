@@ -187,8 +187,9 @@ main window; everything else is set here:
 - the render method, with ``Min. blur (nm)``, the adaptive histogram's
   ``Leaf capacity`` and the jittered triangulation's ``Passes``, ``Jitter``
   and ``Max. localizations`` (see :ref:`render-display-settings`);
-- the scale bar: its length, ``Automatic length`` and ``Print scale bar
-  length``;
+- the scale bar: its length, ``Automatic length`` and its look (see
+  :ref:`render-scale-bar`), whose look is saved under ``ScaleBar3D`` in
+  ``~/.picasso/settings.yaml``;
 - the grid, see below.
 
 The per-channel contrast is shared with the main window: it is set in the main
