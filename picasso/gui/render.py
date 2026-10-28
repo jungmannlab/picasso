@@ -173,6 +173,7 @@ KEEP_NON_OVERLAPPING_KEY = "Keep non-overlapping after alignment"
 # key (in the Render section of the user settings) of whether File >
 # Remove all localizations asks for confirmation first
 CONFIRM_REMOVE_LOCS_KEY = "Confirm removing all localizations"
+CTRL_Z_NOTICE_KEY = "Show Ctrl+Z notice"
 POLYGON_POINTER_SIZE = 16  # must be even
 # shortest drag (display pixels, in x and y) that still yields a box
 # pick, so that a stray click does not create one of zero area
@@ -309,6 +310,22 @@ def confirm_remove_locs_setting() -> bool:
         True if the user is asked before all localizations are removed.
     """
     return _render_bool_setting(CONFIRM_REMOVE_LOCS_KEY, False)
+
+
+def ctrl_z_notice_setting() -> bool:
+    """Whether pressing Ctrl+Z tells that it undoes rather than
+    selecting the Zoom tool, as before Picasso 1.0 (see
+    ``Window.explain_ctrl_z``).
+
+    Reads ``Show Ctrl+Z notice`` from the ``Render`` section of the
+    user settings; a missing key is written with the default (True).
+
+    Returns
+    -------
+    show : bool
+        True if the notice is shown.
+    """
+    return _render_bool_setting(CTRL_Z_NOTICE_KEY, True)
 
 
 def check_pick(f: Callable) -> Callable:
@@ -15721,23 +15738,31 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             )
         return state
 
-    def undo(self) -> None:
+    def undo(self) -> bool:
         """Undo the last step that changed the localizations, the picks
-        or the measured points (File > Undo)."""
-        self._undo_or_redo(redo=False)
+        or the measured points (File > Undo).
 
-    def redo(self) -> None:
-        """Redo the last step undone (File > Redo)."""
-        self._undo_or_redo(redo=True)
+        Returns
+        -------
+        undone : bool
+            Whether a step was undone.
+        """
+        return self._undo_or_redo(redo=False)
 
-    def _undo_or_redo(self, redo: bool) -> None:
+    def redo(self) -> bool:
+        """Redo the last step undone (File > Redo); returns whether a
+        step was redone."""
+        return self._undo_or_redo(redo=True)
+
+    def _undo_or_redo(self, redo: bool) -> bool:
         # not while a step is made, e.g., channels are dragged
         if self._move_channels or lib_qt.gui_busy():
-            return
+            return False
         change = self.history.redo if redo else self.history.undo
         title = "Redo" if redo else "Undo"
+        changed = False
         try:
-            change(
+            changed = change(
                 self._history_channels(),
                 self.group_color,
                 self._overlay_state(),
@@ -15759,6 +15784,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 " so the steps to undo and redo were forgotten.",
             )
         self.window.update_undo_actions()
+        return changed
 
     def _apply_history_step(self, step: render_undo.Step) -> None:
         """Put back what ``step`` holds (see ``undo``) and redraw.
@@ -19780,6 +19806,9 @@ class Window(QtWidgets.QMainWindow):
     #: they stay alive while open, also after being unlinked
     _secondary_windows = []
 
+    #: whether File > Undo is being triggered by its shortcut
+    _undo_by_key = False
+
     def __init__(
         self,
         plugins_loaded: bool = False,
@@ -20065,7 +20094,23 @@ class Window(QtWidgets.QMainWindow):
         file_menu.addSeparator()
         self.undo_action = file_menu.addAction("Undo")
         self.undo_action.setShortcut(QtGui.QKeySequence.StandardKey.Undo)
-        self.undo_action.triggered.connect(self.view.undo)
+        self.undo_action.triggered.connect(self._undo)
+        # Ctrl+Z selected the Zoom tool before Picasso 1.0, so pressing it
+        # explains the change (explain_ctrl_z) until turned off, also with
+        # nothing to undo: then the hidden action below takes the
+        # shortcut, which a disabled action leaves free
+        self.undo_action.installEventFilter(self)
+        if getattr(self, "_ctrl_z_notice_action", None) is not None:
+            self.removeAction(self._ctrl_z_notice_action)  # rebuilt UI
+            self._ctrl_z_notice_action.deleteLater()
+        self._ctrl_z_notice_action = QtGui.QAction("Undo", self)
+        self._ctrl_z_notice_action.setShortcut(
+            QtGui.QKeySequence.StandardKey.Undo
+        )
+        self._ctrl_z_notice_action.triggered.connect(
+            lambda: self.explain_ctrl_z(None)
+        )
+        self.addAction(self._ctrl_z_notice_action)
         self.redo_action = file_menu.addAction("Redo")
         self.redo_action.setShortcut(QtGui.QKeySequence.StandardKey.Redo)
         self.redo_action.triggered.connect(self.view.redo)
@@ -20216,22 +20261,25 @@ class Window(QtWidgets.QMainWindow):
         zoom_tool_action = tools_actiongroup.addAction(
             QtGui.QAction("Zoom", tools_menu, checkable=True)
         )
+        # the tools have plain keys, like W/A/S/D for moving (Ctrl+Z is
+        # File > Undo); the others keep their older Ctrl shortcuts
+        zoom_tool_action.setShortcut("Z")
         tools_menu.addAction(zoom_tool_action)
         zoom_tool_action.setChecked(True)
         pick_tool_action = tools_actiongroup.addAction(
             QtGui.QAction("Pick", tools_menu, checkable=True)
         )
-        pick_tool_action.setShortcut("Ctrl+P")
+        pick_tool_action.setShortcuts(["P", "Ctrl+P"])
         tools_menu.addAction(pick_tool_action)
         measure_tool_action = tools_actiongroup.addAction(
             QtGui.QAction("Measure", tools_menu, checkable=True)
         )
-        measure_tool_action.setShortcut("Ctrl+M")
+        measure_tool_action.setShortcuts(["M", "Ctrl+M"])
         tools_menu.addAction(measure_tool_action)
         move_tool_action = tools_actiongroup.addAction(
             QtGui.QAction("Move", tools_menu, checkable=True)
         )
-        move_tool_action.setShortcut("Ctrl+G")
+        move_tool_action.setShortcuts(["G", "Ctrl+G"])
         move_tool_action.setToolTip(
             "Drag the localizations of the channel selected in the Tools\n"
             "settings (Ctrl+T) to change their x and y coordinates."
@@ -21832,6 +21880,77 @@ class Window(QtWidgets.QMainWindow):
                 QtGui.QKeySequence.SequenceFormat.NativeText
             )
             action.setToolTip(f"{text} ({shortcut})" if shortcut else text)
+        self._ctrl_z_notice_action.setEnabled(not self.undo_action.isEnabled())
+
+    def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        # File > Undo is triggered by its shortcut, see _undo
+        if (
+            obj is getattr(self, "undo_action", None)
+            and event.type() == QtCore.QEvent.Type.Shortcut
+        ):
+            self._undo_by_key = True
+        return super().eventFilter(obj, event)
+
+    def _undo(self) -> None:
+        """File > Undo; pressed as Ctrl+Z, see ``explain_ctrl_z``."""
+        # the native menu bar of macOS triggers the action itself, without
+        # a shortcut event; Ctrl (Cmd) is held then, unlike for a click
+        held = QtGui.QGuiApplication.queryKeyboardModifiers()
+        by_key = self._undo_by_key or bool(
+            held & QtCore.Qt.KeyboardModifier.ControlModifier
+        )
+        self._undo_by_key = False
+        label = self.view.history.undo_label
+        if self.view.undo() and by_key:
+            self.explain_ctrl_z(label)
+
+    def explain_ctrl_z(self, label: str | None) -> None:
+        """Tell, when Ctrl+Z is pressed, that it undoes the last step
+        rather than selecting the Zoom tool, as before Picasso 1.0, which
+        is now Z. Not shown if ``Show Ctrl+Z notice`` is False in the
+        user settings; ticking "Don't show again" sets it to False.
+
+        Parameters
+        ----------
+        label : str or None
+            Name of the step undone, None if there was nothing to undo.
+        """
+        if not ctrl_z_notice_setting():
+            return
+        native = QtGui.QKeySequence.SequenceFormat.NativeText
+        undo_key = self.undo_action.shortcut().toString(native)
+        redo_key = self.redo_action.shortcut().toString(native)
+        if label is None:
+            done = "There was nothing to undo."
+        else:
+            done = (
+                f'It undid "{label}"; {redo_key} (File > Redo) puts it'
+                " back."
+            )
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Icon.Information)
+        box.setWindowTitle("Undo")
+        box.setText(
+            f"{undo_key} undoes the last step that changed the"
+            f" localizations, the picks or the measurements (File > Undo)."
+            f" {done}\n\nThe Zoom tool, which {undo_key} selected before"
+            " Picasso 1.0, is now selected with Z."
+        )
+        box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
+        zoom_button = box.addButton(
+            "Select Zoom tool", QtWidgets.QMessageBox.ButtonRole.ActionRole
+        )
+        dont_show = QtWidgets.QCheckBox("Don't show again")
+        box.setCheckBox(dont_show)
+        box.exec()
+        if dont_show.isChecked():
+            settings = io.load_user_settings()
+            if isinstance(settings["Render"], dict):
+                settings["Render"][CTRL_Z_NOTICE_KEY] = False
+                io.save_user_settings(settings)
+        if box.clickedButton() is zoom_button:
+            tools = self.tools_actiongroup.actions()
+            next(a for a in tools if a.text() == "Zoom").trigger()
 
     def link_channels_changed(self, changes: list[tuple]) -> None:
         """Pass changed channels on to the linked windows sharing them;

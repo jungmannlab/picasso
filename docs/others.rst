@@ -279,6 +279,9 @@ Top level
    * - ``Confirm removing all localizations``
      - ``False``
      - ``True`` asks for confirmation before ``File > Remove all localizations``. Ticking *Don't ask again* in the question sets it to ``False``. See :ref:`render-remove-all-localizations`.
+   * - ``Show Ctrl+Z notice``
+     - ``True``
+     - Pressing :kbd:`Ctrl+Z` in Render shows a notice that tells that it undoes the last step rather than selecting the Zoom tool (now :kbd:`Z`), as before Picasso 1.0. Ticking *Don't show again* in the notice sets it to ``False``.
    * - ``Colorbar format``
      - ``.png``
      - Format of the exported colorbar/LUT image next to a "render by property" export - ``.png`` or ``.svg``. See :ref:`render-colorbar-format`.

@@ -87,17 +87,17 @@ Navigating the image
 What the mouse buttons do on the image depends on the active
 tool, selected in the ``Tools`` menu:
 
-- :ref:`Zoom <render-zoom>` (the default): drag with the left button to zoom
-  into a rectangle, drag with the right button to pan.
-- :ref:`Pick <render-pick>` (:kbd:`Ctrl+P`) selects regions of localizations
+- :ref:`Zoom <render-zoom>` (:kbd:`Z`, the default): drag with the left
+  button to zoom into a rectangle, drag with the right button to pan.
+- :ref:`Pick <render-pick>` (:kbd:`P`) selects regions of localizations
   for further analysis (see :doc:`render/picking`): the left button draws a
   pick, the right button removes the pick under the cursor, whatever its
   shape (with the polygon shape selected, it removes the last vertex of the
   polygon being drawn instead).
-- :ref:`Measure <render-measure>` (:kbd:`Ctrl+M`) measures distances on the
+- :ref:`Measure <render-measure>` (:kbd:`M`) measures distances on the
   image: the left button adds a point, the right button finishes the current
   measurement or, clicked again, deletes the last one.
-- :ref:`Move <render-move>` (:kbd:`Ctrl+G`): drag with the left button to move
+- :ref:`Move <render-move>` (:kbd:`G`): drag with the left button to move
   the localizations of the selected channels, e.g., to register channels by
   eye. The right button has no function here.
 

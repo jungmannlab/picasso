@@ -12,6 +12,10 @@ behaves and looks.
 Zoom
 ----
 
+.. rst-class:: shortcut
+
+Shortcut: :kbd:`Z`
+
 Selects the zoom tool. Dragging a rectangle with the left mouse button (in any
 direction) zooms into it; a right click (or :kbd:`Esc`) while dragging cancels
 it. Dragging with the right mouse button pans. Panning is also available
@@ -26,7 +30,7 @@ Pick
 
 .. rst-class:: shortcut
 
-Shortcut: :kbd:`Ctrl+P`
+Shortcut: :kbd:`P` or :kbd:`Ctrl+P`
 
 Selects the pick tool. The mouse can now be used for picking localizations.
 The user can set the pick shape in the ``Tools settings`` (:kbd:`Ctrl+T`)
@@ -54,7 +58,7 @@ Measure
 
 .. rst-class:: shortcut
 
-Shortcut: :kbd:`Ctrl+M`
+Shortcut: :kbd:`M` or :kbd:`Ctrl+M`
 
 Selects the measure tool, which is used to measure distances on the rendered
 image.
@@ -87,7 +91,7 @@ Move
 
 .. rst-class:: shortcut
 
-Shortcut: :kbd:`Ctrl+G`
+Shortcut: :kbd:`G` or :kbd:`Ctrl+G`
 
 Selects the move tool, which changes the x and y coordinates of localizations
 by dragging them with the left mouse button, e.g., to register channels by

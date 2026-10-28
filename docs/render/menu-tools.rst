@@ -6,10 +6,10 @@ Tools Menu
 The first four entries select the active tool, and ``Tools settings...``
 (:kbd:`Ctrl+T`) sets how the tools behave and look; see :doc:`tools`:
 
-- ``Zoom``, see :ref:`render-zoom`;
-- ``Pick`` (:kbd:`Ctrl+P`), see :ref:`render-pick`;
-- ``Measure`` (:kbd:`Ctrl+M`), see :ref:`render-measure`;
-- ``Move`` (:kbd:`Ctrl+G`), see :ref:`render-move`;
+- ``Zoom`` (:kbd:`Z`), see :ref:`render-zoom`;
+- ``Pick`` (:kbd:`P` or :kbd:`Ctrl+P`), see :ref:`render-pick`;
+- ``Measure`` (:kbd:`M` or :kbd:`Ctrl+M`), see :ref:`render-measure`;
+- ``Move`` (:kbd:`G` or :kbd:`Ctrl+G`), see :ref:`render-move`;
 - ``Tools settings...`` (:kbd:`Ctrl+T`), see :ref:`render-tools-settings`.
 
 The remaining entries work on the picks and the localizations:

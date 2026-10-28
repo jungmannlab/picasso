@@ -216,16 +216,153 @@ def test_file_menu_toolbar_and_shortcuts(window):
     ):
         # the platform's first binding, e.g., Ctrl+Z (Cmd+Z on macOS)
         assert action.shortcut() == QtGui.QKeySequence.keyBindings(key)[0]
-    # Ctrl+Z was the Zoom tool's
+    # Ctrl+Z was the Zoom tool's, which now has Z alone
     zoom = next(
         a for a in window.tools_actiongroup.actions() if a.text() == "Zoom"
     )
-    assert zoom.shortcut().isEmpty()
+    assert zoom.shortcut() == QtGui.QKeySequence("Z")
     toolbar = window.toolbar.actions()
     assert window.undo_action in toolbar and window.redo_action in toolbar
     # the old undos are gone
     assert not any(path.endswith("Undo drift") for path in menus)
     assert not hasattr(window.tools_settings_dialog, "move_undo_button")
+
+
+def test_single_keys_select_the_tools(window, qt_offscreen):
+    from PyQt6 import QtTest
+
+    tools = {a.text(): a for a in window.tools_actiongroup.actions()}
+    window.show()
+    window.activateWindow()
+    qt_offscreen.processEvents()
+    for key, tool in (
+        (QtCore.Qt.Key.Key_P, "Pick"),
+        (QtCore.Qt.Key.Key_M, "Measure"),
+        (QtCore.Qt.Key.Key_G, "Move"),
+        (QtCore.Qt.Key.Key_Z, "Zoom"),
+    ):
+        QtTest.QTest.keyClick(window.view, key)
+        assert tools[tool].isChecked()
+        assert window.view._mode == tool
+    # the older Ctrl shortcuts stay
+    assert tools["Pick"].shortcuts()[1] == QtGui.QKeySequence("Ctrl+P")
+    # a text field takes the key instead
+    field = QtWidgets.QLineEdit(window)
+    tools["Pick"].trigger()
+    field.setFocus()
+    QtTest.QTest.keyClick(field, QtCore.Qt.Key.Key_Z)
+    assert field.text() == "z"
+    assert window.view._mode == "Pick"
+
+
+class _Shown(list):
+    """Message boxes shown; ``answer`` is called with each, e.g., to
+    tick its check box or click a button."""
+
+    @staticmethod
+    def answer(box):
+        pass
+
+
+@pytest.fixture
+def notices(monkeypatch) -> _Shown:
+    """The message boxes shown with ``exec``, see ``_Shown``."""
+    shown = _Shown()
+
+    def exec_(box):
+        shown.append(box)
+        shown.answer(box)
+        return 0
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "exec", exec_)
+    return shown
+
+
+def _press_ctrl_z(window, qapp) -> None:
+    from PyQt6 import QtTest
+
+    window.show()
+    window.activateWindow()
+    qapp.processEvents()
+    ctrl = QtCore.Qt.KeyboardModifier.ControlModifier
+    QtTest.QTest.keyClick(window.view, QtCore.Qt.Key.Key_Z, ctrl)
+    # let go of Ctrl, which _undo asks for
+    QtTest.QTest.keyRelease(window.view, QtCore.Qt.Key.Key_Control)
+    qapp.processEvents()
+
+
+def test_ctrl_z_explains_itself_until_turned_off(
+    window, qt_offscreen, notices
+):
+    view = window.view
+    before = _copies(view)
+    _drag(view, 2, 0)
+    _drag(view, 0, 2)
+    window.undo_action.trigger()  # from the menu: no notice
+    assert not notices
+    _press_ctrl_z(window, qt_offscreen)
+    _assert_locs(view, before)  # it also undid
+    (box,) = notices
+    assert 'It undid "Move"' in box.text()
+    assert "now selected with Z" in box.text()
+    # without "Don't show again", the next Ctrl+Z explains again
+    view.redo()
+    _press_ctrl_z(window, qt_offscreen)
+    assert len(notices) == 2
+    _assert_locs(view, before)
+
+
+def test_ctrl_z_from_the_native_menu_bar_explains_itself(
+    window, notices, monkeypatch
+):
+    """The menu bar of macOS triggers File > Undo itself for Cmd+Z,
+    without a shortcut event; Cmd (Ctrl to Qt) is held then."""
+    _drag(window.view, 2, 0)
+    monkeypatch.setattr(
+        QtGui.QGuiApplication,
+        "queryKeyboardModifiers",
+        staticmethod(lambda: QtCore.Qt.KeyboardModifier.ControlModifier),
+    )
+    window.undo_action.trigger()
+    (box,) = notices
+    assert 'It undid "Move"' in box.text()
+
+
+def test_ctrl_z_with_nothing_to_undo_explains_itself(
+    window, qt_offscreen, notices
+):
+    tools = {a.text(): a for a in window.tools_actiongroup.actions()}
+    tools["Pick"].trigger()
+
+    def select_zoom(box):
+        (zoom,) = [b for b in box.buttons() if b.text() == "Select Zoom tool"]
+        zoom.click()
+
+    notices.answer = select_zoom
+    _press_ctrl_z(window, qt_offscreen)
+    (box,) = notices
+    assert "There was nothing to undo." in box.text()
+    assert window.view._mode == "Zoom"
+
+
+def test_ctrl_z_notice_can_be_turned_off(
+    window, qt_offscreen, notices, tmp_path
+):
+    notices.answer = lambda box: box.checkBox().setChecked(True)
+    _press_ctrl_z(window, qt_offscreen)
+    assert len(notices) == 1
+    settings = io.load_user_settings()
+    assert settings["Render"][gui_render.CTRL_Z_NOTICE_KEY] is False
+    _press_ctrl_z(window, qt_offscreen)
+    assert len(notices) == 1
+    other = gui_render.Window(plugins_loaded=True)
+    try:
+        _add(other, tmp_path / "other.hdf5", _locs())
+        _show(other)
+        _press_ctrl_z(other, qt_offscreen)
+        assert len(notices) == 1
+    finally:
+        _close(other)
 
 
 def test_tooltips_name_the_step(window):

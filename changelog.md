@@ -34,6 +34,7 @@ Last change: 28-OCT-2026 CEST
 - `View > 3D view` (Ctrl+Shift+R, replacing *Update rotation window*) opens the rotation window on the single selected pick or, without a pick, on the current field of view, so any region can be inspected in 3D by zooming to it; pressed again on unchanged content it only raises the window.
 - **Linked windows** that share user-selected attributes, see [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-view.html#render-new-linked-window).
 - **Undo and redo** for most actions that affect localizations, e.g., drift correction, and for picks and measurements. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-file.html#render-undo).
+- The tools have single-key shortcuts: `Z` (Zoom, whose Ctrl+Z is now Undo), `P` (Pick), `M` (Measure) and `G` (Move); Ctrl+P, Ctrl+M and Ctrl+G still work.
 - New blur methods *Adaptive Histogram (Quad-Tree)* and *Jittered Triangulation* (Baddeley, Cannell & Soeller, *Microsc. Microanal.* 2010). See the [blur documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-blur).
 - Picks of different sizes and shapes allowed, see the [documentation](https://picassosr.readthedocs.io/en/latest/render/picking.html#render-pick-sizes).
 - The display settings (main and 3D window) show the minimum blur only for the Gaussian blur methods that use it.

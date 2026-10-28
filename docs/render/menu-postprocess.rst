@@ -317,7 +317,7 @@ Otherwise, the tiles lie on top of each other. Stitching only searches within
 the **Search radius** around the current positions, so it cannot find the
 tiles' places on its own. Place the tiles by hand first:
 
-#. Select the :ref:`Move tool <render-move>` (:kbd:`Ctrl+G`).
+#. Select the :ref:`Move tool <render-move>` (:kbd:`G`).
 #. In ``Tools settings`` (:kbd:`Ctrl+T`), select the channels of one tile.
    With several targets per tile, select all of them so that they move
    together.
