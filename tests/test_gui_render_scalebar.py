@@ -83,17 +83,17 @@ def test_appearance_reaches_the_drawing(window, monkeypatch):
     box = window.display_settings_dlg.scalebar_groupbox
     box.setChecked(True)
     box.print_length.setChecked(True)
-    box.position.setCurrentText("Top left")
-    box.margin_x.setValue(12)
-    box.margin_y.setValue(8)
-    box.thickness.setValue(3)
-    box.color.set_value("Cyan")
-    box.background.setValue(50)
-    box.units.setCurrentText("µm")
-    box.label_position.setCurrentText("Below the bar")
-    box.font_size.setValue(15)
-    box.bold.setChecked(True)
-    box.italic.setChecked(True)
+    box.style_widget.position.setCurrentText("Top left")
+    box.style_widget.margin_x.setValue(12)
+    box.style_widget.margin_y.setValue(8)
+    box.style_widget.thickness.setValue(3)
+    box.style_widget.color.set_value("Cyan")
+    box.style_widget.background.setValue(50)
+    box.style_widget.units.setCurrentText("µm")
+    box.style_widget.label_position.setCurrentText("Below the bar")
+    box.style_widget.font_size.setValue(15)
+    box.style_widget.bold.setChecked(True)
+    box.style_widget.italic.setChecked(True)
     calls.clear()
     with theme.unscaled_text():
         window.view.draw_scalebar(_image())
@@ -150,21 +150,21 @@ def test_unused_settings_are_grayed_out(window):
     window.display_settings_dlg.show()
     box.setChecked(True)
     text_widgets = [
-        box.units,
-        box.label_position,
-        box.font_family,
-        box.font_size,
-        box.bold,
-        box.italic,
+        box.style_widget.units,
+        box.style_widget.label_position,
+        box.style_widget.font_family,
+        box.style_widget.font_size,
+        box.style_widget.bold,
+        box.style_widget.italic,
     ]
     box.print_length.setChecked(False)
     assert not any(w.isEnabled() for w in text_widgets)
     box.print_length.setChecked(True)
     assert all(w.isEnabled() for w in text_widgets)
-    assert box.margin_x.isEnabled()
-    box.position.setCurrentText("Bottom center")
-    assert not box.margin_x.isEnabled()  # centered horizontally
-    assert box.margin_y.isEnabled()
+    assert box.style_widget.margin_x.isEnabled()
+    box.style_widget.position.setCurrentText("Bottom center")
+    assert not box.style_widget.margin_x.isEnabled()  # centered horizontally
+    assert box.style_widget.margin_y.isEnabled()
 
 
 def test_reset_keeps_the_length(qt_offscreen, monkeypatch):
@@ -174,16 +174,16 @@ def test_reset_keeps_the_length(qt_offscreen, monkeypatch):
     box = ScaleBarGroupBox()
     box.auto_length.setChecked(False)
     box.length.setValue(321)
-    box.position.setCurrentText("Top center")
-    box.thickness.setValue(2)
-    box.bold.setChecked(True)
-    box.italic.setChecked(True)
-    box.reset_appearance()
+    box.style_widget.position.setCurrentText("Top center")
+    box.style_widget.thickness.setValue(2)
+    box.style_widget.bold.setChecked(True)
+    box.style_widget.italic.setChecked(True)
+    box.style_widget.reset()
     assert box.length.value() == 321
-    assert box.position.currentText() == "Bottom right"
-    assert box.thickness.value() == 10
-    assert not box.bold.isChecked()
-    assert not box.italic.isChecked()
+    assert box.style_widget.position.currentText() == "Bottom right"
+    assert box.style_widget.thickness.value() == 10
+    assert not box.style_widget.bold.isChecked()
+    assert not box.style_widget.italic.isChecked()
 
 
 def test_export_with_a_hidden_scale_bar_saves_a_copy_with_it(
@@ -192,8 +192,8 @@ def test_export_with_a_hidden_scale_bar_saves_a_copy_with_it(
     """The extra ``_scalebar`` image is drawn as set up, and the view
     and the exported image stay without the scale bar."""
     box = window.display_settings_dlg.scalebar_groupbox
-    box.position.setCurrentText("Top left")
-    box.thickness.setValue(6)
+    box.style_widget.position.setCurrentText("Top left")
+    box.style_widget.thickness.setValue(6)
     window.view.update_scene()
     path = tmp_path / "view.png"
     monkeypatch.setattr(
@@ -217,13 +217,13 @@ def test_settings_are_saved_and_restored(qt_offscreen, tmp_path):
     box_3d = window.window_rot.display_settings_dlg.scalebar_groupbox
     box_2d.length.setValue(750)  # ends the automatic length
     box_2d.print_length.setChecked(True)
-    box_2d.position.setCurrentText("Top center")
-    box_2d.margin_y.setValue(5)
-    box_2d.color.set_value("#ABCDEF")
-    box_2d.units.setCurrentText("Automatic")
-    box_2d.bold.setChecked(True)
-    box_2d.italic.setChecked(True)
-    box_3d.thickness.setValue(4)
+    box_2d.style_widget.position.setCurrentText("Top center")
+    box_2d.style_widget.margin_y.setValue(5)
+    box_2d.style_widget.color.set_value("#ABCDEF")
+    box_2d.style_widget.units.setCurrentText("Automatic")
+    box_2d.style_widget.bold.setChecked(True)
+    box_2d.style_widget.italic.setChecked(True)
+    box_3d.style_widget.thickness.setValue(4)
     window.close()
 
     saved = yaml.safe_load((tmp_path / "settings.yaml").read_text())
@@ -250,8 +250,8 @@ def test_settings_are_saved_and_restored(qt_offscreen, tmp_path):
     assert kwargs["units"] == "auto"
     assert kwargs["bold"] is True
     assert kwargs["italic"] is True
-    assert not box_3d.italic.isChecked()
-    assert box_3d.thickness.value() == 4
+    assert not box_3d.style_widget.italic.isChecked()
+    assert box_3d.style_widget.thickness.value() == 4
     assert box_3d.style_kwargs()["position"] == "bottom right"
     window.view.stop_render_worker()
 
@@ -272,7 +272,7 @@ def test_a_saved_length_is_ignored(qt_offscreen):
     box = window.display_settings_dlg.scalebar_groupbox
     assert box.length.value() == 500
     assert box.auto_length.isChecked()
-    assert box.position.currentText() == "Top left"
+    assert box.style_widget.position.currentText() == "Top left"
     window.view.stop_render_worker()
 
 
@@ -321,10 +321,10 @@ def test_scale_bar_is_mirrored_to_linked_windows(qt_offscreen, tmp_path):
         src.setChecked(False)
         src.setChecked(True)
         assert dst.isChecked()
-        src.position.setCurrentText("Top right")
-        src.background.setValue(40)
-        assert dst.position.currentText() == "Top right"
-        assert dst.background.value() == 40
+        src.style_widget.position.setCurrentText("Top right")
+        src.style_widget.background.setValue(40)
+        assert dst.style_widget.position.currentText() == "Top right"
+        assert dst.style_widget.background.value() == 40
         # an automatic length follows each window's own zoom
         assert dst.auto_length.isChecked()
         assert dst.length.value() == secondary.view.optimal_scalebar_length()
@@ -355,8 +355,8 @@ def test_animation_gets_the_appearance(
     )
     box = dialog.window.display_settings_dlg.scalebar_groupbox
     box.setChecked(True)
-    box.position.setCurrentText("Top left")
-    box.font_size.setValue(18)
+    box.style_widget.position.setCurrentText("Top left")
+    box.style_widget.font_size.setValue(18)
     dialog.build_animation()
     _wait_until(qapp, lambda: dialog._build_thread is None)
     style = received[-1]["scalebar_style"]

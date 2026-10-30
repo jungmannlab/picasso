@@ -37,6 +37,7 @@ from .. import (
     notifications,
     postprocess,
     registration,
+    render,
     scmos,
     spline,
     wavelet,
@@ -52,6 +53,7 @@ from ..fitting import precision, residualfit, splinefit
 from .app import run_gui
 from . import theme
 from . import toolbars
+from .scalebar_settings import ScaleBarOptions
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 CUDA_AVAILABLE = localize.CUDA_AVAILABLE
@@ -1384,14 +1386,17 @@ class View(QtWidgets.QGraphicsView):
         self.window.zoom(scale, anchor=event.position().toPoint())
 
     def on_scroll(self) -> None:
-        """Redraw the frame if scale bar is shown."""
-        # draw_frame() rebuilds the scene, which can change the scrollbar
-        # values and re-fire valueChanged; skip while a draw is in progress
-        # to avoid unbounded re-entrant recursion.
-        if self.window._drawing_frame:
-            return
+        """Repaint the scale bar, if shown: it stays in place while the
+        frame scrolls."""
         if self.window.scalebar_action.isChecked():
-            self.window.draw_frame()
+            self.viewport().update()
+
+    def drawForeground(
+        self, painter: QtGui.QPainter, rect: QtCore.QRectF
+    ) -> None:
+        """Paint the scale bar, if shown, over the frame."""
+        super().drawForeground(painter, rect)
+        self.window.paint_scalebar(painter)
 
 
 class Scene(QtWidgets.QGraphicsScene):
@@ -7047,6 +7052,11 @@ class Window(QtWidgets.QMainWindow):
         self.resize(768, 768)
         self.parameters_dialog = ParametersDialog(self)
         self.contrast_dialog = ContrastDialog(self)
+        # the look of the scale bar is shared with SPINNA
+        self.scalebar_options = ScaleBarOptions(
+            "Localize", "Print scale bar length", True, parent=self
+        )
+        self.scalebar_options.changed.connect(self._update_scalebar)
         self.columns_dialog = LocColumnSelectionDialog(self)
         self.metadata_dialog = lib.MetadataDialog(self)
         self.user_settings_dialog = lib.UserSettingsDialog(self)
@@ -7180,7 +7190,7 @@ class Window(QtWidgets.QMainWindow):
         self.status_bar_frame_indicator = QtWidgets.QLabel()
         self.status_bar.addPermanentWidget(self.status_bar_frame_indicator)
 
-        # re-entrancy guard for draw_frame (see on_scroll)
+        # re-entrancy guard for draw_frame
         self._drawing_frame = False
         # Holds the curr movie as a numpy memmap in the format
         # (frame, y, x)
@@ -7717,8 +7727,12 @@ class Window(QtWidgets.QMainWindow):
         self.scalebar_action = view_menu.addAction("Show scale bar")
         self.scalebar_action.setCheckable(True)
         self.scalebar_action.setChecked(False)
-        self.scalebar_action.triggered.connect(self.draw_frame)
+        self.scalebar_action.triggered.connect(self._update_scalebar)
         view_menu.addAction(self.scalebar_action)
+        scalebar_settings_action = view_menu.addAction("Scale bar settings...")
+        scalebar_settings_action.triggered.connect(
+            lambda: self.scalebar_options.show_dialog(self)
+        )
 
         """ Analyze """
         analyze_menu = menu_bar.addMenu("Analyze")
@@ -10145,8 +10159,8 @@ class Window(QtWidgets.QMainWindow):
         contrast, add identifications and fit markers, if applicable."""
         if self.movie is None:
             return
-        # rebuilding the scene can change scrollbar values and re-fire
-        # valueChanged -> on_scroll -> draw_frame; guard against unbounded
+        # rebuilding the scene can change scrollbar values and fire
+        # signals that draw the frame again; guard against unbounded
         # re-entrant recursion.
         if self._drawing_frame:
             return
@@ -10302,7 +10316,6 @@ class Window(QtWidgets.QMainWindow):
                     )
                     marker.setToolTip(format_hover_tooltip(loc))
                     self.scene.addItem(marker)
-            self.draw_scalebar()
 
     def set_affine_pairing(self, qc: dict) -> None:
         """Keep the bead pairing of an affine calibration so it can be drawn
@@ -11308,96 +11321,64 @@ class Window(QtWidgets.QMainWindow):
             for j in range(len(cur_xy))
         ]
 
-    def draw_scalebar(self) -> None:
-        """Draw a scale bar if the option is checked."""
-        if not self.scalebar_action.isChecked():
-            return
+    def _update_scalebar(self, *args) -> None:
+        """Repaint the view with or without the scale bar."""
+        self.view.viewport().update()
 
-        scene_pixelsize = self.parameters_dialog.pixelsize.value()
-
-        # length (nm) - set optimal size (~1/8 of image width)
+    def scalebar_viewport(
+        self,
+    ) -> tuple[tuple[float, float], tuple[float, float]] | None:
+        """The part of the frame shown in the view, ``((y_min, x_min),
+        (y_max, x_max))`` in nm, or None before the view is laid out."""
         rect = self.view.viewport().rect()
-        visible_scene_rect = self.view.mapToScene(rect).boundingRect()
-        width = visible_scene_rect.width()
-        # the view may not be laid out yet (e.g. slow/network loads), in
-        # which case ``width`` is 0 and there is nothing to draw
-        if width <= 0:
+        visible = self.view.mapToScene(rect).boundingRect()
+        if visible.width() <= 0 or visible.height() <= 0:
+            return None
+        pixelsize = self.parameters_dialog.pixelsize.value()
+        return (
+            (visible.top() * pixelsize, visible.left() * pixelsize),
+            (visible.bottom() * pixelsize, visible.right() * pixelsize),
+        )
+
+    def scalebar_length(self) -> int | None:
+        """Length (nm) of the scale bar: approx. 1/8 of the width shown
+        in the view, rounded; None if no scale bar is shown, e.g., if
+        it is hidden or would be shorter than a screen pixel."""
+        if self.movie is None or not self.scalebar_action.isChecked():
+            return None
+        viewport = self.scalebar_viewport()
+        if viewport is None:
+            return None
+        width_nm = render.viewport_width(viewport)
+        length = render.optimal_scalebar_length(width_nm)
+        length_px = length / width_nm * self.view.viewport().width()
+        if length <= 0 or length_px < 1:
+            return None
+        return length
+
+    def paint_scalebar(self, painter: QtGui.QPainter) -> None:
+        """Paint the scale bar, if shown, over the view in screen pixels,
+        see ``scalebar_options``.
+
+        Parameters
+        ----------
+        painter : QPainter
+            Painter of the view's viewport.
+        """
+        length = self.scalebar_length()
+        if length is None:
             return
-        width_nm = width * scene_pixelsize
-        optimal_scalebar = width_nm / 8
-
-        # approximate to the nearest thousands, hundreds, tens or ones
-        if optimal_scalebar > 10_000:
-            scalebar = 10_000
-        elif optimal_scalebar > 1_000:
-            scalebar = int(1_000 * round(optimal_scalebar / 1_000))
-        elif optimal_scalebar > 100:
-            scalebar = int(100 * round(optimal_scalebar / 100))
-        elif optimal_scalebar > 10:
-            scalebar = int(10 * round(optimal_scalebar / 10))
-        else:
-            scalebar = int(round(optimal_scalebar))
-
-        # position against the viewport (the drawable area) rather than
-        # the whole view, so the bar is not covered by the scrollbar
-        # gutters (opaque on Windows, overlaid on macOS)
-        viewport_width = self.view.viewport().width()
-        viewport_height = self.view.viewport().height()
-        length_displaypxl = int(
-            round(viewport_width * (scalebar / scene_pixelsize) / width)
+        painter.save()
+        painter.resetTransform()  # screen pixels, not the frame's
+        render._paint_scalebar(
+            painter,
+            self.view.viewport().width(),
+            self.view.viewport().height(),
+            self.scalebar_viewport(),
+            length,
+            **self.scalebar_options.draw_kwargs(),
         )
-        # when zoomed in far enough the scale bar rounds down to 0 nm /
-        # 0 display pixels; skip drawing to avoid a division by zero below
-        if scalebar <= 0 or length_displaypxl <= 0:
-            return
-        height_displaypxl = 10
-
-        # draw a rectangle
-        x = viewport_width - length_displaypxl - 40
-        y = viewport_height - height_displaypxl - 20
-        pen = QtGui.QPen(QtCore.Qt.PenStyle.NoPen)
-        brush = QtGui.QBrush(QtGui.QColor("white"))
-        polygon = self.view.mapToScene(
-            x,
-            y,
-            length_displaypxl,
-            height_displaypxl,
-        )
-        x_scene = polygon.boundingRect().x()
-        y_scene = polygon.boundingRect().y()
-        length_scene = polygon.boundingRect().width()
-        height_scene = polygon.boundingRect().height()
-        self.scene.addRect(
-            x_scene,
-            y_scene,
-            length_scene,
-            height_scene,
-            pen,
-            brush,
-        )
-
-        # add scale bar text
-        font = QtGui.QFont()
-        font.setPointSize(20)
-        text_item = self.scene.addText(f"{scalebar} nm", font)
-        text_item.setDefaultTextColor(QtGui.QColor("white"))
-        # scene units per device pixel (uniform zoom, but keep x/y
-        # separate to be safe)
-        scene_per_px_x = length_scene / length_displaypxl
-        scene_per_px_y = height_scene / height_displaypxl
-        # position the text centered above the scale bar, with a fixed
-        # device-pixel gap so the spacing looks the same at every zoom
-        text_rect = text_item.boundingRect()
-        text_width = text_rect.width() * scene_per_px_x
-        text_height = text_rect.height() * scene_per_px_y
-        gap = 8 * scene_per_px_y
-        text_x = x_scene + (length_scene - text_width) / 2
-        text_y = y_scene - gap - text_height
-        text_item.setPos(text_x, text_y)
-        text_item.setFlag(
-            QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations,  # noqa: E501
-            True,
-        )
+        painter.restore()
 
     def region_mngs(self) -> list[int]:
         """Per-region minimum net gradients in split-FOV mode, kept in step
@@ -14677,6 +14658,26 @@ class Window(QtWidgets.QMainWindow):
                 QtCore.Qt.AspectRatioMode.KeepAspectRatio,
             )
             painter.end()
+            length = self.scalebar_length()
+            if length is not None:
+                # as on screen, with the text sizes exports always had
+                pixelsize = self.parameters_dialog.pixelsize.value()
+                with theme.unscaled_text():
+                    qimage = render.draw_scalebar(
+                        image=qimage,
+                        viewport=(
+                            (
+                                scene_rect.top() * pixelsize,
+                                scene_rect.left() * pixelsize,
+                            ),
+                            (
+                                scene_rect.bottom() * pixelsize,
+                                scene_rect.right() * pixelsize,
+                            ),
+                        ),
+                        scalebar_length_nm=length,
+                        **self.scalebar_options.draw_kwargs(),
+                    )
             qimage.save(path)
         self.view.setMinimumSize(1, 1)
 

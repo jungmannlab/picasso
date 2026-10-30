@@ -932,6 +932,10 @@ def isolated_user_settings(tmp_path, monkeypatch):
     monkeypatch.setattr(io, "_settings_load_error", None)
     monkeypatch.setattr(io, "_settings_load_error_dismissed", False)
     monkeypatch.setattr(picasso, "CONFIG_LOAD_ERROR", None)
+    # the shared look of the scale bars is read from this file anew
+    scalebar_settings = sys.modules.get("picasso.gui.scalebar_settings")
+    if scalebar_settings is not None:
+        monkeypatch.setattr(scalebar_settings, "_hub", None)
 
 
 @pytest.fixture(autouse=True)

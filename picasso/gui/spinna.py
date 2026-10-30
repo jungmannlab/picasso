@@ -39,6 +39,7 @@ from scipy.spatial.transform import Rotation
 from .. import io, lib, lib_qt, render, spinna, __version__, docs_url
 from .app import run_gui
 from . import theme
+from .scalebar_settings import ScaleBarOptions
 
 matplotlib.use("agg")
 
@@ -401,6 +402,7 @@ class MaskPreview(QtWidgets.QWidget):
                     (y_max * pixelsize, x_max * pixelsize),
                 ),
                 scalebar_length_nm=self.mask_tab.scalebar_length.value(),
+                **self.mask_tab.scalebar_options.draw_kwargs(),
             )
         cx, cy = self.center
         origin = QtCore.QPointF(
@@ -520,7 +522,9 @@ class MaskPreview(QtWidgets.QWidget):
 
     def save_current_view(self) -> None:
         """Save the current view as png or tif."""
-        rendered = self.render_view()
+        # with the text sizes exports always had
+        with theme.unscaled_text():
+            rendered = self.render_view()
         if rendered is None:
             return
         path, _ = lib.get_save_filename_ext_dialog(
@@ -813,7 +817,11 @@ class MaskGeneratorTab(lib.Dialog):
         self.zslice_slider.setVisible(False)
         display_layout.addWidget(self.zslice_slider, 0, 1)
 
-        # scalebar
+        # scalebar, its look shared with Localize
+        self.scalebar_options = ScaleBarOptions(
+            "SPINNA", "Print scale bar length (mask)", True, parent=self
+        )
+        self.scalebar_options.changed.connect(self.preview.update)
         self.scalebar_check = QtWidgets.QCheckBox("Scale bar (nm):")
         self.scalebar_check.setChecked(False)
         self.scalebar_check.setEnabled(False)
@@ -828,7 +836,10 @@ class MaskGeneratorTab(lib.Dialog):
         self.scalebar_length.valueChanged.connect(
             lambda _: self.preview.update()
         )
-        display_layout.addWidget(self.scalebar_length, 1, 1)
+        scalebar_row = QtWidgets.QHBoxLayout()
+        scalebar_row.addWidget(self.scalebar_length, 1)
+        scalebar_row.addWidget(self.scalebar_options.settings_button(self))
+        display_layout.addLayout(scalebar_row, 1, 1)
 
         self.fig = plt.Figure(
             figsize=MASK_LEGEND_FIGSIZE,
@@ -1401,16 +1412,14 @@ class StructurePreview(QtWidgets.QLabel):
         ):
             return image
 
-        # draw scalebar
-        painter = QtGui.QPainter(image)
-        length = int(self.structure_tab.scalebar_length.value() * self.factor)
-        height = 10
-        painter.setBrush(QtGui.QBrush(QtGui.QColor("white")))
-        x = STRUCTURE_PREVIEW_SIZE - length - 35
-        y = STRUCTURE_PREVIEW_SIZE - height - 20
-        painter.drawRect(x, y, length, height)
-        painter.end()
-        return image
+        # the preview shows STRUCTURE_PREVIEW_SIZE / factor nm
+        size_nm = STRUCTURE_PREVIEW_SIZE / self.factor
+        return render.draw_scalebar(
+            image=image,
+            viewport=((0, 0), (size_nm, size_nm)),
+            scalebar_length_nm=self.structure_tab.scalebar_length.value(),
+            **self.structure_tab.scalebar_options.draw_kwargs(),
+        )
 
     def draw_rotation(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw a small 3 axes icon that rotates with the molecular,
@@ -1582,7 +1591,16 @@ class StructuresTab(lib.Dialog):
         self.show_scalebar_check = QtWidgets.QCheckBox("Show scale bar")
         self.show_scalebar_check.setChecked(True)
         self.show_scalebar_check.stateChanged.connect(self.update_preview)
-        preview_layout.addWidget(self.show_scalebar_check, 2, 1)
+        # the look of the scale bar is shared with Localize
+        self.scalebar_options = ScaleBarOptions(
+            "SPINNA", "Print scale bar length (structures)", False, parent=self
+        )
+        self.scalebar_options.changed.connect(self.update_preview)
+        scalebar_row = QtWidgets.QHBoxLayout()
+        scalebar_row.addWidget(self.show_scalebar_check)
+        scalebar_row.addWidget(self.scalebar_options.settings_button(self))
+        scalebar_row.addStretch()
+        preview_layout.addLayout(scalebar_row, 2, 1)
 
         length_label = QtWidgets.QLabel("Length (nm):")
         length_label.setToolTip("Scale bar length.")
@@ -2010,7 +2028,11 @@ class StructuresTab(lib.Dialog):
         )
         if path:
             self.window.pwd = os.path.dirname(path)
-            self.preview.qimage.save(path)
+            # with the text sizes exports always had
+            with theme.unscaled_text():
+                self.preview.render()
+                self.preview.qimage.save(path)
+            self.preview.render()
 
 
 class GenerateSearchSpaceDialog(lib.Dialog):

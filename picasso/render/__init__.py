@@ -110,6 +110,7 @@ from .overlays_qt import (  # noqa: F401
     draw_picks,
     draw_points,
     draw_scalebar,
+    _paint_scalebar,
     _format_scalebar_length,
     draw_legend,
     _format_tick,

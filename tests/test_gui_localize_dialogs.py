@@ -29,7 +29,7 @@ import pandas as pd
 import pytest
 from PyQt6 import QtCore, QtGui, QtWidgets
 
-from picasso import io, lib, transforms
+from picasso import io, lib, render, transforms
 from picasso.gui import localize as gui_localize
 from tests.test_gui_localize_calibration import (
     ACCEPTED,
@@ -724,23 +724,26 @@ class TestSplitFovRegions:
 # ---------------------------------------------------------------------------
 
 
-def _scalebar_text(window):
-    texts = [
-        item.toPlainText()
-        for item in window.scene.items()
-        if isinstance(item, QtWidgets.QGraphicsTextItem)
-    ]
-    return texts[0] if len(texts) == 1 else texts
-
-
 def _visible_width_nm(window):
     rect = window.view.mapToScene(window.view.viewport().rect()).boundingRect()
     return rect.width() * window.parameters_dialog.pixelsize.value()
 
 
+def _viewport_image(window) -> np.ndarray:
+    image = window.view.viewport().grab().toImage()
+    image = image.convertToFormat(QtGui.QImage.Format.Format_RGB32)
+    bits = image.constBits()
+    bits.setsize(image.sizeInBytes())
+    return (
+        np.frombuffer(bits, np.uint8)
+        .reshape(image.height(), image.width(), 4)[..., :3]
+        .copy()
+    )
+
+
 class TestScaleBar:
     def test_hidden_by_default(self, shown):
-        assert _scalebar_text(shown) == []
+        assert shown.scalebar_length() is None
 
     @pytest.mark.parametrize(
         "pixelsize, step", [(0.5, 1), (5, 10), (50, 100), (500, 1000)]
@@ -750,39 +753,73 @@ class TestScaleBar:
     ):
         shown.parameters_dialog.pixelsize.setValue(pixelsize)
         shown.scalebar_action.setChecked(True)
-        shown.draw_frame()
-        text = _scalebar_text(shown)
-        length = int(text.removesuffix(" nm"))
+        length = shown.scalebar_length()
         assert length % step == 0
         assert length == pytest.approx(_visible_width_nm(shown) / 8, rel=0.5)
 
     def test_capped_at_ten_micrometers(self, shown):
         shown.parameters_dialog.pixelsize.setValue(9000)
         shown.scalebar_action.trigger()
-        assert _scalebar_text(shown) == "10000 nm"
+        assert shown.scalebar_length() == 10000
 
     def test_follows_the_zoom(self, shown):
         shown.scalebar_action.trigger()
-        before = int(_scalebar_text(shown).removesuffix(" nm"))
+        before = shown.scalebar_length()
         shown.zoom_in()
         shown.zoom_in()
-        after = int(_scalebar_text(shown).removesuffix(" nm"))
-        assert after < before
+        assert shown.scalebar_length() < before
 
     def test_not_drawn_when_rounded_to_nothing(self, shown):
         """Zoomed far in, the bar would be 0 nm long."""
         shown.parameters_dialog.pixelsize.setValue(0.01)
         shown.scalebar_action.trigger()
         shown.zoom(8)
-        assert _scalebar_text(shown) == []
+        assert shown.scalebar_length() is None
 
     def test_not_drawn_before_the_view_is_laid_out(self, loaded, monkeypatch):
         loaded.scalebar_action.setChecked(True)
         monkeypatch.setattr(
             loaded.view.viewport(), "rect", lambda: QtCore.QRect()
         )
-        loaded.draw_frame()
-        assert _scalebar_text(loaded) == []
+        assert loaded.scalebar_length() is None
+
+    def test_painted_over_the_view_with_the_shared_look(
+        self, shown, monkeypatch
+    ):
+        calls = []
+        monkeypatch.setattr(
+            gui_localize.render,
+            "_paint_scalebar",
+            lambda *args, **kwargs: calls.append((args, kwargs)),
+        )
+        shown.view.viewport().grab()
+        assert calls == []  # hidden
+        shown.scalebar_action.trigger()
+        shown.view.viewport().grab()
+        (args, kwargs), *_ = calls
+        width, height, viewport, length = args[1:]
+        assert (width, height) == (
+            shown.view.viewport().width(),
+            shown.view.viewport().height(),
+        )
+        assert length == shown.scalebar_length()
+        assert render.viewport_width(viewport) == pytest.approx(
+            _visible_width_nm(shown)
+        )
+        assert kwargs["display_length"] is True  # printed by default
+        assert kwargs["position"] == "bottom right"
+
+    def test_stays_in_place_when_scrolling(self, shown):
+        shown.scalebar_action.trigger()
+        shown.zoom_in()
+        shown.zoom_in()
+        before = _viewport_image(shown)
+        shown.view.hscrollbar.setValue(shown.view.hscrollbar.value() + 5)
+        after = _viewport_image(shown)
+        # the bottom right corner holds the bar in both
+        corner = (slice(-30, -20), slice(-60, -45))
+        assert (before[corner] == 255).all()
+        assert (after[corner] == 255).all()
 
 
 class TestZoom:

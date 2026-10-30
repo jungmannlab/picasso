@@ -1013,6 +1013,81 @@ def draw_scalebar(
     ValueError
         If ``position``, ``label_position`` or ``units`` is unknown.
     """
+    painter = QtGui.QPainter(image)
+    try:
+        _paint_scalebar(
+            painter,
+            image.width(),
+            image.height(),
+            viewport,
+            scalebar_length_nm,
+            display_length=display_length,
+            color=color,
+            display_height=display_height,
+            margin=margin,
+            text_fontsize=text_fontsize,
+            position=position,
+            label_position=label_position,
+            units=units,
+            font_family=font_family,
+            bold=bold,
+            italic=italic,
+            background_opacity=background_opacity,
+        )
+    finally:
+        painter.end()
+    return image
+
+
+def _format_scalebar_length(
+    length_nm: int | float,
+    units: Literal["nm", "um", "auto"] = "nm",
+) -> str:
+    """Text printed next to a scale bar, e.g., ``"500 nm"`` or
+    ``"1.5 µm"``.
+
+    Parameters
+    ----------
+    length_nm : int or float
+        Length of the scale bar in nm.
+    units : {"nm", "um", "auto"}, optional
+        Unit of the text: nm, µm, or µm from 1 µm on and nm below
+        ("auto"). Default is "nm".
+
+    Returns
+    -------
+    text : str
+        The length with its unit.
+    """
+    if units == "um" or (units == "auto" and length_nm >= 1000):
+        return f"{round(length_nm / 1000, 3):.10g} µm"
+    return f"{round(length_nm, 3):.10g} nm"
+
+
+def _paint_scalebar(
+    painter: QtGui.QPainter,
+    width: int,
+    height: int,
+    viewport: tuple[tuple[float, float], tuple[float, float]],
+    scalebar_length_nm: int | float,
+    *,
+    display_length: bool = True,
+    color: QtGui.QColor | None = None,
+    display_height: int = 10,
+    margin: tuple[int, int] = (35, 20),
+    text_fontsize: int = SCALEBAR_FONT_SIZE,
+    position: str = "bottom right",
+    label_position: Literal["above", "below"] = "above",
+    units: Literal["nm", "um", "auto"] = "nm",
+    font_family: str | None = None,
+    bold: bool = False,
+    italic: bool = False,
+    background_opacity: float = 0.0,
+) -> None:
+    """Paint a scale bar with ``painter`` onto a device of ``width`` x
+    ``height`` display pixels that shows ``viewport`` (nm), e.g., the
+    viewport of a widget. See ``draw_scalebar`` for the parameters; the
+    painter's state is restored afterwards."""
     if position not in SCALEBAR_POSITIONS:
         raise ValueError(
             f"Unknown position {position!r}, use one of "
@@ -1030,12 +1105,13 @@ def draw_scalebar(
     if color is None:
         color = QtGui.QColor("white")
     color = QtGui.QColor(color)
-    painter = QtGui.QPainter(image)
+    painter.save()
     painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
 
-    # the viewport's width (nm) spans the image's width (display pixels)
+    # the viewport's width (nm) spans the device's width (display
+    # pixels)
     length_displaypxl = int(
-        round(image.width() * scalebar_length_nm / viewport_width(viewport))
+        round(width * scalebar_length_nm / viewport_width(viewport))
     )
 
     # the length's text and its height, with a small gap to the bar
@@ -1060,7 +1136,7 @@ def draw_scalebar(
     if vertical == "top":
         block_top = margin[1]
     else:
-        block_top = image.height() - block_height - margin[1]
+        block_top = height - block_height - margin[1]
     if display_length and label_position == "above":
         y = block_top + text_height + gap
     else:
@@ -1068,14 +1144,14 @@ def draw_scalebar(
     if horizontal == "left":
         x = margin[0]
     elif horizontal == "center":
-        x = int(round((image.width() - length_displaypxl) / 2))
+        x = int(round((width - length_displaypxl) / 2))
     else:
-        x = image.width() - length_displaypxl - margin[0]
+        x = width - length_displaypxl - margin[0]
 
-    # the text is centered on the bar, but kept inside the image
+    # the text is centered on the bar, but kept inside the device
     if display_length:
         center = x + length_displaypxl / 2
-        center = min(center, image.width() - 2 - text_advance / 2)
+        center = min(center, width - 2 - text_advance / 2)
         center = max(center, 2 + text_advance / 2)
         text_left = int(round(center - text_advance / 2))
         text_top = (
@@ -1116,33 +1192,7 @@ def draw_scalebar(
             QtCore.Qt.AlignmentFlag.AlignHCenter,
             text,
         )
-    painter.end()
-    return image
-
-
-def _format_scalebar_length(
-    length_nm: int | float,
-    units: Literal["nm", "um", "auto"] = "nm",
-) -> str:
-    """Text printed next to a scale bar, e.g., ``"500 nm"`` or
-    ``"1.5 µm"``.
-
-    Parameters
-    ----------
-    length_nm : int or float
-        Length of the scale bar in nm.
-    units : {"nm", "um", "auto"}, optional
-        Unit of the text: nm, µm, or µm from 1 µm on and nm below
-        ("auto"). Default is "nm".
-
-    Returns
-    -------
-    text : str
-        The length with its unit.
-    """
-    if units == "um" or (units == "auto" and length_nm >= 1000):
-        return f"{round(length_nm / 1000, 3):.10g} µm"
-    return f"{round(length_nm, 3):.10g} nm"
+    painter.restore()
 
 
 def draw_legend(

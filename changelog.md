@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 28-OCT-2026 CEST
+Last change: 30-OCT-2026 CEST
 
 ## 1.0.0
 
@@ -107,6 +107,7 @@ Last change: 28-OCT-2026 CEST
 - The quantum efficiency is no longer shown in the Parameters dialog. A `Quantum Efficiency` entry in the camera config, `--qe` in `picasso localize` and a `Qe` key in `camera_info` are still accepted and ignored. `camera_parameters` of the movie classes in `picasso.io` no longer returns `qe`. The `Emission Wavelength` dropdown now lists the wavelengths of `Channel Device` > `Emission Wavelengths` and of the wavelength-keyed calibrations in the config (it appeared only when the config had a `Quantum Efficiency` mapping before, so wavelength-keyed calibrations were not selected with the template config).
 - Imaris `.ims` movies can now be opened on macOS and Linux, not only Windows. Exporting `.ims` files (Render's `Export ROI for Imaris`) remains Windows only. `hdf5plugin` is now installed on all platforms.
 - Every calibration records how its spots were identified, under `Identification`.
+- Customizable scale bar, see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html).
 - Fixed: ratiometric multichannel spline fitting ignored the per-pixel sCMOS variance of the camera calibration.
 - Fixed: with an sCMOS camera calibration and a CUDA GPU, spline fits of movies with more than about 1.5-2 million localizations reported wrong localization precisions (`lpx`, `lpy`, `lpz`, ...) beyond the first ~2 million, which were computed with the readout variance of other localizations.
 - Fixed: `Height` and `Width` were swapped in the metadata of non-square `.ims` movies.
@@ -157,6 +158,7 @@ The [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html)
 
 ### Others
 - Many plots are now customizable.
+- Customizable scale bar, see the [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html). The structure preview can now print the length of its scale bar.
 - High contrast (`File > Appearance... > Contrast`): black and white text and backgrounds, and frames in the color of the text around buttons, input fields and tables. By default it follows macOS's *Increase contrast* and Windows' contrast themes. See the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#appearance).
 - Screen readers (VoiceOver, Narrator, Orca) announce the input fields of all Picasso windows by their labels, fields in tables by their column and icon-only buttons by their tooltip. See the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#accessibility). Note this is an experimental feature, if there is room for improvement, please raise a [GitHub issue](https://github.com/jungmannlab/picasso/issues)
 - Buttons that show a state (e.g., a loaded file in SPINNA) show an icon besides their color, so that the state does not rely on color alone; screen readers read it out.

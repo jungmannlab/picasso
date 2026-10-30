@@ -60,8 +60,9 @@ structures:
 8. The *Preview* box allows the user to see the currently loaded structure,
    rotate it in 3D (drag with the left mouse button; with :kbd:`Ctrl`, around
    the z axis; *Reset rotation* undoes it), show/hide legend and scale bar
-   (whose length is adjustable) as well as save the current view as a .png or
-   .tif file.
+   (whose length is adjustable; the button next to *Show scale bar* sets its
+   look and whether its length is printed, see below) as well as save the
+   current view as a .png or .tif file.
 9. Once at least two molecular targets are defined for the given structure, it
    is possible to add a new molecular target by clicking with the right mouse
    button on the structure view.
@@ -523,7 +524,11 @@ the heterogeneous density distribution present in the experimental data.
    the preview, and *Fit* shows the whole mask. For 3D masks, tick *Show
    z-slice* in the *Display* box to slice through individual z planes with the
    slider. A scale bar can be shown (*Scale bar (nm)*, 1000 nm by default),
-   and *Save view* saves the image. The *Mask information* box shows the area
+   and *Save view* saves the image. The button next to the scale bar's length
+   sets whether its length is printed and its look: position, margins, thickness, color,
+   background, unit, label and font, as in Render (see
+   :ref:`render-scale-bar`). The look is shared by the scale bars of SPINNA
+   and Localize. The *Mask information* box shows the area
    (volume in 3D) and the dimensions of the mask.
 7. Once the mask is ready, click *Save mask*. This saves a numpy array in the
    .npy format (the thresholded mask if *Apply threshold* is ticked) and a
