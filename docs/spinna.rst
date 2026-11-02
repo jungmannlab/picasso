@@ -607,9 +607,45 @@ script directly.
 
    .. tab-item:: Python
 
-      SPINNA functions can also be run in a Python script directly. Examples
-      are presented in ``samples/sample_notebook_4_spinna.ipynb`` (see
-      :ref:`notebook-spinna`).
+      In Python, a batch is a loop over the steps above, with the
+      ``structures`` and constants of :ref:`spinna-fitting`. Here, two cells
+      are fitted at three label uncertainties each and the results collected
+      in one table (proportions in %). See also
+      ``samples/sample_notebook_4_spinna.ipynb`` (:ref:`notebook-spinna`).
+
+      .. code-block:: python
+
+         import pandas as pd
+         from picasso import io, spinna
+
+         rows = []
+         for path in ["cell1_egfr_mols.hdf5", "cell2_egfr_mols.hdf5"]:
+             mols, info = io.load_locs(path)
+             coords = mols[["x", "y"]].to_numpy()  # nm
+             n_egfr = int(coords.shape[0] / LE)
+             search_space = spinna.generate_N_structures(
+                 structures=structures,
+                 N_total={"EGFR": n_egfr},
+                 granularity=GRANULARITY,
+             )
+             for label_unc in [4.0, 6.0, 8.0]:
+                 mixer = spinna.StructureMixer(
+                     structures=structures,
+                     label_unc={"EGFR": label_unc},
+                     le={"EGFR": LE},
+                     width=ROI, height=ROI,
+                 )
+                 spinner = spinna.SPINNA(
+                     mixer=mixer, gt_coords={"EGFR": coords}, N_sim=N_SIM
+                 )
+                 proportions, score = spinner.fit_stoichiometry(
+                     N_structures=search_space, parallel=True
+                 )
+                 rows.append(
+                     {"file": path, "label_unc": label_unc, "score": score}
+                     | {s.title: p for s, p in zip(structures, proportions)}
+                 )
+         pd.DataFrame(rows).to_csv("spinna_batch.csv", index=False)
 
 .. _spinna-batch-columns:
 

@@ -243,10 +243,64 @@ Running it
 
    .. tab-item:: Python
 
-      - :func:`picasso.localize.fit_independent` fits one set of detections per movie.
-      - :func:`picasso.localize.fit_split_fov_independent` fits the regions of one movie, returning each region's localizations in its own coordinates together with its metadata.
-      - Both take the fitting method, the convergence settings and the spline calibration either once for all channels or once per channel.
-      - :func:`picasso.localize.split_locs_by_region` splits an existing set of localizations by region in the same way.
+      :func:`~picasso.localize.fit_independent` fits one set of detections per movie, :func:`~picasso.localize.fit_split_fov_independent` the regions of one movie, each region in its own coordinates. Both take the fitting method, the convergence settings and the spline calibration either once for all channels or as a list, one per channel, and return one ``(locs, info)`` pair per channel.
+
+      .. code-block:: python
+
+         from picasso import io, localize
+
+         # separate movies, each identified with its own threshold
+         movies, infos = zip(*(io.load_movie(p) for p in ("ch0.tif", "ch1.tif")))
+         identified = [
+             localize.identify(
+                 movie,
+                 info,
+                 parameters=localize.IdentificationParameters(
+                     method=localize.NetGradient(threshold), box=7
+                 ),
+             )
+             for movie, info, threshold in zip(movies, infos, [5000, 2000])
+         ]
+         results = localize.fit_independent(
+             movies,
+             [ids_info for _, ids_info in identified],
+             camera_infos=camera_info,  # or one per channel
+             identifications=[ids for ids, _ in identified],
+             box=7,
+             fitting_method=["gausslq", "spline"],
+             spline_calibration=[None, io.load_spline_calibration("ch1_psf.hdf5")],
+         )
+         for (locs, info), name in zip(results, ("ch0", "ch1")):
+             io.save_locs(f"{name}_locs.hdf5", locs, info)
+
+         # split field of view: one threshold per region
+         movie, info = io.load_movie("movie.tif")
+         regions = [[[0, 0], [256, 256]], [[0, 256], [256, 512]]]
+         ids, ids_info = localize.identify(
+             movie,
+             info,
+             parameters=localize.IdentificationParameters(
+                 method=[localize.NetGradient(5000), localize.NetGradient(2000)],
+                 box=7,
+             ),
+             roi=regions,
+         )
+         results = localize.fit_split_fov_independent(
+             movie,
+             ids_info,
+             camera_info=camera_info,
+             identifications=ids,
+             box=7,
+             regions=regions,
+             fitting_method=["gausslq", "spline"],
+             spline_calibration=[None, io.load_spline_calibration("ch1_psf.hdf5")],
+         )
+
+         # split an existing whole-sensor fit by region instead
+         locs, info = io.load_locs("movie_locs.hdf5")
+         locs_per_region = localize.split_locs_by_region(
+             locs, regions, pixelsize=130
+         )
 
 .. _localize-each-channel-settings:
 

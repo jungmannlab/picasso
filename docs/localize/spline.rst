@@ -393,9 +393,45 @@ Summing without registration
 
 The detections stand at the same pixel in every channel (or split-FOV region), which decides how they are fitted:
 
-- ``Fit`` > **Each channel separately** fits every channel (or region) at these detections, each with its own settings, and saves one file per channel as usual (see :ref:`localize-analyzing-each-channel`).
-- The joint fit takes them as it takes the registered sum's detections, without linking, but still places them in the other channels through the registration of the loaded calibration. This only makes sense when that registration is close to the identity, i.e. when the channels really do overlay.
+- With ``Fit`` set to ``Each channel separately``, every channel (or region) is fitted at these detections, each with its own settings, and saved to its own file as usual (see :ref:`localize-analyzing-each-channel`).
+- With ``Fit`` set to ``Jointly (registered channels)``, the joint fit takes them as it takes the registered sum's detections, without linking, but still places them in the other channels through the registration of the loaded calibration. This only makes sense when that registration is close to the identity, i.e. when the channels really do overlay.
 
-.. tip::
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
 
-   The same is available from a script via :func:`picasso.localize.identify_multichannel_sum` (and :class:`picasso.localize.SummedChannelsMovie` for the summed view itself); :func:`picasso.localize.unregistered_sum_transforms` gives the transforms that sum the channels without registration.
+   :func:`~picasso.localize.identify_multichannel_sum` identifies on the sum of the channels, here registered with the multichannel calibration's transforms; :func:`~picasso.localize.unregistered_sum_transforms` gives the transforms that sum them as they are. The detections go straight into the joint fit. :class:`~picasso.localize.SummedChannelsMovie` is the summed movie itself, e.g. for looking at it.
+
+   .. code-block:: python
+
+      from picasso import io, localize
+
+      movies, infos = zip(*(io.load_movie(p) for p in ("plane1.raw", "plane2.raw")))
+      camera_infos = [camera_info_plane1, camera_info_plane2]
+      calibration = io.load_spline_calibration("biplane_spline_calib.hdf5")
+
+      ids, ids_info = localize.identify_multichannel_sum(
+          movies,
+          infos[0],
+          transforms=calibration["channel_transforms"],
+          # without registration:
+          # transforms=localize.unregistered_sum_transforms(len(movies)),
+          parameters=localize.IdentificationParameters(
+              method=localize.NetGradient(20000), box=13  # re-tune for the sum
+          ),
+          camera_infos=camera_infos,
+      )
+      locs, info = localize.fit_spline_multichannel(
+          movies,
+          ids_info,
+          camera_infos=camera_infos,
+          identifications=ids,
+          box=13,
+          calibration=calibration,
+          mle=True,
+      )
+
+      summed = localize.SummedChannelsMovie(
+          movies, calibration["channel_transforms"], camera_infos=camera_infos
+      )
+      frame = summed[0]  # in photons, reference-channel coordinates
