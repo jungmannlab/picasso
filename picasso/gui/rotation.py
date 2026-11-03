@@ -3581,7 +3581,20 @@ class RotationWindow(QtWidgets.QMainWindow):
                         by="frame",
                         inplace=True,
                     )
-                    info = self.view_rot.infos[0] + new_info
+                    # the metadata of the localizations saved, i.e., of
+                    # the main window, as Render combines them
+                    info = (
+                        self.window.view.infos[0]
+                        + [
+                            {
+                                **lib.step_info("Combine"),
+                                "Paths to combined files": (
+                                    self.window.view.locs_paths
+                                ),
+                            }
+                        ]
+                        + new_info
+                    )
                     io.save_locs(path, all_locs, info)
             # save all channels one by one
             elif channel == len(self.view_rot.paths):  # all channels
@@ -3598,7 +3611,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                             self.view_rot.paths[channel]
                         )
                         out_path = base + suffix + ".hdf5"
-                        info = self.view_rot.infos[channel] + new_info
+                        info = self.window.view.infos[channel] + new_info
                         io.save_locs(
                             out_path, self.window.view.locs[channel], info
                         )
@@ -3616,7 +3629,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                     check_ext=".yaml",
                 )
                 if path:
-                    info = self.view_rot.infos[channel] + new_info
+                    info = self.window.view.infos[channel] + new_info
                     io.save_locs(path, self.window.view.locs[channel], info)
 
     def update_scene(self) -> None:

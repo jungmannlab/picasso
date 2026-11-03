@@ -13044,6 +13044,7 @@ class Window(QtWidgets.QMainWindow):
         self,
         identifications: pd.DataFrame | None = None,
         calibrate_z: bool = False,
+        info: list[dict] | None = None,
     ) -> FitWorker | None:
         """A ``FitWorker`` for the active channel, from the settings now on
         the Parameters dialog.
@@ -13064,6 +13065,10 @@ class Window(QtWidgets.QMainWindow):
             it.
         calibrate_z : bool, optional
             Whether the fit feeds a z-calibration. Default False.
+        info : list of dict or None, optional
+            The metadata the fit adds its entry to. None (the default)
+            uses the active channel's identification metadata; a
+            split-FOV region passes them adapted to the region.
         """
         dialog = self.parameters_dialog
         model = dialog.fit_model.currentText()
@@ -13110,7 +13115,7 @@ class Window(QtWidgets.QMainWindow):
             fit_z = False
         return FitWorker(
             self.movie,
-            self.identifications_info,
+            self.identifications_info if info is None else info,
             self.camera_info,
             (
                 self.identifications
@@ -13308,8 +13313,11 @@ class Window(QtWidgets.QMainWindow):
         if not len(identifications):
             self._skip_in_batch(label, "no identifications in it")
             return
+        # the region's size, as fit_split_fov_independent records it
+        info = self.identifications_info
         worker = self._single_channel_fit_worker(
-            identifications=identifications
+            identifications=identifications,
+            info=localize.region_movie_info(info, region) if info else None,
         )
         if worker is None:  # the dialog has said why
             self._abort_independent_fit()
@@ -13356,7 +13364,7 @@ class Window(QtWidgets.QMainWindow):
         )
         self.locs_display = locs
         self.info = localize.region_movie_info(state["info"], region)
-        self.extra_info = localize.region_movie_info(info, region)
+        self.extra_info = info
         self.draw_frame()
         # the same tail as a single fit: the astigmatism z-fit (when it is
         # asked for), then saving and the optional drift correction, which

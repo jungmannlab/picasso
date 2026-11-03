@@ -3514,12 +3514,14 @@ def compute_dark_times(
         removed.
     info : list of dicts
         Metadata of ``locs``: ``info`` with an entry recording the step
-        (``"Step": "Dark"``) appended, see ``lib.append_metadata``.
-        ``io.load_locs`` reads the Picasso version of this entry to
-        tell the dark-time convention.
+        (``"Step": "Dark"``) and whether a ``group`` was given
+        appended, see ``lib.append_metadata``. ``io.load_locs`` reads
+        the Picasso version of this entry to tell the dark-time
+        convention.
     """
     locs = _compute_dark_times(locs, group)
-    return locs, lib.append_metadata(info, lib.step_info("Dark"))
+    entry = lib.step_info("Dark", **{"Per group": group is not None})
+    return locs, lib.append_metadata(info, entry)
 
 
 def _compute_dark_times(
@@ -4613,6 +4615,7 @@ def undrift_from_fiducials(
     locs = _apply_drift(locs, drift)
 
     entry = _picks_entry("Undrift from picked", picks, pick_shape, pick_size)
+    entry["Undrift z"] = "z" in drift.columns
     return locs, lib.append_metadata(info, entry), drift
 
 
@@ -4798,7 +4801,9 @@ def apply_drift(
         (and 'z' if it exists in the drift).
     info : list of dicts
         Metadata of ``locs``: ``info`` with an entry recording the step
-        appended, see ``lib.append_metadata``.
+        appended, see ``lib.append_metadata``. The entry lists the
+        ``"Drift file"`` of a drift loaded with ``io.load_drift``
+        (``drift.attrs["Path"]``).
     """
     assert isinstance(
         drift, (pd.DataFrame, np.ndarray)
@@ -4821,6 +4826,8 @@ def apply_drift(
             columns=["x", "y"] + (["z"] if drift.shape[1] == 3 else []),
         )
     entry = lib.step_info("Apply drift")
+    if path := drift.attrs.get("Path"):
+        entry["Drift file"] = path
     return _apply_drift(locs, drift), lib.append_metadata(info, entry)
 
 
@@ -4915,6 +4922,7 @@ def align(
     display: bool = False,
     return_shifts: bool = False,
     keep_non_overlapping: bool = True,
+    paths: list[str] | None = None,
 ) -> (
     tuple[list[pd.DataFrame], list[list[dict]]]
     | tuple[list[pd.DataFrame], list[list[dict]], tuple]
@@ -4963,6 +4971,9 @@ def align(
         channels overlap are removed, see
         ``remove_non_overlapping_locs``. Default is True (all
         localizations are kept).
+    paths : list of str or None, optional
+        Paths of the channels' files, saved in the metadata
+        (``"Files"``). Default is None.
 
     Returns
     -------
@@ -4998,6 +5009,7 @@ def align(
             display=display,
             return_shifts=True,
             keep_non_overlapping=keep_non_overlapping,
+            paths=paths,
         )
     elif method == "picked":
         if picks is None:
@@ -5011,6 +5023,7 @@ def align(
             index_blocks=index_blocks,
             return_shifts=True,
             keep_non_overlapping=keep_non_overlapping,
+            paths=paths,
         )
     else:
         raise ValueError(
@@ -5022,11 +5035,17 @@ def align(
 
 
 def _aligned_infos(
-    infos: list[list[dict]], shifts: tuple, entry: dict
+    infos: list[list[dict]],
+    shifts: tuple,
+    entry: dict,
+    paths: list[str] | None,
 ) -> list[list[dict]]:
     """Metadata of aligned channels: each element of ``infos`` with a
     copy of ``entry`` appended that also holds the shift subtracted
-    from the channel (nm)."""
+    from the channel (nm) and the ``paths`` of the channels, if
+    given."""
+    if paths is not None:
+        entry = entry | {"Files": list(paths)}
     new_infos = []
     for i, info in enumerate(infos):
         channel_entry = dict(entry)
@@ -5089,6 +5108,7 @@ def align_rcc(
     display: bool = False,
     return_shifts: bool = False,
     keep_non_overlapping: bool = True,
+    paths: list[str] | None = None,
 ) -> (
     tuple[list[pd.DataFrame], list[list[dict]]]
     | tuple[list[pd.DataFrame], list[list[dict]], tuple]
@@ -5115,6 +5135,9 @@ def align_rcc(
         channels overlap are removed, see
         ``remove_non_overlapping_locs``. Default is True (all
         localizations are kept).
+    paths : list of str or None, optional
+        Paths of the channels' files, saved in the metadata
+        (``"Files"``). Default is None.
 
     Returns
     -------
@@ -5177,7 +5200,7 @@ def align_rcc(
             "Remove non-overlapping": not keep_non_overlapping,
         },
     )
-    infos = _aligned_infos(infos, shifts, entry)
+    infos = _aligned_infos(infos, shifts, entry, paths)
     if return_shifts:
         return locs, infos, shifts
     return locs, infos
@@ -5196,6 +5219,7 @@ def align_from_picked(
     return_shifts: bool = False,
     index_blocks: list[tuple | None] | None = None,
     keep_non_overlapping: bool = True,
+    paths: list[str] | None = None,
 ) -> (
     tuple[list[pd.DataFrame], list[list[dict]]]
     | tuple[list[pd.DataFrame], list[list[dict]], tuple]
@@ -5236,6 +5260,9 @@ def align_from_picked(
         channels overlap are removed, see
         ``remove_non_overlapping_locs``. Default is True (all
         localizations are kept).
+    paths : list of str or None, optional
+        Paths of the channels' files, saved in the metadata
+        (``"Files"``). Default is None.
 
     Returns
     -------
@@ -5302,7 +5329,7 @@ def align_from_picked(
     entry = _picks_entry("Align", picks, pick_shape, pick_size)
     entry["Method"] = "Picked"
     entry["Remove non-overlapping"] = not keep_non_overlapping
-    infos = _aligned_infos(infos, shifts, entry)
+    infos = _aligned_infos(infos, shifts, entry, paths)
     if return_shifts:
         return aligned_locs, infos, shifts
     return aligned_locs, infos
@@ -8395,6 +8422,7 @@ def resi(
     radius_z: float | list[float] | None = None,
     min_locs: int | list[int] = 10,
     apply_fa: bool = True,
+    paths: list[str] | None = None,
     save_clustered_locs: bool = False,
     save_cluster_centers: bool = False,
     resi_path: str | None = None,
@@ -8431,6 +8459,9 @@ def resi(
     apply_fa : bool, optional
         If True, apply basic frame analysis to clustered localizations.
         Default is True.
+    paths : list of str or None, optional
+        Paths of the channels' files, saved in the metadata. Default is
+        None.
     save_clustered_locs : bool, optional
         If True, save clustered localizations for each channel to a
         file. Requires output_paths to be provided. Default is False.
@@ -8469,7 +8500,8 @@ def resi(
     resi_info : list of dicts
         Metadata of the RESI cluster centers: the metadata of the first
         channel with an entry recording the clustering parameters of
-        each channel appended, see ``lib.append_metadata``.
+        each channel (and their ``paths``) appended, see
+        ``lib.append_metadata``.
 
     Raises
     ------
@@ -8529,6 +8561,7 @@ def resi(
             radius_z=radius_z,
             min_locs=min_locs,
             apply_fa=apply_fa,
+            paths=paths,
             save_clustered_locs=save_clustered_locs,
             save_cluster_centers=save_cluster_centers,
             resi_path=resi_path,
@@ -8546,6 +8579,7 @@ def _resi(
     radius_z: list[float] | None = None,
     min_locs: list[int] = 10,
     apply_fa: bool = True,
+    paths: list[str] | None = None,
     save_clustered_locs: bool = False,
     save_cluster_centers: bool = False,
     resi_path: str | None = None,
@@ -8628,6 +8662,8 @@ def _resi(
         entry["Clustering radius z (nm) for each channel"] = [
             float(r) for r in radius_z
         ]
+    if paths is not None:
+        entry["Paths to RESI channels"] = list(paths)
     new_info = lib.append_metadata(infos[0], entry)
     # Save combined RESI results if output paths are provided
     if resi_path is not None:

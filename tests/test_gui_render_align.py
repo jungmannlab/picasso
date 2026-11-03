@@ -129,6 +129,10 @@ def test_align_removes_non_overlapping_localizations(window):
     locs = window.view.locs
     assert len(locs[1]) <= n_before[1] - N_STRAY
     assert locs[1]["x"].max() <= locs[0]["x"].max()
+    # removed by postprocess.align, whose entry says so
+    entry = window.view.infos[1][-1]
+    assert entry["Remove non-overlapping"] is True
+    assert entry["Files"] == window.view.locs_paths
 
 
 def test_align_keeps_all_if_the_channels_do_not_overlap(window, monkeypatch):
@@ -141,15 +145,18 @@ def test_align_keeps_all_if_the_channels_do_not_overlap(window, monkeypatch):
         "warning",
         lambda *args, **kwargs: warnings.append(args),
     )
-    monkeypatch.setattr(
-        gui_render.postprocess,
-        "align",
-        lambda locs, infos, **kwargs: (
-            [_locs(10.0), _locs(28.0).query("x > 20")],
-            infos,
-        ),
-    )
+    calls = []
+
+    def align(locs, infos, *, keep_non_overlapping, **kwargs):
+        calls.append(keep_non_overlapping)
+        if not keep_non_overlapping:
+            raise ValueError("The aligned channels do not overlap.")
+        return [_locs(10.0), _locs(28.0).query("x > 20")], infos
+
+    monkeypatch.setattr(gui_render.postprocess, "align", align)
     window.view.align()
+    # asked to remove them first, then aligned again keeping them all
+    assert calls == [False, True]
     assert len(warnings) == 1
     assert len(window.view.locs[0]) == len(_locs(10.0))
 

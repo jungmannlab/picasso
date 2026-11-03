@@ -11,10 +11,12 @@ Picasso command line interface.
 
 from __future__ import annotations
 
+import contextlib
 import os.path
 import argparse
 import logging
 import sys
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Literal
 import pandas as pd
 from . import deprecation, docs_url
@@ -363,7 +365,14 @@ def _clusterfilter(
                 print("Error: Field {} not found.".format(parameter))
                 continue
             _clusterfilter_locs(
-                clusters, locs, info, parameter, minval, maxval, path
+                clusters,
+                locs,
+                info,
+                parameter,
+                minval,
+                maxval,
+                path,
+                clusterfile,
             )
 
 
@@ -375,6 +384,7 @@ def _clusterfilter_locs(
     minval: float,
     maxval: float,
     path: str,
+    clusterfile: str,
 ) -> None:
     import numpy as np
     from . import io, lib
@@ -394,6 +404,7 @@ def _clusterfilter_locs(
             filtered = filtered.sort_values(kind="quicksort", by="frame")
             clusterfilter_info = {
                 **lib.step_info(f"Clusterfilter - {suffix}"),
+                "Cluster file": clusterfile,
                 "Parameter": parameter,
                 "Minval": minval,
                 "Maxval": maxval,
@@ -427,8 +438,8 @@ def _undrift_rcc(
             drift = io.load_drift(
                 fromfile, pixelsize=lib.get_from_metadata(info, "Pixelsize")
             )
+            # records the drift file (drift.attrs["Path"])
             locs, info = postprocess.apply_drift(locs, info, drift=drift)
-            info[-1]["From File"] = fromfile
 
             if display:
                 import matplotlib.pyplot as plt
@@ -735,7 +746,7 @@ def _cbc(
     import warnings
     from glob import glob
     from itertools import chain
-    from . import io, lib, postprocess
+    from . import io, postprocess
 
     paths = list(chain(*[sorted(glob(_)) for _ in files]))
     if len(paths) < 2:
@@ -798,11 +809,6 @@ def _cbc(
             )
             out_locs, out_infos = [locs], [info]
     for i, (locs, info) in enumerate(zip(out_locs, out_infos)):
-        info[-1].update(lib.step_info("CBC"))
-        info[-1]["Scored channel"] = paths[i]
-        info[-1]["Partner channels"] = [
-            p for j, p in enumerate(paths) if j != i
-        ]
         base, ext = os.path.splitext(paths[i])
         io.save_locs(base + "_cbc.hdf5", locs, info)
         print(f"Saved {base}_cbc.hdf5")
@@ -1173,7 +1179,7 @@ def _track(
     """Link localizations into tracks (single-particle tracking) and
     save them as ``<base>_tracks.hdf5``. ``max_jump`` is in nm; see
     ``spt.link_tracks`` for details."""
-    from . import io, lib, spt
+    from . import io, spt
 
     for path in _spt_paths(files):
         locs, info = io.load_locs(path)
@@ -1194,7 +1200,6 @@ def _track(
             )
         except ValueError as e:
             raise SystemExit(str(e))
-        new_info[-1].update(lib.step_info("Track"))
         out_path = os.path.splitext(path)[0] + "_tracks.hdf5"
         io.save_locs(out_path, tracked, new_info)
         print(
@@ -1336,9 +1341,9 @@ def _align(
         method="rcc",
         display=display,
         keep_non_overlapping=not remove_non_overlapping,
+        paths=files,
     )
     for file, locs_, info in zip(files, aligned_locs, aligned_infos):
-        info[-1]["Files"] = files
         base, ext = splitext(file)
         save_locs(base + "_align.hdf5", locs_, info)
 
@@ -1358,6 +1363,7 @@ def _join(files: list[str], keep_index: bool = True) -> None:
     join_info = {
         **lib.step_info("Join"),
         "Files": files,
+        "Frames kept": keep_index,
     }
     base, ext = splitext(files[0])
     info = load_locs(files[0])[1]
@@ -2210,23 +2216,26 @@ def _localize_process_file(
             camera_calibration=camera_calibration,
             lateral_transforms=lateral_transforms,
         )
-    locs, info = localize(
-        movie,
-        camera_info=cam_info,
-        identification_parameters=_identification_parameters_from_args(
-            args, box, min_net_gradient
-        ),
-        roi=roi,
-        frame_bounds=frame_bounds,
-        movie_info=info,
-        fitting_method=fitting_method,
-        eps=convergence if convergence > 0 else None,
-        max_it=max_iterations if max_iterations > 0 else None,
-        spline_calibration=spline_calibration,
-        camera_calibration=camera_calibration,
-        parallel=True,
-        progress="console",
-    )
+    with _lateral_report_only():
+        locs, info = localize(
+            movie,
+            camera_info=cam_info,
+            identification_parameters=_identification_parameters_from_args(
+                args, box, min_net_gradient
+            ),
+            roi=roi,
+            frame_bounds=frame_bounds,
+            movie_info=info,
+            fitting_method=fitting_method,
+            eps=convergence if convergence > 0 else None,
+            max_it=max_iterations if max_iterations > 0 else None,
+            spline_calibration=spline_calibration,
+            camera_calibration=camera_calibration,
+            # in 3D, the z fit applies them (see _localize_finish)
+            affine_calibration=None if z_params else lateral_transforms,
+            parallel=True,
+            progress="console",
+        )
 
     saved = _localize_finish(
         locs,
@@ -2284,6 +2293,7 @@ def _localize_multi_emitter(
     out_path : str
         Path of the localization file written.
     """
+    from .io import strip_mm_metadata
     from .localize import localize_multi_emitter
 
     seed_identification = None
@@ -2293,25 +2303,27 @@ def _localize_multi_emitter(
         )
     calibration_3d = None
     if z_params is not None:
-        zpath, magnification_factor, z_calibration = z_params
+        _, magnification_factor, z_calibration = z_params
         calibration_3d = dict(z_calibration)
         calibration_3d["Magnification factor"] = magnification_factor
-    locs, info = localize_multi_emitter(
-        movie,
-        info,
-        camera_info=camera_info,
-        parameters=_multi_emitter_parameters_from_args(args),
-        roi=roi,
-        frame_bounds=frame_bounds,
-        seed_identification=seed_identification,
-        camera_calibration=camera_calibration,
-        calibration_3d=calibration_3d,
-        spline_calibration=spline_calibration,
-        lateral_transforms=lateral_transforms if calibration_3d else None,
-        parallel=True,
-        fit_z_gpu=args.fit_z_gpu,
-        progress="console",
-    )
+    with _lateral_report_only():
+        locs, info = localize_multi_emitter(
+            movie,
+            # as localize.localize does, see "Save Micro-Manager metadata"
+            strip_mm_metadata(info),
+            camera_info=camera_info,
+            parameters=_multi_emitter_parameters_from_args(args),
+            roi=roi,
+            frame_bounds=frame_bounds,
+            seed_identification=seed_identification,
+            camera_calibration=camera_calibration,
+            calibration_3d=calibration_3d,
+            spline_calibration=spline_calibration,
+            lateral_transforms=lateral_transforms,
+            parallel=True,
+            fit_z_gpu=args.fit_z_gpu,
+            progress="console",
+        )
     entry = next(e for e in info if e.get("Step") == "Fit multi-emitter")
     if spline_calibration is None:
         print(
@@ -2320,12 +2332,11 @@ def _localize_multi_emitter(
             + ("" if args.psf_model == "fixed" else ", the start of the fit")
         )
     if calibration_3d is not None:
-        info[-1]["Z Calibration Path"] = zpath
         _print_lateral_report(
             info[-1].get("Lateral corrections applied"),
             info[-1].get("Lateral corrections skipped"),
         )
-        # applied by the z fit
+        # applied and reported by the z fit
         lateral_transforms = None
     return _localize_finish(
         locs, info, path, args, None, lateral_transforms, spline_calibration
@@ -2405,6 +2416,7 @@ def _localize_regions(
         Paths of the localization files written, one per region with
         localizations.
     """
+    from .io import strip_mm_metadata
     from .localize import (
         fit_split_fov_independent,
         identify,
@@ -2413,7 +2425,8 @@ def _localize_regions(
 
     identifications, ids_info = identify(
         movie,
-        info,
+        # as localize.localize does, see "Save Micro-Manager metadata"
+        strip_mm_metadata(info),
         parameters=_identification_parameters_from_args(
             args, box, min_net_gradient
         ),
@@ -2426,21 +2439,24 @@ def _localize_regions(
         f"Identified {len(identifications):,} spots in {len(roi)} regions. "
         "Fitting each region on its own..."
     )
-    results = fit_split_fov_independent(
-        movie,
-        camera_info=cam_info,
-        identifications=identifications,
-        box=box,
-        regions=roi,
-        fitting_method=region_fit["methods"],
-        info=ids_info,
-        eps=convergence if convergence > 0 else None,
-        max_it=max_iterations if max_iterations > 0 else None,
-        spline_calibration=region_fit["spline_calibrations"],
-        camera_calibration=camera_calibration,
-        parallel=True,
-        progress="console",
-    )
+    with _lateral_report_only():
+        results = fit_split_fov_independent(
+            movie,
+            camera_info=cam_info,
+            identifications=identifications,
+            box=box,
+            regions=roi,
+            fitting_method=region_fit["methods"],
+            info=ids_info,
+            eps=convergence if convergence > 0 else None,
+            max_it=max_iterations if max_iterations > 0 else None,
+            spline_calibration=region_fit["spline_calibrations"],
+            camera_calibration=camera_calibration,
+            # in 3D, the z fit applies them (see _localize_finish)
+            lateral_transforms=None if z_params else lateral_transforms,
+            parallel=True,
+            progress="console",
+        )
     saved = []
     for c, (locs, region_info) in enumerate(results):
         label = region_label(c)
@@ -2468,6 +2484,19 @@ def _localize_regions(
             )
         )
     return saved
+
+
+@contextlib.contextmanager
+def _lateral_report_only() -> Iterator[None]:
+    """Fit without warning about the lateral corrections skipped because
+    the calibration used for fitting applies them already: the console
+    report of ``_print_lateral_report`` says so instead."""
+    import warnings
+    from . import lib
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", lib.DuplicateLateralTransformWarning)
+        yield
 
 
 def _print_lateral_report(
@@ -2520,7 +2549,9 @@ def _localize_finish(
         ``(zpath, magnification_factor, z_calibration)``; else ``None``.
     lateral_transforms : list or None
         Lateral corrections loaded separately from the calibration used
-        for fitting (see ``_localize_process_file``).
+        for fitting (see ``_localize_process_file``). Without
+        ``z_params``, the fit has applied them already, so they are
+        only reported here; with it, the z fit applies them.
     spline_calibration : dict or None
         Spline PSF calibration used for fitting, whose own lateral
         corrections are not applied again; None if not a spline fit.
@@ -2546,7 +2577,7 @@ def _localize_finish(
     if z_params is not None:
         from . import zfit
 
-        zpath, magnification_factor, z_calibration = z_params
+        _, magnification_factor, z_calibration = z_params
         print("------------------------------------------")
         print("Fitting 3D...")
         method = "gausslq" if "mle" not in method_name else "gaussmle"
@@ -2573,7 +2604,6 @@ def _localize_finish(
                 gpu=args.fit_z_gpu,
                 progress="console",
             )
-        info[-1]["Z Calibration Path"] = zpath
         print("3D fitting complete.")
         print("------------------------------------------")
         _print_lateral_report(
@@ -2581,18 +2611,13 @@ def _localize_finish(
             info[-1].get("Lateral corrections skipped"),
         )
     elif lateral_transforms:
-        # No z fit to fold them into, so apply them here. Corrections the
-        # spline calibration carries were applied by ``localize`` itself;
-        # passing that same file to --affine-calibration would otherwise
-        # correct the coordinates twice.
+        # No z fit to fold them into, so the fit applied them and recorded
+        # them in an entry of its own. It skipped the corrections the spline
+        # calibration carries, which it applies itself; passing that same
+        # file to --affine-calibration would otherwise correct twice.
         extra, duplicates = lib.drop_duplicate_lateral_transforms(
             lateral_transforms, spline_calibration
         )
-        if extra:
-            locs = lib.apply_lateral_transforms(locs, extra)
-            info[-1]["Lateral corrections applied"] = info[-1].get(
-                "Lateral corrections applied", []
-            ) + lib.describe_lateral_transforms(extra)
         _print_lateral_report(
             lib.describe_lateral_transforms(extra),
             lib.describe_lateral_transforms(duplicates),

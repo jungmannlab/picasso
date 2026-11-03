@@ -110,6 +110,7 @@ def test_thunderstorm_round_trip(locs, locs_path, monkeypatch):
             np.sort(imported[column]), np.sort(locs[column]), atol=0.01
         )
     assert info[0]["Pixelsize"] == 160
+    assert info[0]["File"] == _out(locs_path, ".csv")
 
 
 def test_smap_round_trip(locs, locs_path, monkeypatch):
@@ -351,7 +352,8 @@ def test_undrift_from_a_drift_file(
     assert np.allclose(undrifted["x"], locs["x"] - 5.0, atol=1e-3)
     assert np.allclose(undrifted["y"], locs["y"] + 3.0, atol=1e-3)
     assert undrift_info[-1]["Step"] == "Apply drift"
-    assert undrift_info[-1]["From File"] == drift_path
+    # recorded by postprocess.apply_drift (io.load_drift keeps the path)
+    assert undrift_info[-1]["Drift file"] == drift_path
 
 
 def test_aim_writes_the_drift(locs, locs_path, monkeypatch):
@@ -470,7 +472,10 @@ def test_cbc_scores_the_first_file(locs_path, two_channels, monkeypatch):
     scored, info = io.load_locs(_out(locs_path, "_cbc.hdf5"))
     assert scored["cbc_same"].median() > 0.9
     assert scored["cbc_far"].abs().max() == 0.0  # no neighbors: undefined
-    assert info[-1]["Scored channel"] == str(locs_path)
+    # the entry postprocess.cbc returns, as saved by Picasso: Render
+    assert info[-1]["Step"] == "CBC"
+    assert info[-1]["CBC columns"] == ["cbc_same", "cbc_far"]
+    assert "Scored channel" not in info[-1]
     assert not os.path.exists(_out(two_channels["same"], "_cbc.hdf5"))
 
 
@@ -1563,7 +1568,8 @@ def test_localize_multi_emitter_elliptical_gives_z(tmp_path, monkeypatch):
     assert entry["PSF Model"] == "elliptical"
     z_entry = next(e for e in info if e.get("Step") == "Fit 3D")
     assert z_entry["Magnification factor"] == 0.6
-    assert z_entry["Z Calibration Path"] == calibration
+    assert z_entry["Calibration path"] == calibration
+    assert z_entry["Z fit method"] == "gaussmle"
 
 
 @pytest.mark.parametrize("gpu", [False, True])

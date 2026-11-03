@@ -3449,9 +3449,12 @@ class TestSeparateRegionFit:
         # in the right one
         offset = np.mean(second["x"]) - np.mean(first["x"])
         assert offset / 130.0 == pytest.approx(9.6 - 6.4, abs=0.1)
-        # the region's size and place on the sensor, recorded last
+        # the region's size and place on the sensor, recorded before the
+        # fit (as by localize.fit_split_fov_independent), whose entry is
+        # saved as localize.fit returned it
         assert lib.get_from_metadata(info, "Width") == 16
-        assert info[-1]["Region"] == [[0, 16], [32, 32]]
+        assert lib.get_from_metadata(info, "Region") == [[0, 16], [32, 32]]
+        assert info[-1]["Step"] == "Fit 2D" and "Region" not in info[-1]
         assert _status(regions) == (
             f"Fitted {2 * FRAMES} spots in 2 regions, saved to 2 files."
         )

@@ -1881,13 +1881,12 @@ class Window(QtWidgets.QMainWindow):
         )
         if not path:
             return
-        filter_info = {
-            key: value
-            for key, value in self.filter_log.items()
-            if key != lib.FILTER_STEPS_KEY or value
-        }
-        filter_info.update(lib.step_info("Filter"))
-        info = self.info + [filter_info]
+        # the entry expression.filter_locs and lib.apply_filter_steps write
+        entry = expression.filter_entry(
+            self.filter_log.get(lib.FILTER_STEPS_KEY, []),
+            removed_columns=self.filter_log.get("Removed columns", ()),
+        )
+        info = lib.append_metadata(self.info, entry)
         if is_locs:
             io.save_locs(path, self.materialize_filtered(), info)
         else:

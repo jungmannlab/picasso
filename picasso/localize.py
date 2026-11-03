@@ -2743,6 +2743,8 @@ def identify(
         ]
         entry["Sum Regions"] = summed.regions
         entry["Sum Reference Channel"] = summed.reference
+        entry["Sum Interpolation Order"] = summed.order
+        entry["Sum In Photons"] = summed.camera_infos is not None
     return ids, lib.append_metadata(info, entry)
 
 
@@ -2972,8 +2974,9 @@ def identify_multichannel_sum(
         Metadata of the identifications: ``info`` with an entry appended
         (see ``lib.append_metadata``), as in :func:`identify`, recording
         the summing under ``"Identification Mode"``,
-        ``"Sum Channel Transforms"``, ``"Sum Regions"`` and
-        ``"Sum Reference Channel"``.
+        ``"Sum Channel Transforms"``, ``"Sum Regions"``,
+        ``"Sum Reference Channel"``, ``"Sum Interpolation Order"`` and
+        ``"Sum In Photons"`` (False if the raw counts were summed).
 
     None is returned instead if the identification was aborted via
     ``abort_callback``.
@@ -4176,6 +4179,7 @@ def fit(
     localize_info = _fit_localize_info(
         fitting_method,
         gauss_flags,
+        box,
         eps,
         max_it,
         spline_calibration,
@@ -4421,6 +4425,7 @@ def _dispatch_fit(
 def _fit_localize_info(
     fitting_method: str,
     gauss_flags: dict | None,
+    box: int,
     eps: float | None,
     max_it: int | None,
     spline_calibration: dict | None,
@@ -4430,6 +4435,8 @@ def _fit_localize_info(
     localize_info = {
         **lib.step_info("Fit 2D"),
         "Fit method": fitting_method,
+        # not "Box Size", which marks the identification entry
+        "Fit box size": int(box),
     }
     # Record the schedule the fit actually ran with, per method - each
     # backend has its own defaults, and "None" in the caller means "yours".
@@ -4456,17 +4463,34 @@ def _fit_localize_info(
         localize_info["Spline CRLB device"] = (
             "GPU" if precision.CUDA_AVAILABLE else "CPU"
         )
-        # Record what the fit actually used, not what was requested: the
-        # schedule depends on whether the axial multi-start ran. Identical
-        # on both devices - they share ``_run_splinefit``.
-        n_z_starts = _default_n_z_starts(spline_calibration)
-        _, apply_seeds = _spline_z_seeds(spline_calibration, n_z_starts)
-        tolerance, max_iterations = _spline_schedule(apply_seeds, eps, max_it)
-        localize_info["Convergence criterion"] = tolerance
-        localize_info["Max iterations"] = max_iterations
-        localize_info["Axial seeds"] = n_z_starts if apply_seeds else 1
+        localize_info.update(
+            _spline_schedule_info(spline_calibration, None, eps, max_it)
+        )
     localize_info.update(camera_calibration_info(camera_calibration))
     return localize_info
+
+
+def _spline_schedule_info(
+    calibration: dict,
+    n_z_starts: int | None,
+    tolerance: float | None,
+    max_iterations: int | None,
+) -> dict:
+    """Metadata keys of the schedule a spline fit ran with: what the fit
+    actually used, not what was requested, as the schedule depends on
+    whether the axial multi-start ran (see ``_prepare_splinefit_args``).
+    Identical on both devices - they share ``_run_splinefit``."""
+    if n_z_starts is None:
+        n_z_starts = _default_n_z_starts(calibration)
+    _, apply_seeds = _spline_z_seeds(calibration, n_z_starts)
+    tolerance, max_iterations = _spline_schedule(
+        apply_seeds, tolerance, max_iterations
+    )
+    return {
+        "Convergence criterion": tolerance,
+        "Max iterations": max_iterations,
+        "Axial seeds": n_z_starts if apply_seeds else 1,
+    }
 
 
 # Per-method convergence schedules. Each backend's own defaults, kept here so
@@ -5529,36 +5553,68 @@ def _joint_fit_entry(
     camera_infos: list[dict],
     calibration: dict,
     *,
+    box: int,
     link_photons: bool | str,
     use_gpu: bool | None,
     tolerance: float | None,
     max_iterations: int | None,
     camera_calibrations: list[dict | None] | None,
+    n_z_starts: int | None = None,
+    apply_roi_residuals: bool | None = None,
 ) -> dict:
     """Metadata entry recording a joint fit of several channels (or
-    split-FOV regions): the method, the calibration or channel
-    registration (its ``"Path"`` and ``"model"``), the schedule asked for
-    (None: the fitter's default, not recorded), the sCMOS calibration and
-    the reference channel's camera information."""
+    split-FOV regions): the method and the device it ran on, the box, the
+    calibration or channel registration (its ``"Path"`` and ``"model"``),
+    the schedule the fit ran with (for a spline fit also its axial seeds,
+    from ``n_z_starts``, and whether the ROI residuals were applied), the
+    sCMOS calibration and the reference channel's camera information.
+    The camera information and sCMOS calibrations of all channels are
+    listed too if they differ between the channels."""
+    use_gpu = _spline_use_gpu(use_gpu)  # the device the fit ran on
     entry = {
         **lib.step_info(step),
         "Fit method": fit_method + ("-gpu" if use_gpu else ""),
+        # not "Box Size", which marks the identification entry
+        "Fit box size": int(box),
         "Channels": len(calibration.get("channel_transforms") or camera_infos),
         "Link photons": link_photons,
         "Calibration path": calibration.get("Path", "N/A"),
     }
     if calibration.get("model"):
         entry["Calibration model"] = calibration["model"]
-    if tolerance is not None:
+    if fit_method.startswith("spline"):
+        entry.update(
+            _spline_schedule_info(
+                calibration, n_z_starts, tolerance, max_iterations
+            )
+        )
+        entry["ROI residuals applied"] = bool(apply_roi_residuals)
+    else:
+        tolerance, max_iterations = gauss_schedule(
+            "mle" in fit_method, use_gpu, tolerance, max_iterations
+        )
         entry["Convergence criterion"] = tolerance
-    if max_iterations is not None:
         entry["Max iterations"] = max_iterations
-    entry.update(camera_calibration_info((camera_calibrations or [None])[0]))
+    camera_calibrations = camera_calibrations or [None]
+    entry.update(camera_calibration_info(camera_calibrations[0]))
+    paths = [
+        camera_calibration_info(c).get("Camera calibration path")
+        for c in camera_calibrations
+    ]
+    if len(set(paths)) > 1:
+        entry["Camera calibration paths per channel"] = paths
+    if any(c != camera_infos[0] for c in camera_infos[1:]):
+        entry["Camera information per channel"] = [
+            dict(c) for c in camera_infos
+        ]
     return entry | camera_infos[0]
 
 
 def _record_regions(
-    info: list[dict], regions: list, reference: int
+    info: list[dict],
+    regions: list,
+    reference: int,
+    confine_to_reference: bool,
 ) -> list[dict]:
     """``info`` of a joint fit with the split-FOV regions it fitted
     recorded in its last entry (a new dict, see ``lib.append_metadata``)."""
@@ -5567,9 +5623,20 @@ def _record_regions(
             "Split FOV": True,
             "Regions": [_normalize_rect(region) for region in regions],
             "Reference region": int(reference),
+            "Confined to reference region": bool(confine_to_reference),
         }
     )
     return info
+
+
+def _fit_entry(info: list[dict]) -> dict:
+    """The last entry of ``info`` that records a fit (see ``fit``), i.e.,
+    not the one of the lateral corrections applied after it."""
+    return next(
+        entry
+        for entry in reversed(info)
+        if entry.get("Step") != "Affine correction"
+    )
 
 
 def fit_gauss_multichannel(
@@ -5751,6 +5818,7 @@ def fit_gauss_multichannel(
         "gaussmle-spherical" if mle else "gausslq-spherical",
         camera_infos,
         channel_registration,
+        box=box,
         link_photons=link_photons,
         use_gpu=use_gpu,
         tolerance=tolerance,
@@ -5901,7 +5969,9 @@ def fit_gauss_split_fov(
     if result is None:  # aborted
         return None
     locs, info = result
-    return locs, _record_regions(info, fit_regions, reference)
+    return locs, _record_regions(
+        info, fit_regions, reference, confine_to_reference
+    )
 
 
 # ----------------------------------------------------------------------
@@ -8118,11 +8188,14 @@ def fit_spline_multichannel(
         "spline-mle" if mle else "spline",
         camera_infos,
         calibration,
+        box=box,
         link_photons=link_photons,
         use_gpu=use_gpu,
         tolerance=tolerance,
         max_iterations=max_iterations,
         camera_calibrations=camera_calibrations,
+        n_z_starts=n_z_starts,
+        apply_roi_residuals=apply_roi_residuals,
     )
     return locs, lib.append_metadata(info, entry)
 
@@ -8334,11 +8407,14 @@ def fit_spline_multichannel_ratiometric(
         "spline-mle" if mle else "spline",
         camera_infos,
         calibration,
+        box=box,
         link_photons="ratiometric",
         use_gpu=use_gpu,
         tolerance=tolerance,
         max_iterations=max_iterations,
         camera_calibrations=camera_calibrations,
+        n_z_starts=n_z_starts,
+        apply_roi_residuals=apply_roi_residuals,
     )
     entry["Photon ratios"] = np.asarray(photon_ratios).tolist()
     return locs, lib.append_metadata(info, entry)
@@ -9072,7 +9148,9 @@ def fit_spline_split_fov(
             camera_calibrations=camera_calibrations,
             info=info,
         )
-    return locs, _record_regions(info, fit_regions, reference)
+    return locs, _record_regions(
+        info, fit_regions, reference, confine_to_reference
+    )
 
 
 # ----------------------------------------------------------------------
@@ -9456,6 +9534,7 @@ def fit_split_fov_independent(
     max_it: int | list | None = None,
     spline_calibration: dict | list | None = None,
     camera_calibration: dict | None = None,
+    lateral_transforms: dict | list | str | None = None,
     parallel: bool = True,
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
@@ -9501,6 +9580,10 @@ def fit_split_fov_independent(
     camera_calibration : dict or None, optional
         Per-pixel sCMOS calibration for the (single) camera, covering the
         full frame. Default None.
+    lateral_transforms : dict, list, str or None, optional
+        Lateral (x, y) corrections applied to the localizations of every
+        region after its fit, in sensor coordinates, and recorded in an
+        entry of their own, as in :func:`fit`. Default None.
     parallel : bool, optional
         Whether to fit on a pool of workers, as in :func:`fit`. Default
         True.
@@ -9547,6 +9630,7 @@ def fit_split_fov_independent(
                 max_it=max_its[c],
                 spline_calibration=splines[c],
                 camera_calibration=camera_calibration,
+                lateral_transforms=lateral_transforms,
                 parallel=parallel,
                 progress=_LabeledProgress(
                     progress, f"Region {c + 1}/{n_regions}: "
@@ -9562,8 +9646,9 @@ def fit_split_fov_independent(
             locs = locs_to_region_coordinates(
                 locs, region, camera_info["Pixelsize"]
             )
-        # the entry of the fit, which is a new dict
-        region_info[-1].update(
+        # the entry of the fit (before that of the lateral corrections, if
+        # any), which is a new dict
+        _fit_entry(region_info).update(
             {
                 "Fit mode": FIT_MODE_INDEPENDENT,
                 "Channel": c,

@@ -905,9 +905,17 @@ class TestMultiChannelSavesKeepAllLocs:
         path = str(tmp_path / "picked_multi.hdf5")
         with pytest.warns(UserWarning, match="net_gradient"):
             view.save_picked_locs_multi(path)
-        saved, _ = io.load_locs(path)
+        saved, info = io.load_locs(path)
         assert len(saved) == self._n_picked(view) > 0
         assert "net_gradient" not in saved.columns
+        self._check_channel_metadata(view, info)
+
+    @staticmethod
+    def _check_channel_metadata(view, info):
+        """The first channel's metadata, then the pick entry naming the
+        combined channels."""
+        assert info[:-1] == view.infos[0]
+        assert info[-1]["Channels combined"] == view.locs_paths
 
     def test_picked_locs_combined_per_pick(self, two_channels, tmp_path):
         view = two_channels.view
@@ -915,8 +923,9 @@ class TestMultiChannelSavesKeepAllLocs:
         with pytest.warns(UserWarning, match="net_gradient"):
             view.save_picked_locs_multi_sep(path)
         for i in range(2):
-            saved, _ = io.load_locs(str(tmp_path / f"picked_sep_{i}.hdf5"))
+            saved, info = io.load_locs(str(tmp_path / f"picked_sep_{i}.hdf5"))
             assert len(saved) == self._n_picked(view, i) > 0
+            self._check_channel_metadata(view, info)
 
     def test_all_channels_combined(self, two_channels, tmp_path, monkeypatch):
         window = two_channels

@@ -1459,7 +1459,20 @@ def test_save_localizations_of_a_channel(window, answers, tmp_path):
     window.save_locs()
     locs, info = _load(out)
     assert len(locs) == len(window.view.locs[0])
-    assert "Last driftfile" in info[-1]
+    # the metadata as the steps returned them: no drift file to add
+    assert info == window.view.infos[0]
+
+
+def test_save_localizations_records_the_drift_file(window, answers, tmp_path):
+    driftfile = str(tmp_path / "drift.txt")
+    window.view._driftfiles[0] = driftfile
+    out = tmp_path / "saved.hdf5"
+    answers.save_path(out)
+    window.save_locs()
+    _, info = _load(out)
+    assert info[:-1] == window.view.infos[0]
+    assert info[-1]["Step"] == "Render"
+    assert info[-1]["Last driftfile"] == driftfile
 
 
 def test_save_localizations_of_all_channels(window2, answers, tmp_path):

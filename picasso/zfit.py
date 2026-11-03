@@ -1042,6 +1042,7 @@ def _apply_lateral_transforms_and_build_info(
     calibration: dict,
     lateral_transforms: dict | list | str | None,
     filter: int,
+    fitting_method: str,
     pixelsize: float | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Apply the calibration's lateral corrections plus any extra ones,
@@ -1073,6 +1074,8 @@ def _apply_lateral_transforms_and_build_info(
     new_info = {
         **lib.step_info("Fit 3D"),
         "Calibration path": calibration.get("Path", "N/A"),
+        # not "Fit method", which names the 2D fit
+        "Z fit method": fitting_method,
         "Filter range": filter,
     }
     if affine:
@@ -1150,7 +1153,13 @@ def _zfit(
         return None, None
     progress.set_value(N)
     return _apply_lateral_transforms_and_build_info(
-        locs, info, calibration, lateral_transforms, filter, pixelsize
+        locs,
+        info,
+        calibration,
+        lateral_transforms,
+        filter,
+        fitting_method,
+        pixelsize,
     )
 
 

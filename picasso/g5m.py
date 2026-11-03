@@ -3550,6 +3550,8 @@ def _g5m_info(
     sigma_bounds: tuple,
     mode: str,
     calibration: dict | None,
+    max_locs_per_cluster: float,
+    group_column: str,
 ) -> dict:
     """The info dictionary :func:`g5m` appends for one run."""
     new_info = {
@@ -3563,8 +3565,11 @@ def _g5m_info(
         # the resolved type, not the requested one, so the saved file
         # always records the model that actually ran
         "Covariance type": covariance_type,
+        "Cluster column": group_column,
         "Filtered": False,
     }
+    if np.isfinite(max_locs_per_cluster):
+        new_info["Max. no. locs per cluster"] = int(max_locs_per_cluster)
     if loc_prec_handle == "local":
         new_info["Sigma bounds (factors)"] = [float(_) for _ in sigma_bounds]
         new_info["Sigma bounds method"] = "Local"
@@ -3574,6 +3579,7 @@ def _g5m_info(
     if "z" in locs.columns:
         new_info["Fit mode"] = mode
         if mode == "astigmatism":
+            new_info["Calibration path"] = calibration.get("Path", "N/A")
             new_info["X Coefficients"] = [
                 float(_) for _ in calibration["X Coefficients"]
             ]
@@ -3781,6 +3787,8 @@ def g5m(
         sigma_bounds,
         mode,
         calibration,
+        max_locs_per_cluster,
+        group_column,
     )
     if len(centers):
         centers = pd.concat(centers, ignore_index=True)

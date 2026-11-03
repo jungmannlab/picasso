@@ -7164,7 +7164,7 @@ class TestFitSplineSplitFov:
             roi=calib["regions"][0],
             frame_bounds=(focus - 1, focus + 1),
         )
-        locs, _ = localize.fit_spline_split_fov(
+        locs, info = localize.fit_spline_split_fov(
             movie,
             camera_info=CAMERA_INFO_WITH_PIXELSIZE,
             identifications=ids,
@@ -7172,6 +7172,13 @@ class TestFitSplineSplitFov:
             calibration=calib,
         )
         assert len(locs) > 0
+        # the settings the fit ran with
+        entry = info[-1]
+        assert entry["Fit box size"] == BOX
+        assert entry["ROI residuals applied"] is True
+        assert entry["Axial seeds"] >= 1
+        assert entry["Max iterations"] > 0
+        assert entry["Fit method"].endswith("-gpu") == localize.CUDA_AVAILABLE
         # localizations are in the reference region's coordinates (nm)
         assert np.all(locs["x"] >= 0) and np.all(locs["x"] < 48 * PIXELSIZE)
         assert np.all(locs["y"] >= 0) and np.all(locs["y"] < 48 * PIXELSIZE)
@@ -11912,6 +11919,8 @@ class TestIdentifyMultichannelSum:
         assert info[-1]["Identification Mode"] == "sum"
         assert info[-1]["Sum Regions"] is None
         assert info[-1]["Sum Reference Channel"] == 0
+        assert info[-1]["Sum Interpolation Order"] == 1
+        assert info[-1]["Sum In Photons"] is True
         assert np.allclose(
             affine_matrix(info[-1]["Sum Channel Transforms"][1]),
             affine_matrix(transform),
@@ -14278,6 +14287,33 @@ class TestFitGaussSplitFov:
         # and they are in the reference region's coordinates
         assert locs["x"].max() < 64 * PIXELSIZE
 
+    def test_metadata_record_the_fit_settings(self):
+        movie, camera_info, ids, _, _ = self._dataset()
+        _, info = localize.fit_gauss_split_fov(
+            movie,
+            camera_info=camera_info,
+            identifications=ids,
+            box=self.BOX,
+            channel_registration=self._registration(),
+            regions=self.REGIONS,
+            mle=True,
+            use_gpu=False,
+            parallel=False,
+        )
+        entry = info[-1]
+        assert entry["Fit method"] == "gaussmle-spherical"
+        assert entry["Fit box size"] == self.BOX
+        # the schedule the fit ran with, also when the default was asked for
+        tolerance, max_iterations = localize.gauss_schedule(
+            True, False, None, None
+        )
+        assert entry["Convergence criterion"] == tolerance
+        assert entry["Max iterations"] == max_iterations
+        assert entry["Confined to reference region"] is True
+        assert entry["Reference region"] == 0
+        # one camera images both regions
+        assert "Camera information per channel" not in entry
+
     def test_the_regions_can_be_redrawn(self):
         """The registration is ROI-agnostic, so a split that sits elsewhere is
         handled by moving the regions rather than re-calibrating."""
@@ -14924,6 +14960,28 @@ class TestFitSplitFovIndependent:
         assert second[-1]["Fit method"] == "gausslq"
         assert second[-1]["Fit mode"] == localize.FIT_MODE_INDEPENDENT
         assert second[-1]["Region coordinates"] == "region"
+
+    def test_lateral_corrections_are_applied_and_recorded(
+        self, picasso_movie_factory
+    ):
+        shift = [[1.0, 0.0, 5.0], [0.0, 1.0, -2.0], [0.0, 0.0, 1.0]]
+        corrections = [
+            {"Type": "chromatic", "Transform": affine(shift).to_dict()}
+        ]
+        _, _, plain = self._fit(picasso_movie_factory)
+        _, _, corrected = self._fit(
+            picasso_movie_factory, lateral_transforms=corrections
+        )
+        for (locs, _), (out, info) in zip(plain, corrected):
+            np.testing.assert_allclose(out["x"], locs["x"] + 5.0, rtol=1e-6)
+            np.testing.assert_allclose(out["y"], locs["y"] - 2.0, rtol=1e-6)
+            # an entry of their own, after the fit's
+            assert info[-1]["Step"] == "Affine correction"
+            assert info[-1]["Lateral corrections applied"] == [
+                "chromatic, affine"
+            ]
+            assert info[-2]["Fit mode"] == localize.FIT_MODE_INDEPENDENT
+            assert "Fit mode" not in info[-1]
 
     def test_the_fit_metadata_comes_back_without_a_movie_info(
         self, picasso_movie_factory

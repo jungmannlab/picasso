@@ -396,6 +396,70 @@ def test_align_returns_metadata_of_each_channel():
     assert [len(i) for i in infos] == [1, 1]
 
 
+# --- steps record the parameters they ran with -----------------------------
+
+
+def test_align_records_the_paths():
+    locs, info = _locs(), _info()
+    _, out_infos = postprocess.align(
+        [locs, locs.copy()],
+        [info, info],
+        method="picked",
+        picks=PICKS["picks"],
+        pick_shape="Circle",
+        pick_size=200.0,
+        paths=["a.hdf5", "b.hdf5"],
+    )
+    for out_info in out_infos:
+        assert out_info[-1]["Files"] == ["a.hdf5", "b.hdf5"]
+
+
+@pytest.mark.parametrize("grouped", [False, True])
+def test_dark_times_record_the_grouping(grouped):
+    locs = _linked(_locs(), _info())
+    group = np.zeros(len(locs), dtype=np.int32) if grouped else None
+    _, info = postprocess.compute_dark_times(locs, _info(), group=group)
+    assert info[-1]["Per group"] is grouped
+
+
+def test_apply_drift_records_the_drift_file(tmp_path):
+    drift = pd.DataFrame({"x": np.full(400, 5.0), "y": np.zeros(400)})
+    path = str(tmp_path / "drift.txt")
+    io.save_drift(path, drift)
+    loaded = io.load_drift(path)
+    assert loaded.attrs["Path"] == path
+    _, info = postprocess.apply_drift(_locs(), _info(), drift=loaded)
+    assert info[-1]["Drift file"] == path
+    # a drift that does not come from a file
+    _, info = postprocess.apply_drift(_locs(), _info(), drift=drift)
+    assert "Drift file" not in info[-1]
+
+
+def test_undrift_from_fiducials_records_z():
+    _, info, _ = postprocess.undrift_from_fiducials(_locs(), _info(), **PICKS)
+    assert info[-1]["Step"] == "Undrift from picked"
+    assert info[-1]["Undrift z"] is False  # 2D localizations
+
+
+def test_resi_records_the_paths():
+    locs, info = _locs(), _info()
+    _, resi_info = postprocess.resi(
+        [locs, locs.copy()],
+        [info, info],
+        radius_xy=20.0,
+        min_locs=3,
+        apply_fa=False,
+        paths=["a.hdf5", "b.hdf5"],
+    )
+    assert resi_info[-1]["Paths to RESI channels"] == ["a.hdf5", "b.hdf5"]
+
+
+def test_filter_entry_lists_steps_only_if_any():
+    assert lib.FILTER_STEPS_KEY not in expression.filter_entry([])
+    entry = expression.filter_entry(["x < 6000"])
+    assert entry[lib.FILTER_STEPS_KEY] == ["x < 6000"]
+
+
 # --- identifying and fitting a movie ----------------------------------------
 
 
@@ -449,6 +513,7 @@ def test_identify_and_fit_return_complete_metadata(movie):
         "Fit 2D",
     ]
     assert locs_info[-1]["Pixelsize"] == 130
+    assert locs_info[-1]["Fit box size"] == 7
     # the input metadata are not modified
     assert len(info) == 1 and len(ids_info) == 2
 

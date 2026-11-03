@@ -358,12 +358,16 @@ metadata need the new ones:
   (were ``Maximum Distance`` and ``Maximum Transient Dark Time``).
 - ``undrift``: ``Segmentation`` (RCC) as before, and no ``Drift X`` and
   ``Drift Y`` (the drift is saved in the drift file). With ``--from-file``,
-  the step is ``Apply drift`` with ``From File``.
+  the step is ``Apply drift`` with ``Drift file`` (was ``From File``).
 - ``undrift-fiducials``: two entries, one for the RCC before picking the
   fiducials (``Segmentation``, was ``pre-RCC segmentation``) and one for the
   fiducials (``Number of picks``, ``Pick shape`` and ``Pick diameter (nm)``,
   was ``Pick radius (nm)``).
 - ``density``: ``Radius (nm)`` (was ``Radius``).
+- ``localize``: the 3D calibration is the ``Calibration path`` of the
+  ``Fit 3D`` entry (was ``Z Calibration Path``). Without a z fit, the
+  corrections of ``--affine-calibration`` are recorded in an
+  ``Affine correction`` entry of their own (were added to the fit's entry).
 - ``align``: the shift subtracted from each file (``Shift x (nm)``,
   ``Shift y (nm)``) and the method, besides ``Files``.
 - ``dbscan``, ``hdbscan`` and ``smlm-cluster``: the cluster centers have one

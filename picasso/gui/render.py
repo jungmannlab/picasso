@@ -9698,6 +9698,7 @@ class RESIDialog(lib.Dialog):
                 radius_z=r_z,
                 min_locs=min_locs,
                 apply_fa=apply_fa,
+                paths=paths,
                 save_clustered_locs=save_clustered_locs,
                 save_cluster_centers=save_cluster_centers,
                 suffix_locs=suffix_locs,
@@ -9706,7 +9707,6 @@ class RESIDialog(lib.Dialog):
                 progress=progress,
             )
             progress.check_canceled()
-            resi_info[-1]["Paths to RESI channels"] = paths
             io.save_locs(resi_path, all_resi, resi_info)
 
         lib.run_task(
@@ -12727,29 +12727,41 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         return [(y_min, x_min), (y_max, x_max)]
 
     def align(self) -> None:
-        """Align channels by RCC or from picked localizations."""
+        """Align channels by RCC or from picked localizations. The
+        localizations outside the region where all aligned channels
+        overlap are removed unless the user settings keep them (see
+        ``keep_non_overlapping_setting``), or if the channels do not
+        overlap."""
         locs, infos = self.locs, self.infos
+        kwargs = {"paths": list(self.locs_paths)}
         if len(self._picks) > 0:  # shift from picked
-            index_blocks = [
-                self._circle_pick_index(c) for c in range(len(self.locs))
-            ]
-            pick_args = self._pick_args()
-
-            def align():
-                return postprocess.align(
-                    locs,
-                    infos,
-                    method="picked",
-                    **pick_args,
-                    index_blocks=index_blocks,
-                )
-
+            kwargs |= {
+                "method": "picked",
+                **self._pick_args(),
+                "index_blocks": [
+                    self._circle_pick_index(c) for c in range(len(self.locs))
+                ],
+            }
         else:  # align using whole images
+            kwargs["method"] = "rcc"
+        keep = keep_non_overlapping_setting()
 
-            def align():
-                return postprocess.align(locs, infos, method="rcc")
+        def align():
+            try:
+                result = postprocess.align(
+                    locs, infos, keep_non_overlapping=keep, **kwargs
+                )
+            except ValueError:
+                if keep:
+                    raise
+                # the aligned channels do not overlap: keep them all
+                result = postprocess.align(
+                    locs, infos, keep_non_overlapping=True, **kwargs
+                )
+                return *result, True
+            return *result, False
 
-        aligned, infos = lib.run_with_status(
+        aligned, infos, all_kept = lib.run_with_status(
             align, "Aligning channels...", self
         )
         with self.undo_step("Align channels"):
@@ -12757,19 +12769,14 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             for channel, info in enumerate(infos):
                 # a new list, the old one may be shared with linked windows
                 self.infos[channel] = info
-            if not keep_non_overlapping_setting():
-                try:
-                    self.locs = postprocess.remove_non_overlapping_locs(
-                        self.locs
-                    )
-                except ValueError:
-                    QtWidgets.QMessageBox.warning(
-                        self,
-                        "Align channels",
-                        "The aligned channels do not overlap, so all"
-                        " localizations were kept.",
-                    )
             self.update_scene(resample_locs=True)
+        if all_kept:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Align channels",
+                "The aligned channels do not overlap, so all"
+                " localizations were kept.",
+            )
 
     @check_pick
     def combine(self) -> None:
@@ -15049,7 +15056,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 return
             drift = self._read_drift_file(path, channel)
             if drift is not None:
-                self.load_drift_drop(channel, drift.to_numpy())
+                self.load_drift_drop(channel, drift)
 
     def _load_or_report(self, loader, path: str, **kwargs):
         """Load ``path`` with ``loader`` (see
@@ -15102,10 +15109,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             self.window.info_dialog.xy_label.setText(f"{x:.1f} / {y:.1f} nm")
             self.window.info_dialog.wh_label.setText(f"{w:.1f} / {h:.1f} nm")
 
-    def load_drift_drop(self, channel: int, drift: FloatArray2D) -> None:
-        """Attempts to load a drift .txt file (2 or 3 columns) and apply
-        the drift to localizations. If ``channel`` equals the number of
-        loaded channels, the drift is applied to all channels
+    def load_drift_drop(self, channel: int, drift: pd.DataFrame) -> None:
+        """Apply the drift of a dropped .txt file (2 or 3 columns, see
+        ``io.load_drift``) to localizations. If ``channel`` equals the
+        number of loaded channels, the drift is applied to all channels
         sequentially (only if every localization channel and the drift
         file share the same number of frames)."""
         if channel == len(self.locs_paths):  # apply to all sequentially
@@ -15133,9 +15140,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         else:
             self._load_drift_drop(channel, drift)
 
-    def _load_drift_drop(self, channel: int, drift: FloatArray2D) -> None:
-        """Apply a loaded drift .txt file (2 or 3 columns) to a single
-        channel after checking its number of frames and dimensions."""
+    def _load_drift_drop(self, channel: int, drift: pd.DataFrame) -> None:
+        """Apply a loaded drift .txt file (2 or 3 columns, see
+        ``io.load_drift``) to a single channel after checking its number
+        of frames and dimensions."""
         n_frames = lib.get_from_metadata(self.infos[channel], "Frames")
         n_dim = 3 if hasattr(self.locs[channel], "z") else 2
         if drift.shape[0] != n_frames or drift.shape[1] != n_dim:
@@ -15151,11 +15159,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 ),
             )
             return
-        # apply drift, convert to df first
-        drift_df = pd.DataFrame(drift[:, :2], columns=["x", "y"])
-        if drift.shape[1] == 3:
-            drift_df["z"] = drift[:, 2]
-        self._apply_drift(channel, drift_df)
+        # as in apply_drift; the metadata record the file (drift.attrs)
+        with self.undo_step("Apply drift"):
+            self._apply_drift(channel, drift)
+            self._driftfiles[channel] = drift.attrs.get("Path")
 
     def _read_picks_file(self, path: str) -> tuple | None:
         """Read a picks .yaml file in nm (see ``io.load_picks``); a file
@@ -18689,10 +18696,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 }
                 self._add_shape_specific_info(pick_info, [i])
                 self._add_picks_to_info(pick_info, [i])
+                # the first channel's, as in save_picked_locs_multi
                 io.save_locs(
                     os.path.splitext(path)[0] + f"_{i}.hdf5",
                     pick_locs,
-                    self.infos[channel] + [pick_info],
+                    self.infos[0] + [pick_info],
                 )
 
     def save_pick_properties(self, path: str, channel: int) -> None:
@@ -21674,15 +21682,11 @@ class Window(QtWidgets.QMainWindow):
                             self.view.locs_paths[channel]
                         )
                         out_path = base + suffix + ".hdf5"
-                        info = self.view.infos[channel] + [
-                            {
-                                **lib.step_info("Render"),
-                                "Last driftfile": (
-                                    self.view._driftfiles[channel]
-                                ),
-                            }
-                        ]
-                        io.save_locs(out_path, self.view.locs[channel], info)
+                        io.save_locs(
+                            out_path,
+                            self.view.locs[channel],
+                            self._info_to_save(channel),
+                        )
             # save one channel only
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
@@ -21695,13 +21699,24 @@ class Window(QtWidgets.QMainWindow):
                     check_ext=".yaml",
                 )
                 if path:
-                    info = self.view.infos[channel] + [
-                        {
-                            **lib.step_info("Render"),
-                            "Last driftfile": self.view._driftfiles[channel],
-                        }
-                    ]
-                    io.save_locs(path, self.view.locs[channel], info)
+                    io.save_locs(
+                        path,
+                        self.view.locs[channel],
+                        self._info_to_save(channel),
+                    )
+
+    def _info_to_save(self, channel: int) -> list[dict]:
+        """Metadata of a channel to save: as its steps returned it,
+        followed by the drift file Render wrote or applied last, if
+        any, which is read back when the file is loaded (``Last
+        driftfile``, see ``View._load_drift``)."""
+        info = self.view.infos[channel]
+        driftfile = self.view._driftfiles[channel]
+        if driftfile is None:
+            return info
+        return info + [
+            {**lib.step_info("Render"), "Last driftfile": driftfile}
+        ]
 
     def save_picked_locs(self) -> None:
         """Save picked localizations in a given channel (or all
