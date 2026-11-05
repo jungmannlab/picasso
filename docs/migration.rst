@@ -717,7 +717,8 @@ The Picasso windows save the metadata these functions return, so some files
 record their steps differently:
 
 - Picasso: Localize records the identification (``Identify``) and the fit
-  (``Fit 2D``, or the joint fit of several channels) in entries of their own,
+  (``Fit 2D``, ``Fit 3D spline`` for a 3D spline calibration, or the joint
+  fit of several channels) in entries of their own,
   followed by the lateral corrections, the z fit and the drift correction,
   instead of one ``Localize`` entry. The fit is named by its code (e.g.,
   ``gaussmle``) and the 3D calibration by the ``Calibration path`` of the
