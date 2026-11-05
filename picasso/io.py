@@ -41,11 +41,12 @@ from . import lib, __version__, docs_url
 from .ext import bitplane
 from .ext.bitplane import IMSFile
 
-# Optional vendor readers for Zeiss .czi and Leica .lif movies. Both are
-# Christoph Gohlke's BSD-licensed libraries (same author as tifffile)
-# and require Python >= 3.12, so they are optional dependencies (extras
-# ``czi`` / ``lif``). When absent, the corresponding extensions are
-# simply not advertised and the loaders raise a helpful ImportError.
+# Optional vendor readers for Zeiss .czi and Leica .lif movies and
+# PicoQuant .ptu confocal scans. All are Christoph Gohlke's BSD-licensed
+# libraries (same author as tifffile) and require Python >= 3.12, so
+# they are optional dependencies (extras ``czi`` / ``lif`` / ``ptu``).
+# When absent, the corresponding extensions are simply not advertised
+# and the loaders raise a helpful ImportError.
 try:
     import czifile
 except ImportError:
@@ -54,6 +55,10 @@ try:
     import liffile
 except ImportError:
     liffile = None
+try:
+    import ptufile
+except ImportError:
+    ptufile = None
 
 __all__ = [
     # localizations
@@ -140,11 +145,15 @@ TIFF_EXTENSIONS = (".tif", ".tiff", ".btf", ".tf8", ".tf2", ".lsm")
 # reader libraries are importable (see the guarded imports above).
 CZI_EXTENSIONS = (".czi",) if czifile is not None else ()
 LIF_EXTENSIONS = (".lif",) if liffile is not None else ()
+# PicoQuant .ptu (TCSPC photon data of confocal image scans) is advertised
+# only when ptufile is importable, like .czi and .lif.
+PTU_EXTENSIONS = (".ptu",) if ptufile is not None else ()
 MOVIE_EXTENSIONS = (
     (".raw", ".ims", ".nd2", ".stk")
     + TIFF_EXTENSIONS
     + CZI_EXTENSIONS
     + LIF_EXTENSIONS
+    + PTU_EXTENSIONS
 )
 # Localizations per block when reading an .hdf5 file, see
 # ``_read_locs_dataset``. Blocks make long reads reportable and
@@ -1609,10 +1618,161 @@ def load_lif_all(path: str) -> tuple[list[LIFMovie], list[list[dict]]]:
     return movies, infos
 
 
+# Movie formats whose pixel values count detected photons. Only these
+# frames can be summed (``frame_sum_window`` of ``load_movie``): a camera
+# frame carries an offset (the baseline) in every frame, so a sum of raw
+# camera counts is not a count of photons.
+_PHOTON_COUNTING_EXTENSIONS = (".ptu",)
+
+
+def _frame_sum_parameters(window: int, stride: int | None) -> tuple[int, int]:
+    """Validate ``frame_sum_window`` / ``frame_sum_stride`` and return
+    ``(window, stride)``; a stride of None is the window (consecutive sums
+    that do not overlap)."""
+    for name, value in (
+        ("frame_sum_window", window),
+        ("frame_sum_stride", stride),
+    ):
+        if value is None and name == "frame_sum_stride":
+            continue
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, np.integer))
+            or value < 1
+        ):
+            raise ValueError(
+                f"{name} must be a positive integer, got {value!r}."
+            )
+    window = int(window)
+    stride = window if stride is None else int(stride)
+    if stride > window:
+        raise ValueError(
+            f"frame_sum_stride ({stride}) must not exceed frame_sum_window "
+            f"({window}): the scan frames between two sums would be "
+            "skipped."
+        )
+    return window, stride
+
+
+def _check_frame_sum(path: str, window: int, stride: int | None) -> None:
+    """Refuse frame summing for movies whose pixels are not photon counts
+    (see ``_PHOTON_COUNTING_EXTENSIONS``)."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in _PHOTON_COUNTING_EXTENSIONS:
+        _frame_sum_parameters(window, stride)
+    elif window != 1 or stride not in (None, 1):
+        raise ValueError(
+            "Frame summing (frame_sum_window, frame_sum_stride) is only "
+            "available for photon-counting movies (.ptu), not for "
+            f"{ext or 'this'} files: camera frames carry an offset "
+            "(the baseline) in every frame, so a sum of their raw counts "
+            "is not a count of photons."
+        )
+
+
+def _require_ptufile() -> None:
+    """Raise a helpful ImportError when ptufile is not installed."""
+    if ptufile is None:
+        raise ImportError(
+            "Reading .ptu files requires the optional 'ptufile' package "
+            "(needs Python >= 3.12). Install it with: "
+            "pip install picassosr[ptu]"
+        )
+
+
+def load_ptu(
+    path: str,
+    prompt_info: Callable[[list[str]], str] | None = None,
+    *,
+    frame_sum_window: int = 1,
+    frame_sum_stride: int | None = None,
+) -> tuple[PTUMovie, list[dict]]:
+    """Load a PicoQuant PTU confocal image scan and its metadata.
+
+    Each pixel counts the photons detected in it, integrated over the
+    microtime (see ``PTUMovie``). A file recorded with several detectors
+    is reduced to one of them via ``prompt_info`` (defaulting to the
+    first detector otherwise).
+
+    Parameters
+    ----------
+    path : str
+        The path to the PTU file.
+    prompt_info : Callable, optional
+        Called with the list of detector names to select one.
+    frame_sum_window : int, optional
+        Number of consecutive scan frames summed into one frame. Default
+        1 (every scan frame is a frame).
+    frame_sum_stride : int, optional
+        Number of scan frames between the starts of two consecutive
+        sums, at most ``frame_sum_window``. None (default) uses
+        ``frame_sum_window``, i.e., sums that do not overlap; 1 gives a
+        sliding window.
+
+    Returns
+    -------
+    movie : PTUMovie
+        A movie object providing array-like access to the frames.
+    info : list[dict]
+        A list containing a dictionary with metadata about the movie.
+    """
+    _check_path_length(path)
+    _require_ptufile()
+    movie = PTUMovie(
+        path,
+        prompt_info=prompt_info,
+        frame_sum_window=frame_sum_window,
+        frame_sum_stride=frame_sum_stride,
+    )
+    return movie, [movie.info()]
+
+
+def load_ptu_all(
+    path: str,
+    *,
+    frame_sum_window: int = 1,
+    frame_sum_stride: int | None = None,
+) -> tuple[list[PTUMovie], list[list[dict]]]:
+    """Load every detector of a PicoQuant PTU image scan as its own movie.
+
+    Parameters
+    ----------
+    path : str
+        The path to the PTU file.
+    frame_sum_window, frame_sum_stride : int, optional
+        Frame summing, see ``load_ptu``.
+
+    Returns
+    -------
+    movies : list of PTUMovie
+        One movie object per detector that recorded photons.
+    infos : list of lists of dicts
+        Per-detector metadata, each carrying a ``"Channel"`` key.
+    """
+    _check_path_length(path)
+    _require_ptufile()
+    channels = PTUMovie.detector_names(path)
+    movies = []
+    infos = []
+    for i in range(len(channels)):
+        movie = PTUMovie(
+            path,
+            channel=i,
+            frame_sum_window=frame_sum_window,
+            frame_sum_stride=frame_sum_stride,
+        )
+        movies.append(movie)
+        infos.append([movie.info()])
+    return movies, infos
+
+
 def load_movie(
     path: str,
     prompt_info=None,
     progress: lib.Progress | Literal["console"] | None = None,
+    *,
+    frame_sum_window: int = 1,
+    frame_sum_stride: int | None = None,
 ) -> tuple[AbstractPicassoMovie, list[dict]]:
     """Load a movie file based on its extension and returns the movie
     object and its metadata.
@@ -1634,6 +1794,16 @@ def load_movie(
         ``load_tif``, "Indexing <file>" and "Reading <file>" over the
         pages of each file; the other formats open effectively
         instantly and report nothing. Default is None.
+    frame_sum_window : int, optional
+        Photon-counting movies (.ptu) only: number of consecutive scan
+        frames summed into one frame of the returned movie, for scans
+        too dim to localize frame by frame. Default 1 (no summing).
+    frame_sum_stride : int, optional
+        Photon-counting movies (.ptu) only: number of scan frames
+        between the starts of two consecutive sums, at most
+        ``frame_sum_window``. None (default) uses ``frame_sum_window``,
+        so that the sums do not overlap and every photon is used once;
+        1 gives a sliding window.
 
     Returns
     -------
@@ -1645,13 +1815,16 @@ def load_movie(
     Raises
     ------
     ValueError
-        If the file extension is not a supported movie format.
+        If the file extension is not a supported movie format, or if
+        frames are to be summed for a movie whose pixel values are not
+        photon counts.
     """
     _check_path_length(path)
     base, ext = os.path.splitext(path)
     ext = ext.lower()
     # validated here, so that a bad argument fails for every format
     lib.normalize_progress(progress)
+    _check_frame_sum(path, frame_sum_window, frame_sum_stride)
     if ext == ".raw":
         return load_raw(path, prompt_info=prompt_info)
     elif ext in TIFF_EXTENSIONS:
@@ -1666,6 +1839,13 @@ def load_movie(
         return load_czi(path, prompt_info=prompt_info)
     elif ext == ".lif":
         return load_lif(path, prompt_info=prompt_info)
+    elif ext == ".ptu":
+        return load_ptu(
+            path,
+            prompt_info=prompt_info,
+            frame_sum_window=frame_sum_window,
+            frame_sum_stride=frame_sum_stride,
+        )
     else:
         raise ValueError(
             f"Unsupported movie format: {ext}. Supported formats are"
@@ -1677,13 +1857,17 @@ def load_movie_all(
     path: str,
     prompt_info=None,
     progress: lib.Progress | Literal["console"] | None = None,
+    *,
+    frame_sum_window: int = 1,
+    frame_sum_stride: int | None = None,
 ) -> tuple[list[AbstractPicassoMovie], list[list[dict]]] | None:
     """Load every channel of a movie file as independent movies.
 
     Mirrors ``load_movie`` but returns parallel lists - one entry per
-    channel. Multi-channel formats (.ims, .czi, .lif, .nd2) expose all of
-    their channels; single-channel formats return one-element lists. Each
-    ``info[0]`` carries a ``"Channel"`` key identifying the channel.
+    channel. Multi-channel formats (.ims, .czi, .lif, .nd2, and .ptu with
+    one channel per detector) expose all of their channels;
+    single-channel formats return one-element lists. Each ``info[0]``
+    carries a ``"Channel"`` key identifying the channel.
 
     Parameters
     ----------
@@ -1700,6 +1884,9 @@ def load_movie_all(
         single-channel formats, i.e., TIFF movies report "Indexing
         <file>" and "Reading <file>" over the pages of each file; the
         multi-channel formats report nothing. Default is None.
+    frame_sum_window, frame_sum_stride : int, optional
+        Photon-counting movies (.ptu) only: frame summing, see
+        ``load_movie``.
 
     Returns
     -------
@@ -1714,6 +1901,7 @@ def load_movie_all(
     _check_path_length(path)
     ext = os.path.splitext(path)[1].lower()
     lib.normalize_progress(progress)  # fails early on a bad argument
+    _check_frame_sum(path, frame_sum_window, frame_sum_stride)
     if ext == ".ims":
         return load_ims_all(path)
     elif ext == ".czi":
@@ -1722,6 +1910,12 @@ def load_movie_all(
         return load_lif_all(path)
     elif ext == ".nd2":
         return load_nd2_all(path, prompt_info=prompt_info)
+    elif ext == ".ptu":
+        return load_ptu_all(
+            path,
+            frame_sum_window=frame_sum_window,
+            frame_sum_stride=frame_sum_stride,
+        )
     else:
         # Single-channel formats: wrap load_movie into one-element lists.
         result = load_movie(path, prompt_info=prompt_info, progress=progress)
@@ -3713,9 +3907,9 @@ class ND2Movie(AbstractPicassoMovie):
 
 
 class _MultiDimMovie(AbstractPicassoMovie):
-    """Shared base for vendor formats (Zeiss .czi, Leica .lif) that store a
-    multi-dimensional image which Picasso reduces to a single-channel
-    ``(T, Y, X)`` movie.
+    """Shared base for vendor formats (Zeiss .czi, Leica .lif, PicoQuant
+    .ptu) that store a multi-dimensional image which Picasso reduces to a
+    single-channel ``(T, Y, X)`` movie.
 
     Subclasses open the file in ``__init__``, populate ``n_frames``,
     ``height``, ``width`` and ``_dtype``, call :meth:`_select_channel` to
@@ -4029,6 +4223,352 @@ class LIFMovie(_MultiDimMovie):
     def close(self):
         try:
             self._lif.close()
+        except Exception:
+            pass
+
+
+# Header tags of a PTU file kept in the movie metadata ("PTU Metadata"):
+# acquisition software, hardware, timing, scan geometry and optics. Long
+# vendor blocks (e.g. Luminosa's XML device settings) are left out.
+_PTU_METADATA_TAGS = (
+    "File_GUID",
+    "File_CreatingTime",
+    "File_Comment",
+    "CreatorSW_Name",
+    "CreatorSW_Version",
+    "HW_Type",
+    "Measurement_Mode",
+    "Measurement_SubMode",
+    "TTResultFormat_TTTRRecType",
+    "TTResult_SyncRate",
+    "MeasDesc_Resolution",
+    "MeasDesc_GlobalResolution",
+    "MeasDesc_BinningFactor",
+    "MeasDesc_AcquisitionTime",
+    "ImgHdr_PixX",
+    "ImgHdr_PixY",
+    "ImgHdr_PixResol",
+    "ImgHdr_TimePerPixel",
+    "ImgHdr_BiDirect",
+    "ImgHdr_ObjectiveName",
+    "LaserName",
+    "LaserWL",
+    "Detector",
+    "DetectorInUse",
+    "Chromophore",
+    "AnaChName",
+)
+
+
+class PTUMovie(_MultiDimMovie):
+    """Read PicoQuant PTU confocal image scans via the optional
+    ``ptufile`` library, presenting the photons of one detector as a
+    ``(T, Y, X)`` movie.
+
+    A PTU file stores every detected photon (time-correlated single
+    photon counting, T3 mode) with its arrival time, its detector and
+    its microtime, the delay after the excitation pulse. ``ptufile``
+    assigns the photons of each scan line to pixels with the pixel dwell
+    time of the file header, the convention of PicoQuant's software;
+    photons detected during the scanner's retrace are left out, as are
+    incomplete first and last scan frames. A pixel value is the number of
+    photons detected in that pixel, integrated over the microtime, so the
+    frames need no camera conversion: the metadata carry
+    ``"Photon Counting": True`` (baseline 0, sensitivity 1, no EM gain).
+
+    Confocal scan frames are often too dim to localize one by one, so
+    ``frame_sum_window`` consecutive scan frames can be summed into one
+    frame, a new sum starting every ``frame_sum_stride`` scan frames
+    (default: the window, i.e., sums that do not overlap and use every
+    photon once; a stride of 1 gives a sliding window). Frame ``k`` is the
+    sum of scan frames ``k * stride`` to ``k * stride + window - 1``; scan
+    frames at the end that do not fill a whole window are left out.
+
+    Only T3 image scans are supported (not point or line scans, z-stacks
+    or T2 data). Each detector that recorded photons is one channel.
+
+    The microtimes stay available for fluorescence-lifetime analyses
+    such as FL-PAINT through ``_microtime_histograms``, private until
+    such an analysis is part of Picasso.
+    """
+
+    # frames are decoded into arrays once, so reading them is thread-safe
+    supports_concurrent_reads = True
+    # Decoded frames are held in memory up to this fraction of the
+    # available memory; larger movies go to a temporary memory-mapped file
+    # (removed by ptufile once it is no longer used).
+    MEMORY_FRACTION = 0.25
+
+    def __init__(
+        self,
+        path: str,
+        prompt_info: Callable[[list[str]], str] | None = None,
+        channel: int | None = None,
+        *,
+        frame_sum_window: int = 1,
+        frame_sum_stride: int | None = None,
+    ):
+        super().__init__()
+        window, stride = _frame_sum_parameters(
+            frame_sum_window, frame_sum_stride
+        )
+        self.path = os.path.abspath(path)
+        self.frame_sum_window = window
+        self.frame_sum_stride = stride
+        # ptufile's file access is not thread-safe
+        self._lock = threading.Lock()
+        self._ptu = self._open(path)
+        try:
+            self._detectors = self._active_detectors(self._ptu, path)
+            self._select_channel(
+                [f"Detector {d + 1}" for d in self._detectors],
+                prompt_info,
+                channel,
+            )
+            self._detector = self._detectors[self._channel]
+            n_scan, height, width = (int(_) for _ in self._ptu.shape[:3])
+            if n_scan < window:
+                raise ValueError(
+                    f"{self.path} has {n_scan} complete scan frame(s), "
+                    f"fewer than the {window} to be summed into one frame."
+                )
+            self.scan_frames = n_scan
+            self.height = height
+            self.width = width
+            self.n_frames = (n_scan - window) // stride + 1
+            if stride == window:
+                # sums that do not overlap: ptufile bins the frames itself
+                self._dtype = np.dtype(np.uint16 if window == 1 else np.uint32)
+                self._frames = self._decode(
+                    slice(0, self.n_frames * window, window), self._dtype
+                )
+                self._scan = None
+            else:
+                # overlapping sums are added up from the scan frames
+                self._dtype = np.dtype(np.uint32)
+                self._scan = self._decode(slice(None), np.dtype(np.uint16))
+                self._frames = None
+        except Exception:
+            self._ptu.close()
+            raise
+
+    @staticmethod
+    def _open(path: str) -> "ptufile.PtuFile":
+        """Open ``path`` with ptufile and check that it is a T3 image
+        scan. Channels are not trimmed, so a channel index is the
+        detector's index; empty trailing microtime bins are."""
+        ptu = ptufile.PtuFile(path, trimdims="TH")
+        try:
+            dims = tuple(ptu.dims)
+            if not (ptu.is_t3 and ptu.is_image) or dims != (
+                "T",
+                "Y",
+                "X",
+                "C",
+                "H",
+            ):
+                raise ValueError(
+                    f"{os.path.abspath(path)} is not a PicoQuant T3 image "
+                    f"scan (dimensions {dims}); Picasso reads .ptu files "
+                    "of confocal image scans only, not point or line "
+                    "scans, z-stacks or T2 data."
+                )
+        except Exception:
+            ptu.close()
+            raise
+        return ptu
+
+    @staticmethod
+    def _active_detectors(ptu: "ptufile.PtuFile", path: str) -> tuple:
+        """Indices of the detectors (TCSPC input channels) with photons."""
+        detectors = tuple(int(_) for _ in ptu.active_channels)
+        if not detectors:
+            raise ValueError(f"{os.path.abspath(path)} contains no photons.")
+        return detectors
+
+    @classmethod
+    def detector_names(cls, path: str) -> list[str]:
+        """Names of the channels (detectors with photons) of a PTU file,
+        without decoding its frames."""
+        ptu = cls._open(path)
+        try:
+            return [
+                f"Detector {d + 1}" for d in cls._active_detectors(ptu, path)
+            ]
+        finally:
+            ptu.close()
+
+    def _decode(self, frames: slice, dtype: np.dtype) -> np.ndarray:
+        """Decode the photon counts of the selected detector, integrated
+        over the microtime, for the scan frames in ``frames`` (a slice
+        whose step sums that many frames) into a read-only
+        ``(T, Y, X)`` array."""
+        first, last, step = frames.indices(self.scan_frames)
+        n = -(-(last - first) // step)  # one frame per (started) step
+        nbytes = n * self.height * self.width * np.dtype(dtype).itemsize
+        out = None
+        try:
+            import psutil
+
+            if (
+                nbytes
+                > self.MEMORY_FRACTION * psutil.virtual_memory().available
+            ):
+                out = "memmap"
+        except Exception as error:  # noqa: BLE001 - keep in memory
+            _log.debug("Available memory not read: %s", error)
+        with self._lock:
+            data = self._ptu.decode_image(
+                (frames, Ellipsis),
+                channel=self._detector,
+                dtime=-1,
+                dtype=dtype,
+                out=out,
+            )
+        data = data[:, :, :, 0, 0]
+        data.flags.writeable = False
+        return data
+
+    def _read_plane(self, index: int) -> np.ndarray:
+        if not 0 <= index < self.n_frames:
+            raise IndexError(
+                f"Frame {index} is out of range for a movie with "
+                f"{self.n_frames} frames."
+            )
+        if self._scan is None:
+            return self._frames[index]
+        start = index * self.frame_sum_stride
+        return self._scan[start : start + self.frame_sum_window].sum(
+            axis=0, dtype=np.uint32
+        )
+
+    def info(self) -> dict:
+        tags = self._ptu.tags
+        info = {
+            "File": self.path,
+            "Height": self.height,
+            "Width": self.width,
+            "Frames": self.n_frames,
+            "Data Type": self._dtype.name,
+            "Channel": self.channels[self._channel],
+            "Generated by": "Picasso Localize (PTU)",
+            "Photon Counting": True,
+            "Frame Sum Window": self.frame_sum_window,
+            "Frame Sum Stride": self.frame_sum_stride,
+            "Scan Frames": self.scan_frames,
+        }
+        resolution = tags.get("ImgHdr_PixResol")  # micrometer
+        if isinstance(resolution, (int, float)) and resolution > 0:
+            info["Pixelsize"] = round(float(resolution) * 1000, 3)
+        info["PTU Metadata"] = _yaml_safe(
+            {key: tags[key] for key in _PTU_METADATA_TAGS if key in tags}
+        )
+        return info
+
+    @property
+    def _tcspc_resolution(self) -> float:
+        """Width of one microtime (TCSPC) bin in seconds."""
+        return float(self._ptu.tcspc_resolution)
+
+    @property
+    def _number_bins(self) -> int:
+        """Number of microtime (TCSPC) bins, up to the last occupied one."""
+        return int(self._ptu.shape[-1])
+
+    def _microtime_histograms(
+        self,
+        start: int,
+        stop: int,
+        *,
+        roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
+        dtime_bin: int = 1,
+        dtime_range: tuple[int, int] | None = None,
+    ) -> np.ndarray:
+        """Microtime histograms of the photons in frames ``start`` to
+        ``stop - 1``, per pixel.
+
+        The extension point for fluorescence-lifetime analyses such as
+        FL-PAINT: the histograms of a localization's box give its
+        lifetime. Summing a histogram over its last axis gives the
+        photon count of the frame, i.e., the frames are the histograms
+        integrated over the microtime.
+
+        Decoding reads the file from its start up to the last scan frame
+        requested, and the result holds one histogram per pixel, so
+        callers should request a block of frames at a time and reduce it
+        to the boxes they need.
+
+        Parameters
+        ----------
+        start, stop : int
+            Frames of this movie (sums of scan frames, see the class
+            docstring).
+        roi : tuple of two tuples, optional
+            ``((y_start, x_start), (y_end, x_end))`` in pixels, as in
+            ``localize.identify_in_frame``. None (default) is the whole
+            frame.
+        dtime_bin : int, optional
+            Number of microtime bins (of ``_tcspc_resolution``) merged
+            into one histogram bin. Default 1.
+        dtime_range : tuple of two ints, optional
+            First and last-plus-one microtime bin included, e.g., a
+            microtime gate. None (default) includes all bins.
+
+        Returns
+        -------
+        histograms : np.ndarray
+            ``(stop - start, Y, X, B)`` uint32 photon counts per pixel
+            and microtime bin.
+        """
+        if not 0 <= start < stop <= self.n_frames:
+            raise IndexError(
+                f"Frames {start} to {stop} are out of range for a movie "
+                f"with {self.n_frames} frames."
+            )
+        if (
+            isinstance(dtime_bin, bool)
+            or int(dtime_bin) != dtime_bin
+            or dtime_bin < 1
+        ):
+            raise ValueError(
+                f"dtime_bin must be a positive integer, got {dtime_bin!r}."
+            )
+        window, stride = self.frame_sum_window, self.frame_sum_stride
+        first = start * stride
+        last = (stop - 1) * stride + window
+        lo, hi = (0, self._number_bins) if dtime_range is None else dtime_range
+        lo, hi = max(0, int(lo)), min(self._number_bins, int(hi))
+        if lo >= hi:
+            raise ValueError(f"Empty microtime range {dtime_range!r}.")
+        if roi is None:
+            rows, cols = slice(None), slice(None)
+        else:
+            (y0, x0), (y1, x1) = roi
+            rows, cols = slice(int(y0), int(y1)), slice(int(x0), int(x1))
+        with self._lock:
+            hist = self._ptu.decode_image(
+                (
+                    slice(first, last),
+                    rows,
+                    cols,
+                    self._detector,
+                    slice(lo, hi, int(dtime_bin)),
+                ),
+                dtype=np.uint32,
+            )[:, :, :, 0, :]
+        n = stop - start
+        if stride == window:
+            return hist.reshape((n, window) + hist.shape[1:]).sum(
+                axis=1, dtype=np.uint32
+            )
+        cumulative = np.zeros((hist.shape[0] + 1,) + hist.shape[1:], np.uint32)
+        np.cumsum(hist, axis=0, out=cumulative[1:])
+        starts = np.arange(n) * stride
+        return cumulative[starts + window] - cumulative[starts]
+
+    def close(self):
+        try:
+            self._ptu.close()
         except Exception:
             pass
 

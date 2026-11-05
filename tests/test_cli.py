@@ -1476,6 +1476,42 @@ def _copy_testdata(tmp_path) -> str:
     return str(tmp_path / "movie.raw")
 
 
+def test_localize_sums_the_scan_frames_of_a_ptu_file(tmp_path, monkeypatch):
+    from tests.test_io_ptu import _install_fake_ptufile, _spot_scan
+
+    _install_fake_ptufile(monkeypatch, _spot_scan())
+    movie = tmp_path / "scan.ptu"
+    movie.write_bytes(b"")  # read by the fake ptufile
+    _picasso(
+        monkeypatch,
+        "localize",
+        movie,
+        "--frame-sum-window",
+        4,
+        "-g",
+        20,
+        "-a",
+        "lq",
+        "-d",
+        0,
+    )
+    locs, info = io.load_locs(_out(str(movie), "_locs.hdf5"))
+    assert len(locs) == 2  # one spot in each of the two sums of 4
+    assert info[0]["Frame Sum Window"] == 4
+    assert info[0]["Frame Sum Stride"] == 4
+    assert info[0]["Photon Counting"] is True
+
+
+@pytest.mark.parametrize(
+    "option", [["--frame-sum-window", 2], ["--frame-sum-stride", 2]]
+)
+def test_localize_refuses_to_sum_camera_frames(tmp_path, monkeypatch, option):
+    movie = _copy_testdata(tmp_path)
+    with pytest.raises(SystemExit, match="photon-counting movies"):
+        _picasso(monkeypatch, "localize", movie, *option, "-px", 160)
+    assert not os.path.exists(_out(movie, "_locs.hdf5"))
+
+
 def test_localize_multi_emitter(tmp_path, monkeypatch):
     movie = _copy_testdata(tmp_path)
     _picasso(

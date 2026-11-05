@@ -81,8 +81,9 @@ dev = [
     "pre-commit",
     "twine",
 ]
-# Optional movie-format readers (czifile and liffile require Python >=
-# 3.12). Used by picasso.io to open Zeiss .czi / Leica .lif files;
+# Optional movie-format readers (czifile, liffile and ptufile require
+# Python >= 3.12). Used by picasso.io to open Zeiss .czi / Leica .lif
+# files and PicoQuant .ptu confocal scans (photon counts per pixel);
 # absent installs simply do not advertise those formats.
 czi = [
     "czifile>=2026.6.12; python_version>='3.12'",
@@ -92,8 +93,11 @@ lif = [
     "liffile>=2026.4.11; python_version>='3.12'",
     "imagecodecs>=2026.6.6; python_version>='3.12'",
 ]
+ptu = [
+    "ptufile>=2026.11.5; python_version>='3.12'",
+]
 formats = [
-    "picassosr[czi,lif]",
+    "picassosr[czi,lif,ptu]",
 ]
 # Not for general use: the installer / installer_cuda extras exist only to
 # build the one-click installers, where every version is pinned exactly so
@@ -125,6 +129,7 @@ installer = [
     "tifffile==2026.4.11",
     "czifile==2026.6.12",
     "liffile==2026.4.11",
+    "ptufile==2026.11.5",
     "imagecodecs==2026.6.6",
     "wgpu==0.32.0",
     "pyinstaller==6.19.0",

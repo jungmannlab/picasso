@@ -244,8 +244,9 @@ Which movie formats can Localize open?
 
 TIFF stacks of any kind (plain ``.tif`` and ``.tiff``, OME-TIFF, NDTiffStack,
 BigTIFF, also files larger than 4 GB), ``.nd2``, ``.ims``, ``.stk``, ``.lsm``
-and ``.raw``; ``.czi`` and ``.lif`` with ``pip install "picassosr[czi]"`` and
-``"picassosr[lif]"`` (Python 3.12 or later; included in the one-click
+and ``.raw``; ``.czi``, ``.lif`` and PicoQuant ``.ptu`` confocal scans with
+``pip install "picassosr[czi]"``, ``"picassosr[lif]"`` and
+``"picassosr[ptu]"`` (Python 3.12 or later; included in the one-click
 installers). TIFF files do not need to be renamed to ``.ome.tif`` or converted
 to ``.raw``. The frames must be grayscale, one per page. For a movie split into
 several μManager files, open the first one. See :ref:`localize-file-formats`.

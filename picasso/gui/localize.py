@@ -149,6 +149,7 @@ IMAGE_FILTER = (
     ";;Zeiss LSM (*.lsm)"
     ";;Zeiss CZI (*.czi)"
     ";;Leica LIF (*.lif)"
+    ";;PicoQuant PTU (*.ptu)"
     ";;ImaRIS IMS (*.ims)"
     ";;Nd2 files (*.nd2)"
     ";;STK files (*.stk)"
@@ -909,10 +910,15 @@ class MovieLoadWorker(QtCore.QObject):
         prompt_for_path,
         load_all: bool = False,
         concat: bool = False,
+        frame_sum: tuple[int, int] | None = None,
     ) -> None:
         super().__init__()
         self.paths = paths
         self._prompt_for_path = prompt_for_path
+        # (window, stride) of the scan frames summed into one frame of a
+        # photon-counting movie (.ptu), see ``io.load_movie``; None keeps
+        # every scan frame.
+        self.frame_sum = frame_sum
         # When True, each path is read with ``io.load_movie_all`` (every
         # channel of one multichannel file); otherwise ``io.load_movie``
         # loads one channel per file.
@@ -976,9 +982,15 @@ class MovieLoadWorker(QtCore.QObject):
                 return []
             movie, info = result
             return [(movie, info, path)]
-        elif self.load_all:
+        frame_sum = {}
+        if self.frame_sum is not None and path.lower().endswith(".ptu"):
+            frame_sum = {
+                "frame_sum_window": self.frame_sum[0],
+                "frame_sum_stride": self.frame_sum[1],
+            }
+        if self.load_all:
             result = io.load_movie_all(
-                path, prompt_info=prompt, progress=report
+                path, prompt_info=prompt, progress=report, **frame_sum
             )
             if result is None:
                 return []
@@ -988,7 +1000,9 @@ class MovieLoadWorker(QtCore.QObject):
                 for movie, info in zip(file_movies, file_infos)
             ]
         else:
-            result = io.load_movie(path, prompt_info=prompt, progress=report)
+            result = io.load_movie(
+                path, prompt_info=prompt, progress=report, **frame_sum
+            )
             if result is None:
                 return []
             movie, info = result
@@ -1995,6 +2009,108 @@ class PromptChannelDialog(lib.Dialog):
         result = dialog.exec()
         channel = dialog.byte_order.currentText()
         return channel, result == QtWidgets.QDialog.DialogCode.Accepted
+
+
+class PromptFrameSumDialog(lib.Dialog):
+    """Dialog asking how many scan frames of a photon-counting movie
+    (PicoQuant .ptu confocal scan) are summed into one frame, see
+    ``io.load_movie``. The choice is remembered in the user settings."""
+
+    SETTINGS_KEY = "PTU frame sum"
+    WINDOW_TOOLTIP = (
+        "Number of consecutive scan frames summed into one frame.\n"
+        "Confocal scan frames are often too dim to localize one by one;"
+        "\n1 keeps every scan frame."
+    )
+    STRIDE_TOOLTIP = (
+        "Number of scan frames between the starts of two sums.\n"
+        "Equal to 'Frames to sum': the sums do not overlap and every "
+        "photon is used once.\n1: a sliding window, i.e., every scan "
+        "frame starts a new sum, so a binding event\nis localized in "
+        "several overlapping frames."
+    )
+
+    def __init__(self, window: QtWidgets.QWidget) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Sum scan frames")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        window_label = QtWidgets.QLabel("Frames to sum:")
+        window_label.setToolTip(self.WINDOW_TOOLTIP)
+        grid.addWidget(window_label, 0, 0)
+        self.frame_window = QtWidgets.QSpinBox()
+        self.frame_window.setRange(1, 1000000)
+        self.frame_window.setToolTip(self.WINDOW_TOOLTIP)
+        grid.addWidget(self.frame_window, 0, 1)
+        stride_label = QtWidgets.QLabel("Stride:")
+        stride_label.setToolTip(self.STRIDE_TOOLTIP)
+        grid.addWidget(stride_label, 1, 0)
+        self.frame_stride = QtWidgets.QSpinBox()
+        self.frame_stride.setRange(1, 1)
+        self.frame_stride.setToolTip(self.STRIDE_TOOLTIP)
+        grid.addWidget(self.frame_stride, 1, 1)
+        vbox.addLayout(grid)
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        self._previous_window = 1
+        self.frame_window.valueChanged.connect(self.on_window_changed)
+        self._load_settings()
+
+    def on_window_changed(self, value: int) -> None:
+        """Keep the stride within the window; a stride equal to the
+        previous window (sums that do not overlap) follows it."""
+        follow = self.frame_stride.value() == self._previous_window
+        self.frame_stride.setMaximum(value)
+        if follow:
+            self.frame_stride.setValue(value)
+        self._previous_window = value
+
+    def _load_settings(self) -> None:
+        """Fill the inputs in with the remembered ones, else 1 and 1."""
+        stored = io.load_user_settings()["Localize"].get(self.SETTINGS_KEY)
+        window, stride = 1, 1
+        if isinstance(stored, dict):
+            try:
+                window = max(1, int(stored.get("window", 1)))
+                stride = min(window, max(1, int(stored.get("stride", window))))
+            except (TypeError, ValueError):
+                window, stride = 1, 1
+        self.frame_window.setValue(window)
+        self.frame_stride.setMaximum(window)
+        self.frame_stride.setValue(stride)
+        self._previous_window = window
+
+    def _save_settings(self) -> None:
+        """Remember the inputs in the user settings."""
+        settings = io.load_user_settings()
+        settings["Localize"][self.SETTINGS_KEY] = {
+            "window": self.frame_window.value(),
+            "stride": self.frame_stride.value(),
+        }
+        io.save_user_settings(settings)
+
+    @staticmethod
+    def getFrameSum(
+        parent: QtWidgets.QWidget | None = None,
+    ) -> tuple[int, int, bool]:
+        """Show the dialog; return ``(window, stride, accepted)``."""
+        dialog = PromptFrameSumDialog(parent)
+        accepted = dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted
+        if accepted:
+            dialog._save_settings()
+        return (
+            dialog.frame_window.value(),
+            dialog.frame_stride.value(),
+            accepted,
+        )
 
 
 class ConcatenateMoviesDialog(lib.Dialog):
@@ -7029,6 +7145,16 @@ class ParametersDialog(lib.Dialog):
                         em_combo.setCurrentIndex(index)
                         break
 
+    def set_photon_counting(self) -> None:
+        """Set the photon conversion of a photon-counting movie (e.g., a
+        PicoQuant .ptu scan), whose pixel values are photons already: no
+        baseline, sensitivity 1 and no EM gain. sCMOS noise maps describe
+        a camera and are cleared."""
+        self.update_camera_calib(None)
+        self.set_photon_scalar("baseline", 0.0)
+        self.set_photon_scalar("sensitivity", 1.0)
+        self.set_photon_scalar("gain", 1)
+
     def set_camera_parameters(self, info: dict) -> None:
         """Set the camera parameters based on the provided camera
         info."""
@@ -9104,8 +9230,9 @@ class Window(QtWidgets.QMainWindow):
 
     def _prompt_for_path(self, path: str):
         """Return the metadata prompt callback appropriate for ``path``."""
-        if path.lower().endswith((".ims", ".czi", ".lif")):
-            # Multi-channel .ims/.czi/.lif files prompt for a channel.
+        if path.lower().endswith((".ims", ".czi", ".lif", ".ptu")):
+            # Multi-channel .ims/.czi/.lif files (and .ptu files recorded
+            # with several detectors) prompt for a channel.
             return self.prompt_channel
         elif path.lower().endswith(io.TIFF_EXTENSIONS + (".stk", ".nd2")):
             # For these formats the metadata may fail to parse; prompt the
@@ -9124,7 +9251,7 @@ class Window(QtWidgets.QMainWindow):
             self,
             "Open multichannel file",
             directory=dir,
-            filter="Multichannel files (*.ims *.czi *.lif *.nd2)",
+            filter="Multichannel files (*.ims *.czi *.lif *.nd2 *.ptu)",
         )
         if path:
             self.pwd = path
@@ -9179,6 +9306,15 @@ class Window(QtWidgets.QMainWindow):
             # (A canceled one is detached immediately, see
             # ``_on_load_canceled``, so it never blocks a new load.)
             return
+        # Photon-counting scans (.ptu) are often too dim to localize scan
+        # frame by scan frame: ask how many scan frames to sum, once for
+        # all files of this load.
+        frame_sum = None
+        if not concat and any(p.lower().endswith(".ptu") for p in paths):
+            window, stride, ok = PromptFrameSumDialog.getFrameSum(self)
+            if not ok:
+                return
+            frame_sum = (window, stride)
 
         self._load_t0 = time.time()
         self._load_multi_file = multi_file
@@ -9207,7 +9343,11 @@ class Window(QtWidgets.QMainWindow):
 
         thread = QtCore.QThread(self)
         worker = MovieLoadWorker(
-            paths, prompt_for_path, load_all=load_all, concat=concat
+            paths,
+            prompt_for_path,
+            load_all=load_all,
+            concat=concat,
+            frame_sum=frame_sum,
         )
         worker.moveToThread(thread)
         self._load_thread = thread
@@ -9550,6 +9690,8 @@ class Window(QtWidgets.QMainWindow):
             for movie, info, path, name in zip(movies, infos, paths, names):
                 channel = Channel(movie=movie, info=info, path=path, name=name)
                 self.parameters_dialog.set_camera_parameters(info[0])
+                if info[0].get("Photon Counting"):
+                    self.parameters_dialog.set_photon_counting()
                 if "Pixelsize" in info[0]:
                     self.parameters_dialog.pixelsize.setValue(
                         float(info[0]["Pixelsize"])
@@ -10263,7 +10405,7 @@ class Window(QtWidgets.QMainWindow):
 
     def prompt_channel(self, channels: list[str]) -> str | None:
         """Prompt for channel selection for multi-channel movies
-        (IMARIS .ims, Zeiss .czi, Leica .lif)."""
+        (IMARIS .ims, Zeiss .czi, Leica .lif, PicoQuant .ptu)."""
         channel, ok = PromptChannelDialog.getMovieSpecs(self, channels)
         if ok:
             return channel

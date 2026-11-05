@@ -244,6 +244,7 @@ class TestPromptForPath:
             ("a.ims", "prompt_channel"),
             ("a.CZI", "prompt_channel"),
             ("a.lif", "prompt_channel"),
+            ("a.ptu", "prompt_channel"),
             ("a.tif", "prompt_movie_info"),
             ("a.nd2", "prompt_movie_info"),
             ("a.stk", "prompt_movie_info"),

@@ -2066,6 +2066,38 @@ def _localize_legacy_calibrations(
     return z_params, lateral_transforms
 
 
+def _localize_frame_sum(args: argparse.Namespace) -> dict:
+    """The frame-sum keywords of ``io.load_movie`` set by
+    ``--frame-sum-window`` / ``--frame-sum-stride``; empty when no scan
+    frames are summed."""
+    window = getattr(args, "frame_sum_window", 1)
+    stride = getattr(args, "frame_sum_stride", None)
+    if window == 1 and stride in (None, 1):
+        return {}
+    return {"frame_sum_window": window, "frame_sum_stride": stride}
+
+
+def _localize_check_frame_sum(
+    args: argparse.Namespace, paths: list[str], concat: bool
+) -> None:
+    """Exit with a message when scan frames are to be summed for movies
+    whose pixel values are not photon counts (anything but .ptu)."""
+    if not _localize_frame_sum(args):
+        return
+    others = [
+        path for path in paths if os.path.splitext(path)[1].lower() != ".ptu"
+    ]
+    if concat or others:
+        listed = ", ".join(others[:3]) + (" ..." if len(others) > 3 else "")
+        raise SystemExit(
+            "--frame-sum-window and --frame-sum-stride apply to "
+            "photon-counting movies (.ptu) only: camera frames carry an "
+            "offset (the baseline) in every frame, so a sum of their raw "
+            "counts is not a count of photons."
+            + (f" Not photon-counting: {listed}" if others else "")
+        )
+
+
 def _localize_process_file(
     paths: str | list[str],
     i: int,
@@ -2169,7 +2201,9 @@ def _localize_process_file(
     if len(paths) > 1:
         movie, info = load_tif_concatenated(paths, progress="console")
     else:
-        movie, info = load_movie(path, progress="console")
+        movie, info = load_movie(
+            path, progress="console", **_localize_frame_sum(args)
+        )
 
     fitting_method = _FIT_METHOD_MAP[args.fit_method]
     cam_info = dict(camera_info)
@@ -2784,6 +2818,7 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
     if not paths:
         print("Error. No files found.")
         raise FileNotFoundError
+    _localize_check_frame_sum(args, paths, concat)
 
     if concat:
         print(
@@ -5335,6 +5370,28 @@ def _build_parser() -> (
             "inclusive. May be given multiple times to analyze several\n"
             "disjoint frame segments, e.g.\n"
             "--frame-bounds 0 100 --frame-bounds 200 300."
+        ),
+    )
+    localize_parser.add_argument(
+        "--frame-sum-window",
+        type=int,
+        default=1,
+        help=(
+            "photon-counting movies (.ptu) only: number of consecutive\n"
+            "scan frames summed into one frame, for confocal scans too\n"
+            "dim to localize scan frame by scan frame. Default 1 (no\n"
+            "summing)"
+        ),
+    )
+    localize_parser.add_argument(
+        "--frame-sum-stride",
+        type=int,
+        default=None,
+        help=(
+            "photon-counting movies (.ptu) only: number of scan frames\n"
+            "between the starts of two sums, at most --frame-sum-window.\n"
+            "Default: --frame-sum-window, i.e., sums that do not overlap\n"
+            "(every photon is used once); 1 gives a sliding window"
         ),
     )
     localize_parser.add_argument(

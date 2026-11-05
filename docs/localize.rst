@@ -99,6 +99,9 @@ Picasso Localize reads the following movie formats:
    * - Leica LIF
      - ``.lif``
      - Requires ``pip install picassosr[lif]``, Python ≥ 3.12; available in the one-click installer.
+   * - PicoQuant PTU
+     - ``.ptu``
+     - Confocal image scans recorded with time-correlated single photon counting (T3 mode); see the note below. Requires ``pip install picassosr[ptu]``, Python ≥ 3.12; available in the one-click installer.
    * - Raw binary
      - ``.raw``
      - A dialog asks for the file specifications when the file is opened.
@@ -130,6 +133,21 @@ Picasso Localize reads the following movie formats:
 
    To load every channel of a multichannel file at once, see :ref:`localize-opening-channels`.
 
+.. _localize-ptu:
+
+.. note::
+
+   **PicoQuant** ``.ptu`` files of confocal image scans are read via the optional `ptufile <https://github.com/cgohlke/ptufile>`_ library, installed with the ``ptu`` extra (``pip install picassosr[ptu]``; requires Python ≥ 3.12).
+
+   A ``.ptu`` file stores every detected photon. Picasso turns the photons of one detector into a movie: a pixel counts the photons detected in it during one scan frame, whatever their arrival time after the laser pulse (the microtime). Photons are assigned to pixels with the pixel dwell time of the file header, as in PicoQuant's software; photons detected while the scanner returns to the start of a line are left out.
+
+   - **The pixel values are photons**, so the camera parameters are set accordingly when the file is opened: baseline 0, sensitivity 1 and EM gain 1 (sCMOS noise maps are cleared). The pixel size is read from the file.
+   - **Scan frames can be summed.** A single confocal scan frame can be too dim to localize, so a dialog asks how many consecutive scan frames (*Frames to sum*) are added up into one frame, and how many scan frames lie between the starts of two sums (*Stride*). By default the stride equals the number of frames to sum: the sums do not overlap and every photon is used once. A stride of 1 is a sliding window, where every scan frame starts a new sum, so a binding event is localized in several overlapping frames. Summing applies to photon counts only; camera movies cannot be summed, since every camera frame carries an offset (the baseline).
+   - **Each detector is a channel.** When photons were recorded with several detectors, a dialog asks which one to load; to load all of them, see :ref:`localize-opening-channels`.
+   - Only T3 image scans are read, not point or line scans, z-stacks or T2 data.
+
+   The metadata of the movie record the summing (``Frame Sum Window``, ``Frame Sum Stride``, ``Scan Frames``), ``Photon Counting: true`` and the main header entries of the file (``PTU Metadata``).
+
 We are open to feature requests regarding support for other file formats, please visit our `GitHub page <https://github.com/jungmannlab/picasso>`_.
 
 .. dropdown:: Python
@@ -148,6 +166,16 @@ We are open to feature requests regarding support for other file formats, please
       movie, info = io.load_movie("movie.nd2")
       frame = movie[100]      # one frame as a NumPy array
       print(info[0]["Frames"], info[0]["Height"], info[0]["Width"])
+
+   For a photon-counting ``.ptu`` scan, ``frame_sum_window`` sums that many
+   consecutive scan frames into one frame and ``frame_sum_stride`` sets
+   the number of scan frames between the starts of two sums (default: the
+   window, so the sums do not overlap; 1 gives a sliding window). Any other
+   format raises a ``ValueError`` when frames are to be summed.
+
+   .. code-block:: python
+
+      movie, info = io.load_movie("scan.ptu", frame_sum_window=20)
 
 
 Topics

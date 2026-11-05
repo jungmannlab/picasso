@@ -153,6 +153,8 @@
   "--fit-region-size",
   "--fit-z-gpu",
   "--frame-bounds",
+  "--frame-sum-stride",
+  "--frame-sum-window",
   "--gain",
   "--gaussian-filter",
   "--gradient",
