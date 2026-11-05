@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 03-NOV-2026 CEST
+Last change: 05-NOV-2026 CEST
 
 ## 1.0.0
 
@@ -106,6 +106,7 @@ Last change: 03-NOV-2026 CEST
 - New column `reduced_chi_square` for MLE and least-squares fits: the goodness of fit normalized for the box size and the photon counts, about 1 for a good fit (`picasso.localize.reduced_chi_square`).
 - The quantum efficiency is no longer shown in the Parameters dialog. A `Quantum Efficiency` entry in the camera config, `--qe` in `picasso localize` and a `Qe` key in `camera_info` are still accepted and ignored. `camera_parameters` of the movie classes in `picasso.io` no longer returns `qe`. The `Emission Wavelength` dropdown now lists the wavelengths of `Channel Device` > `Emission Wavelengths` and of the wavelength-keyed calibrations in the config (it appeared only when the config had a `Quantum Efficiency` mapping before, so wavelength-keyed calibrations were not selected with the template config).
 - Imaris `.ims` movies can now be opened on macOS and Linux, not only Windows. Exporting `.ims` files (Render's `Export ROI for Imaris`) remains Windows only. `hdf5plugin` is now installed on all platforms.
+- Magnification factor calculation, as of Loginov et al. (*Optica* 2024), see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/3d-calibration.html#localize-magnification-factor).
 - Every calibration records how its spots were identified, under `Identification`.
 - Customizable scale bar, see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html).
 - Fixed: ratiometric multichannel spline fitting ignored the per-pixel sCMOS variance of the camera calibration.

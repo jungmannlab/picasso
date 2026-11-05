@@ -300,9 +300,10 @@ then uses it for every measurement.
 1. In ``Analyze > Parameters...``, click ``Load calibration`` in the 3D group
    and select the ``_3d_calib.yaml`` file. ``Fit Z`` is ticked automatically.
 2. Keep the ``Magnification factor`` at its default of 0.79 unless you know
-   the value for your sample. It corrects z for the different refractive
-   indices of the immersion oil and the sample (`Huang et al., Science, 2008
-   <https://doi.org/10.1126/science.1153529>`__).
+   the value for your sample, or estimate it with ``Calculate...`` next to it
+   (see :ref:`localize-magnification-factor`). It corrects z for the
+   different refractive indices of the immersion oil and the sample (`Huang
+   et al., Science, 2008 <https://doi.org/10.1126/science.1153529>`__).
 3. Keep the model ``2D elliptical Gaussian`` and localize as usual. The
    localizations get an extra ``z`` column, in nm.
 

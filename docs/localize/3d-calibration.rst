@@ -141,3 +141,67 @@ For each localization, the spot widths :math:`s_x` and :math:`s_y` are fitted. A
    D(z) = \left(\sqrt{s_x} - \sqrt{w_x(z)}\right)^2 + \left(\sqrt{s_y} - \sqrt{w_y(z)}\right)^2
 
 where :math:`w_x(z)` and :math:`w_y(z)` are the calibration polynomials :math:`\bar{s}_x(z)` and :math:`\bar{s}_y(z)` from above.
+
+.. _localize-magnification-factor:
+
+Magnification factor
+--------------------
+
+The calibration measures ``z`` as the movement of the stage, with the beads on the coverslip. When the refractive index of the sample (e.g., 1.33 for water) differs from that of the immersion medium of the objective (e.g., 1.518 for oil), moving the focus by some distance moves it by a different distance inside the sample. The fitted ``z`` is therefore multiplied by the ``Magnification factor``. The default of 0.79 follows Huang et al. (2008). The same factor is used for the spline PSF (see :doc:`spline`).
+
+``Calculate...`` next to the ``Magnification factor`` (in the ``Parameters`` dialog and in the spline calibration dialog) estimates it with the depth-dependent theory of `Loginov et al., Optica, 2024 <https://doi.org/10.1364/OPTICA.520595>`__. The dialog asks for:
+
+**Numerical aperture**, **Refractive index of immersion** and **Refractive index of sample**
+   Of the objective, its immersion medium (1.518 for oil) and the sample (1.33 for water).
+
+**Emission wavelength (nm)**
+   The emission wavelength of the dye. It sets how deep the near-surface value (see below) holds.
+
+**Focal plane depth (nm)**
+   How far the focus was moved into the sample from the coverslip, i.e., the movement of the stage or the objective. 0 (the default) for imaging at the coverslip, e.g., TIRF or HILO.
+
+**Near-surface value**
+   ``Midpoint ray`` (default) or ``Full aperture``, see below.
+
+The dialog shows the factor and ``OK`` enters it into the ``Magnification factor``. The inputs are remembered for the next time (``magnification_calculator`` in the :ref:`user settings <user-settings-file>`).
+
+The factor depends on the depth:
+
+- **Near the coverslip** it is constant, the near-surface value, which depends on the numerical aperture and the refractive indices only. ``Midpoint ray`` estimates it from the ray in the middle of the axial wave numbers (`Lyakin et al., Opt. Spectrosc., 2017 <https://doi.org/10.1134/S0030400X17090235>`__), as Loginov et al. re-scale their data, e.g., 0.587 for a TIRF objective (NA 1.49) from oil (1.518) into water (1.33). It drops steeply as the numerical aperture approaches the refractive index of the immersion medium and does not exist when that ray is totally internally reflected at the coverslip; use ``Full aperture`` then. ``Full aperture`` is the analytical value of Loginov et al., from constructive interference over the whole aperture, e.g., 0.736 for the TIRF objective above. ``Midpoint ray`` is the default and the recommended choice: `Garat et al., Commun. Eng., 2026 <https://doi.org/10.1038/s44172-026-00765-7>`__ compare the two for single-molecule localization microscopy and recommend Lyakin's value (their Supplementary Fig. S6).
+- **Deeper**, it approaches the ratio of the refractive indices, 0.876 for oil into water. Where it starts to change depends on the wavelength and the dialog shows this point. Picasso multiplies all ``z`` by one factor.
+
+Within a few micrometers of the coverslip, the theory, wave-optics calculations and measurements differ by up to 10-20% (Loginov et al., Figs. 5 and 7), and a correction collar that is not set for the sample changes the factor, too. A factor measured on your own microscope is the most reliable value; the calculation is an estimate where none is available.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``picasso.axial_scaling`` calculates the factor; depths and wavelengths
+   are in nm. ``actual_depth`` converts nominal depths, e.g., of the slices
+   of a z-stack, into actual depths in the sample.
+
+   .. code-block:: python
+
+      import numpy as np
+      from picasso import axial_scaling, io, zfit
+
+      optics = dict(na=1.49, n_immersion=1.518, n_sample=1.33)
+      # at the coverslip (Midpoint ray, the default): 0.587
+      factor = axial_scaling.near_surface_factor(**optics)
+      # with the focal plane 5 um into the sample, emission at 670 nm: 0.756
+      factor = axial_scaling.magnification_factor(
+          5000, **optics, wavelength=670
+      )
+      # the depth up to which the near-surface value holds: 1158 nm
+      depth = axial_scaling.near_surface_depth(**optics, wavelength=670)
+      # actual depths of the slices of a z-stack taken in steps of 500 nm
+      z_actual = axial_scaling.actual_depth(
+          np.arange(0, 20_000, 500), **optics, wavelength=670
+      )
+
+      # fit z with the calculated factor
+      locs, info = io.load_locs("movie_locs.hdf5")
+      calibration = io.load_calibration("beads_3d_calib.yaml")
+      locs, info = zfit.zfit(
+          locs, info, calibration=calibration, magnification_factor=factor
+      )

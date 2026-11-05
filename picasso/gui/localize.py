@@ -12,6 +12,7 @@ Graphical user interface for localizing single molecules.
 from __future__ import annotations
 
 import glob
+import math
 import os.path
 import re
 import sys
@@ -27,6 +28,7 @@ import pandas as pd
 import imageio
 from .. import (
     aim,
+    axial_scaling,
     CONFIG,
     imageprocess,
     io,
@@ -2188,6 +2190,293 @@ def _z_binning_widgets(
     return z_binning
 
 
+#: The papers behind ``MagnificationFactorDialog`` (``picasso.axial_scaling``).
+MAGNIFICATION_REFERENCES = (
+    "Loginov, S.V., Boltje, D.B., Hensgens, M.N.F. et al.\n"
+    "Depth-dependent scaling of axial distances in light microscopy.\n"
+    "Optica 11, 553-568 (2024).\n\n"
+    "Lyakin, D.V., Maksimova, L.A., Sdobnov, A.Y. et al. The influence\n"
+    "of the numerical aperture of a beam probing an object on the\n"
+    "determination of the thickness of a layered object in confocal\n"
+    "microscopy. Opt. Spectrosc. 123, 487-494 (2017)"
+)
+
+MAGNIFICATION_FACTOR_TIP = (
+    "Factor used to correct for z-position aberration due to\n"
+    "refractive index mismatch, see Huang B, et al. Science. 2008.\n"
+    "'Calculate...' estimates it from the objective, the refractive\n"
+    "indices and the emission wavelength."
+)
+
+
+def _magnification_factor_widgets(
+    grid: QtWidgets.QGridLayout, row: int, parent: QtWidgets.QWidget
+) -> QtWidgets.QDoubleSpinBox:
+    """Add the magnification factor spin box of the 3D dialogs to ``grid``
+    at ``row``, with a button that calculates the factor
+    (``MagnificationFactorDialog``), and return the spin box."""
+    label = QtWidgets.QLabel("Magnification factor:")
+    label.setToolTip(MAGNIFICATION_FACTOR_TIP)
+    grid.addWidget(label, row, 0)
+    magnification_factor = QtWidgets.QDoubleSpinBox()
+    magnification_factor.setRange(0, 1e6)
+    magnification_factor.setDecimals(4)
+    magnification_factor.setValue(0.79)
+    calculate = QtWidgets.QPushButton("Calculate...")
+    calculate.setToolTip(
+        "Estimate the magnification factor from the objective, the\n"
+        "refractive indices and the emission wavelength.\n\n"
+        + MAGNIFICATION_REFERENCES
+    )
+    calculate.setAutoDefault(False)
+
+    def calculate_factor() -> None:
+        factor, accepted = MagnificationFactorDialog.getFactor(parent)
+        if accepted:
+            magnification_factor.setValue(factor)
+
+    calculate.clicked.connect(calculate_factor)
+    hbox = QtWidgets.QHBoxLayout()
+    hbox.addWidget(magnification_factor, 1)
+    hbox.addWidget(calculate)
+    grid.addLayout(hbox, row, 1)
+    return magnification_factor
+
+
+class MagnificationFactorDialog(lib.Dialog):
+    """Dialog that estimates the magnification factor of z under a
+    refractive-index mismatch from the objective, the refractive indices,
+    the emission wavelength and the depth of the focal plane (see
+    ``picasso.axial_scaling``). Its inputs are remembered in the user
+    settings when it is accepted."""
+
+    URL = docs_url(
+        "localize/3d-calibration.html#localize-magnification-factor"
+    )
+    #: User settings key (in "Localize") of the remembered inputs.
+    SETTINGS_KEY = "magnification_calculator"
+    DEFAULTS = {
+        "na": 1.49,
+        "n_immersion": 1.518,
+        "n_sample": 1.33,
+        "wavelength": 560.0,
+        "depth": 0.0,
+        "near_surface": axial_scaling.NEAR_SURFACE_MIDPOINT,
+    }
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Magnification Factor")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        vbox.addLayout(grid)
+
+        def add_spinbox(
+            row: int,
+            text: str,
+            tip: str,
+            range_: tuple[float, float],
+            decimals: int,
+            step: float,
+        ) -> QtWidgets.QDoubleSpinBox:
+            label = QtWidgets.QLabel(text)
+            label.setToolTip(tip)
+            grid.addWidget(label, row, 0)
+            spinbox = QtWidgets.QDoubleSpinBox()
+            spinbox.setRange(*range_)
+            spinbox.setDecimals(decimals)
+            spinbox.setSingleStep(step)
+            spinbox.setToolTip(tip)
+            grid.addWidget(spinbox, row, 1)
+            return spinbox
+
+        self.na = add_spinbox(
+            0,
+            "Numerical aperture:",
+            "Numerical aperture of the objective.",
+            (0.01, 2.0),
+            3,
+            0.01,
+        )
+        self.n_immersion = add_spinbox(
+            1,
+            "Refractive index of immersion:",
+            "Refractive index of the immersion medium of the objective,\n"
+            "e.g., 1.518 for oil, 1.0 for air.",
+            (1.0, 2.5),
+            4,
+            0.001,
+        )
+        self.n_sample = add_spinbox(
+            2,
+            "Refractive index of sample:",
+            "Refractive index of the sample, e.g., 1.33 for water.",
+            (1.0, 2.5),
+            4,
+            0.001,
+        )
+        self.wavelength = add_spinbox(
+            3,
+            "Emission wavelength (nm):",
+            "Emission wavelength of the dye (in vacuum). It sets how deep\n"
+            "the near-surface value holds.",
+            (200.0, 2000.0),
+            0,
+            10.0,
+        )
+        self.depth = add_spinbox(
+            4,
+            "Focal plane depth (nm):",
+            "How far the focus was moved into the sample from the\n"
+            "coverslip (the movement of the stage or the objective).\n"
+            "0 for imaging at the coverslip, e.g., TIRF or HILO.",
+            (0.0, 1e6),
+            0,
+            100.0,
+        )
+        near_surface_tip = (
+            "How the factor near the coverslip, where it does not depend\n"
+            "on the depth, is estimated:\n"
+            "Midpoint ray: from the ray in the middle of the axial wave\n"
+            "numbers (Lyakin et al., Opt. Spectrosc. 2017), as Loginov\n"
+            "et al. (Optica 2024) re-scale data. Much lower for objectives\n"
+            "whose numerical aperture is close to the refractive index of\n"
+            "the immersion (TIRF); does not exist when that ray is totally\n"
+            "internally reflected at the coverslip.\n"
+            "Full aperture: from constructive interference over the whole"
+            " aperture.\n\n" + MAGNIFICATION_REFERENCES
+        )
+        near_surface_label = QtWidgets.QLabel("Near-surface value:")
+        near_surface_label.setToolTip(near_surface_tip)
+        grid.addWidget(near_surface_label, 5, 0)
+        self.near_surface = QtWidgets.QComboBox()
+        self.near_surface.addItem(
+            "Midpoint ray", userData=axial_scaling.NEAR_SURFACE_MIDPOINT
+        )
+        self.near_surface.addItem(
+            "Full aperture", userData=axial_scaling.NEAR_SURFACE_FULL_APERTURE
+        )
+        self.near_surface.setToolTip(near_surface_tip)
+        grid.addWidget(self.near_surface, 5, 1)
+
+        self.result = QtWidgets.QLabel()
+        self.result.setWordWrap(True)
+        self.result.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        vbox.addWidget(self.result)
+
+        buttons_row = QtWidgets.QHBoxLayout()
+        buttons_row.addWidget(lib.HelpButton(self.URL))
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        buttons_row.addWidget(self.buttons)
+        vbox.addLayout(buttons_row)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+        self._load_settings()
+        for spinbox in (
+            self.na,
+            self.n_immersion,
+            self.n_sample,
+            self.wavelength,
+            self.depth,
+        ):
+            spinbox.valueChanged.connect(self.update_result)
+        self.near_surface.currentIndexChanged.connect(self.update_result)
+        self.update_result()
+
+    def _load_settings(self) -> None:
+        """Fill the inputs in with the remembered ones, else the defaults."""
+        stored = io.load_user_settings()["Localize"].get(self.SETTINGS_KEY)
+        values = dict(self.DEFAULTS)
+        if isinstance(stored, dict):
+            values.update(stored)
+        for name in ("na", "n_immersion", "n_sample", "wavelength", "depth"):
+            try:
+                value = float(values[name])
+            except (TypeError, ValueError):
+                value = self.DEFAULTS[name]
+            getattr(self, name).setValue(value)
+        index = self.near_surface.findData(values["near_surface"])
+        self.near_surface.setCurrentIndex(max(index, 0))
+
+    def _save_settings(self) -> None:
+        """Remember the inputs in the user settings."""
+        settings = io.load_user_settings()
+        settings["Localize"][self.SETTINGS_KEY] = {
+            "na": self.na.value(),
+            "n_immersion": self.n_immersion.value(),
+            "n_sample": self.n_sample.value(),
+            "wavelength": self.wavelength.value(),
+            "depth": self.depth.value(),
+            "near_surface": self.near_surface.currentData(),
+        }
+        io.save_user_settings(settings)
+
+    def update_result(self) -> None:
+        """Calculate the factor for the current inputs and describe it;
+        OK is disabled if it cannot be calculated."""
+        optics = {
+            "na": self.na.value(),
+            "n_immersion": self.n_immersion.value(),
+            "n_sample": self.n_sample.value(),
+            "wavelength": self.wavelength.value(),
+            "near_surface": self.near_surface.currentData(),
+        }
+        depth = self.depth.value()
+        ok = self.buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Ok)
+        try:
+            self.factor = axial_scaling.magnification_factor(depth, **optics)
+            limit = axial_scaling.near_surface_depth(**optics)
+        except ValueError as error:
+            self.factor = None
+            self.result.setText(str(error))
+            ok.setEnabled(False)
+            return
+        ok.setEnabled(True)
+        text = f"Magnification factor: <b>{self.factor:.4f}</b><br>"
+        if math.isinf(limit):
+            text += "Equal refractive indices: z needs no correction."
+        elif depth <= limit:
+            text += (
+                "Near-surface value, the same for focal plane depths up "
+                f"to {limit:.0f} nm."
+            )
+        else:
+            near = axial_scaling.magnification_factor(0.0, **optics)
+            paraxial = optics["n_sample"] / optics["n_immersion"]
+            text += (
+                f"Depth-dependent: the near-surface value ({near:.4f}) "
+                f"holds up to {limit:.0f} nm; deeper, the factor "
+                f"approaches {paraxial:.4f}."
+            )
+        self.result.setText(text)
+
+    def accept(self) -> None:
+        """Remember the inputs, then close."""
+        self._save_settings()
+        super().accept()
+
+    @staticmethod
+    def getFactor(
+        parent: QtWidgets.QWidget | None = None,
+    ) -> tuple[float, bool]:
+        """Show the dialog and return the calculated magnification factor
+        and whether the dialog was accepted."""
+        dialog = MagnificationFactorDialog(parent)
+        result = dialog.exec()
+        accepted = result == QtWidgets.QDialog.DialogCode.Accepted
+        if not accepted or dialog.factor is None:
+            return 0.0, False
+        return dialog.factor, True
+
+
 class Calibrate3DDialog(lib.Dialog):
     """Dialog for entering the parameters of a 3D (astigmatism)
     calibration: the z step size, the number of frames acquired per z
@@ -2627,17 +2916,9 @@ class CalibrateSplineDialog(lib.Dialog):
         grid.addWidget(self.model, 4, 1)
 
         # Magnification factor (applied to the fitted z, as in astigmatism)
-        magnification_label = QtWidgets.QLabel("Magnification factor:")
-        magnification_label.setToolTip(
-            "Factor used to correct for z-position aberration due to\n"
-            "refractive index mismatch, see Huang B, et al. Science. 2008."
+        self.magnification_factor = _magnification_factor_widgets(
+            grid, 5, self
         )
-        grid.addWidget(magnification_label, 5, 0)
-        self.magnification_factor = QtWidgets.QDoubleSpinBox()
-        self.magnification_factor.setRange(0, 1e6)
-        self.magnification_factor.setDecimals(4)
-        self.magnification_factor.setValue(0.79)
-        grid.addWidget(self.magnification_factor, 5, 1)
 
         # Optional z-bias correction (astigmatism)
         self.correct_z_bias = QtWidgets.QCheckBox(
@@ -4873,17 +5154,9 @@ class ParametersDialog(lib.Dialog):
             QtWidgets.QSizePolicy.Policy.Fixed,
         )
         z_grid.addWidget(self.z_calib_label, 0, 0)
-        magnification_label = QtWidgets.QLabel("Magnification factor:")
-        magnification_label.setToolTip(
-            "Factor used to correct for z-position aberration due to\n"
-            "refractive index mismatch, see Huang B, et al. Science. 2008."
+        self.magnification_factor = _magnification_factor_widgets(
+            z_grid, 1, self
         )
-        z_grid.addWidget(magnification_label, 1, 0)
-        self.magnification_factor = QtWidgets.QDoubleSpinBox()
-        self.magnification_factor.setRange(0, 1e6)
-        self.magnification_factor.setDecimals(4)
-        self.magnification_factor.setValue(0.79)
-        z_grid.addWidget(self.magnification_factor, 1, 1)
 
         # The astigmatism z fit runs on whichever device the fit box's
         # 'Use GPU' checkbox selects

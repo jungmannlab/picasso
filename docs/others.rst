@@ -389,6 +389,9 @@ Top level
    * - ``fit_mode``
      - *(last used)*
      - Remembered last value: the **Fit mode** selection.
+   * - ``magnification_calculator``
+     - *(last used)*
+     - Remembered last values of the dialog behind ``Calculate...`` next to the ``Magnification factor``: ``na``, ``n_immersion``, ``n_sample``, ``wavelength`` (nm), ``depth`` (nm) and ``near_surface`` (``midpoint`` or ``full-aperture``). See :ref:`localize-magnification-factor`.
    * - ``Columns to save``
      - *(all columns)*
      - Which localization columns are ticked in ``File`` > ``Select columns to save...`` when saving fit results.

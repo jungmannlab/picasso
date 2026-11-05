@@ -327,7 +327,9 @@ Record a z-stack of beads, calibrate it in Localize and load the calibration
 for your measurements, see :ref:`localize-3d-calibration` and
 :ref:`localize-fitting-z`. The ``Magnification factor`` (0.79 by default)
 corrects ``z`` for the refractive-index mismatch between the immersion medium
-and the sample. For multichannel and biplane data, see :doc:`localize/spline`.
+and the sample; ``Calculate...`` next to it estimates it for your objective
+and sample, see :ref:`localize-magnification-factor`. For multichannel and
+biplane data, see :doc:`localize/spline`.
 
 Localize keeps the computer busy
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

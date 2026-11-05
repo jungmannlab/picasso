@@ -103,7 +103,7 @@ A calibration is built from a **bead z-stack**: image a sample of sparse, bright
          ``3D (recovers z)`` or ``2D (single plane)``.
 
       **Magnification factor** (default 0.79)
-         Scales the fitted ``z`` to correct for the refractive-index mismatch, as in the astigmatism fit (`Huang et al., Science 319, 810–813 (2008) <https://doi.org/10.1126/science.1153529>`__). It is stored in the calibration and applied at fit time, not during calibration.
+         Scales the fitted ``z`` to correct for the refractive-index mismatch, as in the astigmatism fit (`Huang et al., Science 319, 810–813 (2008) <https://doi.org/10.1126/science.1153529>`__). It is stored in the calibration and applied at fit time, not during calibration. ``Calculate...`` estimates it from the objective and the refractive indices, see :ref:`localize-magnification-factor`.
 
       **Set z = 0 at max. intensity**
          Define ``z = 0`` at the axial intensity peak of the averaged PSF instead of the center of the stage scan. Only meaningful for a PSF with a single, well-defined focus (e.g. astigmatism); off by default. This will impact the effect of the magnification factor if the measured calibration data is offset.

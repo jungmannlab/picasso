@@ -121,6 +121,7 @@ Localization
 
    picasso.localize
    picasso.zfit
+   picasso.axial_scaling
    picasso.spline
    picasso.registration
    picasso.transforms

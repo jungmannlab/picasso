@@ -8,6 +8,12 @@
   "average",
   "AveragePool"
  ],
+ "picasso.axial_scaling": [
+  "magnification_factor",
+  "actual_depth",
+  "near_surface_factor",
+  "near_surface_depth"
+ ],
  "picasso.clusterer": [
   "cluster",
   "dbscan",

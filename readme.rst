@@ -125,6 +125,9 @@ Many of the functionalities provided by Picasso were published independently, pl
    * - 3D fitting via astigmatism
      - Huang et al., Science, 2008
      - `10.1126/science.1153529 <https://www.science.org/doi/10.1126/science.1153529>`__
+   * - Magnification factor of z (refractive-index mismatch, ``Calculate...``)
+     - Loginov et al., Optica, 2024; Lyakin et al., Opt. Spectrosc., 2017
+     - `10.1364/OPTICA.520595 <https://doi.org/10.1364/OPTICA.520595>`__, `10.1134/S0030400X17090235 <https://doi.org/10.1134/S0030400X17090235>`__
    * - B-spline wavelet spot identification
      - Izeddin et al., Opt. Express, 2012
      - `10.1364/OE.20.002081 <https://doi.org/10.1364/OE.20.002081>`__
