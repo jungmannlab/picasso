@@ -59,7 +59,6 @@ _MODELS = {"2D": "xy_constaberrations", "3D": "xyz_constaberrations"}
 #: - "Refractive index medium", "Refractive index cover slip",
 #:   "Refractive index immersion": of the sample medium, the cover slip
 #:   and the immersion fluid.
-#: - "Working distance": of the objective (um).
 #: - "Vertical astigmatism" (Z_2^2), "Oblique astigmatism" (Z_2^-2): fixed
 #:   primary aberrations, in milli-wavelengths (mλ).
 #: - "Horizontal coma" (Z_3^1), "Vertical coma" (Z_3^-1), "Spherical
@@ -76,7 +75,6 @@ DEFAULT_PARAMETERS = {
     "Refractive index medium": 1.406,
     "Refractive index cover slip": 1.525,
     "Refractive index immersion": 1.515,
-    "Working distance": 150.0,
     "Vertical astigmatism": 0.0,
     "Oblique astigmatism": 0.0,
     "Horizontal coma": 0.0,
@@ -174,7 +172,6 @@ def parameters_with_defaults(parameters: dict | None = None) -> dict:
         "Refractive index medium",
         "Refractive index cover slip",
         "Refractive index immersion",
-        "Working distance",
     ):
         if not parameters[key] > 0:
             raise ValueError(f"VectorFit '{key}' must be positive.")
@@ -237,7 +234,6 @@ def fit_params(
     params.RefCov = parameters["Refractive index cover slip"]
     params.RefImm = parameters["Refractive index immersion"]
     params.RefImmNom = params.RefImm
-    params.Fwd = parameters["Working distance"] * 1e3  # um -> nm
     params.Depth = 0
     params.Lambda = parameters["Wavelength"]
     params.PupilSize = params.NA / params.Lambda

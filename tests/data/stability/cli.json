@@ -177,7 +177,6 @@
   "--vf-vertical-astigmatism",
   "--vf-vertical-coma",
   "--vf-wavelength",
-  "--vf-working-distance",
   "--wavelet-min-area",
   "--wavelet-noise",
   "--wavelet-threshold",

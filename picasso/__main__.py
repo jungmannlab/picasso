@@ -1847,7 +1847,6 @@ _VECTORFIT_ARGS = {
     "vf_n_medium": "Refractive index medium",
     "vf_n_coverslip": "Refractive index cover slip",
     "vf_n_immersion": "Refractive index immersion",
-    "vf_working_distance": "Working distance",
     "vf_vertical_astigmatism": "Vertical astigmatism",
     "vf_oblique_astigmatism": "Oblique astigmatism",
     "vf_horizontal_coma": "Horizontal coma",
@@ -1880,10 +1879,6 @@ def _add_vectorfit_args(parser: argparse.ArgumentParser) -> None:
         (
             "--vf-n-immersion",
             "refractive index of the immersion fluid (default 1.515)",
-        ),
-        (
-            "--vf-working-distance",
-            "working distance of the objective in um (default 150)",
         ),
         (
             "--vf-vertical-astigmatism",

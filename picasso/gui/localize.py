@@ -4783,14 +4783,6 @@ class ParametersDialog(lib.Dialog):
                 0.01,
                 "Of the immersion fluid (e.g. 1.515 for oil).",
             ),
-            (
-                "Working distance",
-                "Working distance (µm):",
-                (1, 10000),
-                1,
-                10,
-                "Working distance of the objective.",
-            ),
         ]
         # fixed primary aberrations; astigmatism in milli-wavelengths
         for key, zernike, unit in (

@@ -170,7 +170,9 @@ class TestParameters:
         with pytest.raises(ValueError, match="Fit model"):
             vectorfit.parameters_with_defaults({"Fit model": "4D"})
 
-    @pytest.mark.parametrize("key", ["Wavelength", "NA", "Working distance"])
+    @pytest.mark.parametrize(
+        "key", ["Wavelength", "NA", "Refractive index medium"]
+    )
     def test_non_positive_value_is_rejected(self, key):
         with pytest.raises(ValueError, match=key):
             vectorfit.parameters_with_defaults({key: 0})
@@ -749,7 +751,6 @@ class TestGui:
             "Refractive index medium": 1.33,
             "Refractive index cover slip": 1.52,
             "Refractive index immersion": 1.33,
-            "Working distance": 280.0,
             "Vertical astigmatism": -60.5,
             "Oblique astigmatism": 30.0,
             "Horizontal coma": -12.0,
@@ -828,7 +829,7 @@ class TestFit:
 
     def test_fit_params_carry_the_settings(self):
         params = vectorfit.fit_params(
-            {"NA": 1.3, "Wavelength": 600, "Working distance": 200},
+            {"NA": 1.3, "Wavelength": 600},
             box=9,
             pixelsize=PIXELSIZE,
             image_shape=(40, 50),
@@ -838,7 +839,6 @@ class TestFit:
         )
         assert params.NA == pytest.approx(1.3)
         assert params.Lambda == pytest.approx(600)
-        assert params.Fwd == pytest.approx(200e3)  # nm
         assert params.Mx == params.My == 9
         assert params.NPupil == vectorfit.N_PUPIL[9]
         assert (params.imgSizeY, params.imgSizeX) == (40, 50)
