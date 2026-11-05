@@ -24,6 +24,7 @@ import tempfile
 import threading
 import warnings
 import weakref
+from collections.abc import Sequence
 from typing import Callable, Literal, TYPE_CHECKING
 
 import tifffile
@@ -1654,13 +1655,57 @@ def _frame_sum_parameters(window: int, stride: int | None) -> tuple[int, int]:
     return window, stride
 
 
-def _check_frame_sum(path: str, window: int, stride: int | None) -> None:
-    """Refuse frame summing for movies whose pixels are not photon counts
-    (see ``_PHOTON_COUNTING_EXTENSIONS``)."""
+def _microtime_gate_parameters(
+    gates: Sequence[tuple[float, float]] | None,
+) -> list[tuple[float, float]]:
+    """Validate ``microtime_gates`` and return them as a list of
+    ``(start, end)`` floats in ns; None is an empty list (no gates)."""
+    if gates is None:
+        return []
+    try:
+        gates = [tuple(gate) for gate in gates]
+    except TypeError:
+        raise ValueError(
+            "microtime_gates must be a sequence of (start, end) pairs in "
+            f"ns, got {gates!r}."
+        ) from None
+    checked = []
+    for gate in gates:
+        if len(gate) != 2 or not all(
+            isinstance(_, (int, float, np.integer, np.floating))
+            and not isinstance(_, bool)
+            and np.isfinite(_)
+            for _ in gate
+        ):
+            raise ValueError(
+                "Each microtime gate must be a (start, end) pair of numbers "
+                f"in ns, got {gate!r}."
+            )
+        start, end = float(gate[0]), float(gate[1])
+        if not 0 <= start < end:
+            raise ValueError(
+                f"A microtime gate must satisfy 0 <= start < end, got "
+                f"({start:g}, {end:g}) ns."
+            )
+        checked.append((start, end))
+    return checked
+
+
+def _check_photon_options(
+    path: str,
+    window: int,
+    stride: int | None,
+    gates: Sequence[tuple[float, float]] | None,
+) -> None:
+    """Validate frame summing and microtime gates, and refuse both for
+    movies whose pixels are not photon counts (see
+    ``_PHOTON_COUNTING_EXTENSIONS``)."""
     ext = os.path.splitext(path)[1].lower()
     if ext in _PHOTON_COUNTING_EXTENSIONS:
         _frame_sum_parameters(window, stride)
-    elif window != 1 or stride not in (None, 1):
+        _microtime_gate_parameters(gates)
+        return
+    if window != 1 or stride not in (None, 1):
         raise ValueError(
             "Frame summing (frame_sum_window, frame_sum_stride) is only "
             "available for photon-counting movies (.ptu), not for "
@@ -1668,6 +1713,18 @@ def _check_frame_sum(path: str, window: int, stride: int | None) -> None:
             "(the baseline) in every frame, so a sum of their raw counts "
             "is not a count of photons."
         )
+    if gates:
+        raise ValueError(
+            "Microtime gates (microtime_gates) are only available for "
+            "photon-counting movies recorded with time-correlated single "
+            f"photon counting (.ptu), not for {ext or 'this'} files."
+        )
+
+
+def _sanitize_filename(name: str) -> str:
+    """Turn a channel name into a filename-safe suffix, e.g., of the
+    files of one channel of a multichannel movie."""
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", str(name)).strip("_") or "channel"
 
 
 def _require_ptufile() -> None:
@@ -1686,13 +1743,15 @@ def load_ptu(
     *,
     frame_sum_window: int = 1,
     frame_sum_stride: int | None = None,
+    microtime_gates: Sequence[tuple[float, float]] | None = None,
 ) -> tuple[PTUMovie, list[dict]]:
     """Load a PicoQuant PTU confocal image scan and its metadata.
 
     Each pixel counts the photons detected in it, integrated over the
-    microtime (see ``PTUMovie``). A file recorded with several detectors
-    is reduced to one of them via ``prompt_info`` (defaulting to the
-    first detector otherwise).
+    microtime or over a microtime gate (see ``PTUMovie``). A file with
+    several channels (detectors, or detectors x microtime gates) is
+    reduced to one of them via ``prompt_info`` (defaulting to the first
+    channel otherwise).
 
     Parameters
     ----------
@@ -1708,6 +1767,11 @@ def load_ptu(
         sums, at most ``frame_sum_window``. None (default) uses
         ``frame_sum_window``, i.e., sums that do not overlap; 1 gives a
         sliding window.
+    microtime_gates : sequence of (float, float), optional
+        Microtime gates as ``(start, end)`` in ns after the sync pulse,
+        e.g., one per laser of pulsed interleaved excitation (PIE). Each
+        detector then gives one channel per gate, holding only the
+        photons within it. None (default) uses all photons.
 
     Returns
     -------
@@ -1723,6 +1787,7 @@ def load_ptu(
         prompt_info=prompt_info,
         frame_sum_window=frame_sum_window,
         frame_sum_stride=frame_sum_stride,
+        microtime_gates=microtime_gates,
     )
     return movie, [movie.info()]
 
@@ -1732,8 +1797,11 @@ def load_ptu_all(
     *,
     frame_sum_window: int = 1,
     frame_sum_stride: int | None = None,
+    microtime_gates: Sequence[tuple[float, float]] | None = None,
 ) -> tuple[list[PTUMovie], list[list[dict]]]:
-    """Load every detector of a PicoQuant PTU image scan as its own movie.
+    """Load every channel of a PicoQuant PTU image scan as its own movie:
+    one per detector that recorded photons, or, with microtime gates, one
+    per detector and gate.
 
     Parameters
     ----------
@@ -1741,17 +1809,20 @@ def load_ptu_all(
         The path to the PTU file.
     frame_sum_window, frame_sum_stride : int, optional
         Frame summing, see ``load_ptu``.
+    microtime_gates : sequence of (float, float), optional
+        Microtime gates in ns, see ``load_ptu``.
 
     Returns
     -------
     movies : list of PTUMovie
-        One movie object per detector that recorded photons.
+        One movie object per channel, detector by detector and, within a
+        detector, gate by gate.
     infos : list of lists of dicts
-        Per-detector metadata, each carrying a ``"Channel"`` key.
+        Per-channel metadata, each carrying a ``"Channel"`` key.
     """
     _check_path_length(path)
     _require_ptufile()
-    channels = PTUMovie.detector_names(path)
+    channels = PTUMovie.channel_names(path, microtime_gates)
     movies = []
     infos = []
     for i in range(len(channels)):
@@ -1760,6 +1831,7 @@ def load_ptu_all(
             channel=i,
             frame_sum_window=frame_sum_window,
             frame_sum_stride=frame_sum_stride,
+            microtime_gates=microtime_gates,
         )
         movies.append(movie)
         infos.append([movie.info()])
@@ -1773,6 +1845,7 @@ def load_movie(
     *,
     frame_sum_window: int = 1,
     frame_sum_stride: int | None = None,
+    microtime_gates: Sequence[tuple[float, float]] | None = None,
 ) -> tuple[AbstractPicassoMovie, list[dict]]:
     """Load a movie file based on its extension and returns the movie
     object and its metadata.
@@ -1804,6 +1877,13 @@ def load_movie(
         ``frame_sum_window``. None (default) uses ``frame_sum_window``,
         so that the sums do not overlap and every photon is used once;
         1 gives a sliding window.
+    microtime_gates : sequence of (float, float), optional
+        Photon-counting movies (.ptu) only: microtime gates as
+        ``(start, end)`` in ns after the sync pulse, e.g., one per laser
+        of pulsed interleaved excitation (PIE). Each detector then gives
+        one channel per gate, holding only the photons within it
+        (``prompt_info`` selects the channel). None (default) uses all
+        photons.
 
     Returns
     -------
@@ -1816,15 +1896,17 @@ def load_movie(
     ------
     ValueError
         If the file extension is not a supported movie format, or if
-        frames are to be summed for a movie whose pixel values are not
-        photon counts.
+        frames are to be summed or gated for a movie whose pixel values
+        are not photon counts.
     """
     _check_path_length(path)
     base, ext = os.path.splitext(path)
     ext = ext.lower()
     # validated here, so that a bad argument fails for every format
     lib.normalize_progress(progress)
-    _check_frame_sum(path, frame_sum_window, frame_sum_stride)
+    _check_photon_options(
+        path, frame_sum_window, frame_sum_stride, microtime_gates
+    )
     if ext == ".raw":
         return load_raw(path, prompt_info=prompt_info)
     elif ext in TIFF_EXTENSIONS:
@@ -1845,6 +1927,7 @@ def load_movie(
             prompt_info=prompt_info,
             frame_sum_window=frame_sum_window,
             frame_sum_stride=frame_sum_stride,
+            microtime_gates=microtime_gates,
         )
     else:
         raise ValueError(
@@ -1860,12 +1943,14 @@ def load_movie_all(
     *,
     frame_sum_window: int = 1,
     frame_sum_stride: int | None = None,
+    microtime_gates: Sequence[tuple[float, float]] | None = None,
 ) -> tuple[list[AbstractPicassoMovie], list[list[dict]]] | None:
     """Load every channel of a movie file as independent movies.
 
     Mirrors ``load_movie`` but returns parallel lists - one entry per
     channel. Multi-channel formats (.ims, .czi, .lif, .nd2, and .ptu with
-    one channel per detector) expose all of their channels;
+    one channel per detector, or per detector and microtime gate) expose
+    all of their channels;
     single-channel formats return one-element lists. Each ``info[0]``
     carries a ``"Channel"`` key identifying the channel.
 
@@ -1887,6 +1972,9 @@ def load_movie_all(
     frame_sum_window, frame_sum_stride : int, optional
         Photon-counting movies (.ptu) only: frame summing, see
         ``load_movie``.
+    microtime_gates : sequence of (float, float), optional
+        Photon-counting movies (.ptu) only: microtime gates in ns, see
+        ``load_movie``.
 
     Returns
     -------
@@ -1901,7 +1989,9 @@ def load_movie_all(
     _check_path_length(path)
     ext = os.path.splitext(path)[1].lower()
     lib.normalize_progress(progress)  # fails early on a bad argument
-    _check_frame_sum(path, frame_sum_window, frame_sum_stride)
+    _check_photon_options(
+        path, frame_sum_window, frame_sum_stride, microtime_gates
+    )
     if ext == ".ims":
         return load_ims_all(path)
     elif ext == ".czi":
@@ -1915,6 +2005,7 @@ def load_movie_all(
             path,
             frame_sum_window=frame_sum_window,
             frame_sum_stride=frame_sum_stride,
+            microtime_gates=microtime_gates,
         )
     else:
         # Single-channel formats: wrap load_movie into one-element lists.
@@ -4284,8 +4375,15 @@ class PTUMovie(_MultiDimMovie):
     sum of scan frames ``k * stride`` to ``k * stride + window - 1``; scan
     frames at the end that do not fill a whole window are left out.
 
+    Microtime gates (``microtime_gates``, ``(start, end)`` in ns after
+    the sync pulse) select the photons by their microtime, e.g., one gate
+    per laser of pulsed interleaved excitation (PIE); a gated frame counts
+    only the photons within its gate.
+
     Only T3 image scans are supported (not point or line scans, z-stacks
-    or T2 data). Each detector that recorded photons is one channel.
+    or T2 data). Each detector that recorded photons is one channel, or,
+    with microtime gates, each detector and gate (detector by detector,
+    named e.g. ``"Detector 1 gate 2"``).
 
     The microtimes stay available for fluorescence-lifetime analyses
     such as FL-PAINT through ``_microtime_histograms``, private until
@@ -4307,11 +4405,13 @@ class PTUMovie(_MultiDimMovie):
         *,
         frame_sum_window: int = 1,
         frame_sum_stride: int | None = None,
+        microtime_gates: Sequence[tuple[float, float]] | None = None,
     ):
         super().__init__()
         window, stride = _frame_sum_parameters(
             frame_sum_window, frame_sum_stride
         )
+        gates = _microtime_gate_parameters(microtime_gates)
         self.path = os.path.abspath(path)
         self.frame_sum_window = window
         self.frame_sum_stride = stride
@@ -4319,13 +4419,12 @@ class PTUMovie(_MultiDimMovie):
         self._lock = threading.Lock()
         self._ptu = self._open(path)
         try:
-            self._detectors = self._active_detectors(self._ptu, path)
+            specs = self._channel_specs(self._ptu, path, gates)
             self._select_channel(
-                [f"Detector {d + 1}" for d in self._detectors],
-                prompt_info,
-                channel,
+                [name for name, *_ in specs], prompt_info, channel
             )
-            self._detector = self._detectors[self._channel]
+            _, self._detector, self.microtime_gate = specs[self._channel]
+            self._microtime_range = self._gate_bins(self.microtime_gate)
             n_scan, height, width = (int(_) for _ in self._ptu.shape[:3])
             if n_scan < window:
                 raise ValueError(
@@ -4387,16 +4486,54 @@ class PTUMovie(_MultiDimMovie):
         return detectors
 
     @classmethod
-    def detector_names(cls, path: str) -> list[str]:
-        """Names of the channels (detectors with photons) of a PTU file,
-        without decoding its frames."""
+    def _channel_specs(
+        cls,
+        ptu: "ptufile.PtuFile",
+        path: str,
+        gates: list[tuple[float, float]],
+    ) -> list[tuple[str, int, tuple[float, float] | None]]:
+        """``(name, detector, gate)`` of every channel: one per detector
+        with photons, or per detector and gate, detector by detector."""
+        detectors = cls._active_detectors(ptu, path)
+        if not gates:
+            return [(f"Detector {d + 1}", d, None) for d in detectors]
+        return [
+            (f"Detector {d + 1} gate {g + 1}", d, gate)
+            for d in detectors
+            for g, gate in enumerate(gates)
+        ]
+
+    @classmethod
+    def channel_names(
+        cls,
+        path: str,
+        microtime_gates: Sequence[tuple[float, float]] | None = None,
+    ) -> list[str]:
+        """Names of the channels of a PTU file (detectors with photons,
+        or detectors x microtime gates), without decoding its frames."""
+        gates = _microtime_gate_parameters(microtime_gates)
         ptu = cls._open(path)
         try:
-            return [
-                f"Detector {d + 1}" for d in cls._active_detectors(ptu, path)
-            ]
+            return [name for name, *_ in cls._channel_specs(ptu, path, gates)]
         finally:
             ptu.close()
+
+    def _gate_bins(self, gate: tuple[float, float] | None) -> tuple[int, int]:
+        """The microtime bins ``[lo, hi)`` of ``gate`` (ns), or all bins
+        without a gate. Bin edges are rounded to the nearest TCSPC bin."""
+        n_bins = self._number_bins
+        if gate is None:
+            return 0, n_bins
+        width_ns = self._tcspc_resolution * 1e9
+        lo = max(0, int(round(gate[0] / width_ns)))
+        hi = min(n_bins, int(round(gate[1] / width_ns)))
+        if lo >= hi:
+            raise ValueError(
+                f"The microtime gate {gate[0]:g}-{gate[1]:g} ns holds no "
+                f"photons of {self.path}: they arrive within 0-"
+                f"{n_bins * width_ns:.3g} ns after the sync pulse."
+            )
+        return lo, hi
 
     def _decode(self, frames: slice, dtype: np.dtype) -> np.ndarray:
         """Decode the photon counts of the selected detector, integrated
@@ -4418,13 +4555,28 @@ class PTUMovie(_MultiDimMovie):
         except Exception as error:  # noqa: BLE001 - keep in memory
             _log.debug("Available memory not read: %s", error)
         with self._lock:
-            data = self._ptu.decode_image(
-                (frames, Ellipsis),
-                channel=self._detector,
-                dtime=-1,
-                dtype=dtype,
-                out=out,
-            )
+            if self.microtime_gate is None:
+                data = self._ptu.decode_image(
+                    (frames, Ellipsis),
+                    channel=self._detector,
+                    dtime=-1,
+                    dtype=dtype,
+                    out=out,
+                )
+            else:
+                # one microtime bin as wide as the gate holds its photons
+                lo, hi = self._microtime_range
+                data = self._ptu.decode_image(
+                    (
+                        frames,
+                        slice(None),
+                        slice(None),
+                        self._detector,
+                        slice(lo, hi, hi - lo),
+                    ),
+                    dtype=dtype,
+                    out=out,
+                )
         data = data[:, :, :, 0, 0]
         data.flags.writeable = False
         return data
@@ -4457,6 +4609,8 @@ class PTUMovie(_MultiDimMovie):
             "Frame Sum Stride": self.frame_sum_stride,
             "Scan Frames": self.scan_frames,
         }
+        if self.microtime_gate is not None:
+            info["Microtime Gate (ns)"] = list(self.microtime_gate)
         resolution = tags.get("ImgHdr_PixResol")  # micrometer
         if isinstance(resolution, (int, float)) and resolution > 0:
             info["Pixelsize"] = round(float(resolution) * 1000, 3)
@@ -4511,8 +4665,11 @@ class PTUMovie(_MultiDimMovie):
             Number of microtime bins (of ``_tcspc_resolution``) merged
             into one histogram bin. Default 1.
         dtime_range : tuple of two ints, optional
-            First and last-plus-one microtime bin included, e.g., a
-            microtime gate. None (default) includes all bins.
+            First and last-plus-one microtime bin included, e.g., the
+            tail of the decay. It is restricted to the movie's microtime
+            gate (``_microtime_range``), so that the histograms always add
+            up to the frames. None (default) is the movie's microtime
+            gate, i.e., all bins without one.
 
         Returns
         -------
@@ -4536,10 +4693,14 @@ class PTUMovie(_MultiDimMovie):
         window, stride = self.frame_sum_window, self.frame_sum_stride
         first = start * stride
         last = (stop - 1) * stride + window
-        lo, hi = (0, self._number_bins) if dtime_range is None else dtime_range
-        lo, hi = max(0, int(lo)), min(self._number_bins, int(hi))
+        gate_lo, gate_hi = self._microtime_range
+        lo, hi = (gate_lo, gate_hi) if dtime_range is None else dtime_range
+        lo, hi = max(gate_lo, int(lo)), min(gate_hi, int(hi))
         if lo >= hi:
-            raise ValueError(f"Empty microtime range {dtime_range!r}.")
+            raise ValueError(
+                f"Empty microtime range {dtime_range!r} within the movie's "
+                f"microtime bins {gate_lo}-{gate_hi}."
+            )
         if roi is None:
             rows, cols = slice(None), slice(None)
         else:
@@ -4566,11 +4727,101 @@ class PTUMovie(_MultiDimMovie):
         starts = np.arange(n) * stride
         return cumulative[starts + window] - cumulative[starts]
 
+    def _decay(
+        self,
+        first: int = 0,
+        last: int | None = None,
+        *,
+        dtime_bin: int = 1,
+    ) -> np.ndarray:
+        """Decay (microtime) histogram of every photon of the movie's
+        detector detected during scan frames ``first`` to ``last - 1``
+        (scan frames, not the summed frames of this movie), within its
+        microtime gate (``_microtime_range``). Unlike the frames, it also
+        counts the photons detected while the scanner returns to the start
+        of a line: the decay of all the photons a detector saw.
+
+        Scan frame ``i`` spans the records from the ``i``-th frame marker
+        (the start of the file for 0) to the ``i + 1``-th; only the
+        records up to the last frame needed are decoded.
+
+        Parameters
+        ----------
+        first, last : int, optional
+            Scan frames; ``last`` None (default) is the last scan frame.
+        dtime_bin : int, optional
+            Number of microtime bins merged into one histogram bin, the
+            first starting at the start of the gate. Default 1.
+
+        Returns
+        -------
+        decay : np.ndarray
+            Photons per microtime bin (uint64).
+        """
+        last = (
+            self.scan_frames if last is None else min(last, self.scan_frames)
+        )
+        if not 0 <= first < last:
+            raise IndexError(
+                f"Scan frames {first} to {last} are out of range for a "
+                f"movie with {self.scan_frames} scan frames."
+            )
+        lo, hi = self._microtime_range
+        with self._lock:
+            ptu = self._ptu
+            records = ptu.read_records(copy=False)
+            frame_mask = ptu.frame_change_mask
+            size = min(len(records), 1 << 20)
+            while True:
+                decoded = ptu.decode_records(records[:size])
+                markers = np.flatnonzero(
+                    (decoded["channel"] < 0)
+                    & (decoded["marker"] & frame_mask != 0)
+                )
+                if len(markers) >= last or size == len(records):
+                    break
+                size = min(len(records), size * 4)
+        begin = 0 if first == 0 else int(markers[first - 1])
+        end = int(markers[last - 1]) + 1 if len(markers) >= last else size
+        decoded = decoded[begin:end]
+        dtime = decoded["dtime"][decoded["channel"] == self._detector]
+        dtime = dtime.astype(np.int64)
+        dtime = dtime[(dtime >= lo) & (dtime < hi)]
+        n_bins = -(-(hi - lo) // int(dtime_bin))
+        return np.bincount(
+            (dtime - lo) // int(dtime_bin), minlength=n_bins
+        ).astype(np.uint64)
+
     def close(self):
         try:
             self._ptu.close()
         except Exception:
             pass
+
+
+def _ptu_decay_histograms(path: str) -> dict:
+    """Decay (microtime) histograms of every detector of a PTU file with
+    photons, e.g., to place microtime gates.
+
+    Returns
+    -------
+    histograms : dict
+        ``"names"`` (list of ``"Detector N"``), ``"counts"`` (one row of
+        photons per microtime bin per detector) and ``"bin_ns"`` (the
+        width of a bin in ns).
+    """
+    _require_ptufile()
+    ptu = PTUMovie._open(path)
+    try:
+        detectors = PTUMovie._active_detectors(ptu, path)
+        counts = np.asarray(ptu.decode_histogram(dtype=np.uint32))
+        return {
+            "names": [f"Detector {d + 1}" for d in detectors],
+            "counts": counts[list(detectors)],
+            "bin_ns": float(ptu.tcspc_resolution) * 1e9,
+        }
+    finally:
+        ptu.close()
 
 
 def _yaml_safe(obj):

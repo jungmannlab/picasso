@@ -686,9 +686,8 @@ def _region_fit_summary(params: dict) -> list[tuple[str, str]]:
     ]
 
 
-def _sanitize_filename(name: str) -> str:
-    """Turn a channel name into a filename-safe suffix."""
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", str(name)).strip("_") or "channel"
+# a channel name as a filename-safe suffix, shared with the command line
+_sanitize_filename = io._sanitize_filename
 
 
 def _format_mng(minimum_ng: float | list) -> str:
@@ -910,15 +909,15 @@ class MovieLoadWorker(QtCore.QObject):
         prompt_for_path,
         load_all: bool = False,
         concat: bool = False,
-        frame_sum: tuple[int, int] | None = None,
+        ptu_options: dict | None = None,
     ) -> None:
         super().__init__()
         self.paths = paths
         self._prompt_for_path = prompt_for_path
-        # (window, stride) of the scan frames summed into one frame of a
-        # photon-counting movie (.ptu), see ``io.load_movie``; None keeps
-        # every scan frame.
-        self.frame_sum = frame_sum
+        # loader keywords of photon-counting movies (.ptu): frame sums and
+        # microtime gates (``PTUOptionsDialog.options``); None keeps every
+        # scan frame and photon.
+        self.ptu_options = ptu_options
         # When True, each path is read with ``io.load_movie_all`` (every
         # channel of one multichannel file); otherwise ``io.load_movie``
         # loads one channel per file.
@@ -982,15 +981,12 @@ class MovieLoadWorker(QtCore.QObject):
                 return []
             movie, info = result
             return [(movie, info, path)]
-        frame_sum = {}
-        if self.frame_sum is not None and path.lower().endswith(".ptu"):
-            frame_sum = {
-                "frame_sum_window": self.frame_sum[0],
-                "frame_sum_stride": self.frame_sum[1],
-            }
+        options = {}
+        if self.ptu_options is not None and path.lower().endswith(".ptu"):
+            options = dict(self.ptu_options)
         if self.load_all:
             result = io.load_movie_all(
-                path, prompt_info=prompt, progress=report, **frame_sum
+                path, prompt_info=prompt, progress=report, **options
             )
             if result is None:
                 return []
@@ -1001,7 +997,7 @@ class MovieLoadWorker(QtCore.QObject):
             ]
         else:
             result = io.load_movie(
-                path, prompt_info=prompt, progress=report, **frame_sum
+                path, prompt_info=prompt, progress=report, **options
             )
             if result is None:
                 return []
@@ -2011,12 +2007,16 @@ class PromptChannelDialog(lib.Dialog):
         return channel, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
-class PromptFrameSumDialog(lib.Dialog):
-    """Dialog asking how many scan frames of a photon-counting movie
-    (PicoQuant .ptu confocal scan) are summed into one frame, see
-    ``io.load_movie``. The choice is remembered in the user settings."""
+class PTUOptionsDialog(lib.Dialog):
+    """Dialog asking how a photon-counting movie (PicoQuant .ptu confocal
+    scan) is opened, see ``io.load_movie``: how many scan frames are
+    summed into one frame, and the microtime gates that split each
+    detector into channels (e.g., one per laser of pulsed interleaved
+    excitation). The decay histogram of the file shows where the photons
+    arrive; dragging over it adds a gate. The choices are remembered in
+    the user settings."""
 
-    SETTINGS_KEY = "PTU frame sum"
+    SETTINGS_KEY = "PTU options"
     WINDOW_TOOLTIP = (
         "Number of consecutive scan frames summed into one frame.\n"
         "Confocal scan frames are often too dim to localize one by one;"
@@ -2029,13 +2029,25 @@ class PromptFrameSumDialog(lib.Dialog):
         "frame starts a new sum, so a binding event\nis localized in "
         "several overlapping frames."
     )
+    GATES_TOOLTIP = (
+        "Microtime gates: ranges of photon arrival times after the sync\n"
+        "(laser) pulse, in ns. Each detector gives one channel per gate,\n"
+        "holding only the photons within it, e.g., one gate per laser of\n"
+        "pulsed interleaved excitation (PIE). Without gates every photon\n"
+        "counts and each detector is one channel.\n"
+        "Drag over the decay histogram to add a gate."
+    )
 
-    def __init__(self, window: QtWidgets.QWidget) -> None:
+    def __init__(
+        self, window: QtWidgets.QWidget, path: str | None = None
+    ) -> None:
         super().__init__(window)
         self.window = window
-        self.setWindowTitle("Sum scan frames")
+        self.setWindowTitle("Open PicoQuant scan")
         vbox = QtWidgets.QVBoxLayout(self)
-        grid = QtWidgets.QGridLayout()
+
+        frames_box = QtWidgets.QGroupBox("Frames")
+        grid = QtWidgets.QGridLayout(frames_box)
         window_label = QtWidgets.QLabel("Frames to sum:")
         window_label.setToolTip(self.WINDOW_TOOLTIP)
         grid.addWidget(window_label, 0, 0)
@@ -2050,7 +2062,36 @@ class PromptFrameSumDialog(lib.Dialog):
         self.frame_stride.setRange(1, 1)
         self.frame_stride.setToolTip(self.STRIDE_TOOLTIP)
         grid.addWidget(self.frame_stride, 1, 1)
-        vbox.addLayout(grid)
+        vbox.addWidget(frames_box)
+
+        gates_box = QtWidgets.QGroupBox("Microtime gates")
+        gates_box.setToolTip(self.GATES_TOOLTIP)
+        gates_layout = QtWidgets.QVBoxLayout(gates_box)
+        self._histograms = None
+        self.canvas = None
+        if path is not None:
+            self._add_decay_plot(gates_layout, path)
+        self.gate_table = QtWidgets.QTableWidget(0, 2)
+        self.gate_table.setHorizontalHeaderLabels(["Start (ns)", "End (ns)"])
+        self.gate_table.horizontalHeader().setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.Stretch
+        )
+        self.gate_table.setToolTip(self.GATES_TOOLTIP)
+        self.gate_table.setMinimumHeight(110)
+        gates_layout.addWidget(self.gate_table)
+        gate_buttons = QtWidgets.QHBoxLayout()
+        add_button = QtWidgets.QPushButton("Add gate")
+        add_button.setAutoDefault(False)
+        add_button.clicked.connect(lambda: self.add_gate())
+        gate_buttons.addWidget(add_button)
+        remove_button = QtWidgets.QPushButton("Remove gate")
+        remove_button.setAutoDefault(False)
+        remove_button.clicked.connect(self.remove_gate)
+        gate_buttons.addWidget(remove_button)
+        gate_buttons.addStretch(1)
+        gates_layout.addLayout(gate_buttons)
+        vbox.addWidget(gates_box)
+
         self.buttons = QtWidgets.QDialogButtonBox(
             QtWidgets.QDialogButtonBox.StandardButton.Ok
             | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
@@ -2063,6 +2104,139 @@ class PromptFrameSumDialog(lib.Dialog):
         self._previous_window = 1
         self.frame_window.valueChanged.connect(self.on_window_changed)
         self._load_settings()
+        self.draw()
+
+    def _add_decay_plot(self, layout: QtWidgets.QLayout, path: str) -> None:
+        """Show the decay histogram of every detector of ``path``; a note
+        replaces it if the file cannot be read."""
+        try:
+            self._histograms = io._ptu_decay_histograms(path)
+        except Exception as error:  # noqa: BLE001 - shown in the dialog
+            note = QtWidgets.QLabel(f"No decay histogram: {error}")
+            note.setWordWrap(True)
+            layout.addWidget(note)
+            return
+        # imported here, so Localize only loads matplotlib's Qt backend
+        # when the dialog shows a plot
+        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+        from matplotlib.figure import Figure
+        from matplotlib.widgets import SpanSelector
+
+        from . import plot_style
+
+        self.plot_style = plot_style.current()
+        with self.plot_style.context():
+            self.figure = Figure(figsize=(5.5, 2.6), layout="constrained")
+            self.axes = self.figure.add_subplot()
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas.setMinimumHeight(200)
+        layout.addWidget(self.canvas)
+        self.span = SpanSelector(
+            self.axes,
+            self.on_span_select,
+            "horizontal",
+            useblit=True,
+            props=self.plot_style.selection,
+        )
+
+    def on_span_select(self, xmin: float, xmax: float) -> None:
+        """Add the range dragged over the decay histogram as a gate."""
+        if xmax - xmin > 0:
+            self.add_gate(round(max(0.0, xmin), 2), round(xmax, 2))
+
+    def _gate_spinbox(self, value: float) -> QtWidgets.QDoubleSpinBox:
+        spinbox = QtWidgets.QDoubleSpinBox()
+        spinbox.setRange(0, 1e6)
+        spinbox.setDecimals(2)
+        spinbox.setSingleStep(0.5)
+        spinbox.setValue(value)
+        spinbox.valueChanged.connect(self.draw)
+        return spinbox
+
+    def add_gate(
+        self, start: float | None = None, end: float | None = None
+    ) -> None:
+        """Append a gate; without limits it starts where the last one
+        ends and reaches the end of the decay (10 ns without a decay
+        histogram)."""
+        gates = self.gates()
+        if start is None:
+            start = gates[-1][1] if gates else 0.0
+        if end is None:
+            if self._histograms is not None:
+                counts = self._histograms["counts"]
+                end = counts.shape[1] * self._histograms["bin_ns"]
+            else:
+                end = start + 10.0
+            end = max(end, start + 1.0)
+        row = self.gate_table.rowCount()
+        self.gate_table.insertRow(row)
+        self.gate_table.setCellWidget(row, 0, self._gate_spinbox(start))
+        self.gate_table.setCellWidget(row, 1, self._gate_spinbox(end))
+        self.draw()
+
+    def remove_gate(self) -> None:
+        """Remove the selected gates, else the last one."""
+        rows = sorted(
+            {index.row() for index in self.gate_table.selectedIndexes()},
+            reverse=True,
+        )
+        if not rows and self.gate_table.rowCount():
+            rows = [self.gate_table.rowCount() - 1]
+        for row in rows:
+            self.gate_table.removeRow(row)
+        self.draw()
+
+    def gates(self) -> list[tuple[float, float]]:
+        """The gates in the table as ``(start, end)`` in ns."""
+        return [
+            (
+                self.gate_table.cellWidget(row, 0).value(),
+                self.gate_table.cellWidget(row, 1).value(),
+            )
+            for row in range(self.gate_table.rowCount())
+        ]
+
+    def draw(self) -> None:
+        """Draw the decay histograms with the gates shaded."""
+        if self.canvas is None:
+            return
+        style = self.plot_style
+        axes = self.axes
+        axes.clear()
+        histograms = self._histograms
+        colors = style.series_colors
+        with style.context():
+            for i, (name, counts) in enumerate(
+                zip(histograms["names"], histograms["counts"])
+            ):
+                times = (np.arange(len(counts)) + 0.5) * histograms["bin_ns"]
+                axes.plot(
+                    times,
+                    np.where(counts > 0, counts, np.nan),
+                    color=colors[i % len(colors)],
+                    label=name,
+                    linewidth=1.0,
+                )
+            for i, (start, end) in enumerate(self.gates()):
+                axes.axvspan(start, end, alpha=0.2, color="0.5", lw=0)
+                axes.text(
+                    (start + end) / 2,
+                    0.98,
+                    f"gate {i + 1}",
+                    transform=axes.get_xaxis_transform(),
+                    ha="center",
+                    va="top",
+                    color=style.theme_colors["text"],
+                    fontsize=style.tick_size,
+                )
+            axes.set_yscale("log")
+            if len(histograms["names"]) > 1:
+                axes.legend(loc="upper right")
+        style.style_figure(self.figure)
+        style.style_axes(axes)
+        style.label(axes, "Microtime (ns)", "Counts")
+        self.canvas.draw_idle()
 
     def on_window_changed(self, value: int) -> None:
         """Keep the stride within the window; a stride equal to the
@@ -2074,19 +2248,26 @@ class PromptFrameSumDialog(lib.Dialog):
         self._previous_window = value
 
     def _load_settings(self) -> None:
-        """Fill the inputs in with the remembered ones, else 1 and 1."""
+        """Fill the inputs in with the remembered ones, else 1, 1 and no
+        gates."""
         stored = io.load_user_settings()["Localize"].get(self.SETTINGS_KEY)
-        window, stride = 1, 1
+        window, stride, gates = 1, 1, []
         if isinstance(stored, dict):
             try:
                 window = max(1, int(stored.get("window", 1)))
                 stride = min(window, max(1, int(stored.get("stride", window))))
+                gates = [
+                    (float(start), float(end))
+                    for start, end in stored.get("gates") or []
+                ]
             except (TypeError, ValueError):
-                window, stride = 1, 1
+                window, stride, gates = 1, 1, []
         self.frame_window.setValue(window)
         self.frame_stride.setMaximum(window)
         self.frame_stride.setValue(stride)
         self._previous_window = window
+        for start, end in gates:
+            self.add_gate(start, end)
 
     def _save_settings(self) -> None:
         """Remember the inputs in the user settings."""
@@ -2094,23 +2275,42 @@ class PromptFrameSumDialog(lib.Dialog):
         settings["Localize"][self.SETTINGS_KEY] = {
             "window": self.frame_window.value(),
             "stride": self.frame_stride.value(),
+            "gates": [[start, end] for start, end in self.gates()],
         }
         io.save_user_settings(settings)
 
+    def accept(self) -> None:
+        """Refuse gates that end before they start."""
+        for i, (start, end) in enumerate(self.gates()):
+            if start >= end:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Microtime gates",
+                    f"Gate {i + 1} ends ({end:g} ns) before it starts "
+                    f"({start:g} ns).",
+                )
+                return
+        super().accept()
+
+    def options(self) -> dict:
+        """The keywords of ``io.load_movie`` chosen in the dialog."""
+        return {
+            "frame_sum_window": self.frame_window.value(),
+            "frame_sum_stride": self.frame_stride.value(),
+            "microtime_gates": self.gates() or None,
+        }
+
     @staticmethod
-    def getFrameSum(
-        parent: QtWidgets.QWidget | None = None,
-    ) -> tuple[int, int, bool]:
-        """Show the dialog; return ``(window, stride, accepted)``."""
-        dialog = PromptFrameSumDialog(parent)
+    def getOptions(
+        parent: QtWidgets.QWidget | None = None, path: str | None = None
+    ) -> tuple[dict, bool]:
+        """Show the dialog for the PTU file ``path``; return the loader
+        keywords and whether the dialog was accepted."""
+        dialog = PTUOptionsDialog(parent, path)
         accepted = dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted
         if accepted:
             dialog._save_settings()
-        return (
-            dialog.frame_window.value(),
-            dialog.frame_stride.value(),
-            accepted,
-        )
+        return dialog.options(), accepted
 
 
 class ConcatenateMoviesDialog(lib.Dialog):
@@ -9306,15 +9506,16 @@ class Window(QtWidgets.QMainWindow):
             # (A canceled one is detached immediately, see
             # ``_on_load_canceled``, so it never blocks a new load.)
             return
-        # Photon-counting scans (.ptu) are often too dim to localize scan
-        # frame by scan frame: ask how many scan frames to sum, once for
-        # all files of this load.
-        frame_sum = None
-        if not concat and any(p.lower().endswith(".ptu") for p in paths):
-            window, stride, ok = PromptFrameSumDialog.getFrameSum(self)
+        # Photon-counting scans (.ptu): ask how many scan frames to sum
+        # (single scan frames are often too dim to localize) and for
+        # microtime gates, once for all files of this load, showing the
+        # decay histogram of the first one.
+        ptu_options = None
+        ptu_paths = [p for p in paths if p.lower().endswith(".ptu")]
+        if not concat and ptu_paths:
+            ptu_options, ok = PTUOptionsDialog.getOptions(self, ptu_paths[0])
             if not ok:
                 return
-            frame_sum = (window, stride)
 
         self._load_t0 = time.time()
         self._load_multi_file = multi_file
@@ -9347,7 +9548,7 @@ class Window(QtWidgets.QMainWindow):
             prompt_for_path,
             load_all=load_all,
             concat=concat,
-            frame_sum=frame_sum,
+            ptu_options=ptu_options,
         )
         worker.moveToThread(thread)
         self._load_thread = thread

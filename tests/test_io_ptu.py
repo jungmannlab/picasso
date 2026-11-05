@@ -101,6 +101,9 @@ class _FakePtuFile:
             data = data[:, :, :, sel[3] : sel[3] + 1, :]
         return data.astype(dtype or np.uint16)
 
+    def decode_histogram(self, dtype=None):
+        return self._data.sum(axis=(0, 1, 2)).astype(dtype or np.uint32)
+
     def close(self):
         self.closed = True
 
@@ -345,6 +348,128 @@ class TestPTUMicrotimes:
             movie._microtime_histograms(0, 2, dtime_bin=0)
 
 
+# 16 microtime bins of 0.04 ns (``_FakePtuFile.tcspc_resolution``): two
+# gates of 8 bins each
+GATES = [(0.0, 0.32), (0.32, 0.64)]
+
+
+class TestPTUGates:
+    def test_each_detector_has_one_channel_per_gate(
+        self, tmp_path, monkeypatch
+    ):
+        _install_fake_ptufile(monkeypatch, _scan(channels=(0, 1)))
+        path = str(tmp_path / "scan.ptu")
+        names = [
+            "Detector 1 gate 1",
+            "Detector 1 gate 2",
+            "Detector 2 gate 1",
+            "Detector 2 gate 2",
+        ]
+        assert io.PTUMovie.channel_names(path, GATES) == names
+        assert io.PTUMovie.channel_names(path) == ["Detector 1", "Detector 2"]
+        _, infos = io.load_movie_all(path, microtime_gates=GATES)
+        assert [info[0]["Channel"] for info in infos] == names
+        assert infos[3][0]["Microtime Gate (ns)"] == [0.32, 0.64]
+
+    def test_gated_frames_hold_the_photons_of_their_gate(
+        self, tmp_path, monkeypatch
+    ):
+        data = _scan(t=9, channels=(0, 1))
+        _install_fake_ptufile(monkeypatch, data)
+        movies, _ = io.load_movie_all(
+            str(tmp_path / "scan.ptu"),
+            frame_sum_window=3,
+            microtime_gates=GATES,
+        )
+        expected = data.astype(np.int64)[:9].reshape(3, 3, 6, 8, 2, 16).sum(1)
+        for movie, (detector, bins) in zip(
+            movies,
+            [
+                (0, slice(0, 8)),
+                (0, slice(8, 16)),
+                (1, slice(0, 8)),
+                (1, slice(8, 16)),
+            ],
+        ):
+            np.testing.assert_array_equal(
+                np.stack(list(movie)), expected[..., detector, bins].sum(-1)
+            )
+
+    def test_gates_add_up_to_all_photons(self, tmp_path, monkeypatch):
+        _install_fake_ptufile(monkeypatch, _scan())
+        path = str(tmp_path / "scan.ptu")
+        whole, _ = io.load_movie(path)
+        movies, _ = io.load_movie_all(path, microtime_gates=GATES)
+        np.testing.assert_array_equal(
+            movies[0][4].astype(np.int64) + movies[1][4], whole[4]
+        )
+
+    def test_the_prompt_chooses_detector_and_gate(self, tmp_path, monkeypatch):
+        data = _scan(channels=(0, 1))
+        _install_fake_ptufile(monkeypatch, data)
+        asked = []
+
+        def prompt(channels):
+            asked.append(channels)
+            return "Detector 2 gate 1"
+
+        movie, info = io.load_movie(
+            str(tmp_path / "scan.ptu"), prompt, microtime_gates=GATES
+        )
+        assert len(asked[0]) == 4
+        assert info[0]["Microtime Gate (ns)"] == [0.0, 0.32]
+        np.testing.assert_array_equal(
+            movie[1], data[1, :, :, 1, :8].astype(np.int64).sum(-1)
+        )
+
+    def test_histograms_stay_within_the_gate(self, tmp_path, monkeypatch):
+        _install_fake_ptufile(monkeypatch, _scan(t=9))
+        movies, _ = io.load_movie_all(
+            str(tmp_path / "scan.ptu"),
+            frame_sum_window=3,
+            frame_sum_stride=1,
+            microtime_gates=GATES,
+        )
+        movie = movies[1]
+        assert movie._microtime_range == (8, 16)
+        hist = movie._microtime_histograms(0, len(movie))
+        assert hist.shape[-1] == 8
+        np.testing.assert_array_equal(hist.sum(-1), movie[0 : len(movie)])
+        # an explicit range is cut to the gate
+        part = movie._microtime_histograms(0, 2, dtime_range=(4, 12))
+        np.testing.assert_array_equal(part, hist[:2, :, :, :4])
+
+    def test_a_gate_without_photons(self, tmp_path, monkeypatch):
+        _install_fake_ptufile(monkeypatch, _scan())
+        with pytest.raises(ValueError, match="holds no photons"):
+            io.load_movie(str(tmp_path / "scan.ptu"), microtime_gates=[(5, 6)])
+
+    @pytest.mark.parametrize(
+        "gates",
+        [[(2, 1)], [(-1, 1)], [(0, 1, 2)], [("a", 1)], [(0, np.inf)], 3],
+    )
+    def test_invalid_gates(self, tmp_path, monkeypatch, gates):
+        _install_fake_ptufile(monkeypatch, _scan())
+        with pytest.raises(ValueError, match="gate"):
+            io.load_movie(str(tmp_path / "scan.ptu"), microtime_gates=gates)
+
+    @pytest.mark.parametrize("loader", [io.load_movie, io.load_movie_all])
+    def test_camera_movies_cannot_be_gated(self, tmp_path, loader):
+        with pytest.raises(ValueError, match="only available for photon"):
+            loader(str(tmp_path / "movie.tif"), microtime_gates=GATES)
+
+    def test_decay_histograms(self, tmp_path, monkeypatch):
+        data = _scan(channels=(1, 3), c=4)
+        _install_fake_ptufile(monkeypatch, data)
+        decay = io._ptu_decay_histograms(str(tmp_path / "scan.ptu"))
+        assert decay["names"] == ["Detector 2", "Detector 4"]
+        assert decay["bin_ns"] == pytest.approx(0.04)
+        np.testing.assert_array_equal(
+            decay["counts"],
+            data[..., [1, 3], :].astype(np.int64).sum((0, 1, 2)),
+        )
+
+
 class TestPTUAvailability:
     def test_extension_advertised_when_library_present(self):
         assert (".ptu" in io.MOVIE_EXTENSIONS) == (io.ptufile is not None)
@@ -461,6 +586,65 @@ class TestPTUFile:
         np.testing.assert_array_equal(hist, expected)
         assert movie._tcspc_resolution == pytest.approx(5e-8 / 64)
         movie.close()
+
+    def test_microtime_gates(self, tmp_path):
+        path, data = _written_scan(tmp_path)
+        # 64 bins of 5e-8 / 64 s = 0.78125 ns: gates of 32 bins each
+        gates = [(0.0, 25.0), (25.0, 50.0)]
+        movies, infos = io.load_movie_all(
+            path, frame_sum_window=2, microtime_gates=gates
+        )
+        assert [i[0]["Channel"] for i in infos] == [
+            "Detector 2 gate 1",
+            "Detector 2 gate 2",
+            "Detector 4 gate 1",
+            "Detector 4 gate 2",
+        ]
+        frames = data[:6].reshape(3, 2, 12, 16, 4, 64).sum(1)
+        for movie, (detector, bins) in zip(
+            movies,
+            [
+                (1, slice(0, 32)),
+                (1, slice(32, 64)),
+                (3, slice(0, 32)),
+                (3, slice(32, 64)),
+            ],
+        ):
+            np.testing.assert_array_equal(
+                np.stack(list(movie)), frames[..., detector, bins].sum(-1)
+            )
+            hist = movie._microtime_histograms(0, 3, dtime_bin=8)
+            np.testing.assert_array_equal(hist.sum(-1), np.stack(list(movie)))
+            movie.close()
+
+    def test_decay_of_scan_frames(self, tmp_path):
+        """``_decay`` counts the photons of scan frames from the records;
+        ptufile writes no photons outside the scan lines, so it equals the
+        pixels' histograms added up."""
+        path, data = _written_scan(tmp_path)
+        movie, _ = io.load_movie(path, frame_sum_window=2)
+        whole = movie._decay()
+        np.testing.assert_array_equal(whole, data[..., 1, :].sum((0, 1, 2)))
+        part = movie._decay(2, 5, dtime_bin=8)
+        expected = data[2:5, ..., 1, :].sum((0, 1, 2)).reshape(8, 8).sum(1)
+        np.testing.assert_array_equal(part, expected)
+        with pytest.raises(IndexError):
+            movie._decay(5, 5)
+        movie.close()
+        gated, _ = io.load_movie(path, microtime_gates=[(25.0, 50.0)])
+        np.testing.assert_array_equal(
+            gated._decay(dtime_bin=4),
+            data[..., 1, 32:].sum((0, 1, 2)).reshape(8, 4).sum(1),
+        )
+        gated.close()
+
+    def test_decay_histograms(self, tmp_path):
+        path, data = _written_scan(tmp_path)
+        decay = io._ptu_decay_histograms(path)
+        assert decay["names"] == ["Detector 2", "Detector 4"]
+        np.testing.assert_array_equal(
+            decay["counts"][:, :64], data[..., [1, 3], :].sum((0, 1, 2))
+        )
 
 
 def test_ptu_metadata_is_safe_yaml(tmp_path, monkeypatch):

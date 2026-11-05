@@ -1502,8 +1502,52 @@ def test_localize_sums_the_scan_frames_of_a_ptu_file(tmp_path, monkeypatch):
     assert info[0]["Photon Counting"] is True
 
 
+def test_localize_writes_one_file_per_microtime_gate(tmp_path, monkeypatch):
+    from tests.test_io_ptu import _install_fake_ptufile, _spot_scan
+
+    # 8 microtime bins of 0.04 ns, split into two gates of 4 bins
+    _install_fake_ptufile(monkeypatch, _spot_scan())
+    movie = tmp_path / "scan.ptu"
+    movie.write_bytes(b"")  # read by the fake ptufile
+    _picasso(
+        monkeypatch,
+        "localize",
+        movie,
+        "--frame-sum-window",
+        4,
+        "--microtime-gate",
+        0,
+        0.16,
+        "--microtime-gate",
+        0.16,
+        0.32,
+        "-g",
+        8,
+        "-a",
+        "lq",
+        "-d",
+        0,
+    )
+    for gate, (start, end) in enumerate([(0.0, 0.16), (0.16, 0.32)], 1):
+        out = tmp_path / f"scan_Detector_1_gate_{gate}_locs.hdf5"
+        locs, info = io.load_locs(str(out))
+        # the spot at (12.6, 11.3) px, in each of the two sums of 4
+        near = (abs(locs["x"] / 130 - 12.6) < 1) & (
+            abs(locs["y"] / 130 - 11.3) < 1
+        )
+        assert set(locs["frame"][near]) == {0, 1}
+        assert info[0]["Channel"] == f"Detector 1 gate {gate}"
+        assert info[0]["Microtime Gate (ns)"] == [start, end]
+    assert not (tmp_path / "scan_locs.hdf5").exists()
+
+
 @pytest.mark.parametrize(
-    "option", [["--frame-sum-window", 2], ["--frame-sum-stride", 2]]
+    "option",
+    [
+        ["--frame-sum-window", 2],
+        ["--frame-sum-stride", 2],
+        ["--microtime-gate", 0, 10],
+    ],
 )
 def test_localize_refuses_to_sum_camera_frames(tmp_path, monkeypatch, option):
     movie = _copy_testdata(tmp_path)

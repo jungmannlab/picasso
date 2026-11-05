@@ -143,10 +143,11 @@ Picasso Localize reads the following movie formats:
 
    - **The pixel values are photons**, so the camera parameters are set accordingly when the file is opened: baseline 0, sensitivity 1 and EM gain 1 (sCMOS noise maps are cleared). The pixel size is read from the file.
    - **Scan frames can be summed.** A single confocal scan frame can be too dim to localize, so a dialog asks how many consecutive scan frames (*Frames to sum*) are added up into one frame, and how many scan frames lie between the starts of two sums (*Stride*). By default the stride equals the number of frames to sum: the sums do not overlap and every photon is used once. A stride of 1 is a sliding window, where every scan frame starts a new sum, so a binding event is localized in several overlapping frames. Summing applies to photon counts only; camera movies cannot be summed, since every camera frame carries an offset (the baseline).
-   - **Each detector is a channel.** When photons were recorded with several detectors, a dialog asks which one to load; to load all of them, see :ref:`localize-opening-channels`.
+   - **Microtime gates split the photons by arrival time.** The same dialog shows the decay histogram of every detector: the photons counted against their arrival time after the laser pulse. A *microtime gate* keeps only the photons arriving within a range of times, e.g., one gate per laser of pulsed interleaved excitation (PIE). Drag over the histogram or click *Add gate*; without gates every photon counts.
+   - **Each detector is a channel**, or, with microtime gates, each detector and gate (*Detector 1 gate 1*, *Detector 1 gate 2*, ...). When a file has several channels, a dialog asks which one to load; to load all of them, see :ref:`localize-opening-channels`.
    - Only T3 image scans are read, not point or line scans, z-stacks or T2 data.
 
-   The metadata of the movie record the summing (``Frame Sum Window``, ``Frame Sum Stride``, ``Scan Frames``), ``Photon Counting: true`` and the main header entries of the file (``PTU Metadata``).
+   The metadata of the movie record the summing (``Frame Sum Window``, ``Frame Sum Stride``, ``Scan Frames``), the gate of the channel (``Microtime Gate (ns)``), ``Photon Counting: true`` and the main header entries of the file (``PTU Metadata``).
 
 We are open to feature requests regarding support for other file formats, please visit our `GitHub page <https://github.com/jungmannlab/picasso>`_.
 
@@ -170,12 +171,18 @@ We are open to feature requests regarding support for other file formats, please
    For a photon-counting ``.ptu`` scan, ``frame_sum_window`` sums that many
    consecutive scan frames into one frame and ``frame_sum_stride`` sets
    the number of scan frames between the starts of two sums (default: the
-   window, so the sums do not overlap; 1 gives a sliding window). Any other
-   format raises a ``ValueError`` when frames are to be summed.
+   window, so the sums do not overlap; 1 gives a sliding window).
+   ``microtime_gates`` takes ``(start, end)`` gates in ns, giving one channel
+   per detector and gate. Any other format raises a ``ValueError`` when
+   frames are to be summed or gated.
 
    .. code-block:: python
 
       movie, info = io.load_movie("scan.ptu", frame_sum_window=20)
+      # two PIE gates, every channel at once
+      movies, infos = io.load_movie_all(
+          "scan.ptu", frame_sum_window=20, microtime_gates=[(0, 25), (25, 50)]
+      )
 
 
 Topics

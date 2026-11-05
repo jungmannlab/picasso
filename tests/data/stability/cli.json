@@ -162,6 +162,7 @@
   "--magnification-factor",
   "--max-cycles",
   "--max-iterations",
+  "--microtime-gate",
   "--multi-emitter",
   "--peak-radius",
   "--peak-search-z",

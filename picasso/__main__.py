@@ -2066,23 +2066,29 @@ def _localize_legacy_calibrations(
     return z_params, lateral_transforms
 
 
-def _localize_frame_sum(args: argparse.Namespace) -> dict:
-    """The frame-sum keywords of ``io.load_movie`` set by
-    ``--frame-sum-window`` / ``--frame-sum-stride``; empty when no scan
-    frames are summed."""
+def _localize_photon_options(args: argparse.Namespace) -> dict:
+    """The keywords of ``io.load_movie`` for photon-counting movies set by
+    ``--frame-sum-window`` / ``--frame-sum-stride`` and
+    ``--microtime-gate``; empty when none of them is used."""
+    options = {}
     window = getattr(args, "frame_sum_window", 1)
     stride = getattr(args, "frame_sum_stride", None)
-    if window == 1 and stride in (None, 1):
-        return {}
-    return {"frame_sum_window": window, "frame_sum_stride": stride}
+    if window != 1 or stride not in (None, 1):
+        options["frame_sum_window"] = window
+        options["frame_sum_stride"] = stride
+    gates = getattr(args, "microtime_gate", None)
+    if gates:
+        options["microtime_gates"] = [tuple(gate) for gate in gates]
+    return options
 
 
-def _localize_check_frame_sum(
+def _localize_check_photon_options(
     args: argparse.Namespace, paths: list[str], concat: bool
 ) -> None:
-    """Exit with a message when scan frames are to be summed for movies
-    whose pixel values are not photon counts (anything but .ptu)."""
-    if not _localize_frame_sum(args):
+    """Exit with a message when scan frames are to be summed or gated for
+    movies whose pixel values are not photon counts (anything but
+    .ptu)."""
+    if not _localize_photon_options(args):
         return
     others = [
         path for path in paths if os.path.splitext(path)[1].lower() != ".ptu"
@@ -2090,12 +2096,49 @@ def _localize_check_frame_sum(
     if concat or others:
         listed = ", ".join(others[:3]) + (" ..." if len(others) > 3 else "")
         raise SystemExit(
-            "--frame-sum-window and --frame-sum-stride apply to "
-            "photon-counting movies (.ptu) only: camera frames carry an "
-            "offset (the baseline) in every frame, so a sum of their raw "
-            "counts is not a count of photons."
+            "--frame-sum-window, --frame-sum-stride and --microtime-gate "
+            "apply to photon-counting movies (.ptu) only: camera frames "
+            "carry an offset (the baseline) in every frame, so a sum of "
+            "their raw counts is not a count of photons, and they hold no "
+            "photon arrival times to gate."
             + (f" Not photon-counting: {listed}" if others else "")
         )
+
+
+def _localize_movies(paths: list[str], args: argparse.Namespace):
+    """The movies of one ``picasso localize`` job, each with the suffix of
+    its output files: the files concatenated into one movie
+    (``--concat``), every channel of a .ptu file with several channels
+    (detectors, or detectors x microtime gates) one after the other as
+    ``_<channel>``, else the one movie, without a suffix."""
+    from . import io
+
+    if len(paths) > 1:
+        movie, info = io.load_tif_concatenated(paths, progress="console")
+        yield movie, info, ""
+        return
+    path = paths[0]
+    options = _localize_photon_options(args)
+    names = [None]
+    if os.path.splitext(path)[1].lower() == ".ptu":
+        io._require_ptufile()
+        names = io.PTUMovie.channel_names(path, options.get("microtime_gates"))
+    if len(names) == 1:
+        movie, info = io.load_movie(path, progress="console", **options)
+        yield movie, info, ""
+        return
+    for name in names:
+        print(f"Channel {name}")
+        movie, info = io.load_movie(
+            path,
+            prompt_info=lambda channels, name=name: name,
+            progress="console",
+            **options,
+        )
+        try:
+            yield movie, info, "_" + io._sanitize_filename(name)
+        finally:
+            movie.close()
 
 
 def _localize_process_file(
@@ -2177,11 +2220,9 @@ def _localize_process_file(
     -------
     saved : list of str
         Paths of the localization files written: one, or one per region
-        with ``region_fit``.
+        with ``region_fit``, or one per channel of a .ptu file with
+        several channels.
     """
-    from .io import load_movie, load_tif_concatenated
-    from .localize import localize
-
     if isinstance(paths, str):
         paths = [paths]
     path = paths[0]
@@ -2198,12 +2239,54 @@ def _localize_process_file(
     else:
         print(f"Processing {path}, File {i + 1} of {n_total}")
     print("------------------------------------------")
-    if len(paths) > 1:
-        movie, info = load_tif_concatenated(paths, progress="console")
-    else:
-        movie, info = load_movie(
-            path, progress="console", **_localize_frame_sum(args)
+    saved = []
+    for movie, info, suffix in _localize_movies(paths, args):
+        saved += _localize_movie(
+            movie,
+            info,
+            path,
+            suffix,
+            args,
+            box,
+            min_net_gradient,
+            roi,
+            frame_bounds,
+            camera_info,
+            convergence,
+            max_iterations,
+            z_params,
+            spline_calibration=spline_calibration,
+            camera_calibration=camera_calibration,
+            lateral_transforms=lateral_transforms,
+            region_fit=region_fit,
         )
+    return saved
+
+
+def _localize_movie(
+    movie,
+    info: list[dict],
+    path: str,
+    suffix: str,
+    args: argparse.Namespace,
+    box: int,
+    min_net_gradient: float,
+    roi,
+    frame_bounds,
+    camera_info: dict,
+    convergence: float,
+    max_iterations: int,
+    z_params,
+    spline_calibration: dict | None = None,
+    camera_calibration: dict | None = None,
+    lateral_transforms: list | None = None,
+    region_fit: dict | None = None,
+) -> list[str]:
+    """Identify, fit, save and optionally undrift one loaded movie of
+    ``_localize_process_file``, whose arguments it takes; ``suffix`` is
+    inserted into the output names before ``_locs`` (a channel of a .ptu
+    file)."""
+    from .localize import localize
 
     fitting_method = _FIT_METHOD_MAP[args.fit_method]
     cam_info = dict(camera_info)
@@ -2230,6 +2313,7 @@ def _localize_process_file(
                 z_params,
                 lateral_transforms,
                 spline_calibration,
+                suffix=suffix,
             )
         ]
     if region_fit is not None:
@@ -2249,6 +2333,7 @@ def _localize_process_file(
             region_fit,
             camera_calibration=camera_calibration,
             lateral_transforms=lateral_transforms,
+            suffix=suffix,
         )
     with _lateral_report_only():
         locs, info = localize(
@@ -2279,6 +2364,7 @@ def _localize_process_file(
         z_params,
         lateral_transforms,
         spline_calibration,
+        suffix=suffix,
     )
     return [saved]
 
@@ -2314,6 +2400,7 @@ def _localize_multi_emitter(
     z_params,
     lateral_transforms: list | None,
     spline_calibration: dict | None,
+    suffix: str = "",
 ) -> str:
     """Fit one movie with the multi-emitter fitting (``--multi-emitter``),
     then save it and undrift it as any other fit. With ``z_params`` (an
@@ -2373,7 +2460,14 @@ def _localize_multi_emitter(
         # applied and reported by the z fit
         lateral_transforms = None
     return _localize_finish(
-        locs, info, path, args, None, lateral_transforms, spline_calibration
+        locs,
+        info,
+        path,
+        args,
+        None,
+        lateral_transforms,
+        spline_calibration,
+        suffix=suffix,
     )
 
 
@@ -2433,6 +2527,7 @@ def _localize_regions(
     region_fit: dict,
     camera_calibration: dict | None = None,
     lateral_transforms: list | None = None,
+    suffix: str = "",
 ) -> list[str]:
     """Fit each ``--roi`` region of one movie on its own
     (``--regions-separately``).
@@ -2513,7 +2608,7 @@ def _localize_regions(
                 z_params,
                 lateral_transforms,
                 region_fit["spline_calibrations"][c],
-                suffix=f"_{label}",
+                suffix=f"{suffix}_{label}",
                 fitting_method=region_fit["methods"][c],
             )
         )
@@ -2818,7 +2913,7 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
     if not paths:
         print("Error. No files found.")
         raise FileNotFoundError
-    _localize_check_frame_sum(args, paths, concat)
+    _localize_check_photon_options(args, paths, concat)
 
     if concat:
         print(
@@ -5392,6 +5487,23 @@ def _build_parser() -> (
             "between the starts of two sums, at most --frame-sum-window.\n"
             "Default: --frame-sum-window, i.e., sums that do not overlap\n"
             "(every photon is used once); 1 gives a sliding window"
+        ),
+    )
+    localize_parser.add_argument(
+        "--microtime-gate",
+        type=float,
+        nargs=2,
+        action="append",
+        default=None,
+        metavar=("START", "END"),
+        help=(
+            "photon-counting movies (.ptu) only: a microtime gate, i.e.,\n"
+            "photons arriving START to END ns after the sync (laser)\n"
+            "pulse, e.g., one gate per laser of pulsed interleaved\n"
+            "excitation (PIE). May be given several times; each detector\n"
+            "then gives one channel per gate. A .ptu file with several\n"
+            "channels (detectors or gates) is localized channel by\n"
+            "channel, into <movie>_<channel>_locs.hdf5"
         ),
     )
     localize_parser.add_argument(
