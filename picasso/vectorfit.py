@@ -59,9 +59,8 @@ _MODELS = {"2D": "xy_constaberrations", "3D": "xyz_constaberrations"}
 #: - "Refractive index medium", "Refractive index cover slip",
 #:   "Refractive index immersion": of the sample medium, the cover slip
 #:   and the immersion fluid.
-#: - "Vertical astigmatism" (Z_2^2), "Oblique astigmatism" (Z_2^-2): fixed
-#:   primary aberrations, in milli-wavelengths (mλ).
-#: - "Horizontal coma" (Z_3^1), "Vertical coma" (Z_3^-1), "Spherical
+#: - "Vertical astigmatism" (Z_2^2), "Oblique astigmatism" (Z_2^-2),
+#:   "Horizontal coma" (Z_3^1), "Vertical coma" (Z_3^-1), "Spherical
 #:   aberration" (Z_4^0): fixed primary aberrations (nm).
 #: - "Discard outliers": drop the spots VectorFit flags as outliers (not
 #:   converged, final merit more than 3 standard deviations below the
@@ -87,14 +86,13 @@ DEFAULT_PARAMETERS = {
 #: for ``NAT_order=1``.
 _N_LEGENDRE = 13
 
-#: Index of each primary aberration among the Legendre coefficients, and
-#: whether its setting is in milli-wavelengths (else in nm).
+#: Index of each primary aberration among the Legendre coefficients.
 _PRIMARY_ABERRATIONS = {
-    "Vertical astigmatism": (4, True),
-    "Oblique astigmatism": (5, True),
-    "Horizontal coma": (9, False),
-    "Vertical coma": (10, False),
-    "Spherical aberration": (12, False),
+    "Vertical astigmatism": 4,
+    "Oblique astigmatism": 5,
+    "Horizontal coma": 9,
+    "Vertical coma": 10,
+    "Spherical aberration": 12,
 }
 
 
@@ -289,10 +287,8 @@ def _fixed_aberrations(
     ``(n, 3)`` Zernike aberrations (radial order, azimuthal order,
     coefficient) of the model."""
     gammas = np.zeros(_N_LEGENDRE)
-    for key, (index, in_milli_wavelengths) in _PRIMARY_ABERRATIONS.items():
+    for key, index in _PRIMARY_ABERRATIONS.items():
         gammas[index] = parameters[key]
-        if in_milli_wavelengths:
-            gammas[index] *= params.Lambda * 1e-3  # mλ -> nm
     orders = np.array(params.InitialAberrationOrders, dtype=np.float64)
     # the Zernike coefficients the Legendre ones give
     orders[:, 2] = np.array(

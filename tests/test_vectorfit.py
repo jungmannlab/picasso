@@ -803,7 +803,7 @@ class TestFit:
         assert params.NiterMax == vectorfit.MAX_ITERATIONS
 
     def test_primary_aberrations_set_their_coefficients(self):
-        """Astigmatism is given in milli-wavelengths, the others in nm."""
+        """All primary aberrations are given in nm."""
         import vectorfit_py
 
         parameters = vectorfit.parameters_with_defaults(
@@ -823,7 +823,7 @@ class TestFit:
             vectorfit_py, params, parameters
         )
         expected = np.zeros(vectorfit._N_LEGENDRE)
-        expected[[4, 5, 9, 10, 12]] = [30.0, -15.0, 10.0, -20.0, 30.0]
+        expected[[4, 5, 9, 10, 12]] = [50.0, -25.0, 10.0, -20.0, 30.0]
         np.testing.assert_allclose(gammas, expected)
         assert orders[:, 2].any()
 

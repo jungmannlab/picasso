@@ -4081,9 +4081,8 @@ def fit(
         - "NA": numerical aperture, default 1.5;
         - "Refractive index medium", "Refractive index cover slip",
           "Refractive index immersion": defaults 1.406, 1.525, 1.515;
-        - "Vertical astigmatism" (Z_2^2), "Oblique astigmatism" (Z_2^-2):
-          fixed primary aberrations in milli-wavelengths, default 0;
-        - "Horizontal coma" (Z_3^1), "Vertical coma" (Z_3^-1),
+        - "Vertical astigmatism" (Z_2^2), "Oblique astigmatism" (Z_2^-2),
+          "Horizontal coma" (Z_3^1), "Vertical coma" (Z_3^-1),
           "Spherical aberration" (Z_4^0): fixed primary aberrations in
           nm, default 0;
         - "Discard outliers": drop the spots VectorFit flags as outliers,

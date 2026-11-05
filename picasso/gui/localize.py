@@ -4784,18 +4784,18 @@ class ParametersDialog(lib.Dialog):
                 "Of the immersion fluid (e.g. 1.515 for oil).",
             ),
         ]
-        # fixed primary aberrations; astigmatism in milli-wavelengths
-        for key, zernike, unit in (
-            ("Vertical astigmatism", "Z<sub>2</sub><sup>2</sup>", "mλ"),
-            ("Oblique astigmatism", "Z<sub>2</sub><sup>−2</sup>", "mλ"),
-            ("Horizontal coma", "Z<sub>3</sub><sup>1</sup>", "nm"),
-            ("Vertical coma", "Z<sub>3</sub><sup>−1</sup>", "nm"),
-            ("Spherical aberration", "Z<sub>4</sub><sup>0</sup>", "nm"),
+        # fixed primary aberrations (nm)
+        for key, zernike in (
+            ("Vertical astigmatism", "Z<sub>2</sub><sup>2</sup>"),
+            ("Oblique astigmatism", "Z<sub>2</sub><sup>−2</sup>"),
+            ("Horizontal coma", "Z<sub>3</sub><sup>1</sup>"),
+            ("Vertical coma", "Z<sub>3</sub><sup>−1</sup>"),
+            ("Spherical aberration", "Z<sub>4</sub><sup>0</sup>"),
         ):
             spinboxes.append(
                 (
                     key,
-                    f"{key} {zernike} ({unit}):",
+                    f"{key} {zernike} (nm):",
                     (-1000, 1000),
                     3,
                     1,

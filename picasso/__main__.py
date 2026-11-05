@@ -1882,13 +1882,11 @@ def _add_vectorfit_args(parser: argparse.ArgumentParser) -> None:
         ),
         (
             "--vf-vertical-astigmatism",
-            "fixed vertical astigmatism Z_2^2 in milli-wavelengths "
-            "(default 0)",
+            "fixed vertical astigmatism Z_2^2 in nm (default 0)",
         ),
         (
             "--vf-oblique-astigmatism",
-            "fixed oblique astigmatism Z_2^-2 in milli-wavelengths "
-            "(default 0)",
+            "fixed oblique astigmatism Z_2^-2 in nm (default 0)",
         ),
         (
             "--vf-horizontal-coma",
