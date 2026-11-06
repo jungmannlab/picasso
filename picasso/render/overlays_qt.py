@@ -12,7 +12,7 @@ legend, minimap and rotation widgets, plus PDF/SVG export.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Literal, TYPE_CHECKING
+from typing import Callable, Literal, TYPE_CHECKING
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -1312,6 +1312,7 @@ def _colorbar_layout(
     margin: int = 12,
     tick_length: int = 8,
     tick_spacer: int = 4,
+    format_tick: Callable[[float], str] | None = None,
 ) -> dict:
     """Lay out a color bar: its size and everything needed to paint it.
 
@@ -1354,6 +1355,9 @@ def _colorbar_layout(
     tick_spacer : int, optional
         Spacing between the tick marks and the tick text in display
         pixels. Default is 4.
+    format_tick : callable, optional
+        Text of the tick at a value. Default is None, i.e., a sensible
+        number of digits (``_format_tick``).
 
     Returns
     -------
@@ -1384,7 +1388,7 @@ def _colorbar_layout(
         ticks = [
             (
                 (value - min_value) / (max_value - min_value),
-                _format_tick(value),
+                (format_tick or _format_tick)(value),
             )
             for value in values
         ]

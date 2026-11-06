@@ -5,7 +5,8 @@ microtime gates, over the decay histogram of the file (the choice is
 remembered and reaches the loader for ``.ptu`` files only), channels
 (detectors, or detectors x gates) are chosen like the channels of other
 multichannel formats, and a loaded photon-counting movie sets the camera
-parameters to photon counting. The loader itself is tested in ``tests/test_io_ptu.py``.
+parameters to photon counting and can be displayed as lifetimes. The loader
+itself is tested in ``tests/test_io_ptu.py``.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -17,11 +18,12 @@ import time
 
 import numpy as np
 import pytest
-from PyQt6 import QtWidgets
+from PyQt6 import QtGui, QtWidgets
 
 from picasso import io
 from picasso.gui import localize as gui_localize
 from tests.test_gui_localize_calibration import ACCEPTED, REJECTED, _answer
+from tests.test_io_ptu import _install_fake_ptufile
 
 
 @pytest.fixture
@@ -277,3 +279,291 @@ class TestPhotonCounting:
         dialog.baseline.setValue(100)
         self._load(window, tmp_path, photon_counting=False)
         assert dialog.baseline.value() == 100
+
+
+# ---------------------------------------------------------------------------
+# Lifetime display
+# ---------------------------------------------------------------------------
+
+
+def _lifetime_scan():
+    """4 scan frames of 6 x 8 pixels in 16 microtime bins of 0.04 ns: one
+    photon per pixel and scan frame in bin 2 (the maximum of the decay),
+    and ten more in bin 12 in pixel (y, x) = (1, 2)."""
+    data = np.zeros((4, 6, 8, 1, 16), np.uint16)
+    data[..., 0, 2] = 1
+    data[:, 1, 2, 0, 12] = 10
+    return data
+
+
+# mean delay of the photons of pixel (1, 2) after bin 2, in ns
+LIFETIME = (0.5 + 10 * 10.5) / 11 * 0.04
+
+
+@pytest.fixture
+def scan(window, tmp_path, monkeypatch):
+    """A photon-counting movie of ``_lifetime_scan`` shown in Localize."""
+    data = _lifetime_scan()
+    _install_fake_ptufile(monkeypatch, data)
+
+    def decay(self, first=0, last=None, *, dtime_bin=1):
+        # the fake file has no records: the decay of its pixels
+        lo, hi = self._microtime_range
+        return data[first:last, ..., 0, lo:hi].sum((0, 1, 2)).astype(np.uint64)
+
+    monkeypatch.setattr(io.PTUMovie, "_decay", decay)
+    path = str(tmp_path / "scan.ptu")
+    movie = io.PTUMovie(path)
+    window._set_channels([movie], [[movie.info()]], [path], ["Detector 1"])
+    return movie
+
+
+def _pixel(window, x, y):
+    """``(r, g, b)`` of a pixel of the frame displayed."""
+    (item,) = [
+        item
+        for item in window.scene.items()
+        if isinstance(item, QtWidgets.QGraphicsPixmapItem)
+    ]
+    color = item.pixmap().toImage().pixelColor(x, y)
+    return color.red(), color.green(), color.blue()
+
+
+class TestLifetimeDisplay:
+    def test_offered_for_photon_counting_movies_only(
+        self, window, scan, tmp_path
+    ):
+        assert window.lifetime_action.isEnabled()
+        assert window.lifetime_settings_action.isEnabled()
+        assert not window.lifetime_button.isHidden()
+        window.lifetime_button.setChecked(True)
+        assert window.lifetime_action.isChecked()
+        assert window.lifetime_shown()
+        camera = np.memmap(
+            tmp_path / "movie.raw", dtype=np.uint16, mode="w+", shape=(2, 6, 8)
+        )
+        info = {"Frames": 2, "Height": 6, "Width": 8}
+        window._set_channels(
+            [camera], [[info]], [str(tmp_path / "movie.raw")], ["Channel 1"]
+        )
+        assert not window.lifetime_action.isEnabled()
+        assert not window.lifetime_settings_action.isEnabled()
+        assert window.lifetime_button.isHidden()
+        assert not window.lifetime_shown()
+
+    def test_lifetimes_are_mean_photon_delays_in_the_window(
+        self, window, scan
+    ):
+        lifetimes, photons = window.lifetimes()
+        assert photons[1, 2] == 11
+        assert lifetimes[1, 2] == pytest.approx(LIFETIME)
+        # a single photon is fewer than the 5 a lifetime needs by default
+        assert photons[0, 0] == 1
+        assert np.isnan(lifetimes[0, 0])
+        # from the maximum (bin 2) to the end of the microtimes (bin 16)
+        assert window.lifetime_window_ns() == pytest.approx((0.08, 0.64))
+        # starting 5 bins after the maximum leaves out bin 2
+        window.lifetime_dialog.start_spinbox.setValue(0.2)
+        lifetimes, photons = window.lifetimes()
+        assert photons[1, 2] == 10
+        assert lifetimes[1, 2] == pytest.approx(5.5 * 0.04)
+
+    def test_switching_colors_the_frame(self, window, scan):
+        contrast = window.contrast_dialog
+        contrast.auto_checkbox.setChecked(False)
+        contrast.change_contrast_silently(0, 11)
+        window.draw_frame()
+        assert _pixel(window, 2, 1) == (255, 255, 255)
+        assert _pixel(window, 0, 0) == (23, 23, 23)
+        window.lifetime_action.setChecked(True)
+        assert window.lifetime_button.isChecked()
+        # the first time, the colors span the lifetimes of the frame
+        dialog = window.lifetime_dialog
+        assert dialog.range_known
+        shortest = dialog.shortest_spinbox.value()
+        longest = dialog.longest_spinbox.value()
+        assert (shortest, longest) == pytest.approx((0.3, 0.4))
+        lut = gui_localize._lifetime_lut(gui_localize.LIFETIME_COLORMAP)
+        index = int((LIFETIME - shortest) / (longest - shortest) * 255 + 0.5)
+        assert _pixel(window, 2, 1) == tuple(int(c) for c in lut[index])
+        # no lifetime: gray, as bright as the intensity
+        assert _pixel(window, 0, 0) == (23, 23, 23)
+        window.lifetime_button.setChecked(False)
+        assert not window.lifetime_action.isChecked()
+        assert _pixel(window, 2, 1) == (255, 255, 255)
+
+    def test_a_remembered_range_is_kept(self, window, scan):
+        dialog = window.lifetime_dialog
+        dialog.set_range(1.0, 2.0)
+        window.set_lifetime_shown(True)
+        assert dialog.shortest_spinbox.value() == 1.0
+        assert dialog.longest_spinbox.value() == 2.0
+        dialog.auto_button.click()
+        assert dialog.shortest_spinbox.value() == pytest.approx(0.3)
+        assert dialog.longest_spinbox.value() == pytest.approx(0.4)
+
+    def test_photon_delays_are_read_once_per_frame(
+        self, window, scan, monkeypatch
+    ):
+        calls = []
+        original = io.PTUMovie._delay_sums
+
+        def counted(self, index, dtime_range):
+            calls.append((index, dtime_range))
+            return original(self, index, dtime_range)
+
+        monkeypatch.setattr(io.PTUMovie, "_delay_sums", counted)
+        window.set_lifetime_shown(True)
+        window.draw_frame()
+        window.set_frame(1)
+        window.set_frame(0)
+        assert calls == [(0, (2, 16)), (1, (2, 16))]
+        # the same photons, counted differently
+        window.lifetime_dialog.min_photons_spinbox.setValue(1)
+        window.lifetime_dialog.binning_spinbox.setValue(3)
+        assert len(calls) == 2
+        # other photons
+        window.lifetime_dialog.start_spinbox.setValue(0.2)
+        assert calls[-1] == (0, (7, 16))
+
+    def test_a_window_without_photons_shows_why(self, window, scan):
+        window.set_lifetime_shown(True)
+        assert window._lifetime_error is None
+        window.lifetime_dialog.start_spinbox.setValue(5.0)
+        assert "outside the photons' microtimes" in window._lifetime_error
+        assert _pixel(window, 2, 1) == (255, 255, 255)  # intensity
+        image = QtGui.QImage(400, 300, QtGui.QImage.Format.Format_ARGB32)
+        image.fill(0)
+        painter = QtGui.QPainter(image)
+        window.paint_lifetime_legend(painter)
+        painter.end()
+
+    def test_the_color_bar_is_painted_over_the_view(self, window, scan):
+        def painted():
+            image = QtGui.QImage(
+                window.view.viewport().size(),
+                QtGui.QImage.Format.Format_ARGB32,
+            )
+            image.fill(0)
+            painter = QtGui.QPainter(image)
+            window.paint_lifetime_legend(painter)
+            painter.end()
+            return image.pixelColor(image.width() - 12, 12).alpha()
+
+        assert painted() == 0
+        window.set_lifetime_shown(True)
+        assert painted() > 0
+
+    def test_the_dialog_plots_the_decay_and_dragging_sets_the_window(
+        self, window, scan
+    ):
+        dialog = window.lifetime_dialog
+        dialog.show()
+        times, counts, maximum = dialog._decay
+        assert maximum == pytest.approx(0.08)
+        assert counts[2] == 4 * 48
+        assert times[2] == pytest.approx(0.1)
+        dialog.on_span_select(0.2, 0.6)
+        assert dialog.start_spinbox.value() == pytest.approx(0.12)
+        assert dialog.length_spinbox.value() == pytest.approx(0.4)
+        assert window.lifetime_window_ns() == pytest.approx((0.2, 0.6))
+        dialog.close()
+
+    def test_the_dialog_without_a_photon_counting_movie(self, window):
+        dialog = window.lifetime_dialog
+        dialog.show()
+        assert dialog._decay is None
+        assert dialog._decay_error is None
+        dialog.close()
+
+    def test_settings_are_remembered(self, window):
+        dialog = window.lifetime_dialog
+        dialog.start_spinbox.setValue(0.3)
+        dialog.length_spinbox.setValue(4.0)
+        dialog.binning_spinbox.setValue(3)
+        dialog.min_photons_spinbox.setValue(10)
+        dialog.colormap_combo.setCurrentText("viridis")
+        dialog.set_range(1.0, 3.5)
+        window.close()
+        stored = io.load_user_settings()["Localize"]["Lifetime display"]
+        assert stored == {
+            "start": 0.3,
+            "length": 4.0,
+            "binning": 3,
+            "min_photons": 10,
+            "colormap": "viridis",
+            "shortest": 1.0,
+            "longest": 3.5,
+        }
+        other = gui_localize.Window()
+        try:
+            assert other.lifetime_dialog.settings() == stored
+            assert other.lifetime_dialog.range_known
+        finally:
+            other.close()
+
+    def test_an_unknown_range_is_not_remembered(self, window):
+        window.close()
+        stored = io.load_user_settings()["Localize"]["Lifetime display"]
+        assert "shortest" not in stored
+        other = gui_localize.Window()
+        try:
+            assert not other.lifetime_dialog.range_known
+        finally:
+            other.close()
+
+
+class TestLifetimeImage:
+    def test_lifetimes_are_mean_delays_of_enough_photons(self):
+        photons = np.zeros((5, 5))
+        delays = np.zeros((5, 5))
+        photons[2, 2], delays[2, 2] = 3, 6.0
+        photons[2, 3], delays[2, 3] = 3, 12.0
+        lifetimes, counted = gui_localize._lifetime_image(
+            photons, delays, min_photons=3
+        )
+        assert lifetimes.dtype == np.float32
+        assert lifetimes[2, 2] == 2.0 and lifetimes[2, 3] == 4.0
+        assert np.isnan(lifetimes).sum() == 23
+        np.testing.assert_array_equal(counted, photons)
+
+    def test_binning_pools_the_photons_of_neighbors(self):
+        photons = np.zeros((5, 5))
+        delays = np.zeros((5, 5))
+        photons[2, 2], delays[2, 2] = 3, 6.0
+        photons[2, 3], delays[2, 3] = 3, 12.0
+        lifetimes, counted = gui_localize._lifetime_image(
+            photons, delays, binning=3, min_photons=6
+        )
+        assert counted[2, 2] == counted[1, 3] == 6
+        assert lifetimes[2, 2] == lifetimes[1, 3] == 3.0
+        assert counted[2, 4] == 3 and np.isnan(lifetimes[2, 4])
+        assert np.isfinite(lifetimes).sum() == 6
+
+    def test_colors_show_lifetimes_and_brightness_the_intensity(self):
+        lut = np.zeros((256, 3), np.uint8)
+        lut[:, 0] = np.arange(256)
+        lifetimes = np.array([[np.nan, 1.0, 3.0, 2.0]], np.float32)
+        brightness = np.array([[255, 255, 128, 255]], np.uint8)
+        rgb = gui_localize._lifetime_rgb(lifetimes, brightness, lut, 1.0, 3.0)
+        assert rgb.dtype == np.uint8 and rgb.flags.c_contiguous
+        assert rgb[0].tolist() == [
+            [255, 255, 255],  # no lifetime: gray
+            [0, 0, 0],  # the first color
+            [128, 0, 0],  # the last color, half as bright
+            [128, 0, 0],  # halfway
+        ]
+
+    def test_the_range_covers_most_photons(self):
+        lifetimes = np.array([1.0, 2.0, 3.0, np.nan])
+        photons = np.array([1.0, 98.0, 1.0, 50.0])
+        assert gui_localize._lifetime_range(lifetimes, photons) == (2.0, 2.1)
+        spread = np.linspace(0.51, 3.49, 100)
+        assert gui_localize._lifetime_range(spread, np.ones(100)) == (
+            0.5,
+            3.5,
+        )
+        assert (
+            gui_localize._lifetime_range(np.full(3, np.nan), photons[:3])
+            is None
+        )

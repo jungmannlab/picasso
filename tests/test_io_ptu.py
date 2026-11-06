@@ -347,6 +347,70 @@ class TestPTUMicrotimes:
         with pytest.raises(ValueError):
             movie._microtime_histograms(0, 2, dtime_bin=0)
 
+    @pytest.mark.parametrize(
+        "window, stride", [(1, 1), (3, 3), (3, 1), (4, 2)]
+    )
+    def test_histograms_of_single_frames(
+        self, tmp_path, monkeypatch, window, stride
+    ):
+        """One frame at a time, ptufile adds up its scan frames itself,
+        overlapping sums included."""
+        _install_fake_ptufile(monkeypatch, _scan(t=11))
+        movie, _ = io.load_movie(
+            str(tmp_path / "scan.ptu"),
+            frame_sum_window=window,
+            frame_sum_stride=stride,
+        )
+        for k in range(len(movie)):
+            hist = movie._microtime_histograms(k, k + 1)
+            assert hist.shape == (1, 6, 8, 16)
+            np.testing.assert_array_equal(hist[0].sum(-1), movie[k])
+
+    def test_delay_sums(self, tmp_path, monkeypatch):
+        data = _scan(t=9)
+        _install_fake_ptufile(monkeypatch, data)
+        movie, _ = io.load_movie(
+            str(tmp_path / "scan.ptu"), frame_sum_window=3
+        )
+        photons, delays = movie._delay_sums(1, (4, 12))
+        counts = data[3:6, :, :, 0, 4:12].sum(0).astype(np.float64)
+        np.testing.assert_array_equal(photons, counts.sum(-1))
+        # a photon's delay: the center of its bin of 0.04 ns after bin 4
+        np.testing.assert_allclose(
+            delays, counts @ ((np.arange(8) + 0.5) * 0.04)
+        )
+        assert photons.shape == delays.shape == (6, 8)
+
+    def test_delay_sums_merge_the_bins_of_large_frames(
+        self, tmp_path, monkeypatch
+    ):
+        data = _scan(t=4)
+        _install_fake_ptufile(monkeypatch, data)
+        movie, _ = io.load_movie(str(tmp_path / "scan.ptu"))
+        # 6 x 8 pixels x 11 bins x 4 bytes = 2112 bytes: bins merged by 3,
+        # the last of the 4 merged bins holding 2
+        monkeypatch.setattr(io.PTUMovie, "_DELAY_HISTOGRAM_BYTES", 800)
+        photons, delays = movie._delay_sums(2, (3, 14))
+        counts = data[2, :, :, 0, 3:14].astype(np.float64)
+        centers = np.repeat([1.5, 4.5, 7.5, 10.0], [3, 3, 3, 2])
+        np.testing.assert_array_equal(photons, counts.sum(-1))
+        np.testing.assert_allclose(delays, counts @ (centers * 0.04))
+
+    def test_delay_sums_stay_within_the_gate(self, tmp_path, monkeypatch):
+        data = _scan(t=4)
+        _install_fake_ptufile(monkeypatch, data)
+        movie, _ = io.load_movie(
+            str(tmp_path / "scan.ptu"), microtime_gates=[GATES[1]]
+        )
+        photons, delays = movie._delay_sums(0, (2, 12))  # gate: bins 8-16
+        counts = data[0, :, :, 0, 8:12].astype(np.float64)
+        np.testing.assert_array_equal(photons, counts.sum(-1))
+        np.testing.assert_allclose(
+            delays, counts @ ((np.arange(4) + 0.5) * 0.04)
+        )
+        with pytest.raises(ValueError, match="Empty microtime range"):
+            movie._delay_sums(0, (0, 8))
+
 
 # 16 microtime bins of 0.04 ns (``_FakePtuFile.tcspc_resolution``): two
 # gates of 8 bins each
@@ -585,6 +649,30 @@ class TestPTUFile:
         )
         np.testing.assert_array_equal(hist, expected)
         assert movie._tcspc_resolution == pytest.approx(5e-8 / 64)
+        movie.close()
+
+    def test_single_frames_of_overlapping_sums(self, tmp_path):
+        """ptufile adds up the scan frames of one overlapping sum, and
+        the delay sums of a frame are those of its photons."""
+        path, data = _written_scan(tmp_path)
+        movie, _ = io.load_movie(path, frame_sum_window=4, frame_sum_stride=2)
+        assert len(movie) == 2
+        for k in range(2):
+            hist = movie._microtime_histograms(k, k + 1, dtime_bin=8)
+            expected = (
+                data[2 * k : 2 * k + 4, ..., 1, :]
+                .sum(0)
+                .reshape(12, 16, 8, 8)
+                .sum(-1)
+            )
+            np.testing.assert_array_equal(hist[0], expected)
+        photons, delays = movie._delay_sums(1, (10, 30))
+        counts = data[2:6, ..., 1, 10:30].sum(0)
+        width = 5e-8 / 64 * 1e9
+        np.testing.assert_array_equal(photons, counts.sum(-1))
+        np.testing.assert_allclose(
+            delays, counts @ ((np.arange(20) + 0.5) * width)
+        )
         movie.close()
 
     def test_microtime_gates(self, tmp_path):

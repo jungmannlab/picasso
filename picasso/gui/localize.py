@@ -60,6 +60,45 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 CUDA_AVAILABLE = localize.CUDA_AVAILABLE
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
+
+
+def _bar_toggle_button(text: str, tooltip: str) -> QtWidgets.QToolButton:
+    """A small checkable button for the bar below the movie (next to the
+    contrast slider), colored from the palette so that it follows the
+    theme."""
+    button = QtWidgets.QToolButton()
+    button.setText(text)
+    button.setToolTip(tooltip)
+    button.setCheckable(True)
+    font = button.font()
+    font.setPointSizeF(font.pointSizeF() * 0.8)
+    button.setFont(font)
+    button.setStyleSheet(
+        """
+        QToolButton {
+            border: 1px solid palette(mid);
+            border-radius: 3px;
+            padding: 0px 4px;
+            background: transparent;
+        }
+        QToolButton:checked {
+            border-color: palette(highlight);
+            background: palette(highlight);
+            color: palette(highlighted-text);
+        }
+        QToolButton:disabled {
+            border-color: palette(midlight);
+            color: palette(mid);
+        }
+        QToolButton:checked:disabled {
+            background: palette(midlight);
+        }
+        """
+    )
+    button.setFixedHeight(max(15, button.fontMetrics().height() + 2))
+    return button
+
+
 # Frames sampled to size the contrast slider's track. Kept small: with
 # the temporal median on, reading one frame reads a whole window.
 CONTRAST_SLIDER_SAMPLES = 10
@@ -1398,17 +1437,22 @@ class View(QtWidgets.QGraphicsView):
         self.window.zoom(scale, anchor=event.position().toPoint())
 
     def on_scroll(self) -> None:
-        """Repaint the scale bar, if shown: it stays in place while the
-        frame scrolls."""
-        if self.window.scalebar_action.isChecked():
+        """Repaint the scale bar and the lifetime color bar, if shown:
+        they stay in place while the frame scrolls."""
+        if (
+            self.window.scalebar_action.isChecked()
+            or self.window.lifetime_shown()
+        ):
             self.viewport().update()
 
     def drawForeground(
         self, painter: QtGui.QPainter, rect: QtCore.QRectF
     ) -> None:
-        """Paint the scale bar, if shown, over the frame."""
+        """Paint the scale bar and the lifetime color bar, if shown, over
+        the frame."""
         super().drawForeground(painter, rect)
         self.window.paint_scalebar(painter)
+        self.window.paint_lifetime_legend(painter)
 
 
 class Scene(QtWidgets.QGraphicsScene):
@@ -2311,6 +2355,457 @@ class PTUOptionsDialog(lib.Dialog):
         if accepted:
             dialog._save_settings()
         return dialog.options(), accepted
+
+
+#: Default colormap of the lifetime display; any matplotlib colormap can
+#: be chosen in ``LifetimeDialog``.
+LIFETIME_COLORMAP = "rainbow"
+#: Scan frames whose decay places the lifetime window.
+LIFETIME_DECAY_SCAN_FRAMES = 50
+#: Frames whose photon delays the lifetime display keeps in memory.
+LIFETIME_CACHE_FRAMES = 16
+
+
+def _lifetime_image(
+    photons: np.ndarray,
+    delays: np.ndarray,
+    binning: int = 1,
+    min_photons: float = 1,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Lifetime of every pixel for the lifetime display: the mean delay
+    of its photons, see ``io.PTUMovie._delay_sums``.
+
+    Parameters
+    ----------
+    photons, delays : np.ndarray
+        ``(Y, X)`` photons of every pixel and the sums of their delays
+        (ns).
+    binning : int, optional
+        Side of the square of pixels, centered on a pixel, whose photons
+        give its lifetime. Default 1, i.e., its own photons only.
+    min_photons : float, optional
+        Fewest photons a lifetime is based on. Default 1.
+
+    Returns
+    -------
+    lifetimes : np.ndarray
+        ``(Y, X)`` float32 mean photon delays in ns, NaN where there are
+        fewer than ``min_photons`` photons.
+    photons : np.ndarray
+        ``(Y, X)`` photons the lifetimes are based on.
+    """
+    photons = np.asarray(photons, dtype=np.float64)
+    delays = np.asarray(delays, dtype=np.float64)
+    binning = int(binning)
+    if binning > 1:
+        from scipy import ndimage
+
+        area = binning * binning
+        # sums of whole photons, rounded so that the threshold below is
+        # not missed by a rounding error of the filter
+        photons = np.rint(
+            ndimage.uniform_filter(photons, binning, mode="constant") * area
+        )
+        delays = (
+            ndimage.uniform_filter(delays, binning, mode="constant") * area
+        )
+    valid = photons >= max(float(min_photons), 1.0)
+    lifetimes = np.full(photons.shape, np.nan, dtype=np.float32)
+    lifetimes[valid] = delays[valid] / photons[valid]
+    return lifetimes, photons
+
+
+def _lifetime_lut(colormap: str) -> np.ndarray:
+    """``(256, 3)`` uint8 RGB colors of a matplotlib colormap (of
+    ``LIFETIME_COLORMAP`` if there is none of that name)."""
+    from matplotlib import colormaps
+
+    cmap = colormaps.get(colormap) or colormaps[LIFETIME_COLORMAP]
+    colors = cmap(np.linspace(0, 1, 256))[:, :3]
+    return np.round(colors * 255).astype(np.uint8)
+
+
+def _lifetime_rgb(
+    lifetimes: np.ndarray,
+    brightness: np.ndarray,
+    lut: np.ndarray,
+    shortest: float,
+    longest: float,
+) -> np.ndarray:
+    """Color image of the lifetime display: the color of a pixel shows
+    its lifetime (``shortest`` to ``longest`` ns over the colors of
+    ``lut``), its brightness the intensity shown (``brightness``, uint8
+    after the contrast); pixels without a lifetime (NaN) are gray.
+
+    Returns
+    -------
+    rgb : np.ndarray
+        ``(Y, X, 3)`` C-contiguous uint8 image.
+    """
+    valid = np.isfinite(lifetimes)
+    span = max(float(longest) - float(shortest), 1e-9)
+    index = np.zeros(lifetimes.shape, dtype=np.intp)
+    index[valid] = np.clip(
+        (lifetimes[valid] - float(shortest)) / span * 255 + 0.5, 0, 255
+    )
+    rgb = lut[index].astype(np.uint16)
+    rgb[~valid] = 255
+    rgb *= np.asarray(brightness, dtype=np.uint16)[..., None]
+    rgb += 127
+    rgb //= 255
+    return np.ascontiguousarray(rgb, dtype=np.uint8)
+
+
+def _lifetime_range(
+    lifetimes: np.ndarray, photons: np.ndarray
+) -> tuple[float, float] | None:
+    """The range of the lifetime colors covering most photons: the
+    photon-weighted 2nd and 98th percentiles of the lifetimes, rounded
+    out to 0.1 ns; None if no pixel has a lifetime."""
+    valid = np.isfinite(lifetimes)
+    if not valid.any():
+        return None
+    values = lifetimes[valid].astype(np.float64)
+    order = np.argsort(values)
+    values = values[order]
+    cumulative = np.cumsum(photons[valid][order])
+    cumulative /= cumulative[-1]
+    lo = values[np.searchsorted(cumulative, 0.02)]
+    hi = values[np.searchsorted(cumulative, 0.98)]
+    lo = math.floor(lo * 10) / 10
+    hi = max(math.ceil(hi * 10) / 10, lo + 0.1)
+    return round(lo, 1), round(hi, 1)
+
+
+class LifetimeDialog(lib.Dialog):
+    """Settings of the lifetime display of photon-counting movies (View >
+    Show lifetime): which photons give the lifetime of a pixel and how
+    lifetimes are colored.
+
+    A pixel's lifetime is the mean delay of its photons after the start
+    of a time window placed after the maximum of the decay. For a
+    single-exponential decay that has died away within the window this is
+    the fluorescence lifetime; a short window shortens long lifetimes,
+    while background photons and the instrument response bias it too. The
+    decay of the first scan frames of the movie shown is plotted with the
+    window shaded; dragging over it sets the window. The settings are
+    remembered in the user settings."""
+
+    SETTINGS_KEY = "Lifetime display"
+    START_TOOLTIP = (
+        "Start of the time window, in ns after the maximum of the decay.\n"
+        "Starting a little after the maximum leaves out most of the\n"
+        "instrument response (e.g., scattered laser light)."
+    )
+    LENGTH_TOOLTIP = (
+        "Length of the time window in ns. Later photons are left out,\n"
+        "e.g., background between the laser pulses; a window shorter\n"
+        "than a few lifetimes shortens long lifetimes."
+    )
+    BINNING_TOOLTIP = (
+        "Side of the square of pixels whose photons give the lifetime of\n"
+        "the pixel at its center. 1: each pixel's own photons only."
+    )
+    MIN_PHOTONS_TOOLTIP = (
+        "Fewest photons a lifetime is based on; pixels with fewer are\n"
+        "shown in gray. The relative error of a mean of N photon delays\n"
+        "is about 1/sqrt(N)."
+    )
+    RANGE_TOOLTIP = (
+        "Lifetimes shown with the first and the last color of the\n"
+        "colormap; shorter and longer ones take these colors too."
+    )
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Lifetime display")
+        self.setModal(False)
+        # set while the inputs are changed programmatically
+        self._silent = False
+        # whether the color range was set (by hand, Auto or the settings)
+        self.range_known = False
+        # (times, counts, maximum) of the decay plotted, all in ns, or
+        # why it could not be read
+        self._decay = None
+        self._decay_error = None
+        self.canvas = None
+        vbox = QtWidgets.QVBoxLayout(self)
+
+        photons_box = QtWidgets.QGroupBox("Photons")
+        self.photons_layout = QtWidgets.QVBoxLayout(photons_box)
+        grid = QtWidgets.QGridLayout()
+        self.start_spinbox = self._double_spinbox(-50, 1000, 0.1)
+        self.length_spinbox = self._double_spinbox(0.05, 10000, 1.0)
+        self.binning_spinbox = QtWidgets.QSpinBox()
+        self.binning_spinbox.setRange(1, 25)
+        self.min_photons_spinbox = QtWidgets.QSpinBox()
+        self.min_photons_spinbox.setRange(1, 1000000)
+        for row, (text, widget, tooltip) in enumerate(
+            [
+                (
+                    "Start after the maximum (ns):",
+                    self.start_spinbox,
+                    self.START_TOOLTIP,
+                ),
+                (
+                    "Window length (ns):",
+                    self.length_spinbox,
+                    self.LENGTH_TOOLTIP,
+                ),
+                (
+                    "Binning (pixels):",
+                    self.binning_spinbox,
+                    self.BINNING_TOOLTIP,
+                ),
+                (
+                    "Min. photons:",
+                    self.min_photons_spinbox,
+                    self.MIN_PHOTONS_TOOLTIP,
+                ),
+            ]
+        ):
+            label = QtWidgets.QLabel(text)
+            label.setToolTip(tooltip)
+            widget.setToolTip(tooltip)
+            grid.addWidget(label, row, 0)
+            grid.addWidget(widget, row, 1)
+        self.photons_layout.addLayout(grid)
+        vbox.addWidget(photons_box)
+
+        colors_box = QtWidgets.QGroupBox("Colors")
+        grid = QtWidgets.QGridLayout(colors_box)
+        self.shortest_spinbox = self._double_spinbox(0, 1000, 0.1)
+        self.longest_spinbox = self._double_spinbox(0, 1000, 0.1)
+        for row, (text, widget) in enumerate(
+            [
+                ("Shortest lifetime (ns):", self.shortest_spinbox),
+                ("Longest lifetime (ns):", self.longest_spinbox),
+            ]
+        ):
+            label = QtWidgets.QLabel(text)
+            label.setToolTip(self.RANGE_TOOLTIP)
+            widget.setToolTip(self.RANGE_TOOLTIP)
+            grid.addWidget(label, row, 0)
+            grid.addWidget(widget, row, 1)
+        self.auto_button = QtWidgets.QPushButton("Auto")
+        self.auto_button.setAutoDefault(False)
+        self.auto_button.setToolTip(
+            "Set the range to the lifetimes of most photons of the frame "
+            "shown\n(2nd to 98th percentile)."
+        )
+        self.auto_button.clicked.connect(self.window.auto_lifetime_range)
+        grid.addWidget(self.auto_button, 0, 2, 2, 1)
+        grid.addWidget(QtWidgets.QLabel("Colormap:"), 2, 0)
+        self.colormap_combo = QtWidgets.QComboBox()
+        from matplotlib import pyplot as plt
+
+        self.colormap_combo.addItems(plt.colormaps())
+        grid.addWidget(self.colormap_combo, 2, 1, 1, 2)
+        vbox.addWidget(colors_box)
+
+        self._load_settings()
+        for spinbox in (
+            self.start_spinbox,
+            self.length_spinbox,
+            self.binning_spinbox,
+            self.min_photons_spinbox,
+        ):
+            spinbox.valueChanged.connect(self.on_changed)
+        for spinbox in (self.shortest_spinbox, self.longest_spinbox):
+            spinbox.valueChanged.connect(self.on_range_changed)
+        self.colormap_combo.currentTextChanged.connect(self.on_changed)
+
+    @staticmethod
+    def _double_spinbox(
+        minimum: float, maximum: float, step: float
+    ) -> QtWidgets.QDoubleSpinBox:
+        spinbox = QtWidgets.QDoubleSpinBox()
+        spinbox.setRange(minimum, maximum)
+        spinbox.setDecimals(2)
+        spinbox.setSingleStep(step)
+        spinbox.setKeyboardTracking(False)
+        return spinbox
+
+    def settings(self) -> dict:
+        """The inputs, as remembered in the user settings."""
+        settings = {
+            "start": self.start_spinbox.value(),
+            "length": self.length_spinbox.value(),
+            "binning": self.binning_spinbox.value(),
+            "min_photons": self.min_photons_spinbox.value(),
+            "colormap": self.colormap_combo.currentText(),
+        }
+        if self.range_known:
+            settings["shortest"] = self.shortest_spinbox.value()
+            settings["longest"] = self.longest_spinbox.value()
+        return settings
+
+    def _load_settings(self) -> None:
+        """Fill the inputs in with the remembered ones, else the window
+        from the maximum to 10 ns after it, no binning, at least 5
+        photons, the rainbow colormap and 0.5-4 ns (replaced by Auto when
+        the lifetimes are first shown)."""
+        values = {
+            "start": 0.0,
+            "length": 10.0,
+            "binning": 1,
+            "min_photons": 5,
+            "colormap": LIFETIME_COLORMAP,
+            "shortest": 0.5,
+            "longest": 4.0,
+        }
+        stored = io.load_user_settings()["Localize"].get(self.SETTINGS_KEY)
+        if isinstance(stored, dict):
+            for key, default in values.items():
+                if key not in stored:
+                    continue
+                try:
+                    values[key] = type(default)(stored[key])
+                except (TypeError, ValueError):
+                    continue
+            self.range_known = "shortest" in stored and "longest" in stored
+        self._silent = True
+        try:
+            self.start_spinbox.setValue(values["start"])
+            self.length_spinbox.setValue(values["length"])
+            self.binning_spinbox.setValue(values["binning"])
+            self.min_photons_spinbox.setValue(values["min_photons"])
+            index = self.colormap_combo.findText(values["colormap"])
+            if index < 0:
+                index = self.colormap_combo.findText(LIFETIME_COLORMAP)
+            self.colormap_combo.setCurrentIndex(index)
+            self.shortest_spinbox.setValue(values["shortest"])
+            self.longest_spinbox.setValue(values["longest"])
+        finally:
+            self._silent = False
+
+    def set_range(self, shortest: float, longest: float) -> None:
+        """Set the lifetimes of the first and the last color without
+        redrawing."""
+        self._silent = True
+        try:
+            self.shortest_spinbox.setValue(shortest)
+            self.longest_spinbox.setValue(longest)
+        finally:
+            self._silent = False
+        self.range_known = True
+
+    def on_changed(self, *_) -> None:
+        if self._silent:
+            return
+        self.window.on_lifetime_settings_changed()
+        self.draw_decay()
+
+    def on_range_changed(self, *_) -> None:
+        if self._silent:
+            return
+        self.range_known = True
+        self.window.on_lifetime_settings_changed()
+
+    def showEvent(self, event: QtGui.QShowEvent) -> None:
+        super().showEvent(event)
+        self.update_decay()
+
+    def update_decay(self) -> None:
+        """Plot the decay of the movie shown, if the dialog is open."""
+        if not self.isVisible():
+            return
+        try:
+            self._decay = self.window.lifetime_decay()
+            self._decay_error = None
+        except Exception as error:  # noqa: BLE001 - shown in the plot
+            self._decay = None
+            self._decay_error = str(error)
+        if self.canvas is None:
+            self._add_decay_plot()
+        self.draw_decay()
+
+    def _add_decay_plot(self) -> None:
+        # imported here, so Localize only loads matplotlib's Qt backend
+        # when the dialog is opened
+        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+        from matplotlib.figure import Figure
+        from matplotlib.widgets import SpanSelector
+
+        from . import plot_style
+
+        self.plot_style = plot_style.current()
+        with self.plot_style.context():
+            self.figure = Figure(figsize=(5, 2.4), layout="constrained")
+            self.axes = self.figure.add_subplot()
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas.setMinimumHeight(180)
+        self.canvas.setToolTip("Drag over the decay to set the time window.")
+        self.photons_layout.insertWidget(0, self.canvas)
+        self.span = SpanSelector(
+            self.axes,
+            self.on_span_select,
+            "horizontal",
+            useblit=True,
+            props=self.plot_style.selection,
+        )
+
+    def on_span_select(self, xmin: float, xmax: float) -> None:
+        """Set the window to the range dragged over the decay."""
+        if self._decay is None or xmax <= xmin:
+            return
+        maximum = self._decay[2]
+        self._silent = True
+        try:
+            self.start_spinbox.setValue(round(xmin - maximum, 2))
+            self.length_spinbox.setValue(round(xmax - xmin, 2))
+        finally:
+            self._silent = False
+        self.on_changed()
+
+    def draw_decay(self) -> None:
+        """Draw the decay with its maximum marked and the window
+        shaded."""
+        if self.canvas is None:
+            return
+        style = self.plot_style
+        axes = self.axes
+        axes.clear()
+        with style.context():
+            if self._decay is None:
+                axes.text(
+                    0.5,
+                    0.5,
+                    (
+                        f"No decay: {self._decay_error}"
+                        if self._decay_error
+                        else "No photon-counting movie shown"
+                    ),
+                    wrap=True,
+                    transform=axes.transAxes,
+                    ha="center",
+                    va="center",
+                    color=style.theme_colors["text"],
+                )
+            else:
+                times, counts, maximum = self._decay
+                axes.plot(
+                    times,
+                    np.where(counts > 0, counts, np.nan),
+                    color=style.series_colors[0],
+                    linewidth=1.0,
+                )
+                axes.axvline(
+                    maximum,
+                    color=style.theme_colors["text"],
+                    linestyle="--",
+                    linewidth=0.8,
+                )
+                window = self.window.lifetime_window_ns()
+                if window is not None:
+                    axes.axvspan(*window, alpha=0.2, color="0.5", lw=0)
+                if np.any(counts > 0):
+                    axes.set_yscale("log")
+        style.style_figure(self.figure)
+        style.style_axes(axes)
+        style.label(axes, "Microtime (ns)", "Counts")
+        self.canvas.draw_idle()
 
 
 class ConcatenateMoviesDialog(lib.Dialog):
@@ -7649,8 +8144,13 @@ class Window(QtWidgets.QMainWindow):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(768, 768)
+        # lifetime display: photon delays of the latest frames, keyed by
+        # (movie, frame, microtime range), and the decay of each movie
+        self._lifetime_cache = {}
+        self._lifetime_decays = {}
         self.parameters_dialog = ParametersDialog(self)
         self.contrast_dialog = ContrastDialog(self)
+        self.lifetime_dialog = LifetimeDialog(self)
         # the look of the scale bar is shared with SPINNA
         self.scalebar_options = ScaleBarOptions(
             "Localize", "Print scale bar length", True, parent=self
@@ -7717,39 +8217,8 @@ class Window(QtWidgets.QMainWindow):
         # Auto toggle at the slider's side, a second view onto the contrast
         # dialog's Auto checkbox. Connected both ways; ``setChecked`` with
         # an unchanged state emits nothing, so the pair does not loop.
-        self.contrast_auto_button = QtWidgets.QToolButton()
-        self.contrast_auto_button.setText("Auto")
-        self.contrast_auto_button.setToolTip(
-            "Set the contrast automatically for each frame?"
-        )
-        self.contrast_auto_button.setCheckable(True)
-        font = self.contrast_auto_button.font()
-        font.setPointSizeF(font.pointSizeF() * 0.8)
-        self.contrast_auto_button.setFont(font)
-        self.contrast_auto_button.setStyleSheet(
-            """
-            QToolButton {
-                border: 1px solid palette(mid);
-                border-radius: 3px;
-                padding: 0px 4px;
-                background: transparent;
-            }
-            QToolButton:checked {
-                border-color: palette(highlight);
-                background: palette(highlight);
-                color: palette(highlighted-text);
-            }
-            QToolButton:disabled {
-                border-color: palette(midlight);
-                color: palette(mid);
-            }
-            QToolButton:checked:disabled {
-                background: palette(midlight);
-            }
-            """
-        )
-        self.contrast_auto_button.setFixedHeight(
-            max(15, self.contrast_auto_button.fontMetrics().height() + 2)
+        self.contrast_auto_button = _bar_toggle_button(
+            "Auto", "Set the contrast automatically for each frame?"
         )
         self.contrast_auto_button.setChecked(
             self.contrast_dialog.auto_checkbox.isChecked()
@@ -7769,6 +8238,16 @@ class Window(QtWidgets.QMainWindow):
         contrast_layout.setSpacing(4)
         contrast_layout.addWidget(self.contrast_slider)
         contrast_layout.addWidget(self.contrast_auto_button)
+        # display switch of photon-counting movies, a second view onto
+        # View > Show lifetime (shown for such movies only)
+        self.lifetime_button = _bar_toggle_button(
+            "Lifetime",
+            "Color the pixels by the lifetime of their photons?\n"
+            "Settings: View > Lifetime display...",
+        )
+        self.lifetime_button.setVisible(False)
+        self.lifetime_button.toggled.connect(self.set_lifetime_shown)
+        contrast_layout.addWidget(self.lifetime_button)
         # Channel selector (hidden unless several channels are loaded).
         self.channel_combo = QtWidgets.QComboBox()
         self.channel_combo.setToolTip("Channel of the movie shown below.")
@@ -8069,6 +8548,9 @@ class Window(QtWidgets.QMainWindow):
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Close the application, save user settings."""
         settings = io.load_user_settings()
+        settings["Localize"][
+            LifetimeDialog.SETTINGS_KEY
+        ] = self.lifetime_dialog.settings()
         if self.movie_path != []:
             settings["Localize"]["PWD"] = os.path.dirname(self.movie_path)
             settings["Localize"][
@@ -8323,6 +8805,18 @@ class Window(QtWidgets.QMainWindow):
         # in the menu only, not on the toolbar
         constract_action.setIcon(theme.icon("contrast"))
         view_menu.addAction(constract_action)
+        # photon-counting movies only (enabled in update_lifetime_controls)
+        self.lifetime_action = view_menu.addAction("Show lifetime")
+        self.lifetime_action.setCheckable(True)
+        self.lifetime_action.setEnabled(False)
+        self.lifetime_action.toggled.connect(self.set_lifetime_shown)
+        self.lifetime_settings_action = view_menu.addAction(
+            "Lifetime display..."
+        )
+        self.lifetime_settings_action.setEnabled(False)
+        self.lifetime_settings_action.triggered.connect(
+            self.lifetime_dialog.show
+        )
         self.scalebar_action = view_menu.addAction("Show scale bar")
         self.scalebar_action.setCheckable(True)
         self.scalebar_action.setChecked(False)
@@ -9875,6 +10369,9 @@ class Window(QtWidgets.QMainWindow):
         # the preview's link colors cache the other channels' detections and
         # filter stacks, and these are other channels now
         self.drop_preview_link_cache()
+        # as do the lifetime display's photon delays and decays
+        self._lifetime_cache.clear()
+        self._lifetime_decays.clear()
         # Build channels and seed each channel's parameter/contrast
         # snapshot from the current dialog state, applying any camera /
         # pixel-size hints from that channel's metadata. Guarded so the
@@ -10029,6 +10526,7 @@ class Window(QtWidgets.QMainWindow):
         self.frame_slider.blockSignals(False)
         frame_number = min(max(0, frame_number), max(0, last_frame))
         self.curr_frame_number = frame_number
+        self.update_lifetime_controls()
         # before set_frame: this channel's intensities can differ from the
         # previous one's, and set_frame's auto contrast then lands on a
         # track that already fits
@@ -10887,14 +11385,27 @@ class Window(QtWidgets.QMainWindow):
             frame = self.identification_movie()[self.curr_frame_number]
             frame = self.contrast_dialog.to_uint8(frame)
             height, width = frame.shape
-            image = QtGui.QImage(
-                frame.data,
-                width,
-                height,
-                width,
-                QtGui.QImage.Format.Format_Indexed8,
-            )
-            image.setColorTable(CMAP_GRAYSCALE)
+            rgb = None
+            if self.lifetime_shown():
+                rgb = self._lifetime_frame(frame)
+            if rgb is None:
+                image = QtGui.QImage(
+                    frame.data,
+                    width,
+                    height,
+                    width,
+                    QtGui.QImage.Format.Format_Indexed8,
+                )
+                image.setColorTable(CMAP_GRAYSCALE)
+            else:
+                image = QtGui.QImage(
+                    rgb.data,
+                    width,
+                    height,
+                    3 * width,
+                    QtGui.QImage.Format.Format_RGB888,
+                )
+            # copies the pixels, so the arrays may go
             pixmap = QtGui.QPixmap.fromImage(image)
             self.scene = Scene(self)
             self.scene.addPixmap(pixmap)
@@ -11994,6 +12505,248 @@ class Window(QtWidgets.QMainWindow):
             length,
             **self.scalebar_options.draw_kwargs(),
         )
+        painter.restore()
+
+    def lifetime_available(self) -> bool:
+        """Whether the movie shown can be displayed as lifetimes: a
+        photon-counting movie read with the microtimes of its photons
+        (``io.PTUMovie``), shown on its own rather than as the sum of the
+        channels."""
+        if not isinstance(getattr(self, "movie", None), io.PTUMovie):
+            return False
+        return not (
+            self.channel_sum_view() is not None
+            and self.identify_mode() in IDENTIFY_SUM_MODES
+        )
+
+    def lifetime_shown(self) -> bool:
+        """Whether the frames are displayed as lifetimes."""
+        return self.lifetime_action.isChecked() and self.lifetime_available()
+
+    def set_lifetime_shown(self, shown: bool) -> None:
+        """Switch between the intensity and the lifetime display (View >
+        Show lifetime, or the Lifetime button below the movie). The first
+        time, the color range is set to the lifetimes of the frame shown
+        unless one is remembered."""
+        shown = bool(shown)
+        for widget in (self.lifetime_action, self.lifetime_button):
+            widget.blockSignals(True)
+            widget.setChecked(shown)
+            widget.blockSignals(False)
+        if shown and not self.lifetime_dialog.range_known:
+            self.auto_lifetime_range(redraw=False)
+        self.draw_frame()
+        self.view.viewport().update()
+
+    def update_lifetime_controls(self) -> None:
+        """Offer the lifetime display for photon-counting movies only."""
+        available = self.lifetime_available()
+        self.lifetime_action.setEnabled(available)
+        self.lifetime_settings_action.setEnabled(available)
+        self.lifetime_button.setVisible(available)
+        self.lifetime_dialog.update_decay()
+
+    def _movie_decay(self, movie: io.PTUMovie) -> tuple[np.ndarray, int]:
+        """Decay of the first ``LIFETIME_DECAY_SCAN_FRAMES`` scan frames of
+        ``movie`` (within its microtime gate) and the microtime bin of its
+        maximum, read once per movie."""
+        key = id(movie)
+        if key not in self._lifetime_decays:
+            decay = movie._decay(
+                0, min(LIFETIME_DECAY_SCAN_FRAMES, movie.scan_frames)
+            )
+            maximum = movie._microtime_range[0] + int(np.argmax(decay))
+            self._lifetime_decays[key] = (decay, maximum)
+        return self._lifetime_decays[key]
+
+    def lifetime_decay(self) -> tuple[np.ndarray, np.ndarray, float] | None:
+        """``(times, counts, maximum)`` of the decay of the movie shown
+        (times in ns at the bin centers, the maximum at the start of its
+        bin), or None without a photon-counting movie."""
+        if not self.lifetime_available():
+            return None
+        movie = self.movie
+        counts, maximum = self._movie_decay(movie)
+        width = movie._tcspc_resolution * 1e9
+        first = movie._microtime_range[0]
+        times = (first + np.arange(len(counts)) + 0.5) * width
+        return times, counts, maximum * width
+
+    def lifetime_bins(self) -> tuple[int, int]:
+        """First and last-plus-one microtime bin of the lifetime window of
+        the movie shown, see ``LifetimeDialog``, within its microtime gate.
+
+        Raises
+        ------
+        ValueError
+            If the window holds no microtimes of the movie.
+        """
+        movie = self.movie
+        _, maximum = self._movie_decay(movie)
+        width = movie._tcspc_resolution * 1e9
+        dialog = self.lifetime_dialog
+        start = maximum + int(round(dialog.start_spinbox.value() / width))
+        length = int(round(dialog.length_spinbox.value() / width))
+        stop = start + max(1, length)
+        gate_lo, gate_hi = movie._microtime_range
+        start, stop = max(start, gate_lo), min(stop, gate_hi)
+        if start >= stop:
+            raise ValueError(
+                "the time window lies outside the photons' microtimes, "
+                f"{gate_lo * width:.3g}-{gate_hi * width:.3g} ns"
+            )
+        return start, stop
+
+    def lifetime_window_ns(self) -> tuple[float, float] | None:
+        """Start and end of the lifetime window of the movie shown in ns,
+        or None if there is none."""
+        if not self.lifetime_available():
+            return None
+        try:
+            start, stop = self.lifetime_bins()
+        except Exception:  # noqa: BLE001 - no window
+            return None
+        width = self.movie._tcspc_resolution * 1e9
+        return start * width, stop * width
+
+    def lifetimes(
+        self, index: int | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """``(lifetimes, photons)`` of frame ``index`` (default: the frame
+        shown) of the movie shown, see ``_lifetime_image``. The photon
+        delays of the latest ``LIFETIME_CACHE_FRAMES`` frames are kept, so
+        redrawing (e.g., when panning) does not read them again."""
+        if index is None:
+            index = self.curr_frame_number
+        movie = self.movie
+        start, stop = self.lifetime_bins()
+        key = (id(movie), int(index), start, stop)
+        sums = self._lifetime_cache.pop(key, None)
+        if sums is None:
+            sums = movie._delay_sums(int(index), (start, stop))
+        self._lifetime_cache[key] = sums  # the most recent one last
+        while len(self._lifetime_cache) > LIFETIME_CACHE_FRAMES:
+            del self._lifetime_cache[next(iter(self._lifetime_cache))]
+        dialog = self.lifetime_dialog
+        return _lifetime_image(
+            *sums,
+            binning=dialog.binning_spinbox.value(),
+            min_photons=dialog.min_photons_spinbox.value(),
+        )
+
+    def _lifetime_colors(self) -> np.ndarray:
+        """Colors (``_lifetime_lut``) of the colormap chosen."""
+        name = self.lifetime_dialog.colormap_combo.currentText()
+        cached = getattr(self, "_lifetime_lut_cache", None)
+        if cached is None or cached[0] != name:
+            self._lifetime_lut_cache = (name, _lifetime_lut(name))
+        return self._lifetime_lut_cache[1]
+
+    def _lifetime_frame(self, brightness: np.ndarray) -> np.ndarray | None:
+        """The frame shown as lifetimes (``_lifetime_rgb``), its brightness
+        from the intensity shown (uint8, after the contrast). None if the
+        lifetimes cannot be computed; the reason is shown over the view
+        (``paint_lifetime_legend``)."""
+        try:
+            lifetimes, _ = self.lifetimes()
+        except Exception as error:  # noqa: BLE001 - shown over the view
+            self._lifetime_error = str(error)
+            return None
+        self._lifetime_error = None
+        dialog = self.lifetime_dialog
+        return _lifetime_rgb(
+            lifetimes,
+            brightness,
+            self._lifetime_colors(),
+            dialog.shortest_spinbox.value(),
+            dialog.longest_spinbox.value(),
+        )
+
+    def auto_lifetime_range(self, *_, redraw: bool = True) -> None:
+        """Set the range of the lifetime colors to the lifetimes of most
+        photons of the frame shown, see ``_lifetime_range``; unchanged if
+        no pixel has a lifetime."""
+        if not self.lifetime_available():
+            return
+        try:
+            lifetimes, photons = self.lifetimes()
+        except Exception:  # noqa: BLE001 - the display shows the reason
+            return
+        found = _lifetime_range(lifetimes, photons)
+        if found is None:
+            return
+        self.lifetime_dialog.set_range(*found)
+        if redraw:
+            self.on_lifetime_settings_changed()
+
+    def on_lifetime_settings_changed(self) -> None:
+        """Redraw after a change of the lifetime display settings."""
+        if self.lifetime_shown():
+            self.draw_frame()
+            self.view.viewport().update()
+
+    def paint_lifetime_legend(self, painter: QtGui.QPainter) -> None:
+        """Paint the color bar of the lifetime display, if shown, at the
+        top right of the frame (of the part of it in view) in screen
+        pixels; or why no lifetimes are shown.
+
+        Parameters
+        ----------
+        painter : QPainter
+            Painter of the view's viewport.
+        """
+        if not self.lifetime_shown():
+            return
+        viewport = self.view.viewport().rect()
+        frame = self.view.mapFromScene(self.scene.sceneRect()).boundingRect()
+        area = viewport.intersected(frame)
+        if area.isEmpty():
+            area = viewport
+
+        def top_left(width: int) -> QtCore.QPoint:
+            # 8 pixels in from the corner, but within the view
+            x = max(viewport.left(), area.right() + 1 - width - 8)
+            return QtCore.QPoint(x, area.top() + 8)
+
+        background = QtGui.QColor(0, 0, 0, 160)
+        painter.save()
+        painter.resetTransform()  # screen pixels, not the frame's
+        error = getattr(self, "_lifetime_error", None)
+        if error:
+            font = QtGui.QFont()
+            font.setPixelSize(11)
+            painter.setFont(font)
+            flags = QtCore.Qt.TextFlag.TextWordWrap
+            text = f"No lifetimes: {error}"
+            rect = QtGui.QFontMetrics(font).boundingRect(
+                QtCore.QRect(0, 0, max(100, area.width() // 2), 1000),
+                flags,
+                text,
+            )
+            rect.moveTopLeft(top_left(rect.width() + 12) + QtCore.QPoint(6, 6))
+            painter.fillRect(rect.adjusted(-6, -6, 6, 6), background)
+            painter.setPen(QtGui.QColor("white"))
+            painter.drawText(rect, flags, text)
+        else:
+            dialog = self.lifetime_dialog
+            layout = render._colorbar_layout(
+                self._lifetime_colors()[::4] / 255,
+                dialog.shortest_spinbox.value(),
+                dialog.longest_spinbox.value(),
+                label="Lifetime (ns)",
+                vertical=False,
+                bar_length=150,
+                bar_width=10,
+                n_ticks=3,
+                background=background,
+                text_fontsize=11,
+                margin=6,
+                tick_length=4,
+                tick_spacer=2,
+                format_tick=lambda value: f"{round(value, 2):g}",
+            )
+            painter.translate(top_left(layout["width"]))
+            render._paint_colorbar(painter, layout)
         painter.restore()
 
     def region_mngs(self) -> list[int]:

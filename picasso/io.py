@@ -4387,7 +4387,8 @@ class PTUMovie(_MultiDimMovie):
 
     The microtimes stay available for fluorescence-lifetime analyses
     such as FL-PAINT through ``_microtime_histograms``, private until
-    such an analysis is part of Picasso.
+    such an analysis is part of Picasso; Localize's lifetime display uses
+    ``_delay_sums``.
     """
 
     # frames are decoded into arrays once, so reading them is thread-safe
@@ -4706,10 +4707,14 @@ class PTUMovie(_MultiDimMovie):
         else:
             (y0, x0), (y1, x1) = roi
             rows, cols = slice(int(y0), int(y1)), slice(int(x0), int(x1))
+        n = stop - start
+        # sums that do not overlap (or a single one): ptufile bins the
+        # scan frames itself, without decoding them one by one
+        binned = stride == window or n == 1
         with self._lock:
             hist = self._ptu.decode_image(
                 (
-                    slice(first, last),
+                    slice(first, last, window if binned else 1),
                     rows,
                     cols,
                     self._detector,
@@ -4717,11 +4722,8 @@ class PTUMovie(_MultiDimMovie):
                 ),
                 dtype=np.uint32,
             )[:, :, :, 0, :]
-        n = stop - start
-        if stride == window:
-            return hist.reshape((n, window) + hist.shape[1:]).sum(
-                axis=1, dtype=np.uint32
-            )
+        if binned:
+            return hist
         cumulative = np.zeros((hist.shape[0] + 1,) + hist.shape[1:], np.uint32)
         np.cumsum(hist, axis=0, out=cumulative[1:])
         starts = np.arange(n) * stride
@@ -4791,6 +4793,58 @@ class PTUMovie(_MultiDimMovie):
         return np.bincount(
             (dtime - lo) // int(dtime_bin), minlength=n_bins
         ).astype(np.uint64)
+
+    # upper limit of the per-pixel histograms decoded by ``_delay_sums``
+    _DELAY_HISTOGRAM_BYTES = 64 * 2**20
+
+    def _delay_sums(
+        self, index: int, dtime_range: tuple[int, int]
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Photons of every pixel of frame ``index`` within a range of
+        microtimes, and the sum of their delays after the start of the
+        range, e.g., for a lifetime image: a pixel's mean photon delay is
+        its delay sum divided by its photons.
+
+        A photon's delay is the center of its microtime bin minus the
+        start of the range. Bins are merged when the per-pixel histograms
+        would take more than ``_DELAY_HISTOGRAM_BYTES``, and the delay is
+        then the center of the merged bin.
+
+        Parameters
+        ----------
+        index : int
+            Frame of this movie.
+        dtime_range : tuple of two ints
+            First and last-plus-one microtime bin, restricted to the
+            movie's microtime gate (``_microtime_range``).
+
+        Returns
+        -------
+        photons : np.ndarray
+            ``(Y, X)`` photons within the range (float64).
+        delays : np.ndarray
+            ``(Y, X)`` sums of their delays in ns (float64).
+        """
+        gate_lo, gate_hi = self._microtime_range
+        lo, hi = max(gate_lo, int(dtime_range[0])), min(
+            gate_hi, int(dtime_range[1])
+        )
+        if lo >= hi:
+            raise ValueError(
+                f"Empty microtime range {dtime_range!r} within the movie's "
+                f"microtime bins {gate_lo}-{gate_hi}."
+            )
+        nbytes = self.height * self.width * (hi - lo) * 4
+        merge = max(1, -(-nbytes // self._DELAY_HISTOGRAM_BYTES))
+        hist = self._microtime_histograms(
+            index, index + 1, dtime_bin=merge, dtime_range=(lo, hi)
+        )[0]
+        edges = np.minimum(lo + merge * np.arange(hist.shape[-1] + 1), hi)
+        centers = (edges[:-1] + edges[1:]) / 2 - lo
+        delays_ns = centers * self._tcspc_resolution * 1e9
+        photons = hist.sum(axis=-1, dtype=np.float64)
+        delays = np.tensordot(hist, delays_ns, axes=([-1], [0]))
+        return photons, delays
 
     def close(self):
         try:
