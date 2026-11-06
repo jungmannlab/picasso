@@ -45,7 +45,18 @@ SPOTS_PER_BATCH = 20_000
 #: Fit box sizes VectorFit supports and the pupil sampling each needs: the
 #: chirp-z transform requires ``box + n_pupil - 1`` to be a power of 2 or
 #: three times one.
-N_PUPIL = {5: 44, 7: 42, 9: 40, 13: 52, 15: 50, 17: 48, 21: 44, 27: 38}
+N_PUPIL = {
+    5: 44,
+    7: 42,
+    9: 40,
+    11: 54,
+    13: 52,
+    15: 50,
+    17: 48,
+    19: 46,
+    21: 44,
+    27: 38,
+}
 
 #: VectorFit model of each "Fit model" setting.
 _MODELS = {"2D": "xy_constaberrations", "3D": "xyz_constaberrations"}

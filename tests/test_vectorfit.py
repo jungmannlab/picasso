@@ -181,7 +181,7 @@ class TestParameters:
     def test_supported_boxes_pass(self, box):
         vectorfit.check_box(box)
 
-    @pytest.mark.parametrize("box", [3, 6, 11, 19])
+    @pytest.mark.parametrize("box", [3, 6, 23, 31])
     def test_unsupported_boxes_are_rejected(self, box):
         with pytest.raises(ValueError, match="box size"):
             vectorfit.check_box(box)
@@ -364,7 +364,7 @@ class TestLocalizeWiring:
                 movie,
                 camera_info=dict(CAMERA_INFO),
                 identifications=_identifications(2),
-                box=11,
+                box=23,
                 fitting_method="vectorfit",
             )
 

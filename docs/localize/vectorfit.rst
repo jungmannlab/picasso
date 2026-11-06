@@ -51,7 +51,7 @@ VectorFit runs on the CPU and is an optional dependency:
 
    pip install picassosr[vectorfit]
 
-1. Identify the spots as usual (see :ref:`localize-identification`). The **box size** must be one VectorFit supports: 5, 7, 9, 13, 15, 17, 21 or 27.
+1. Identify the spots as usual (see :ref:`localize-identification`). The **box size** must be one VectorFit supports: 5, 7, 9, 11, 13, 15, 17, 19, 21 or 27.
 2. Make sure the **pixel size** of the camera is right: the model is computed in nm.
 3. Open ``Analyze`` > ``Parameters`` and set **Model** to ``Vectorial PSF (VectorFit)``. There is no optimizer to choose.
 4. In the **Vectorial PSF (VectorFit)** box, set the **Fit model** (``2D`` or ``3D``), the emission wavelength, the NA and the three refractive indices of your setup.
