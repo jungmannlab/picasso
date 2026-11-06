@@ -155,23 +155,11 @@ resolves it the same way; ``lateral-calibrate`` requires ``--pixelsize``.
 
 PicoQuant scans (.ptu)
 ~~~~~~~~~~~~~~~~~~~~~~
-The pixels of a ``.ptu`` confocal scan count photons, so the camera options
-keep their defaults (baseline 0, sensitivity 1, gain 1); see
-:ref:`PicoQuant .ptu files <localize-ptu>`. These options apply to ``.ptu`` files only:
-
-``--frame-sum-window``
-   Number of consecutive scan frames summed into one frame (default 1).
-``--frame-sum-stride``
-   Number of scan frames between the starts of two sums (default: the
-   window, i.e., sums that do not overlap; 1 gives a sliding window).
-``--microtime-gate START END``
-   Keeps the photons arriving START to END ns after the laser pulse, e.g.,
-   one gate per laser of pulsed interleaved excitation (PIE). It may be
-   given several times; each detector then gives one channel per gate.
-
-A ``.ptu`` file with several channels (detectors, or detectors and gates) is
-localized channel by channel, each into ``<movie>_<channel>_locs.hdf5``, e.g.,
-``scan_Detector_1_gate_2_locs.hdf5``:
+For ``.ptu`` confocal scans (see :ref:`PicoQuant .ptu files <localize-ptu>`),
+``--frame-sum-window`` and ``--frame-sum-stride`` sum scan frames into one
+frame, and each ``--microtime-gate START END`` (ns) gives every detector one
+channel per gate. Each channel is localized into its own
+``<movie>_<channel>_locs.hdf5``; the camera options keep their defaults.
 
 .. code-block:: bash
 

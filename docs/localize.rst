@@ -101,7 +101,7 @@ Picasso Localize reads the following movie formats:
      - Requires ``pip install picassosr[lif]``, Python ≥ 3.12; available in the one-click installer.
    * - PicoQuant PTU
      - ``.ptu``
-     - Confocal image scans recorded with time-correlated single photon counting (T3 mode); see the note below. Requires ``pip install picassosr[ptu]``, Python ≥ 3.12; available in the one-click installer.
+     - Confocal scans (photon counting); see the note below. Requires ``pip install picassosr[ptu]``, Python ≥ 3.12; available in the one-click installer.
    * - Raw binary
      - ``.raw``
      - A dialog asks for the file specifications when the file is opened.
@@ -137,18 +137,15 @@ Picasso Localize reads the following movie formats:
 
 .. note::
 
-   **PicoQuant** ``.ptu`` files of confocal image scans are read via the optional `ptufile <https://github.com/cgohlke/ptufile>`_ library, installed with the ``ptu`` extra (``pip install picassosr[ptu]``; requires Python ≥ 3.12).
+   **PicoQuant** ``.ptu`` confocal scans are read via the optional `ptufile <https://github.com/cgohlke/ptufile>`_ library (``ptu`` extra, Python ≥ 3.12). A pixel counts the photons detected in it; when a file is opened, a dialog asks how many scan frames to sum into one frame and for optional microtime gates. Each detector, or detector and gate, is a channel. *View > Show lifetime* colors the pixels by the lifetime of their photons.
 
-   A ``.ptu`` file stores every detected photon. Picasso turns the photons of one detector into a movie: a pixel counts the photons detected in it during one scan frame, whatever their arrival time after the laser pulse (the microtime). Photons are assigned to pixels with the pixel dwell time of the file header, as in PicoQuant's software; photons detected while the scanner returns to the start of a line are left out.
+   .. dropdown:: Details
 
-   - **The pixel values are photons**, so the camera parameters are set accordingly when the file is opened: baseline 0, sensitivity 1 and EM gain 1 (sCMOS noise maps are cleared). The pixel size is read from the file.
-   - **Scan frames can be summed.** A single confocal scan frame can be too dim to localize, so a dialog asks how many consecutive scan frames (*Frames to sum*) are added up into one frame, and how many scan frames lie between the starts of two sums (*Stride*). By default the stride equals the number of frames to sum: the sums do not overlap and every photon is used once. A stride of 1 is a sliding window, where every scan frame starts a new sum, so a binding event is localized in several overlapping frames. Summing applies to photon counts only; camera movies cannot be summed, since every camera frame carries an offset (the baseline).
-   - **Microtime gates split the photons by arrival time.** The same dialog shows the decay histogram of every detector: the photons counted against their arrival time after the laser pulse. A *microtime gate* keeps only the photons arriving within a range of times, e.g., one gate per laser of pulsed interleaved excitation (PIE). Drag over the histogram or click *Add gate*; without gates every photon counts.
-   - **Lifetimes can be displayed.** *View > Show lifetime*, or the *Lifetime* button below the movie, colors every pixel by the mean delay of its photons after the maximum of the decay, a quick estimate of the fluorescence lifetime, while its brightness still shows the intensity. *View > Lifetime display...* sets the time window (by default 10 ns from the maximum of the decay), pools the photons of neighboring pixels (*Binning*), sets the fewest photons a pixel needs to be colored (others stay gray) and chooses the colors.
-   - **Each detector is a channel**, or, with microtime gates, each detector and gate (*Detector 1 gate 1*, *Detector 1 gate 2*, ...). When a file has several channels, a dialog asks which one to load; to load all of them, see :ref:`localize-opening-channels`.
-   - Only T3 image scans are read, not point or line scans, z-stacks or T2 data.
-
-   The metadata of the movie record the summing (``Frame Sum Window``, ``Frame Sum Stride``, ``Scan Frames``), the gate of the channel (``Microtime Gate (ns)``), ``Photon Counting: true`` and the main header entries of the file (``PTU Metadata``).
+      - **Pixels are photons:** the camera parameters are set to baseline 0, sensitivity 1 and EM gain 1, and the pixel size is read from the file. Photons are assigned to pixels with the dwell time of the file header, as in PicoQuant's software; photons detected during the line retrace are left out.
+      - **Frame sums:** *Frames to sum* scan frames make one frame, a new sum starting every *Stride* scan frames (default: as many as are summed, so every photon is used once; 1 is a sliding window).
+      - **Microtime gates** keep the photons arriving within a range of times after the laser pulse, e.g., one gate per laser of pulsed interleaved excitation (PIE). Drag over the decay histogram in the dialog to add one; the channels are named *Detector 1 gate 1*, *Detector 1 gate 2*, ...
+      - **Lifetime display:** a pixel's color is the mean delay of its photons after the maximum of the decay, its brightness the intensity. *View > Lifetime display...* sets the time window, pools neighboring pixels (*Binning*) and sets the fewest photons a colored pixel needs (others stay gray).
+      - Only T3 image scans are read, not point or line scans, z-stacks or T2 data. The metadata record ``Frame Sum Window``, ``Frame Sum Stride``, ``Scan Frames``, ``Microtime Gate (ns)``, ``Photon Counting`` and the file header (``PTU Metadata``).
 
 We are open to feature requests regarding support for other file formats, please visit our `GitHub page <https://github.com/jungmannlab/picasso>`_.
 
@@ -169,21 +166,12 @@ We are open to feature requests regarding support for other file formats, please
       frame = movie[100]      # one frame as a NumPy array
       print(info[0]["Frames"], info[0]["Height"], info[0]["Width"])
 
-   For a photon-counting ``.ptu`` scan, ``frame_sum_window`` sums that many
-   consecutive scan frames into one frame and ``frame_sum_stride`` sets
-   the number of scan frames between the starts of two sums (default: the
-   window, so the sums do not overlap; 1 gives a sliding window).
-   ``microtime_gates`` takes ``(start, end)`` gates in ns, giving one channel
-   per detector and gate. Any other format raises a ``ValueError`` when
-   frames are to be summed or gated.
+   ``.ptu`` scans also take ``frame_sum_window``, ``frame_sum_stride``
+   and ``microtime_gates`` (``(start, end)`` in ns):
 
    .. code-block:: python
 
       movie, info = io.load_movie("scan.ptu", frame_sum_window=20)
-      # two PIE gates, every channel at once
-      movies, infos = io.load_movie_all(
-          "scan.ptu", frame_sum_window=20, microtime_gates=[(0, 25), (25, 50)]
-      )
 
 
 Topics
