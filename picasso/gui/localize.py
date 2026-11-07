@@ -238,6 +238,7 @@ _SUM_REGISTRATION_MAX_FRAMES = 200
 # a separate field, so the combo carries one value - see picasso.transforms.
 _TRANSFORM_MODELS = [
     ("Translation (2 DOF, >= 1 pair)", "translation"),
+    ("Rigid (3 DOF, >= 2 pairs)", "rigid"),
     ("Affine (6 DOF, >= 3 pairs)", "affine"),
     ("Projective (8 DOF, >= 4 pairs)", "projective"),
     ("Polynomial, degree 2 (>= 6 pairs)", "polynomial2"),
@@ -249,6 +250,8 @@ _TRANSFORM_MODEL_TOOLTIP = (
     "  Translation: a shift in x and y and nothing else - for frames that\n"
     "    are known to differ only by an offset. Any rotation or scale then\n"
     "    shows up in the residual instead of being absorbed.\n"
+    "  Rigid: a rotation and a shift - for frames that differ in neither\n"
+    "    scale nor shear.\n"
     "  Affine: translation, rotation, scale and shear - the default, and\n"
     "    what a well-aligned splitter does to first order.\n"
     "  Projective: adds the perspective/keystone term a tilted dichroic or\n"

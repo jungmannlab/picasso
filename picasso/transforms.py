@@ -17,6 +17,13 @@ be fitted with, in order of increasing flexibility:
     are optically identical and only misplaced. With one free parameter per
     axis it is the least noise-prone of the models, and a single
     correspondence already fixes it.
+``rigid``
+    3 DOF. A rotation and a shift, which keep all distances: the model for
+    two copies of the same geometry, e.g., a structure and its design (see
+    ``picasso.registration.register_to_template``), or two channels known
+    to differ in neither scale nor shear. Two correspondences fix it. A
+    rigid transform may also reflect (``RigidTransform.mirror``), which
+    :func:`estimate` does not fit: it finds the proper rotation.
 ``affine``
     6 DOF. Translation, rotation, anisotropic scale and shear. Parallel lines
     stay parallel. The default, and what an aligned image splitter does to
@@ -54,6 +61,7 @@ __all__ = [
     "MODELS",
     "Transform",
     "TranslationTransform",
+    "RigidTransform",
     "AffineTransform",
     "ProjectiveTransform",
     "PolynomialTransform",
@@ -68,6 +76,7 @@ __all__ = [
 
 MODELS = (
     "translation",
+    "rigid",
     "affine",
     "projective",
     "polynomial2",
@@ -75,13 +84,18 @@ MODELS = (
 )
 
 Model = Literal[
-    "translation", "affine", "projective", "polynomial2", "polynomial3"
+    "translation",
+    "rigid",
+    "affine",
+    "projective",
+    "polynomial2",
+    "polynomial3",
 ]
 
 # Minimum correspondences per model. A model fitted on exactly this many
 # points interpolates them exactly and says nothing about the field in
 # between, hence the "thin data" warning at _WARN_FACTOR times these.
-_MIN_POINTS = {"translation": 1, "affine": 3, "projective": 4}
+_MIN_POINTS = {"translation": 1, "rigid": 2, "affine": 3, "projective": 4}
 _WARN_FACTOR = 3
 
 
@@ -117,8 +131,8 @@ def min_points(model: Model) -> int:
     Returns
     -------
     n_points : int
-        1 for translation, 3 for affine, 4 for projective, 6 for
-        ``polynomial2`` and 10 for ``polynomial3``.
+        1 for translation, 2 for rigid, 3 for affine, 4 for projective,
+        6 for ``polynomial2`` and 10 for ``polynomial3``.
 
     Raises
     ------
@@ -709,6 +723,133 @@ class TranslationTransform(AffineTransform):
 
 
 @dataclass(frozen=True, eq=False)
+class RigidTransform(AffineTransform):
+    """A 3-DOF rotation and shift, optionally with a reflection: the
+    transforms that keep all distances.
+
+    Stored as an affine whose linear part is orthogonal: the reflection
+    ``y -> -y`` if :attr:`mirror`, then the counterclockwise rotation by
+    :attr:`rotation_deg`, then the shift. Like :class:`TranslationTransform`
+    it is an :class:`AffineTransform`, so every affine-only fast path takes
+    it unchanged.
+
+    :func:`estimate` fits the proper rotation (Kabsch); a reflected point
+    set is registered by mirroring it first, as
+    ``picasso.registration.register_to_template`` does, whose result then
+    reflects.
+
+    Attributes
+    ----------
+    matrix : np.ndarray
+        The ``(3, 3)`` homogeneous matrix, always C-contiguous float64,
+        with an orthogonal ``matrix[:2, :2]``.
+    domain : np.ndarray or None
+        See :class:`Transform`.
+    """
+
+    @property
+    def model(self) -> str:
+        return "rigid"
+
+    def __post_init__(self):
+        super().__post_init__()
+        linear = self.matrix[:2, :2]
+        if not np.allclose(linear @ linear.T, np.eye(2), atol=1e-9):
+            raise ValueError(
+                "A rigid transform must have an orthogonal linear part (a "
+                f"rotation, optionally with a reflection), got "
+                f"{linear.tolist()}. Use AffineTransform for a transform "
+                "with scale or shear."
+            )
+
+    @classmethod
+    def from_params(
+        cls,
+        rotation_deg: float = 0.0,
+        shift=(0.0, 0.0),
+        mirror: bool = False,
+        domain=None,
+    ) -> "RigidTransform":
+        """Build a rigid transform from its rotation, shift and
+        reflection.
+
+        Parameters
+        ----------
+        rotation_deg : float, optional
+            Counterclockwise rotation in degrees. Default is 0.0.
+        shift : array, optional
+            ``(2,)`` shift ``(dx, dy)`` applied after the rotation.
+            Default is ``(0, 0)``.
+        mirror : bool, optional
+            Whether ``y -> -y`` is applied before the rotation. Default is
+            False.
+        domain : array, optional
+            ``[[xmin, ymin], [xmax, ymax]]`` to attach as
+            :attr:`Transform.domain`.
+
+        Returns
+        -------
+        transform : RigidTransform
+        """
+        angle = np.radians(rotation_deg)
+        rotation = np.array(
+            [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
+        )
+        if mirror:
+            rotation = rotation @ np.diag([1.0, -1.0])
+        matrix = np.eye(3)
+        matrix[:2, :2] = rotation
+        matrix[:2, 2] = np.asarray(shift, dtype=np.float64).reshape(2)
+        return cls(matrix=matrix, domain=domain)
+
+    @property
+    def mirror(self) -> bool:
+        """Whether the transform reflects (determinant -1)."""
+        return bool(np.linalg.det(self.matrix[:2, :2]) < 0)
+
+    @property
+    def rotation_deg(self) -> float:
+        """Counterclockwise rotation in degrees, in ``(-180, 180]``, after
+        the reflection ``y -> -y`` if :attr:`mirror`."""
+        rotation = self.matrix[:2, :2]
+        if self.mirror:
+            rotation = rotation @ np.diag([1.0, -1.0])
+        return float(np.degrees(np.arctan2(rotation[1, 0], rotation[0, 0])))
+
+    @property
+    def shift(self) -> np.ndarray:
+        """The ``(2,)`` shift ``(dx, dy)``. Same as
+        :attr:`AffineTransform.translation`."""
+        return self.matrix[:2, 2]
+
+    def inverse(self) -> "RigidTransform":
+        # the inverse of an orthogonal matrix is exactly its transpose
+        linear = self.matrix[:2, :2].T
+        matrix = np.eye(3)
+        matrix[:2, :2] = linear
+        matrix[:2, 2] = -linear @ self.matrix[:2, 2]
+        domain = None
+        if self.domain is not None:
+            domain = _domain_of(self.apply(_corners(self.domain)))
+        return RigidTransform(matrix=matrix, domain=domain)
+
+    def compose_translations(self, pre=(0.0, 0.0), post=(0.0, 0.0)):
+        affine = super().compose_translations(pre, post)
+        return RigidTransform(matrix=affine.matrix, domain=affine.domain)
+
+    def to_dict(self) -> dict:
+        return {
+            "model": "rigid",
+            "matrix": [[float(v) for v in row] for row in self.matrix],
+            "domain": _domain_to_list(self.domain),
+        }
+
+    @property
+    def n_params(self) -> int:
+        return 3
+
+
+@dataclass(frozen=True, eq=False)
 class ProjectiveTransform(Transform):
     """An 8-DOF homography, stored as a ``(3, 3)`` matrix normalized so that
     ``matrix[2, 2] == 1`` where that is possible.
@@ -1116,6 +1257,28 @@ def _estimate_translation(
     )
 
 
+def _estimate_rigid(
+    src: np.ndarray, dst: np.ndarray, domain: np.ndarray
+) -> RigidTransform:
+    # Kabsch: the rotation from the SVD of the cross-covariance of the
+    # centered points, with its sign fixed to a proper rotation
+    src_center = src.mean(axis=0)
+    dst_center = dst.mean(axis=0)
+    src_c = src - src_center
+    if np.allclose(src_c, 0.0):
+        raise ValueError(
+            "A rigid transform is degenerate for coincident source points: "
+            "they do not fix the rotation."
+        )
+    u, _, vt = np.linalg.svd(src_c.T @ (dst - dst_center))
+    sign = 1.0 if np.linalg.det(vt.T @ u.T) >= 0 else -1.0
+    rotation = vt.T @ np.diag([1.0, sign]) @ u.T
+    matrix = np.eye(3)
+    matrix[:2, :2] = rotation
+    matrix[:2, 2] = dst_center - rotation @ src_center
+    return RigidTransform(matrix=matrix, domain=domain)
+
+
 def _estimate_affine(
     src: np.ndarray, dst: np.ndarray, domain: np.ndarray
 ) -> AffineTransform:
@@ -1299,6 +1462,8 @@ def estimate(
     domain = _domain_of(src)
     if model == "translation":
         return _estimate_translation(src, dst, domain)
+    if model == "rigid":
+        return _estimate_rigid(src, dst, domain)
     if model == "affine":
         return _estimate_affine(src, dst, domain)
     if model == "projective":
@@ -1332,6 +1497,8 @@ def identity(model: Model = "affine", domain=None) -> Transform:
     domain = None if domain is None else np.asarray(domain, dtype=np.float64)
     if model == "translation":
         return TranslationTransform(matrix=np.eye(3), domain=domain)
+    if model == "rigid":
+        return RigidTransform(matrix=np.eye(3), domain=domain)
     if model == "affine":
         return AffineTransform(matrix=np.eye(3), domain=domain)
     if model == "projective":
@@ -1385,6 +1552,8 @@ def from_dict(data) -> Transform:
     domain = None if domain is None else np.asarray(domain, dtype=np.float64)
     if model == "translation":
         return TranslationTransform.from_shift(data["shift"], domain=domain)
+    if model == "rigid":
+        return RigidTransform(matrix=data["matrix"], domain=domain)
     if model == "affine":
         return AffineTransform(matrix=data["matrix"], domain=domain)
     if model == "projective":

@@ -267,7 +267,8 @@
  ],
  "picasso.registration": [
   "calibrate_channel_registration_from_beads",
-  "calibrate_channel_registration_from_signal"
+  "calibrate_channel_registration_from_signal",
+  "register_to_template"
  ],
  "picasso.render": [
   "render",
@@ -401,6 +402,7 @@
   "MODELS",
   "Transform",
   "TranslationTransform",
+  "RigidTransform",
   "AffineTransform",
   "ProjectiveTransform",
   "PolynomialTransform",

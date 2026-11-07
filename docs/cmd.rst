@@ -464,7 +464,7 @@ described in `Camera settings`_.
    * - ``-rm``, ``--registration-model``
      - ``affine``
      - How the channels of a multichannel calibration are registered to the
-       reference: ``translation``, ``affine``, ``projective``,
+       reference: ``translation``, ``rigid``, ``affine``, ``projective``,
        ``polynomial2`` or ``polynomial3`` (see
        :ref:`localize-lateral-transform-models`). Ignored for one channel.
    * - ``-pr``, ``--photon-ratios`` (str)
@@ -542,8 +542,9 @@ The beads are identified with the same arguments as in ``picasso localize``
      - ``astigmatism`` or ``chromatic``: what the correction is for.
    * - ``-m``, ``--model``
      - ``affine``
-     - ``translation``, ``affine``, ``projective``, ``polynomial2`` or
-       ``polynomial3``, needing at least 1, 3, 4, 6 or 10 bead pairs (see
+     - ``translation``, ``rigid``, ``affine``, ``projective``,
+       ``polynomial2`` or ``polynomial3``, needing at least 1, 2, 3, 4, 6 or
+       10 bead pairs (see
        :ref:`localize-lateral-transform-models`).
    * - ``-c``, ``--calibration`` (str)
      - none

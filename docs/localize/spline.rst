@@ -283,7 +283,7 @@ If photon counts are not linked, the resulting localizations contain per-channel
 
 Picasso builds a PSF for every channel and registers each non-reference channel to the reference by a transform estimated from matching beads; the per-channel PSFs and transforms are stored in one calibration ``.hdf5``.
 
-- ``Channel registration`` in the calibration dialog chooses the transform model of the :ref:`channel registration <localize-channel-registration>` — ``translation`` (a pure xy shift), ``affine`` (the default), ``projective``, ``polynomial2`` or ``polynomial3`` — with the same trade-offs as the lateral corrections (see :ref:`localize-lateral-transform-models`).
+- ``Channel registration`` in the calibration dialog chooses the transform model of the :ref:`channel registration <localize-channel-registration>` — ``translation`` (a pure xy shift), ``rigid`` (a rotation and a shift), ``affine`` (the default), ``projective``, ``polynomial2`` or ``polynomial3`` — with the same trade-offs as the lateral corrections (see :ref:`localize-lateral-transform-models`).
 - The choice is recorded in the calibration and used automatically at fit time, where each spot is linearized about its own position.
 - Alongside the usual diagnostic plot, a ``<base>_registration.png`` is written showing how well the channels align (residuals and the decomposed shift / rotation / scale / mirror) — check it before fitting.
 

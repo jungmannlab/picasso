@@ -62,6 +62,9 @@ Transform models
 **Translation** (2 DOF, at least 1 bead pair)
    A shift in x and y and nothing else. The right choice when the two frames are known to differ only by an offset: with one free parameter per axis it is the least noise-prone of the models, and a rotation or scale it cannot absorb shows up in the residual instead of being fitted away.
 
+**Rigid** (3 DOF, at least 2 bead pairs)
+   A rotation and a shift, which keep all distances. For frames that differ in neither scale nor shear, e.g., a camera mounted at a slight angle.
+
 **Affine** (6 DOF, at least 3 bead pairs)
    Translation, rotation, scale and shear. The default, and what a well-aligned optical path does to first order.
 

@@ -111,6 +111,7 @@ Last change: 07-NOV-2026 CEST
 - Imaris `.ims` movies can now be opened on macOS and Linux, not only Windows. Exporting `.ims` files (Render's `Export ROI for Imaris`) remains Windows only. `hdf5plugin` is now installed on all platforms.
 - Magnification factor calculation, as of Loginov et al. (*Optica* 2024), see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/3d-calibration.html#localize-magnification-factor).
 - Automatic min. net gradient, see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html#localize-estimate-min-net-gradient).
+- New rigid transform model (3 DOF, a rotation and a shift, at least 2 bead pairs), offered wherever Picasso fits a geometric transform, see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/lateral-correction.html#localize-lateral-transform-models).
 - Every calibration records how its spots were identified, under `Identification`.
 - Customizable scale bar, see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html).
 - Fixed: ratiometric multichannel spline fitting ignored the per-pixel sCMOS variance of the camera calibration.
@@ -163,6 +164,7 @@ The [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html)
 
 ### Others
 - Many plots are now customizable.
+- `picasso.registration.register_to_template` registers points onto a template without known correspondences, e.g., the docking sites resolved in a DNA origami onto its design, with a rigid transform that tolerates missing and extra points and may reflect.
 - Customizable scale bar, see the [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html). The structure preview can now print the length of its scale bar.
 - High contrast (`File > Appearance... > Contrast`): black and white text and backgrounds, and frames in the color of the text around buttons, input fields and tables. By default it follows macOS's *Increase contrast* and Windows' contrast themes. See the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#appearance).
 - Screen readers (VoiceOver, Narrator, Orca) announce the input fields of all Picasso windows by their labels, fields in tables by their column and icon-only buttons by their tooltip. See the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#accessibility). Note this is an experimental feature, if there is room for improvement, please raise a [GitHub issue](https://github.com/jungmannlab/picasso/issues)
