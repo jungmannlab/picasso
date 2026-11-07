@@ -169,6 +169,7 @@
   "identify",
   "identify_in_frame",
   "identify_by_frame_number",
+  "estimate_min_net_gradient",
   "clip_rois",
   "add_roi_id",
   "get_spots",

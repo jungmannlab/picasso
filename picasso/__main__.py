@@ -1907,6 +1907,79 @@ def _identification_method_from_args(
     return NetGradient(min_net_gradient)
 
 
+#: ``--gradient`` value that estimates the minimum net gradient of each
+#: movie (see ``_localize_auto_gradient``)
+_AUTO_GRADIENT = "auto"
+
+
+def _gradient_arg(value: str) -> int | str:
+    """``--gradient`` of ``picasso localize``: a minimum net gradient or
+    'auto'."""
+    if value.strip().lower() == _AUTO_GRADIENT:
+        return _AUTO_GRADIENT
+    try:
+        return int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"invalid value: {value!r} (an integer or 'auto')"
+        ) from None
+
+
+def _localize_auto_gradient(
+    movie,
+    args: argparse.Namespace,
+    box: int,
+    min_net_gradient: int | str | list,
+    roi,
+    frame_bounds,
+) -> int | str | list:
+    """``min_net_gradient`` with every ``--gradient auto`` replaced by
+    the estimate of ``localize.estimate_min_net_gradient`` for this
+    movie, as Localize's 'Estimate' button makes it: on the movie the
+    identification searches (filtered), within the ROIs and the frame
+    bounds. A single 'auto' is estimated in all ROIs; with one value
+    per ROI, each in its own. Left as is when the net gradient is not
+    used (wavelet identification, or the multi-emitter fit without
+    ``--seed-identification``)."""
+    from . import localize
+
+    values = (
+        list(min_net_gradient)
+        if isinstance(min_net_gradient, list)
+        else [min_net_gradient]
+    )
+    if _AUTO_GRADIENT not in values:
+        return min_net_gradient
+    if _wavelet_from_args(args) is not None or (
+        args.multi_emitter and not getattr(args, "seed_identification", False)
+    ):
+        return min_net_gradient
+    # the filter settings; the threshold plays no part in the filters
+    parameters = _identification_parameters_from_args(args, box, 0)
+    filtered = localize._identification_filtered_movie(movie, parameters, roi)
+    for index, value in enumerate(values):
+        if value != _AUTO_GRADIENT:
+            continue
+        region = roi if len(values) == 1 else [roi[index]]
+        result = localize.estimate_min_net_gradient(
+            filtered,
+            box=box,
+            roi=region,
+            frame_bounds=frame_bounds,
+            progress="console",
+        )
+        # rounded and at least 0, like the value the button sets
+        values[index] = max(int(round(result["min_net_gradient"])), 0)
+        where = "" if len(values) == 1 else f" (ROI {index + 1})"
+        print(
+            f"Min. net gradient estimated{where}: {values[index]} "
+            f"(background peak {result['background']:.0f}, width "
+            f"{result['background_width']:.0f}; "
+            f"{len(result['frames'])} frames)"
+        )
+    return values if isinstance(min_net_gradient, list) else values[0]
+
+
 def _identification_parameters_from_args(
     args: argparse.Namespace,
     box: int,
@@ -2151,9 +2224,10 @@ def _localize_process_file(
         Parsed ``picasso localize`` arguments.
     box : int
         Side length of the fitting box in camera pixels.
-    min_net_gradient : float or list of float
+    min_net_gradient : float, "auto" or list of them
         Minimum net gradient for identification; one value per ROI
-        region if a list.
+        region if a list. "auto" is estimated for each movie (see
+        ``_localize_auto_gradient``).
     roi : list or None
         ROI regions, each ``[[y_min, x_min], [y_max, x_max]]``, or None
         for the whole frame.
@@ -2272,6 +2346,9 @@ def _localize_movie(
     print(f"Camera pixel size: {cam_info['Pixelsize']:g} nm")
     z_params, lateral_transforms = _localize_legacy_calibrations(
         args, z_params, lateral_transforms, cam_info["Pixelsize"]
+    )
+    min_net_gradient = _localize_auto_gradient(
+        movie, args, box, min_net_gradient, roi, frame_bounds
     )
     if args.multi_emitter:
         return [
@@ -2823,8 +2900,9 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
           ``'mle'``, ``'lq-3d'`` or ``'lq-gpu-3d'``; one per ROI region
           with ``regions_separately``.
         - ``box_side_length`` (int): side length of the fitting box.
-        - ``gradient`` (list of float): minimum net gradient(s), one per
-          ROI region or a single one for all.
+        - ``gradient`` (list of int or "auto"): minimum net gradient(s),
+          one per ROI region or a single one for all; "auto" estimates
+          it for each movie.
         - ``roi`` (list of list of int): regions of interest, each
           ``[y_min, x_min, y_max, x_max]``.
         - ``frame_bounds`` (list of list of int): one or more
@@ -4128,13 +4206,16 @@ def _build_parser() -> (
     localize_parser.add_argument(
         "-g",
         "--gradient",
-        type=int,
+        type=_gradient_arg,
         action="append",
         default=None,
         help=(
-            "minimum net gradient (default 5000). May be given once per "
-            "--roi, since regions imaged through different optics need not "
-            "share a brightness scale"
+            "minimum net gradient (default 5000), or 'auto' to estimate it "
+            "for each movie from its background (the local maxima of 40 "
+            "frames; see localize.estimate_min_net_gradient). May be given "
+            "once per --roi, since regions imaged through different optics "
+            "need not share a brightness scale; an 'auto' is then estimated "
+            "in its own region"
         ),
     )
     localize_parser.add_argument(

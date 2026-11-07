@@ -6521,8 +6521,9 @@ def batch_analysis(
         distance (NND) histogram (plotting only).
 
     Depending on whether a homo- or heterogeneous (masked) distribution
-    is used, the following columns must be present:
-    * For homogeneous distribution:
+    is used, the following columns must be present.
+
+    For a homogeneous distribution:
 
     - "area" or "volume" : Area (2D simulation) or volume (3D
         simulation) of the simulated ROI (um^2 or um^3). For 2D rows,
@@ -6532,7 +6533,8 @@ def batch_analysis(
     - "z_range" : Applicable only when "volume" is provided. Defines
         the range of z coordinates (nm) of simulated molecular targets.
 
-    * For heterogeneous distribution:
+    For a heterogeneous distribution:
+
     - "mask_filename_TARGET" : Name of the .npy file with the mask saved for
         each molecular target. Each target in the structures must have
         a corresponding column, for example, "mask_EGFR".

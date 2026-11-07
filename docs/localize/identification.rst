@@ -33,6 +33,7 @@ Identification and fitting of single-molecule spots
    - The box must contain the entire single-emitter image, since the fit only sees the pixels inside it. A cut-off spot biases the fitted photons, PSF σ and localization precision.
    - The value of ``Min. net gradient`` specifies a minimum threshold above which spots should be considered for fitting. The net gradient sums, over the box, how steeply the intensity rises towards the spot's center. It is proportional to the spot's brightness above the background (in camera counts) and also grows with sharper spots and larger boxes.
    - By checking ``Preview``, the spots identified with the current settings will be marked in the displayed frame. Adjust ``Min. net gradient`` to a value at which only spots are detected (no background).
+   - ``Estimate``, next to ``Min. net gradient``, sets a starting value from the background of the movie; see :ref:`localize-estimate-min-net-gradient`.
    - Alternatively, select ``B-spline wavelet`` as the ``Method`` to identify spots by wavelet segmentation, with a threshold in units of the noise instead of the net gradient; see :ref:`localize-wavelet`.
 
 5. (Optional) Tick ``Temporal median filter`` in the ``Identification`` group to subtract a rolling per-pixel background before spots are identified; see :ref:`localize-temporal-median-filter`.
@@ -109,6 +110,48 @@ Hovering the mouse cursor over a fit marker or over an identification box shows 
           progress="console",
       )
       io.save_locs("movie_locs.hdf5", locs, locs_info)
+
+
+.. _localize-estimate-min-net-gradient:
+
+Estimating the min. net gradient
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``Estimate``, next to ``Min. net gradient``, sets the threshold from the background of the movie:
+
+1. The local maxima of 40 frames, evenly spaced over the movie, are identified with a min. net gradient of -3000, low enough to include the maxima of the background, without a spot.
+2. Their net gradients form a peak at the background. Its width is measured on its lower side, which the spots do not reach.
+3. ``Min. net gradient`` is set 5 widths above that peak.
+
+The estimate searches what the identification searches: the movie after the identification filters, within the ROIs and the frames set in ``Frames (min,max)``. With several channels, it searches the displayed one (or the channel sum, when identifying on it). In split-FOV mode (``Regions = channels``), the selected region's threshold is estimated from that region alone; with no region selected, every region's threshold is set from all of them.
+
+The estimate is a starting point: check it with ``Preview`` and adjust it if needed.
+
+On the command line, ``picasso localize --gradient auto`` estimates it for each movie; see :ref:`cmd-localize-auto-gradient`.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``estimate_min_net_gradient`` returns the estimate together with the
+   background peak, its width, the frames used and the histogram of the
+   net gradients. ``frames``, ``roi`` and ``frame_bounds`` set what it
+   searches.
+
+   .. code-block:: python
+
+      from picasso import io, localize
+
+      movie, info = io.load_movie("movie.tif")
+      result = localize.estimate_min_net_gradient(movie, box=7)
+      print(result["min_net_gradient"], result["background"])
+
+      parameters = localize.IdentificationParameters(
+          method=localize.NetGradient(result["min_net_gradient"]), box=7
+      )
+      identifications, ids_info = localize.identify(
+          movie, info, parameters=parameters
+      )
 
 
 .. _localize-remembered-parameters:

@@ -4866,6 +4866,9 @@ class ParametersDialog(lib.Dialog):
     max_it : QtWidgets.QSpinBox
         Spin box for selecting the max. number of iterations. Only used
         for MLE fitting.
+    mng_estimate_button : QtWidgets.QPushButton
+        Button that estimates the minimum net gradient from the movie
+        and puts it on ``mng_spinbox``.
     mng_min_spinbox : QtWidgets.QSpinBox
         Spin box for selecting the minimum net gradient (lower bound).
     mng_max_spinbox : QtWidgets.QSpinBox
@@ -5046,7 +5049,22 @@ class ParametersDialog(lib.Dialog):
         self.mng_spinbox.setValue(DEFAULT_PARAMETERS["Min. Net Gradient"])
         self.mng_spinbox.setKeyboardTracking(False)
         self.mng_spinbox.valueChanged.connect(self.on_mng_spinbox_changed)
-        mng_grid.addWidget(self.mng_spinbox, 0, 1)
+        mng_row = QtWidgets.QHBoxLayout()
+        mng_row.addWidget(self.mng_spinbox, 1)
+        # see localize.estimate_min_net_gradient
+        self.mng_estimate_button = QtWidgets.QPushButton("Estimate")
+        self.mng_estimate_button.setToolTip(
+            "Estimate the min. net gradient from the background of the\n"
+            "movie: the local maxima of 40 frames are identified with a\n"
+            "min. net gradient of -3000, and the threshold is set 5 widths\n"
+            "above the peak their net gradients form without a spot.\n\n"
+            "Searches what the identification searches: the filtered\n"
+            "movie, the ROIs (in split-FOV mode the selected region, or\n"
+            "every region when none is selected) and the frame range."
+        )
+        self.mng_estimate_button.clicked.connect(self.on_estimate_mng_clicked)
+        mng_row.addWidget(self.mng_estimate_button)
+        mng_grid.addLayout(mng_row, 0, 1)
 
         # Slider
         self.mng_slider = QtWidgets.QSlider()
@@ -7574,6 +7592,11 @@ class ParametersDialog(lib.Dialog):
         if value > self.mng_slider.maximum():
             self.mng_max_spinbox.setValue(value)
         self.mng_slider.setValue(value)
+
+    def on_estimate_mng_clicked(self) -> None:
+        """Estimate the min. net gradient, see
+        ``Window.estimate_min_net_gradient``."""
+        self.window.estimate_min_net_gradient()
 
     def on_mng_slider_changed(self, value: int) -> None:
         """Handle change to the min. net gradient slider."""
@@ -12774,6 +12797,69 @@ class Window(QtWidgets.QMainWindow):
         mngs += [int(default)] * (len(view.rois) - len(mngs))
         view.roi_mngs = mngs
         return mngs
+
+    def estimate_min_net_gradient(self) -> None:
+        """Estimate the min. net gradient from the background of the movie
+        (see ``localize.estimate_min_net_gradient``) and put it on the
+        Parameters dialog's spin box.
+
+        The estimate searches what the identification searches: the
+        identification movie (filtered, or the channel sum), within the
+        ROIs and the frame range. In split-FOV mode a selected region is
+        searched alone, since the spin box then holds that region's own
+        threshold; with none selected, the value goes to every region, so
+        every region is searched. The spin box stores the value wherever a
+        typed one would go (see ``ParametersDialog.on_mng_slider_changed``).
+        """
+        title = "Estimate min. net gradient"
+        if self.movie is None:
+            QtWidgets.QMessageBox.information(self, title, "No movie loaded.")
+            return
+        movie = self.identification_movie()
+        rois = self.identification_rois()
+        index = self.view.selected_roi
+        if (
+            self.view.split_fov_mode
+            and self.identify_mode() not in IDENTIFY_SUM_MODES
+            and index is not None
+            and index < len(rois)
+        ):
+            rois = [rois[index]]
+        box = self.parameters_dialog.box_spinbox.value()
+        frame_bounds = self.frame_range
+
+        def compute(progress: lib.TaskProgress) -> dict:
+            return localize.estimate_min_net_gradient(
+                movie,
+                box=box,
+                roi=rois,
+                frame_bounds=frame_bounds,
+                progress=progress,
+            )
+
+        def apply(result: dict) -> None:
+            value = max(int(round(result["min_net_gradient"])), 0)
+            self.parameters_dialog.mng_spinbox.setValue(value)
+            self.status_bar.showMessage(
+                f"Min. net gradient estimated: {value:,} (background peak "
+                f"{result['background']:,.0f}, width "
+                f"{result['background_width']:,.0f}; "
+                f"{len(result['frames'])} frames)."
+            )
+
+        def failed(error: Exception) -> None:
+            if isinstance(error, ValueError):
+                QtWidgets.QMessageBox.warning(self, title, str(error))
+            else:  # unexpected, report as usual
+                sys.excepthook(type(error), error, error.__traceback__)
+
+        lib.run_task(
+            compute,
+            "Estimating the min. net gradient",
+            self,
+            apply,
+            on_failed=failed,
+        )
 
     def _shared_identification_method(self) -> localize.IdentificationMethod:
         """The identification method of the Parameters dialog with its

@@ -165,6 +165,22 @@ channel per gate. Each channel is localized into its own
 
    picasso localize scan.ptu --frame-sum-window 20 --microtime-gate 0 25 --microtime-gate 25 50
 
+.. _cmd-localize-auto-gradient:
+
+Estimating the minimum net gradient
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``--gradient auto`` (``-g auto``) estimates the minimum net gradient of each
+movie from its background, as ``Estimate`` in the ``Parameters`` dialog does
+(see :ref:`localize-estimate-min-net-gradient`). The estimate searches the
+movie after the pre-filters, within ``--roi`` and ``--frame-bounds``. It is
+printed and saved as ``Min. Net Gradient`` in the metadata. With one
+``--gradient`` per ``--roi``, each ``auto`` is estimated in its own region:
+
+.. code-block:: bash
+
+   picasso localize movie.tif -g auto
+   picasso localize movie.tif --roi 0 0 512 256 --roi 0 256 512 512 -g auto -g auto -rs
+
 Pre-filters
 ~~~~~~~~~~~
 ``--temporal-median``

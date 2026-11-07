@@ -1778,3 +1778,137 @@ def test_localize_multi_emitter_refuses(tmp_path, monkeypatch, options):
             "-px",
             160,
         )
+
+
+class _FakeEstimate:
+    """Records the calls to ``localize.estimate_min_net_gradient`` and
+    returns a fixed estimate."""
+
+    def __init__(self, monkeypatch, value=1234.4):
+        from picasso import localize
+
+        self.calls = []
+        self.value = value
+        monkeypatch.setattr(localize, "estimate_min_net_gradient", self)
+
+    def __call__(self, movie, **kwargs):
+        self.calls.append((movie, kwargs))
+        return {
+            "min_net_gradient": self.value,
+            "background": 100.0,
+            "background_width": 50.0,
+            "frames": np.arange(40),
+        }
+
+
+def _min_net_gradient(path):
+    """The minimum net gradient the localizations at ``path`` were
+    identified with."""
+    _, info = io.load_locs(_out(path, "_locs.hdf5"))
+    return next(e for e in info if "Min. Net Gradient" in e)[
+        "Min. Net Gradient"
+    ]
+
+
+class TestLocalizeAutoGradient:
+    def test_auto_or_an_integer(self):
+        import argparse
+
+        assert cli._gradient_arg("auto") == "auto"
+        assert cli._gradient_arg(" Auto ") == "auto"
+        assert cli._gradient_arg("3000") == 3000
+        with pytest.raises(argparse.ArgumentTypeError, match="'auto'"):
+            cli._gradient_arg("fast")
+
+    def test_the_estimate_of_the_movie_is_used(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from picasso import localize
+
+        path = _copy_testdata(tmp_path)
+        movie, _ = io.load_movie(path)
+        estimate = localize.estimate_min_net_gradient(movie, box=7)
+        expected = round(estimate["min_net_gradient"])
+        _picasso(
+            monkeypatch, "localize", path, "-g", "auto", "-d", 0, "-px", 160
+        )
+        assert _min_net_gradient(path) == expected
+        assert f"Min. net gradient estimated: {expected} " in (
+            capsys.readouterr().out
+        )
+
+    def test_one_per_roi_is_estimated_in_its_own_roi(
+        self, tmp_path, monkeypatch
+    ):
+        fake = _FakeEstimate(monkeypatch)
+        path = _copy_testdata(tmp_path)
+        _picasso(
+            monkeypatch,
+            "localize",
+            path,
+            "--roi", 0, 0, 32, 16,
+            "--roi", 0, 16, 32, 32,
+            "-g", "auto",
+            "-g", 3000,
+            "-fb", 10, 59,
+            "-d", 0,
+            "-px", 160,
+        )  # fmt: skip
+        ((_, kwargs),) = fake.calls
+        assert kwargs["roi"] == [[[0, 0], [32, 16]]]
+        assert kwargs["frame_bounds"] == [[10, 59]]
+        assert kwargs["box"] == 7
+        assert _min_net_gradient(path) == [1234, 3000]
+
+    def test_a_single_one_is_estimated_in_all_rois(
+        self, tmp_path, monkeypatch
+    ):
+        fake = _FakeEstimate(monkeypatch)
+        path = _copy_testdata(tmp_path)
+        _picasso(
+            monkeypatch,
+            "localize",
+            path,
+            "--roi", 0, 0, 32, 16,
+            "--roi", 0, 16, 32, 32,
+            "-g", "auto",
+            "-d", 0,
+            "-px", 160,
+        )  # fmt: skip
+        ((_, kwargs),) = fake.calls
+        assert kwargs["roi"] == [[[0, 0], [32, 16]], [[0, 16], [32, 32]]]
+        assert _min_net_gradient(path) == 1234
+
+    def test_the_filtered_movie_is_searched(self, tmp_path, monkeypatch):
+        from picasso import localize
+
+        fake = _FakeEstimate(monkeypatch)
+        path = _copy_testdata(tmp_path)
+        _picasso(
+            monkeypatch,
+            "localize",
+            path,
+            "-g", "auto",
+            "--gaussian-filter", 1.0,
+            "-d", 0,
+            "-px", 160,
+        )  # fmt: skip
+        ((movie, _),) = fake.calls
+        assert isinstance(movie, localize.GaussianFilteredMovie)
+
+    def test_not_estimated_for_the_wavelet_identification(
+        self, tmp_path, monkeypatch
+    ):
+        fake = _FakeEstimate(monkeypatch)
+        path = _copy_testdata(tmp_path)
+        _picasso(
+            monkeypatch,
+            "localize",
+            path,
+            "-g", "auto",
+            "--identification-method", "wavelet",
+            "-d", 0,
+            "-px", 160,
+        )  # fmt: skip
+        assert fake.calls == []
+        assert os.path.exists(_out(path, "_locs.hdf5"))

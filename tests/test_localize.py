@@ -568,6 +568,121 @@ class TestAddRoiId:
 
 
 # ---------------------------------------------------------------------------
+# estimate_min_net_gradient
+# ---------------------------------------------------------------------------
+
+
+def _noisy_spot_movie(n_frames, n_spots, amplitude=600.0, seed=0):
+    """Frames of Poisson background (mean 200) with ``n_spots`` Gaussian
+    spots each, away from the edges."""
+    rng = np.random.default_rng(seed)
+    shape = (64, 64)
+    frames = []
+    for _ in range(n_frames):
+        spots = [
+            (x, y, amplitude) for x, y in rng.uniform(6, 58, size=(n_spots, 2))
+        ]
+        mean = _spots_frame(shape, spots, background=200.0)
+        frames.append(rng.poisson(mean).astype(np.uint16))
+    return np.stack(frames)
+
+
+class TestEstimateMinNetGradient:
+    def test_background_peak_and_width(self):
+        """A Gaussian background (sd 200 around 1000) and a flat tail
+        of spots: the peak is found at the mean, the width is sqrt(2)
+        times the standard deviation, and the estimate is 5 widths
+        above the peak."""
+        rng = np.random.default_rng(1)
+        net_gradients = np.concatenate(
+            [rng.normal(1000, 200, 200_000), rng.uniform(2000, 20000, 5000)]
+        )
+        result = localize._background_peak_threshold(
+            net_gradients, -3000.0, 5.0
+        )
+        bin_width = result["bin_edges"][1] - result["bin_edges"][0]
+        assert result["background"] == pytest.approx(1000, abs=bin_width)
+        assert result["background_width"] == pytest.approx(
+            np.sqrt(2) * 200, abs=2 * bin_width
+        )
+        assert result["min_net_gradient"] == pytest.approx(
+            result["background"] + 5 * result["background_width"],
+            abs=bin_width,
+        )
+
+    def test_estimate_separates_spots_from_noise(self):
+        n_spots = 8
+        movie = _noisy_spot_movie(40, n_spots)
+        result = localize.estimate_min_net_gradient(movie, box=7)
+        method = localize.NetGradient(result["min_net_gradient"])
+        found = [
+            len(localize.identify_by_frame_number(movie, method, 7, f))
+            for f in range(len(movie))
+        ]
+        # the spots (some may overlap) and hardly any noise
+        assert np.mean(found) == pytest.approx(n_spots, abs=1)
+        noise = _noisy_spot_movie(10, 0, seed=2)
+        found = [
+            len(localize.identify_by_frame_number(noise, method, 7, f))
+            for f in range(len(noise))
+        ]
+        assert sum(found) <= 2
+
+    def test_frames_are_sampled_as_in_picasso_workflow(self):
+        movie = _noisy_spot_movie(30, 2)
+        result = localize.estimate_min_net_gradient(movie, box=7, frames=8)
+        # every int(30 / 7) = 4th frame from the first on
+        np.testing.assert_array_equal(result["frames"], np.arange(0, 30, 4))
+        result = localize.estimate_min_net_gradient(
+            movie, box=7, frames=[3, 5, 8]
+        )
+        np.testing.assert_array_equal(result["frames"], [3, 5, 8])
+        # a shorter movie is used whole
+        result = localize.estimate_min_net_gradient(movie[:5], box=7)
+        np.testing.assert_array_equal(result["frames"], np.arange(5))
+
+    def test_frames_are_sampled_within_the_frame_bounds(self):
+        movie = _noisy_spot_movie(30, 2)
+        result = localize.estimate_min_net_gradient(
+            movie, box=7, frames=4, frame_bounds=(10, 19)
+        )
+        # every int(10 / 3) = 3rd of the frames 10 to 19
+        np.testing.assert_array_equal(result["frames"], [10, 13, 16, 19])
+        result = localize.estimate_min_net_gradient(
+            movie, box=7, frame_bounds=[(0, 2), (27, None)]
+        )
+        np.testing.assert_array_equal(result["frames"], [0, 1, 2, 27, 28, 29])
+
+    def test_only_the_rois_are_searched(self):
+        """Spots in the left half of the frames only: the net gradients
+        histogrammed for the right half (up to their 99.95% quantile)
+        stay at the background."""
+        rng = np.random.default_rng(0)
+        frames = []
+        for _ in range(10):
+            spots = zip(rng.uniform(6, 24, 8), rng.uniform(6, 58, 8))
+            mean = _spots_frame(
+                (64, 64), [(x, y, 600.0) for x, y in spots], background=200.0
+            )
+            frames.append(rng.poisson(mean).astype(np.uint16))
+        movie = np.stack(frames)
+        left = localize.estimate_min_net_gradient(
+            movie, box=7, roi=((0, 0), (64, 32))
+        )
+        right = localize.estimate_min_net_gradient(
+            movie, box=7, roi=[((0, 32), (64, 64))]
+        )
+        assert right["bin_edges"][-1] < 0.1 * left["bin_edges"][-1]
+
+    def test_without_local_maxima_raises(self):
+        movie = _noisy_spot_movie(3, 0)
+        with pytest.raises(ValueError, match="No local maxima"):
+            localize.estimate_min_net_gradient(
+                movie, box=7, start_net_gradient=1e9
+            )
+
+
+# ---------------------------------------------------------------------------
 # resolve_fit_method
 # ---------------------------------------------------------------------------
 

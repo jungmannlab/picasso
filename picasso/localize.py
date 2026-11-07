@@ -100,6 +100,7 @@ __all__ = [
     "identify",
     "identify_in_frame",
     "identify_by_frame_number",
+    "estimate_min_net_gradient",
     "clip_rois",
     "add_roi_id",
     "get_spots",
@@ -2540,6 +2541,34 @@ def _identify_serial(
     return ids
 
 
+def _identification_filtered_movie(
+    movie: MovieLike,
+    parameters: IdentificationParameters,
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None,
+) -> MovieLike:
+    """``movie`` as :func:`identify` searches it: temporal median
+    filtered and then Gaussian smoothed, as ``parameters`` set (lazy
+    views; the movie itself without filters). The temporal median is
+    computed only within ``roi`` (with a margin)."""
+    if parameters.temporal_median_window:
+        movie = TemporalMedianMovie(
+            movie,
+            parameters.temporal_median_window,
+            stride=parameters.temporal_median_stride,
+            roi=roi,
+            roi_pad=identification_roi_pad(
+                parameters.box,
+                parameters.gaussian_filter_sigma,
+                parameters.method,
+            ),
+        )
+    # temporal median first, then smoothing: the Gaussian is meant to merge
+    # the maxima of one spot, not those of the background it sits on
+    if parameters.gaussian_filter_sigma:
+        movie = GaussianFilteredMovie(movie, parameters.gaussian_filter_sigma)
+    return movie
+
+
 def identify(
     movie: MovieLike,
     info: list[dict] | None = None,
@@ -2683,23 +2712,9 @@ def identify(
     if window is not None:
         movie = CroppedMovie(movie, window)
         search_roi = _roi_in_window(roi, window)
-    roi_pad = identification_roi_pad(
-        box, parameters.gaussian_filter_sigma, method
-    )
-    if parameters.temporal_median_window:
-        # note that identify_async() is not wrapped: callers driving the
-        # thread pool themselves build the filtered views explicitly
-        movie = TemporalMedianMovie(
-            movie,
-            parameters.temporal_median_window,
-            stride=parameters.temporal_median_stride,
-            roi=search_roi,
-            roi_pad=roi_pad,
-        )
-    # temporal median first, then smoothing: the Gaussian is meant to merge
-    # the maxima of one spot, not those of the background it sits on
-    if parameters.gaussian_filter_sigma:
-        movie = GaussianFilteredMovie(movie, parameters.gaussian_filter_sigma)
+    # note that identify_async() is not wrapped: callers driving the
+    # thread pool themselves build the filtered views explicitly
+    movie = _identification_filtered_movie(movie, parameters, search_roi)
     with lib.tracked_progress(
         progress, "Identifying spots", unit="frame"
     ) as progress:
@@ -2751,6 +2766,171 @@ def identify(
         entry["Sum Interpolation Order"] = summed.order
         entry["Sum In Photons"] = summed.camera_infos is not None
     return ids, lib.append_metadata(info, entry)
+
+
+def _sample_frame_numbers(n_frames: int, n_sample: int) -> lib.IntArray1D:
+    """``n_sample`` frames evenly spaced from the first frame on (one
+    more if the spacing does not divide the movie evenly), as
+    picasso-workflow samples them; all frames of a shorter movie."""
+    n_sample = min(n_sample, n_frames)
+    if n_sample < 2:
+        return np.arange(n_frames)
+    step = int(n_frames / (n_sample - 1))
+    return np.arange(0, n_frames, step)
+
+
+def _background_peak_threshold(
+    net_gradients: lib.FloatArray1D,
+    start_net_gradient: float,
+    zscore: float,
+) -> dict:
+    """The histogram analysis of :func:`estimate_min_net_gradient` on the
+    net gradients of the local maxima."""
+    high = np.quantile(net_gradients, 0.9995)
+    bins = np.linspace(start_net_gradient, high, num=500)
+    hist, edges = np.histogram(net_gradients, bins=bins, density=True)
+    # the background peak is assumed to be the highest; its width is
+    # taken from its lower half, which spots do not reach
+    peak_height, peak = np.max(hist), int(np.argmax(hist))
+    half_below = np.argsort(np.abs(hist[:peak] - peak_height / 2))
+    if len(half_below) == 0:
+        half_below = [peak - 1]
+    fwhm = 2 * np.abs(peak - half_below[0])  # in bins
+    width = fwhm / np.sqrt(4 * np.log(2))  # in bins
+    threshold = min(int(zscore * width) + peak, len(edges) - 1)
+    return {
+        "min_net_gradient": float(edges[threshold]),
+        "background": float(edges[peak]),
+        "background_width": float(width * (edges[1] - edges[0])),
+        "histogram": hist,
+        "bin_edges": edges,
+    }
+
+
+def estimate_min_net_gradient(
+    movie: MovieLike,
+    *,
+    box: int,
+    frames: int | list[int] = 40,
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
+    frame_bounds: tuple[int, int] | list | None = None,
+    zscore: float = 5.0,
+    start_net_gradient: float = -3000.0,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> dict:
+    """Estimate the minimum net gradient that separates spots from the
+    background, from the net gradients of the local maxima of a sample
+    of frames.
+
+    The local maxima are identified with a minimum net gradient of
+    ``start_net_gradient`` (see :class:`NetGradient`), low enough to
+    include those of the background, i.e., without a spot. Their net
+    gradients are histogrammed in 500 bins from ``start_net_gradient``
+    to their 99.95% quantile. The highest bin is taken as the peak of
+    the background, which is assumed to be Gaussian. Its width is found
+    from the lower half of the peak, which spots do not reach: w = FWHM
+    / sqrt(4 ln 2), where the full width at half maximum, FWHM, is twice
+    the distance from the peak to the bin below it whose height is
+    closest to half the peak's (w is sqrt(2) times the standard
+    deviation of a Gaussian). The estimate is ``zscore`` widths above
+    the background peak, at a bin edge.
+
+    The method was written by Heinrich Grabmayr for picasso-workflow
+    (https://github.com/jungmannlab/picasso-workflow).
+
+    Parameters
+    ----------
+    movie : MovieLike
+        The movie, (N, Y, X), in camera counts as it is identified.
+    box : int
+        Size of the box used for calculating the net gradient (odd), as
+        in the identification.
+    frames : int or list of int, optional
+        The number of frames to sample, evenly spaced from the first
+        frame on (one more if the spacing does not divide the movie
+        evenly; all frames of a shorter movie), or the frame numbers.
+        Default is 40.
+    roi : tuple or list of tuples, optional
+        Region(s) of interest to search, as in :func:`identify`. If
+        None, the entire frame is searched. Default is None.
+    frame_bounds : tuple or list of tuples, optional
+        Frame range(s) to sample the frames from, as in
+        :func:`identify`; only used when ``frames`` is a number. If
+        None, all frames are sampled from. Default is None.
+    zscore : float, optional
+        Number of background widths above the background peak at which
+        the minimum net gradient is set. Default is 5.0.
+    start_net_gradient : float, optional
+        Lowest net gradient of the local maxima that are included,
+        below the background. Default is -3000.0.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase over the frames.
+        Default is None.
+
+    Returns
+    -------
+    result : dict
+        "min_net_gradient" (the estimate), "background" (net gradient of
+        the background peak), "background_width" (w, see above),
+        "frames" (the frame numbers used), "histogram" (density of the
+        net gradients in each bin) and "bin_edges".
+
+    Raises
+    ------
+    ValueError
+        If no local maxima are found in the frames.
+    """
+    if isinstance(frames, (int, np.integer)):
+        n_frames = len(movie)
+        segments = lib.normalize_frame_bounds(frame_bounds, n_frames)
+        if segments is None:
+            candidates = np.arange(n_frames)
+        else:
+            candidates = np.unique(
+                np.concatenate(
+                    [
+                        np.arange(max(lo, 0), min(hi, n_frames - 1) + 1)
+                        for lo, hi in segments
+                    ]
+                )
+            )
+        frame_numbers = candidates[
+            _sample_frame_numbers(len(candidates), int(frames))
+        ]
+    else:
+        frame_numbers = np.asarray(frames, dtype=int)
+    method = NetGradient(start_net_gradient)
+    net_gradients = []
+    with lib.tracked_progress(
+        progress, "Estimating the min. net gradient", unit="frame"
+    ) as progress:
+        lib.start_phase(
+            progress,
+            "Estimating the min. net gradient",
+            len(frame_numbers),
+            unit="frame",
+        )
+        for i, frame_number in enumerate(frame_numbers):
+            ids = identify_by_frame_number(
+                movie, method, box, int(frame_number), roi=roi
+            )
+            net_gradients.append(ids["net_gradient"].to_numpy(np.float64))
+            progress.set_value(i + 1)
+    net_gradients = (
+        np.concatenate(net_gradients) if net_gradients else np.empty(0)
+    )
+    if net_gradients.size == 0:
+        raise ValueError(
+            "No local maxima were found in the frames, so the minimum net "
+            "gradient cannot be estimated."
+        )
+    result = _background_peak_threshold(
+        net_gradients, start_net_gradient, zscore
+    )
+    result["frames"] = frame_numbers
+    return result
 
 
 def wavelet_from_parameters(
