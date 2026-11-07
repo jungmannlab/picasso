@@ -14,16 +14,36 @@ not used directly to avoid extra dependencies. License (BSD-2-Clause):
 """
 
 from __future__ import annotations
+from collections.abc import Iterator
 from typing import Literal
 
+import numba
 import numpy as np
 import pandas as pd
 from scipy import ndimage as ndi
+from scipy.spatial import KDTree
 from statsmodels.nonparametric.smoothers_lowess import lowess as loess
 
 from . import lib, render
 
-__all__ = ["mask_locs", "generate_image", "mask_image", "binary_mask"]
+__all__ = [
+    "mask_locs",
+    "generate_image",
+    "mask_image",
+    "binary_mask",
+    "label_components",
+    "keep_components",
+    "fill_holes",
+    "erode",
+    "dilate",
+    "mask_to_polygons",
+]
+
+#: Connectivity of the regions of a mask: pixels touching at an edge or
+#: a corner belong to the same region
+_CONNECTIVITY = np.ones((3, 3), dtype=bool)
+
+_point_segment_distance_sq = lib._point_segment_distance_sq
 
 
 def mask_locs(
@@ -235,6 +255,500 @@ def mask_image(
     threshold = function(image)
     mask = binary_mask(image, threshold)
     return mask, threshold
+
+
+def label_components(
+    mask: lib.BoolArray2D,
+) -> tuple[lib.IntArray2D, lib.IntArray1D]:
+    """Label the connected regions of a binary mask, e.g., the cells,
+    largest first. Pixels touching at an edge or a corner belong to the
+    same region.
+
+    Parameters
+    ----------
+    mask : lib.BoolArray2D
+        Binary mask, True (or nonzero) inside.
+
+    Returns
+    -------
+    labels : lib.IntArray2D
+        Region of each pixel: 0 outside the mask, 1 for the largest
+        region, 2 for the second largest, etc.
+    sizes : lib.IntArray1D
+        Number of pixels of each region, in the order of the labels
+        (``sizes[0]`` of region 1).
+    """
+    labels, n_regions = ndi.label(np.asarray(mask, dtype=bool), _CONNECTIVITY)
+    sizes = np.bincount(labels.ravel(), minlength=n_regions + 1)[1:]
+    # largest first; ties in the order of the first pixel
+    order = np.argsort(-sizes, kind="stable")
+    relabel = np.zeros(n_regions + 1, dtype=np.int64)
+    relabel[order + 1] = np.arange(1, n_regions + 1)
+    return relabel[labels], sizes[order]
+
+
+def keep_components(
+    mask: lib.BoolArray2D,
+    *,
+    min_area: float = 0.0,
+    n_largest: int | None = None,
+    pixel_size: float = 1.0,
+) -> lib.BoolArray2D:
+    """Keep the connected regions of a binary mask (see
+    ``label_components``) that are large enough, e.g., to remove specks
+    of background or to keep only the largest cell.
+
+    Parameters
+    ----------
+    mask : lib.BoolArray2D
+        Binary mask, True (or nonzero) inside.
+    min_area : float, optional
+        Smallest area of a region that is kept, in the unit of
+        ``pixel_size`` squared: e.g., nm^2 (1e6 per um^2) with the
+        pixel size in nm. Default is 0 (all regions).
+    n_largest : int or None, optional
+        Number of the largest regions kept (among those of at least
+        ``min_area``). None keeps all. Default is None.
+    pixel_size : float, optional
+        Side length of a pixel of the mask, e.g., in nm. Default is 1
+        (``min_area`` in pixels).
+
+    Returns
+    -------
+    mask : lib.BoolArray2D
+        The mask with only the regions kept.
+
+    Raises
+    ------
+    ValueError
+        If ``min_area`` is negative, ``n_largest`` is negative or
+        ``pixel_size`` is not positive.
+    """
+    if not min_area >= 0:
+        raise ValueError("min_area must not be negative.")
+    if n_largest is not None and n_largest < 0:
+        raise ValueError("n_largest must not be negative.")
+    if not pixel_size > 0:
+        raise ValueError("pixel_size must be positive.")
+    labels, sizes = label_components(mask)
+    kept = sizes * pixel_size**2 >= min_area
+    if n_largest is not None:
+        kept[int(n_largest) :] = False  # the regions are largest first
+    return np.concatenate([[False], kept])[labels]
+
+
+def fill_holes(mask: lib.BoolArray2D) -> lib.BoolArray2D:
+    """Fill the holes of a binary mask, i.e., the areas outside the
+    mask that it encloses and that do not reach the image border.
+
+    Parameters
+    ----------
+    mask : lib.BoolArray2D
+        Binary mask, True (or nonzero) inside.
+
+    Returns
+    -------
+    mask : lib.BoolArray2D
+        The mask with its holes filled.
+    """
+    return ndi.binary_fill_holes(np.asarray(mask, dtype=bool))
+
+
+def dilate(
+    mask: lib.BoolArray2D,
+    distance: float,
+    *,
+    pixel_size: float = 1.0,
+) -> lib.BoolArray2D:
+    """Grow a binary mask by a distance in all directions alike: add the
+    pixels whose centers lie within ``distance`` of the center of a
+    pixel of the mask (Euclidean distance transform).
+
+    Parameters
+    ----------
+    mask : lib.BoolArray2D
+        Binary mask, True (or nonzero) inside.
+    distance : float
+        Distance by which the mask grows, in the unit of
+        ``pixel_size``, e.g., nm. 0 leaves the mask unchanged.
+    pixel_size : float, optional
+        Side length of a pixel of the mask, e.g., in nm. Default is 1
+        (``distance`` in pixels).
+
+    Returns
+    -------
+    mask : lib.BoolArray2D
+        The grown mask.
+
+    Raises
+    ------
+    ValueError
+        If ``distance`` is negative or ``pixel_size`` is not positive.
+
+    See Also
+    --------
+    erode : Shrink a mask.
+    """
+    mask = np.asarray(mask, dtype=bool)
+    _check_morphology(distance, pixel_size)
+    if not mask.any():
+        return mask.copy()
+    # the distance of each pixel to the nearest pixel of the mask
+    distances = ndi.distance_transform_edt(~mask, sampling=pixel_size)
+    return distances <= distance
+
+
+def erode(
+    mask: lib.BoolArray2D,
+    distance: float,
+    *,
+    pixel_size: float = 1.0,
+) -> lib.BoolArray2D:
+    """Shrink a binary mask by a distance in all directions alike, e.g.,
+    to stay away from the edges of a cell: keep the pixels whose
+    centers lie farther than ``distance`` from the center of every
+    pixel outside the mask (Euclidean distance transform). The image
+    border is not an edge of the mask.
+
+    Parameters
+    ----------
+    mask : lib.BoolArray2D
+        Binary mask, True (or nonzero) inside.
+    distance : float
+        Distance by which the mask shrinks, in the unit of
+        ``pixel_size``, e.g., nm. 0 leaves the mask unchanged.
+    pixel_size : float, optional
+        Side length of a pixel of the mask, e.g., in nm. Default is 1
+        (``distance`` in pixels).
+
+    Returns
+    -------
+    mask : lib.BoolArray2D
+        The shrunk mask.
+
+    Raises
+    ------
+    ValueError
+        If ``distance`` is negative or ``pixel_size`` is not positive.
+
+    See Also
+    --------
+    dilate : Grow a mask.
+    """
+    mask = np.asarray(mask, dtype=bool)
+    _check_morphology(distance, pixel_size)
+    return ~dilate(~mask, distance, pixel_size=pixel_size)
+
+
+def _check_morphology(distance: float, pixel_size: float) -> None:
+    """Raise ValueError for a negative ``distance`` or a pixel size
+    that is not positive."""
+    if not distance >= 0:
+        raise ValueError("distance must not be negative.")
+    if not pixel_size > 0:
+        raise ValueError("pixel_size must be positive.")
+
+
+def mask_to_polygons(
+    mask: lib.BoolArray2D,
+    *,
+    field_of_view: tuple[float, float],
+    tolerance: float | None = None,
+) -> list[list[tuple[float, float]]]:
+    """Outline each connected region of a binary mask (see
+    ``label_components``), e.g., each cell, as a polygon pick, so that
+    the mask can be used wherever picks are, e.g., in
+    ``postprocess.picked_locs`` or the spatial statistics such as
+    ``postprocess.ripley_h``.
+
+    The outline follows the edges of the pixels of the region and is
+    then simplified (Douglas-Peucker algorithm): corners are removed as
+    long as the outline moves by at most ``tolerance``. A region with
+    holes becomes a single "keyhole" polygon: each hole is joined to
+    the outline by a cut of zero width from its nearest corner, i.e.,
+    the outline runs along the cut to the hole, around the hole and
+    back along the cut. The cut encloses no area, so the localizations
+    on both sides of it are inside the pick and those in the hole are
+    outside.
+
+    Parameters
+    ----------
+    mask : lib.BoolArray2D
+        Binary mask, True (or nonzero) inside.
+    field_of_view : tuple of floats
+        Width and height in nm of the area that the mask spans, starting
+        at the origin, as in ``mask_locs``: e.g., the field of view of
+        the localizations the mask was made from (see
+        ``lib.field_of_view``).
+    tolerance : float or None, optional
+        Largest distance in nm by which the simplified outline may
+        deviate from the edges of the pixels. 0 keeps the outline of
+        the pixels (only the corners where it runs straight on are
+        removed), so that the picks hold the same localizations as the
+        mask (``mask_locs``). If None, the larger side of a pixel,
+        which smooths the steps between the pixels. Default is None.
+
+    Returns
+    -------
+    picks : list of lists of tuples
+        One closed polygon pick per region, largest region first: its
+        corners ``(x, y)`` in nm, the first one repeated at the end. Use
+        them with ``pick_shape="Polygon"``. Empty for an empty mask.
+
+    Raises
+    ------
+    ValueError
+        If the mask is not 2D, the field of view is not positive or
+        ``tolerance`` is negative.
+    """
+    mask = np.asarray(mask, dtype=bool)
+    if mask.ndim != 2:
+        raise ValueError("The mask must be a 2D array.")
+    width, height = (float(value) for value in field_of_view)
+    if not (width > 0 and height > 0):
+        raise ValueError("field_of_view must be positive.")
+    n_y, n_x = mask.shape
+    pixel = np.array([width / n_x, height / n_y])
+    if tolerance is None:
+        tolerance = float(pixel.max())
+    elif not tolerance >= 0:
+        raise ValueError("tolerance must not be negative.")
+    labels, _ = label_components(mask)
+    picks = []
+    for label, (rows, columns) in enumerate(ndi.find_objects(labels), 1):
+        offset = np.array([columns.start, rows.start])
+        outer, holes = None, []
+        for ring in _pixel_outlines(labels[rows, columns] == label):
+            corners = _simplify_ring((ring + offset) * pixel, tolerance)
+            # the region is on the left of its outline, which therefore
+            # runs counterclockwise (in x, y) and around holes clockwise
+            if _signed_area(corners) > 0:
+                outer = corners
+            else:
+                holes.append(corners)
+        corners = _join_holes(outer, holes)
+        pick = [(float(x), float(y)) for x, y in corners]
+        picks.append(pick + pick[:1])
+    return picks
+
+
+def _pixel_outlines(region: lib.BoolArray2D) -> list[lib.FloatArray2D]:
+    """The outlines along the pixel edges of a connected region of a
+    binary mask (pixels touching at an edge or a corner): the outer
+    outline and that of each hole, as the corners ``(column, row)`` in
+    pixels (the corner of the first pixel is ``(0, 0)``), with the
+    region on the left of each outline. Corners where an outline runs
+    straight on are left out."""
+    padded = np.pad(region, 1)
+    inside = padded[1:-1, 1:-1]
+    starts, ends = [], []
+    # the sides of the pixels of the region that face a pixel outside,
+    # each directed so that the pixel is on its left: top, right,
+    # bottom and left side
+    for outside, start, end in (
+        (~padded[:-2, 1:-1], (0, 0), (1, 0)),
+        (~padded[1:-1, 2:], (1, 0), (1, 1)),
+        (~padded[2:, 1:-1], (1, 1), (0, 1)),
+        (~padded[1:-1, :-2], (0, 1), (0, 0)),
+    ):
+        rows, columns = np.nonzero(inside & outside)
+        starts.append(np.column_stack([columns + start[0], rows + start[1]]))
+        ends.append(np.column_stack([columns + end[0], rows + end[1]]))
+    starts = np.concatenate(starts)
+    ends = np.concatenate(ends)
+    directions = ends - starts
+    n_corners_x = region.shape[1] + 1
+    start_ids = starts[:, 1] * n_corners_x + starts[:, 0]
+    end_ids = ends[:, 1] * n_corners_x + ends[:, 0]
+    order = np.argsort(start_ids, kind="stable")
+    first = np.searchsorted(start_ids[order], end_ids, side="left")
+    n_leaving = (
+        np.searchsorted(start_ids[order], end_ids, side="right") - first
+    )
+    following = order[first]
+    other = order[np.minimum(first + 1, len(order) - 1)]
+    # where two pixels of the region touch at a corner only, two sides
+    # leave the corner: the right turn keeps both pixels in one outline
+    turn = (
+        directions[:, 0] * directions[following, 1]
+        - directions[:, 1] * directions[following, 0]
+    )
+    following = np.where((n_leaving == 2) & (turn > 0), other, following)
+    sequence, bounds = _cycles(following)
+    outlines = []
+    for start, end in zip(bounds[:-1], bounds[1:]):
+        sides = sequence[start:end]
+        turns = np.any(
+            directions[sides] != np.roll(directions[sides], 1, axis=0), axis=1
+        )
+        outlines.append(starts[sides][turns].astype(np.float64))
+    return outlines
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _cycles(
+    following: lib.IntArray1D,
+) -> tuple[lib.IntArray1D, lib.IntArray1D]:
+    """The cycles of the permutation ``following`` (the element that
+    follows each element): the elements in the order of the cycles and
+    the start of each cycle in it (with the total number at the
+    end)."""
+    n = len(following)
+    sequence = np.empty(n, dtype=np.int64)
+    bounds = np.zeros(n + 1, dtype=np.int64)
+    visited = np.zeros(n, dtype=np.bool_)
+    m = 0
+    n_cycles = 0
+    for first in range(n):
+        if visited[first]:
+            continue
+        element = first
+        while not visited[element]:
+            visited[element] = True
+            sequence[m] = element
+            m += 1
+            element = following[element]
+        n_cycles += 1
+        bounds[n_cycles] = m
+    return sequence, bounds[: n_cycles + 1]
+
+
+def _signed_area(corners: lib.FloatArray2D) -> float:
+    """Area enclosed by the closed outline through ``corners`` (shape
+    (n, 2), x and y), positive if it runs counterclockwise."""
+    x, y = corners[:, 0], corners[:, 1]
+    return 0.5 * float(np.sum(x * np.roll(y, -1) - np.roll(x, -1) * y))
+
+
+def _simplify_ring(
+    corners: lib.FloatArray2D,
+    tolerance: float,
+) -> lib.FloatArray2D:
+    """Simplify the closed outline through ``corners`` (shape (n, 2))
+    by the Douglas-Peucker algorithm, which removes corners as long as
+    each removed corner lies within ``tolerance`` of the simplified
+    outline, starting from the first corner and the one farthest from
+    it."""
+    n = len(corners)
+    if tolerance <= 0 or n <= 4:
+        return corners
+    farthest = int(np.argmax(np.sum((corners - corners[0]) ** 2, axis=1)))
+    closed = np.vstack([corners, corners[:1]])
+    keep = np.zeros(n + 1, dtype=bool)
+    keep[: farthest + 1] = _douglas_peucker(closed[: farthest + 1], tolerance)
+    keep[farthest:] |= _douglas_peucker(closed[farthest:], tolerance)
+    simplified = corners[keep[:n]]
+    return simplified if len(simplified) >= 3 else corners
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _douglas_peucker(
+    points: lib.FloatArray2D,
+    tolerance: float,
+) -> lib.BoolArray1D:
+    """Which of the ``points`` (shape (n, 2)) of an open line the
+    Douglas-Peucker algorithm keeps: the ends, and recursively the
+    point farthest from the segment between two kept points if it is
+    farther than ``tolerance``."""
+    n = len(points)
+    keep = np.zeros(n, dtype=np.bool_)
+    keep[0] = True
+    keep[n - 1] = True
+    # pending stretches between kept points; they do not overlap, so
+    # there are fewer than n at a time
+    stack = np.empty((n, 2), dtype=np.int64)
+    stack[0, 0] = 0
+    stack[0, 1] = n - 1
+    top = 1
+    tolerance_sq = tolerance * tolerance
+    while top > 0:
+        top -= 1
+        first = stack[top, 0]
+        last = stack[top, 1]
+        farthest = -1
+        largest = tolerance_sq
+        for i in range(first + 1, last):
+            distance_sq = _point_segment_distance_sq(
+                points[i, 0],
+                points[i, 1],
+                points[first, 0],
+                points[first, 1],
+                points[last, 0],
+                points[last, 1],
+            )
+            if distance_sq > largest:
+                largest = distance_sq
+                farthest = i
+        if farthest >= 0:
+            keep[farthest] = True
+            stack[top, 0] = first
+            stack[top, 1] = farthest
+            stack[top + 1, 0] = farthest
+            stack[top + 1, 1] = last
+            top += 2
+    return keep
+
+
+def _join_holes(
+    outer: lib.FloatArray2D,
+    holes: list[lib.FloatArray2D],
+) -> lib.FloatArray2D:
+    """Join the ``holes`` (outlines running opposite to ``outer``) to
+    the outer outline by cuts of zero width (keyhole polygon). The
+    holes are joined largest first, each from its corner nearest to the
+    outlines joined before it (the outer one and the larger holes) to
+    the nearest corner of them."""
+    if not holes:
+        return outer
+    rings = [outer] + sorted(holes, key=_signed_area)  # largest first
+    ring_of = np.concatenate([np.full(len(r), k) for k, r in enumerate(rings)])
+    corner_of = np.concatenate([np.arange(len(r)) for r in rings])
+    tree = KDTree(np.concatenate(rings))
+    n_neighbors = min(16, len(ring_of))
+    outer_tree = None
+    # the holes joined at each corner of each outline: (hole, corner)
+    attached = [{} for _ in rings]
+    for k in range(1, len(rings)):
+        distances, nearest = tree.query(rings[k], k=n_neighbors)
+        distances[ring_of[nearest] >= k] = np.inf
+        j, column = np.unravel_index(np.argmin(distances), distances.shape)
+        if np.isfinite(distances[j, column]):
+            target = nearest[j, column]
+            ring, corner = ring_of[target], corner_of[target]
+        else:  # no joined outline among the nearest corners
+            if outer_tree is None:
+                outer_tree = KDTree(outer)
+            distances, nearest = outer_tree.query(rings[k])
+            j = int(np.argmin(distances))
+            ring, corner = 0, nearest[j]
+        attached[ring].setdefault(int(corner), []).append((k, int(j)))
+
+    def walk(ring: int, start: int, back: bool) -> Iterator:
+        """The corners of an outline from ``start`` on, each followed by
+        the holes joined at it (yielded as (hole, corner) tuples) and
+        by itself again, ending with ``start`` again if ``back``."""
+        corners = rings[ring]
+        for step in range(len(corners)):
+            corner = (start + step) % len(corners)
+            yield corners[corner]
+            for hole in attached[ring].get(corner, ()):
+                yield hole
+                yield corners[corner]
+        if back:
+            yield corners[start]
+
+    # depth first without recursion, as holes may be joined to holes
+    joined = []
+    walks = [walk(0, 0, False)]
+    while walks:
+        item = next(walks[-1], None)
+        if item is None:
+            walks.pop()
+        elif isinstance(item, tuple):
+            walks.append(walk(*item, True))
+        else:
+            joined.append(item)
+    return np.array(joined)
 
 
 def threshold_isodata(image: lib.FloatArray2D) -> float:

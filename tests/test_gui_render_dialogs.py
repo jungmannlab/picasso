@@ -2278,9 +2278,74 @@ def mask_dialog(window, answers):
 
 def test_mask_dialog_shows_the_steps(mask_dialog):
     titles = [plot._title for plot in mask_dialog.plots]
-    assert titles == ["Histogrammed localizations", "Blur", "Mask"]
+    assert titles[:2] == ["Histogrammed localizations", "Blur"]
+    assert titles[2].startswith("Mask (") and titles[2].endswith("regions)")
     assert mask_dialog.mask.shape == mask_dialog.H.shape
     assert mask_dialog.save_mask_button.isEnabled()
+
+
+def test_mask_refinement(mask_dialog, window, answers):
+    from picasso import masking
+
+    mask_dialog.thresh_method.setCurrentText("Custom")
+    mask_dialog.mask_thresh.setValue(0.05)  # many regions
+    thresholded = mask_dialog.mask.astype(bool)
+    n_regions = len(masking.label_components(thresholded)[1])
+    assert n_regions > 1
+    mask_dialog.n_largest.setValue(1)
+    largest = mask_dialog.mask.astype(bool)
+    assert len(masking.label_components(largest)[1]) == 1
+    assert mask_dialog.plots[2]._title == "Mask (1 region)"
+    mask_dialog.n_largest.setValue(0)  # all
+    np.testing.assert_array_equal(mask_dialog.mask.astype(bool), thresholded)
+    # 260 nm pixels: growing by 260 nm adds at least the 4 neighbors
+    mask_dialog.grow.setValue(260.0)
+    grown = mask_dialog.mask.astype(bool)
+    assert grown.sum() > thresholded.sum() and grown[thresholded].all()
+    mask_dialog.grow.setValue(-260.0)
+    assert mask_dialog.mask.astype(bool).sum() < thresholded.sum()
+    mask_dialog.grow.setValue(0.0)
+    mask_dialog.fill_holes.setChecked(True)
+    assert mask_dialog.mask.astype(bool)[thresholded].all()
+    mask_dialog.min_area.setValue(1e6)  # um^2: more than the image
+    assert not mask_dialog.mask.any()
+    mask_dialog.min_area.setValue(0.0)
+    # recorded with the masked localizations
+    mask_dialog.mask_locs()
+    entry = mask_dialog.index_infos[0][-1]
+    assert entry["Fill holes"] is True
+    assert entry["Largest regions kept"] == "all"
+    assert entry["Grow (nm)"] == 0.0 and entry["Min. area (um^2)"] == 0.0
+
+
+def test_mask_regions_as_polygon_picks(mask_dialog, window, answers):
+    from picasso import masking, postprocess
+
+    view = window.view
+    n_picks = len(view._picks)
+    mask_dialog.n_largest.setValue(2)
+    assert mask_dialog.picks_button.isEnabled()
+    n_regions = len(masking.label_components(mask_dialog.mask)[1])
+    mask_dialog.add_mask_picks()
+    assert len(view._picks) == n_picks + n_regions
+    assert view._pick_shapes[n_picks:] == ["Polygon"] * n_regions
+    polygons = view._picks[n_picks:]
+    assert all(polygon[0] == polygon[-1] for polygon in polygons)
+    # the picks hold about the localizations inside the mask (the
+    # outline is smoothed by up to a pixel)
+    picked = postprocess.picked_locs(
+        view.locs[0], view.infos[0], picks=polygons, pick_shape="Polygon"
+    )
+    mask_dialog.mask_locs()
+    n_inside = len(mask_dialog.index_locs[0])
+    assert sum(len(locs) for locs in picked) == pytest.approx(
+        n_inside, rel=0.1
+    )
+    view.undo()  # one step
+    assert len(view._picks) == n_picks
+    mask_dialog.min_area.setValue(1e6)  # um^2: nothing left
+    mask_dialog.add_mask_picks()
+    assert len(answers.messages) == 1 and len(view._picks) == n_picks
 
 
 @pytest.mark.parametrize("method", ["Otsu", "Li", "Mean", "Triangle"])

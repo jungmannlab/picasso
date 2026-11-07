@@ -7700,6 +7700,11 @@ class MaskSettingsDialog(lib.Dialog):
         Container for all widgets in the scroll area.
     disp_px_size : QSpinBox
         Contains the display pixel size in nm.
+    fill_holes : QCheckBox
+        If checked, the holes of the computed mask are filled.
+    grow : QDoubleSpinBox
+        Distance in nm by which the computed mask grows (negative:
+        shrinks).
     index_infos : list
         Metadata of ``index_locs``, as ``masking.mask_locs`` returned
         it.
@@ -7728,9 +7733,18 @@ class MaskSettingsDialog(lib.Dialog):
         Contains the blur value in nm.
     mask_thresh : QDoubleSpinBox
         Contains the threshold value for masking.
+    min_area : QDoubleSpinBox
+        Smallest area (um^2) of a region of the computed mask that is
+        kept.
+    n_largest : QSpinBox
+        Number of the largest regions of the computed mask kept; 0
+        keeps all.
     paths : list
         Contains paths to all localizations loaded when starting the
         dialog.
+    picks_button : QPushButton
+        Used for adding the regions of the current mask as polygon
+        picks.
     plots : list of QLabel
         Used for displaying the 4 plots (histogram, blurred, mask,
         masked).
@@ -7844,6 +7858,55 @@ class MaskSettingsDialog(lib.Dialog):
         threshold_layout.addWidget(show_hist_button)
         threshold_layout.addWidget(lib.HelpButton(self.DOCS_URL))
 
+        # refine the thresholded mask, in this order
+        self.fill_holes = QtWidgets.QCheckBox("Fill holes")
+        self.fill_holes.setToolTip(
+            "Fill the holes of the mask, i.e., the areas it encloses."
+        )
+        self.fill_holes.toggled.connect(self.mask_image)
+        settings_grid.addWidget(self.fill_holes, 2, 0, 1, 2)
+        min_area_label = QtWidgets.QLabel("Min. area (\u00b5m\u00b2):")
+        min_area_label.setToolTip(
+            "Remove the regions of the mask smaller than this, e.g.,\n"
+            "specks of background. Regions touching at an edge or a\n"
+            "corner are one region."
+        )
+        settings_grid.addWidget(min_area_label, 2, 2)
+        self.min_area = QtWidgets.QDoubleSpinBox()
+        self.min_area.setRange(0, 1e6)
+        self.min_area.setDecimals(2)
+        self.min_area.setSingleStep(1)
+        self.min_area.setKeyboardTracking(False)
+        self.min_area.valueChanged.connect(self.mask_image)
+        settings_grid.addWidget(self.min_area, 2, 3)
+        n_largest_label = QtWidgets.QLabel("Keep largest regions:")
+        n_largest_label.setToolTip(
+            "Keep only this number of the largest regions of the mask,\n"
+            "e.g., 1 for the largest cell. 'All' keeps all regions."
+        )
+        settings_grid.addWidget(n_largest_label, 3, 0)
+        self.n_largest = QtWidgets.QSpinBox()
+        self.n_largest.setRange(0, 9999)
+        self.n_largest.setSpecialValueText("All")
+        self.n_largest.setKeyboardTracking(False)
+        self.n_largest.valueChanged.connect(self.mask_image)
+        settings_grid.addWidget(self.n_largest, 3, 1)
+        grow_label = QtWidgets.QLabel("Grow / shrink (nm):")
+        grow_label.setToolTip(
+            "Grow the mask by this distance in all directions, or\n"
+            "shrink it for a negative value, e.g., to stay away from the\n"
+            "edges of the cells. The image border is not an edge.\n"
+            "Applied after the options to the left and above."
+        )
+        settings_grid.addWidget(grow_label, 3, 2)
+        self.grow = QtWidgets.QDoubleSpinBox()
+        self.grow.setRange(-1e5, 1e5)
+        self.grow.setDecimals(0)
+        self.grow.setSingleStep(100)
+        self.grow.setKeyboardTracking(False)
+        self.grow.valueChanged.connect(self.mask_image)
+        settings_grid.addWidget(self.grow, 3, 3)
+
         display_groupbox = QtWidgets.QGroupBox("Display")
         display_groupbox.setToolTip(
             "The images can be zoomed in/out (Ctrl/Cmd + scrolling)\n"
@@ -7916,6 +7979,18 @@ class MaskSettingsDialog(lib.Dialog):
         self.save_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.save_button.clicked.connect(self.save_locs)
         mask_grid.addWidget(self.save_button, 2, 1, 1, 2)
+
+        self.picks_button = QtWidgets.QPushButton("Add as polygon picks")
+        self.picks_button.setToolTip(
+            "Add each region of the mask as a polygon pick, e.g., to\n"
+            "analyze each cell separately. The outline is smoothed by\n"
+            "up to one pixel of the mask; a hole is joined to the\n"
+            "outline by a cut, which adds no area."
+        )
+        self.picks_button.setEnabled(False)
+        self.picks_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.picks_button.clicked.connect(self.add_mask_picks)
+        mask_grid.addWidget(self.picks_button, 3, 0)
 
         self.cached_oversampling = 0
         self.cached_blur = 0
@@ -8028,6 +8103,23 @@ class MaskSettingsDialog(lib.Dialog):
                 title="Mask",
             )
             self.save_button.setEnabled(True)
+            self.picks_button.setEnabled(True)
+
+    def add_mask_picks(self) -> None:
+        """Add each region of the mask as a polygon pick in the main
+        window, see ``masking.mask_to_polygons``."""
+        polygons = masking.mask_to_polygons(
+            self.mask, field_of_view=(self.x_max, self.y_max)
+        )
+        if not polygons:
+            QtWidgets.QMessageBox.warning(
+                self, "Empty mask", "The mask has no regions to pick."
+            )
+            return
+        view = self.window.view
+        with view.undo_step("Add mask as picks", picks=True):
+            view.add_picks(polygons, "Polygon")
+        view.update_pick_info_short()
 
     def mask_image(self) -> None:
         """Calculate binary mask based on threshold."""
@@ -8046,13 +8138,37 @@ class MaskSettingsDialog(lib.Dialog):
                 self.mask_thresh.setValue(thresh)
             else:
                 self.mask_thresh.setValue(0)
-        self.mask = mask
+        self.mask = self.refine_mask(mask)
         self.save_mask_button.setEnabled(True)
         self.save_button.setEnabled(True)
+        self.picks_button.setEnabled(True)
+        n_regions = len(masking.label_components(self.mask)[1])
         self.plots[2].setPixmap(
             self.render_to_pixmap(self.mask, cmap="Greys_r"),
-            title="Mask",
+            title=f"Mask ({n_regions} region{'s' * (n_regions != 1)})",
         )
+
+    def refine_mask(self, mask: np.ndarray) -> np.ndarray:
+        """Refine a thresholded mask as set: fill its holes, remove the
+        small regions, keep the largest ones and grow or shrink it, in
+        this order (see ``masking``). Returns the mask in its dtype."""
+        dtype = mask.dtype
+        pixel_size = self.disp_px_size.value()  # nm
+        if self.fill_holes.isChecked():
+            mask = masking.fill_holes(mask)
+        if self.min_area.value() or self.n_largest.value():
+            mask = masking.keep_components(
+                mask,
+                min_area=self.min_area.value() * 1e6,  # nm^2
+                n_largest=self.n_largest.value() or None,
+                pixel_size=pixel_size,
+            )
+        grow = self.grow.value()
+        if grow > 0:
+            mask = masking.dilate(mask, grow, pixel_size=pixel_size)
+        elif grow < 0:
+            mask = masking.erode(mask, -grow, pixel_size=pixel_size)
+        return mask.astype(dtype, copy=False)
 
     def update_plots(self) -> None:
         """Plot in all 4 axes: 2D histogram, blurred image, mask and
@@ -8109,6 +8225,10 @@ class MaskSettingsDialog(lib.Dialog):
                 "Blur (nm)": self.mask_blur.value(),
                 "Threshold": self.mask_thresh.value(),
                 "Threshold method": self.thresh_method.currentText(),
+                "Fill holes": self.fill_holes.isChecked(),
+                "Min. area (um^2)": self.min_area.value(),
+                "Largest regions kept": self.n_largest.value() or "all",
+                "Grow (nm)": self.grow.value(),
             },
         )
         self.index_locs.append(locs_in)  # locs in the mask
@@ -8290,7 +8410,8 @@ class MaskSettingsDialog(lib.Dialog):
         image = np.float32(image)
         # adjust contrast and convert to 8 bits
         image -= image.min()
-        image /= image.max()
+        if image.max() > 0:  # e.g., an empty mask stays black
+            image /= image.max()
         image = render.to_8bit(image.astype(np.float32))
         # get colormap and paint the image
         cmap = self.cmap if cmap is None else cmap

@@ -215,7 +215,13 @@
   "mask_locs",
   "generate_image",
   "mask_image",
-  "binary_mask"
+  "binary_mask",
+  "label_components",
+  "keep_components",
+  "fill_holes",
+  "erode",
+  "dilate",
+  "mask_to_polygons"
  ],
  "picasso.nanotron": [
   "predict_structure",

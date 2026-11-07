@@ -50,6 +50,8 @@ Last change: 07-NOV-2026 CEST
 - FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*).
 - Resolution by decorrelation analysis (Descloux et al., *Nat. Methods* 2019), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-info-decorrelation).
 - Pick similar without seed picks, see the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-pick-by-n-locs-rmsd).
+- *Mask image* refines the mask: fill holes, remove small regions, keep the largest ones, and grow or shrink it by a distance. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-mask-image).
+- *Mask image* adds the regions of the mask (e.g., the cells) as polygon picks, e.g., to analyze each cell separately with the spatial statistics; `picasso.masking.mask_to_polygons` in Python. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-mask-image).
 - `picasso.render` is distributed as a package (`kernels`, `geometry`, `splat`, `scene`, `overlays_qt`, `animation`, `backend`, `gpu`); every former `picasso.render.*` name is still importable from `picasso.render`.
 - 2D/3D grid available for reference, either as the full grid or as axes with ticks and labels only.
 - Customizable scale bar. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-scale-bar).

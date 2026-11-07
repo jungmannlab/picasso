@@ -14,7 +14,7 @@ import pytest
 from PyQt6 import QtCore, QtGui
 from scipy.spatial.transform import Rotation
 
-from picasso import io, lib, masking, render
+from picasso import io, lib, masking, postprocess, render
 
 from tests._progress_tracking import (
     CancelingProgress,
@@ -2782,6 +2782,230 @@ class TestMasking:
         )
         assert locs_in["x"].tolist() == [1000.0]
         assert locs_out["x"].tolist() == [15000.0]
+
+
+def _cells() -> np.ndarray:
+    """A mask of a 6 x 6 cell with a 2 x 2 hole, a 2 x 2 cell and a
+    speck of two pixels touching at a corner."""
+    mask = np.zeros((20, 20), dtype=bool)
+    mask[2:8, 2:8] = True
+    mask[4:6, 4:6] = False
+    mask[12:14, 12:14] = True
+    mask[15, 15] = mask[16, 16] = True
+    return mask
+
+
+class TestMaskMorphology:
+    def test_components_are_labeled_largest_first(self):
+        labels, sizes = masking.label_components(_cells())
+        np.testing.assert_array_equal(sizes, [32, 4, 2])
+        assert labels[2, 2] == 1 and labels[12, 12] == 2
+        # touching at a corner is one region
+        assert labels[15, 15] == labels[16, 16] == 3
+        assert labels[0, 0] == 0
+        labels, sizes = masking.label_components(np.zeros((3, 3)))
+        assert not labels.any() and not len(sizes)
+
+    def test_keep_components(self):
+        mask = _cells()
+        largest = masking.keep_components(mask, n_largest=1)
+        assert largest.sum() == 32 and largest[2, 2]
+        # 4 pixels of 100 nm: 40,000 nm^2
+        no_specks = masking.keep_components(
+            mask, min_area=40_000.0, pixel_size=100.0
+        )
+        assert no_specks.sum() == 36 and not no_specks[15, 15]
+        np.testing.assert_array_equal(masking.keep_components(mask), mask)
+        assert not masking.keep_components(mask, n_largest=0).any()
+        with pytest.raises(ValueError, match="min_area"):
+            masking.keep_components(mask, min_area=-1)
+
+    def test_fill_holes(self):
+        filled = masking.fill_holes(_cells())
+        assert filled.sum() == 36 + 4 + 2 and filled[4, 4]
+
+    def test_dilate_and_erode_alike_in_all_directions(self):
+        point = np.zeros((41, 41), dtype=bool)
+        point[20, 20] = True
+        # a disk of radius 10 pixels = 500 nm
+        disk = masking.dilate(point, 500.0, pixel_size=50.0)
+        assert disk.sum() == pytest.approx(np.pi * 10**2, rel=0.03)
+        assert disk[20, 30] and not disk[27, 28]  # 9.9 px
+        smaller = masking.erode(disk, 250.0, pixel_size=50.0)
+        assert smaller.sum() == pytest.approx(np.pi * 5**2, rel=0.1)
+        np.testing.assert_array_equal(masking.dilate(disk, 0.0), disk)
+        np.testing.assert_array_equal(masking.erode(disk, 0.0), disk)
+
+    def test_the_image_border_is_not_an_edge(self):
+        full = np.ones((5, 5), dtype=bool)
+        np.testing.assert_array_equal(masking.erode(full, 2.0), full)
+        assert not masking.dilate(np.zeros((5, 5)), 2.0).any()
+
+    @pytest.mark.parametrize("function", ["erode", "dilate"])
+    def test_invalid_distance(self, function):
+        with pytest.raises(ValueError, match="distance"):
+            getattr(masking, function)(_cells(), -1.0)
+        with pytest.raises(ValueError, match="pixel_size"):
+            getattr(masking, function)(_cells(), 1.0, pixel_size=0)
+
+
+def _polygon_area(pick) -> float:
+    """Area of a polygon pick."""
+    X, Y = lib.get_pick_polygon_corners(pick)
+    return lib.polygon_area(X, Y)
+
+
+def _annulus(n: int = 200) -> np.ndarray:
+    """A mask (n x n) of an annulus, radii 0.15 n and 0.4 n pixels."""
+    y, x = np.mgrid[0:n, 0:n] + 0.5 - n / 2
+    r2 = x**2 + y**2
+    return (r2 < (0.4 * n) ** 2) & (r2 > (0.15 * n) ** 2)
+
+
+class TestMaskToPolygons:
+    FOV = (2000.0, 2000.0)  # 100 nm pixels for _cells()
+
+    def test_rectangle(self):
+        mask = np.zeros((10, 10), dtype=bool)
+        mask[2:4, 1:4] = True
+        corners = [
+            (100.0, 200.0),
+            (400.0, 200.0),
+            (400.0, 400.0),
+            (100.0, 400.0),
+            (100.0, 200.0),
+        ]
+        for tolerance in (0.0, None):
+            picks = masking.mask_to_polygons(
+                mask, field_of_view=(1000.0, 1000.0), tolerance=tolerance
+            )
+            assert picks == [corners]
+
+    def test_regions_largest_first_with_holes_as_keyholes(self):
+        picks = masking.mask_to_polygons(
+            _cells(), field_of_view=self.FOV, tolerance=0
+        )
+        assert len(picks) == 3
+        areas = [_polygon_area(pick) for pick in picks]
+        np.testing.assert_allclose(areas, np.array([32, 4, 2]) * 100.0**2)
+        # the cell is one closed outline that runs around its hole
+        cell = picks[0]
+        assert cell[0] == cell[-1]
+        assert {(400.0, 400.0), (600.0, 600.0)} <= set(cell)
+        X, Y = lib.get_pick_polygon_corners(cell)
+        inside = lib.check_if_in_polygon(
+            np.array([300.0, 500.0, 750.0]),
+            np.array([300.0, 500.0, 500.0]),
+            np.array(X),
+            np.array(Y),
+        )
+        np.testing.assert_array_equal(inside, [True, False, True])
+        # pixels touching at a corner share one outline
+        assert len(picks[2]) == 9
+
+    def test_exact_outline_holds_the_masked_localizations(self):
+        mask = _annulus()
+        mask[[10, 11, 12], [10, 11, 12]] = True  # a diagonal speck
+        mask[95:105, 30:32] = False  # a gap: a second hole
+        fov = (10_000.0, 10_000.0)
+        info = [{"Pixelsize": 100.0, "Width": 100, "Height": 100}]
+        rng = np.random.default_rng(0)
+        x, y = rng.uniform(0, 1e4, size=(2, 50_000))
+        locs = pd.DataFrame({"frame": 0, "x": x, "y": y})
+        masked = masking.mask_locs(locs, info, mask=mask, field_of_view=fov)
+        picks = masking.mask_to_polygons(mask, field_of_view=fov, tolerance=0)
+        picked = postprocess.picked_locs(
+            locs, info, picks=picks, pick_shape="Polygon", add_group=False
+        )
+        np.testing.assert_array_equal(
+            np.sort(pd.concat(picked)["x"]), np.sort(masked[0]["x"])
+        )
+        np.testing.assert_allclose(
+            sum(_polygon_area(pick) for pick in picks), mask.sum() * 50.0**2
+        )
+
+    def test_simplified_outline(self):
+        mask = _annulus()
+        (exact,) = masking.mask_to_polygons(
+            mask, field_of_view=(10_000.0, 10_000.0), tolerance=0
+        )
+        (smooth,) = masking.mask_to_polygons(
+            mask, field_of_view=(10_000.0, 10_000.0)
+        )
+        assert len(smooth) < len(exact) / 4
+        assert _polygon_area(smooth) == pytest.approx(
+            _polygon_area(exact), rel=0.01
+        )
+        # the removed corners lie within a pixel (50 nm) of the outline
+        X, Y = (np.array(c) for c in lib.get_pick_polygon_corners(smooth))
+        corners = np.array(exact)
+        distances = np.full(len(corners), np.inf)
+        for k in range(len(X) - 1):
+            distances = np.minimum(
+                distances,
+                np.sqrt(
+                    [
+                        lib._point_segment_distance_sq(
+                            x, y, X[k], Y[k], X[k + 1], Y[k + 1]
+                        )
+                        for x, y in corners
+                    ]
+                ),
+            )
+        assert distances.max() <= 50.0 + 1e-9
+
+    def test_holes_joined_to_holes(self):
+        mask = np.ones((60, 60), dtype=bool)
+        mask[5:55:4, 5:55:4] = False  # 169 holes of one pixel
+        picks = masking.mask_to_polygons(
+            mask, field_of_view=(60.0, 60.0), tolerance=0
+        )
+        assert len(picks) == 1
+        assert _polygon_area(picks[0]) == pytest.approx(60 * 60 - 169)
+        X, Y = lib.get_pick_polygon_corners(picks[0])
+        y, x = np.mgrid[0:60, 0:60] + 0.5
+        inside = lib.check_if_in_polygon(
+            x.ravel(), y.ravel(), np.array(X), np.array(Y)
+        )
+        np.testing.assert_array_equal(inside, mask.ravel())
+
+    def test_spatial_statistics_in_a_mask_with_a_hole(self):
+        mask = _annulus()
+        fov = (10_000.0, 10_000.0)
+        info = [{"Pixelsize": 100.0, "Width": 100, "Height": 100}]
+        rng = np.random.default_rng(1)
+        rows, columns = np.nonzero(mask)
+        k = rng.integers(len(rows), size=8000)
+        molecules = pd.DataFrame(
+            {
+                "frame": 0,
+                "x": (columns[k] + rng.uniform(size=8000)) * 50.0,
+                "y": (rows[k] + rng.uniform(size=8000)) * 50.0,
+                "n_events": 1,
+            }
+        )
+        picks = masking.mask_to_polygons(mask, field_of_view=fov)
+        kwargs = dict(picks=picks, pick_shape="Polygon", r_max=600, steps=6)
+        corrected = postprocess.ripley_h(
+            molecules, info, n_simulations=0, **kwargs
+        )
+        raw = postprocess.ripley_h(
+            molecules, info, n_simulations=0, edge_correction=False, **kwargs
+        )
+        assert np.abs(corrected["h_mean"]).max() < 5  # nm
+        assert raw["h_mean"][-1] < -20
+
+    def test_empty_and_invalid(self):
+        empty = np.zeros((5, 5), dtype=bool)
+        assert masking.mask_to_polygons(empty, field_of_view=(5, 5)) == []
+        with pytest.raises(ValueError, match="2D"):
+            masking.mask_to_polygons(np.ones((2, 2, 2)), field_of_view=(5, 5))
+        with pytest.raises(ValueError, match="field_of_view"):
+            masking.mask_to_polygons(_cells(), field_of_view=(0, 5))
+        with pytest.raises(ValueError, match="tolerance"):
+            masking.mask_to_polygons(
+                _cells(), field_of_view=(5, 5), tolerance=-1
+            )
 
 
 # ---------------------------------------------------------------------------

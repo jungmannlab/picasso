@@ -668,7 +668,9 @@ To use it, open ``Postprocess > Spatial statistics > Ripley's H function...``:
    function between two channels, see :ref:`render-cross-functions`.
 2. Choose the ``Regions``: the ``Picks`` (any pick shape, also mixed; ``H``
    is computed in each pick and averaged over the picks with at least two
-   localizations), the ``Current view`` or the ``Whole field of view``.
+   localizations), the ``Current view`` or the ``Whole field of view``. To
+   analyze each cell, pick the cells from a mask with ``Add as polygon picks``
+   in :ref:`render-mask-image`.
 3. Set ``Max. radius (nm)``, which should be well below the size of the
    regions, and the number of ``Radius steps`` up to it.
 4. Set the number of ``Simulations``. Each region is filled with as many

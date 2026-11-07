@@ -329,16 +329,34 @@ from the density of the localizations of the selected channel:
    thresholds (``Isodata``, ``Li``, ``Mean``, ``Minimum``, ``Otsu``,
    ``Triangle``, ``Yen``) or local ones that vary across the image
    (``Local Gaussian``, ``Local mean``, ``Local median``).
-4. ``Mask`` applies the mask to the localizations and shows those inside it
+4. Optionally, refine the mask, in this order: ``Fill holes`` fills the areas
+   it encloses; ``Min. area (µm²)`` removes the regions smaller than that,
+   e.g., specks of background; ``Keep largest regions`` keeps only that number
+   of the largest regions (``All`` keeps all), e.g., 1 for the largest cell;
+   ``Grow / shrink (nm)`` grows the mask by that distance in all directions,
+   or shrinks it for a negative value, e.g., to stay away from the edges of
+   the cells (the image border is not an edge). Regions touching at an edge or
+   a corner are one region; the panel title shows their number. The settings
+   are recorded with the masked localizations.
+5. ``Mask`` applies the mask to the localizations and shows those inside it
    (panel *Masked*). Tick ``Mask all channels`` to apply the same mask to every
    loaded channel.
-5. ``Save localizations`` saves the localizations inside and outside the mask
+6. ``Save localizations`` saves the localizations inside and outside the mask
    as two files (``_mask_in.hdf5`` and ``_mask_out.hdf5``; with all channels,
    you choose the suffixes). The loaded localizations are not changed.
 
 ``Save Mask`` saves the mask as a ``.npy`` array (plus a ``.png`` image) and
 ``Load Mask`` loads one, e.g., to apply the same mask to another dataset.
 ``Save Blurred`` saves the blurred image as a ``.png``.
+
+``Add as polygon picks`` adds each region of the mask as a polygon pick, e.g.,
+to analyze each cell separately with the spatial statistics (such as
+:ref:`render-ripley-h`) or the pick properties, or to save the cells as a
+picks file. The outline follows the pixels of the mask, smoothed by up to one
+pixel. A region with holes becomes one polygon whose outline runs along a cut
+into each hole, around it and back along the cut (a "keyhole" polygon); the
+cut adds no area, so the localizations in a hole are outside the pick.
+:menuselection:`File --> Undo` removes the added picks.
 
 The panels zoom and pan together: :kbd:`Ctrl`/:kbd:`Cmd` + scrolling zooms,
 dragging with the right mouse button (or :kbd:`Ctrl`/:kbd:`Cmd` + the left
@@ -354,15 +372,23 @@ button) pans, and a double click resets the zoom.
    mask under ``Area (um^2)`` (used, e.g., by SPINNA) and ``mask_info``.
    To mask other localizations, e.g., another channel, with the same mask,
    pass the field of view of the first as ``field_of_view``.
+   ``label_components``, ``keep_components``, ``fill_holes``, ``erode`` and
+   ``dilate`` refine a mask; lengths are in the unit of ``pixel_size``, e.g.,
+   nm, and areas in its square. ``mask_to_polygons`` outlines each region as
+   a polygon pick (``tolerance`` in nm, 0 for the exact outline of the
+   pixels, which holds the same localizations as ``mask_locs``).
 
    .. code-block:: python
 
       import numpy as np
-      from picasso import io, masking
+      from picasso import io, lib, masking
 
       locs, info = io.load_locs("movie_locs.hdf5")
       image = masking.generate_image(locs, info, disp_px_size=300, blur=500)   # nm
       mask, threshold = masking.mask_image(image, "otsu")   # or 0.5, "li", "local_mean", ...
+      mask = masking.fill_holes(mask)
+      mask = masking.keep_components(mask, n_largest=1)       # the largest cell
+      mask = masking.erode(mask, 500.0, pixel_size=300.0)    # nm
       locs_in, info_in, locs_out, info_out = masking.mask_locs(
           locs, info, mask=mask, mask_info={"Blur (nm)": 500}
       )
@@ -370,3 +396,7 @@ button) pans, and a double click resets the zoom.
       io.save_locs("movie_locs_mask_in.hdf5", locs_in, info_in)
       io.save_locs("movie_locs_mask_out.hdf5", locs_out, info_out)
       np.save("movie_locs_mask.npy", mask)
+
+      # each region (cell) as a polygon pick
+      picks = masking.mask_to_polygons(mask, field_of_view=lib.field_of_view(info))
+      io.save_picks("movie_locs_mask_picks.yaml", picks, "Polygon")
