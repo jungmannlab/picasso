@@ -38,6 +38,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
+from matplotlib.widgets import RectangleSelector
 from scipy.ndimage import gaussian_filter
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans
@@ -526,6 +527,468 @@ class PickHistWindow(lib.GenericPlotWindow):
             )
         )
         self.figure.suptitle("Binding kinetics per pick")
+
+
+class PickCandidatesWindow(lib.GenericPlotWindow):
+    """Pick circular structures by their number of localizations and
+    RMSD, without seed picks.
+
+    The candidate picks (``postprocess.pick_similar_candidates``) of one
+    channel are shown in a 2D histogram of their number of localizations
+    and RMSD. The ranges of the two - drawn as a rectangle on the
+    histogram, typed in, or those of a class of
+    ``postprocess.structure_classes`` - select the candidates that
+    ``Add picks`` adds to the picks of the view.
+
+    Parameters
+    ----------
+    view : picasso.gui.render.View
+        The view whose localizations are scanned and which receives the
+        picks.
+    channel : int
+        Index of the channel.
+
+    Attributes
+    ----------
+    candidates : pd.DataFrame or None
+        The candidates found last, see
+        ``postprocess.pick_similar_candidates``.
+    diameter : float or None
+        Pick diameter (nm) the candidates were found with, which the
+        added picks take.
+    classes : pd.DataFrame or None
+        The classes found last, see ``postprocess.structure_classes``.
+    """
+
+    TITLE = "Pick by localizations and RMSD"
+    HELP_URL = docs_url("render/menu-tools.html#render-pick-by-n-locs-rmsd")
+    #: Default minimum number of localizations of a candidate, as a
+    #: fraction of the frames: above the background, whose candidates
+    #: would otherwise outnumber the structures (see
+    #: ``postprocess.structure_classes``).
+    MIN_N_LOCS_FRACTION = 0.01
+    #: Upper limit of the bins of each axis of the 2D histogram.
+    MAX_BINS = 100
+
+    def __init__(self, view: QtWidgets.QWidget, channel: int) -> None:
+        name = os.path.basename(view.locs_paths[channel])
+        super().__init__(f"{self.TITLE}: {name}", "render")
+        self.view = view
+        self.channel = channel
+        self.candidates = None
+        self.diameter = None
+        self.classes = None
+        self.selector = None
+        self.range_patch = None
+        self.redraw = self.plot
+        self.resize(900, 750)
+
+        controls = QtWidgets.QWidget()
+        rows = QtWidgets.QVBoxLayout(controls)
+        rows.setContentsMargins(0, 0, 0, 0)
+        self.layout().insertWidget(0, controls)
+        # the plot takes the height the controls do not need
+        self.layout().setStretchFactor(self.canvas, 1)
+        candidates_row = QtWidgets.QHBoxLayout()
+        ranges_row = QtWidgets.QHBoxLayout()
+        picks_row = QtWidgets.QHBoxLayout()
+        for row in (candidates_row, ranges_row, picks_row):
+            rows.addLayout(row)
+
+        # the candidates
+        candidates_row.addWidget(lib.HelpButton(self.HELP_URL))
+        min_label = QtWidgets.QLabel("Min. localizations:")
+        min_tip = (
+            "Minimum number of localizations of a candidate pick. The\n"
+            "background forms many candidates of a few localizations,\n"
+            "which can outnumber the structures. The default is 1% of\n"
+            "the frames."
+        )
+        min_label.setToolTip(min_tip)
+        candidates_row.addWidget(min_label)
+        self.min_n_locs = QtWidgets.QSpinBox()
+        self.min_n_locs.setRange(2, int(1e9))
+        self.min_n_locs.setToolTip(min_tip)
+        n_frames = lib.get_from_metadata(view.infos[channel], "Frames")
+        self.min_n_locs.setValue(
+            max(2, int(self.MIN_N_LOCS_FRACTION * (n_frames or 0)))
+        )
+        candidates_row.addWidget(self.min_n_locs)
+        self.find_button = QtWidgets.QPushButton("Find candidates")
+        self.find_button.setToolTip(
+            "Scan the field of view with circular picks of the pick\n"
+            "diameter of the Tools settings (Ctrl+T), each moved to the\n"
+            "center of mass of its localizations, as Pick similar does."
+        )
+        self.find_button.clicked.connect(self.find_candidates)
+        candidates_row.addWidget(self.find_button)
+        self.diameter_label = QtWidgets.QLabel()
+        candidates_row.addWidget(self.diameter_label)
+        candidates_row.addStretch(1)
+
+        # the ranges
+        ranges_row.addWidget(QtWidgets.QLabel("Localizations:"))
+        self.n_locs_min = QtWidgets.QSpinBox()
+        self.n_locs_max = QtWidgets.QSpinBox()
+        for spinbox in (self.n_locs_min, self.n_locs_max):
+            spinbox.setRange(0, int(1e9))
+            spinbox.setKeyboardTracking(False)
+        ranges_row.addWidget(self.n_locs_min)
+        ranges_row.addWidget(QtWidgets.QLabel("to"))
+        ranges_row.addWidget(self.n_locs_max)
+        ranges_row.addSpacing(16)
+        ranges_row.addWidget(QtWidgets.QLabel("RMSD (nm):"))
+        self.rmsd_min = QtWidgets.QDoubleSpinBox()
+        self.rmsd_max = QtWidgets.QDoubleSpinBox()
+        for spinbox in (self.rmsd_min, self.rmsd_max):
+            spinbox.setRange(0, 1e6)
+            spinbox.setDecimals(1)
+            spinbox.setKeyboardTracking(False)
+        ranges_row.addWidget(self.rmsd_min)
+        ranges_row.addWidget(QtWidgets.QLabel("to"))
+        ranges_row.addWidget(self.rmsd_max)
+        ranges_row.addStretch(1)
+        for spinbox in self._range_spinboxes():
+            spinbox.setToolTip(
+                "Range (inclusive) of the candidates to pick. Draw a\n"
+                "rectangle on the histogram to set both."
+            )
+            spinbox.valueChanged.connect(self.on_range_changed)
+
+        # the classes and the picks
+        self.classes_button = QtWidgets.QPushButton("Find classes")
+        self.classes_button.setToolTip(
+            "Cluster the candidates by their number of localizations and\n"
+            "RMSD (OPTICS) and give each class the ranges of its median\n"
+            "+/- one standard deviation."
+        )
+        self.classes_button.clicked.connect(self.find_classes)
+        picks_row.addWidget(self.classes_button)
+        self.class_combo = QtWidgets.QComboBox()
+        self.class_combo.setToolTip("Set the ranges to those of a class.")
+        self.class_combo.setSizeAdjustPolicy(
+            QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToContents
+        )
+        self.class_combo.activated.connect(self.on_class_selected)
+        picks_row.addWidget(self.class_combo)
+        picks_row.addStretch(1)
+        self.status_label = QtWidgets.QLabel()
+        picks_row.addWidget(self.status_label)
+        self.add_button = QtWidgets.QPushButton("Add picks")
+        self.add_button.setToolTip(
+            "Add the candidates within the ranges to the picks, as\n"
+            "circles of the diameter they were found with."
+        )
+        self.add_button.clicked.connect(self.add_picks)
+        picks_row.addWidget(self.add_button)
+
+        # in the window, as the canvas does not take the keyboard focus
+        cancel = QtGui.QShortcut(
+            QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape), self
+        )
+        cancel.activated.connect(self.cancel_selection)
+        self._update_widgets()
+        self.plot()
+
+    # ------------------------------------------------------------------
+    # candidates and classes
+    # ------------------------------------------------------------------
+
+    def find_candidates(self) -> None:
+        """Find the candidate picks of the channel with the pick diameter
+        of the Tools settings, on a worker thread."""
+        view = self.view
+        locs = view.locs[self.channel]
+        info = view.infos[self.channel]
+        tools = view.window.tools_settings_dialog
+        diameter = float(tools.pick_diameter.value())
+        min_n_locs = self.min_n_locs.value()
+
+        def compute(progress: lib.TaskProgress) -> pd.DataFrame:
+            return postprocess.pick_similar_candidates(
+                locs,
+                info,
+                pick_size=diameter,
+                min_n_locs=min_n_locs,
+                progress=progress,
+            )
+
+        def apply(candidates: pd.DataFrame) -> None:
+            self.set_candidates(candidates, diameter)
+
+        lib.run_task(compute, "Finding candidate picks", self, apply)
+
+    def set_candidates(
+        self, candidates: pd.DataFrame, diameter: float
+    ) -> None:
+        """Show ``candidates`` found with picks of ``diameter`` (nm), with
+        ranges that span all of them."""
+        self.candidates = candidates
+        self.diameter = diameter
+        self.classes = None
+        if len(candidates):
+            self.set_ranges(
+                (candidates["n_locs"].min(), candidates["n_locs"].max()),
+                (candidates["rmsd"].min(), candidates["rmsd"].max()),
+            )
+        self._update_widgets()
+        self.plot()
+
+    def find_classes(self) -> None:
+        """Find the classes of the candidates and select the first."""
+        if self.candidates is None or len(self.candidates) < 2:
+            self.status_label.setText("Too few candidates for classes.")
+            return
+        candidates = self.candidates
+        _, classes = lib.run_with_status(
+            lambda: postprocess.structure_classes(candidates),
+            "Finding classes...",
+            self,
+        )
+        self.classes = classes
+        self._update_widgets()
+        if len(classes):
+            self.select_class(0)
+        else:
+            self.status_label.setText("No classes found.")
+        self.plot()
+
+    def select_class(self, index: int) -> None:
+        """Set the ranges to those of class ``index``."""
+        row = self.classes.iloc[index]
+        self.set_ranges(
+            (row["n_locs_min"], row["n_locs_max"]),
+            (row["rmsd_min"], row["rmsd_max"]),
+        )
+        self.class_combo.setCurrentIndex(index)
+
+    def on_class_selected(self, index: int) -> None:
+        if self.classes is not None and 0 <= index < len(self.classes):
+            self.select_class(index)
+
+    # ------------------------------------------------------------------
+    # ranges
+    # ------------------------------------------------------------------
+
+    def _range_spinboxes(self) -> tuple[QtWidgets.QAbstractSpinBox, ...]:
+        return (self.n_locs_min, self.n_locs_max, self.rmsd_min, self.rmsd_max)
+
+    def ranges(self) -> tuple[tuple[int, int], tuple[float, float]]:
+        """The ranges of the number of localizations and of the RMSD
+        (nm), inclusive."""
+        return (
+            (self.n_locs_min.value(), self.n_locs_max.value()),
+            (self.rmsd_min.value(), self.rmsd_max.value()),
+        )
+
+    def set_ranges(
+        self,
+        n_locs_range: tuple[float, float],
+        rmsd_range: tuple[float, float],
+    ) -> None:
+        """Set the ranges: the integers within ``n_locs_range`` and
+        ``rmsd_range`` (nm) widened to the decimals shown, so that the
+        candidates within them stay within."""
+        values = (
+            int(np.ceil(n_locs_range[0])),
+            int(np.floor(n_locs_range[1])),
+            np.floor(rmsd_range[0] * 10) / 10,
+            np.ceil(rmsd_range[1] * 10) / 10,
+        )
+        for spinbox, value in zip(self._range_spinboxes(), values):
+            spinbox.blockSignals(True)
+            spinbox.setValue(value)
+            spinbox.blockSignals(False)
+        self.on_range_changed()
+
+    def on_range_changed(self) -> None:
+        self._update_status()
+        self._draw_range()
+
+    def selected(self) -> pd.DataFrame:
+        """The candidates within the ranges."""
+        if self.candidates is None:
+            return pd.DataFrame(columns=["x", "y", "n_locs", "rmsd"])
+        (n_low, n_high), (r_low, r_high) = self.ranges()
+        c = self.candidates
+        keep = c["n_locs"].between(n_low, n_high) & c["rmsd"].between(
+            r_low, r_high
+        )
+        return c[keep]
+
+    def on_rect_select(self, press, release) -> None:
+        """Set the ranges to the rectangle drawn on the histogram."""
+        x0, x1 = sorted((press.xdata, release.xdata))
+        y0, y1 = sorted((press.ydata, release.ydata))
+        self.set_ranges((x0, x1), (max(y0, 0.0), y1))
+
+    # ------------------------------------------------------------------
+    # picks
+    # ------------------------------------------------------------------
+
+    def add_picks(self) -> None:
+        """Add the candidates within the ranges as circular picks."""
+        selected = self.selected()
+        if not len(selected):
+            self.status_label.setText("No candidates within the ranges.")
+            return
+        positions = list(zip(selected["x"], selected["y"]))
+        view = self.view
+        with view.undo_step(self.TITLE, picks=True):
+            view.add_picks(positions, "Circle", self.diameter)
+        view.update_pick_info_short()
+        self.status_label.setText(f"Added {len(positions):,} picks.")
+
+    # ------------------------------------------------------------------
+    # display
+    # ------------------------------------------------------------------
+
+    def _update_widgets(self) -> None:
+        found = self.candidates is not None and len(self.candidates) > 0
+        for widget in (*self._range_spinboxes(), self.add_button):
+            widget.setEnabled(found)
+        self.classes_button.setEnabled(found)
+        self.class_combo.clear()
+        if self.classes is not None:
+            for index, row in self.classes.iterrows():
+                self.class_combo.addItem(
+                    f"Class {index + 1}: {int(row['n_candidates']):,} "
+                    f"candidates, {row['n_locs']:,.0f} localizations, "
+                    f"{row['rmsd']:.1f} nm"
+                )
+        self.class_combo.setEnabled(self.class_combo.count() > 0)
+        if self.diameter is None:
+            self.diameter_label.setText("")
+        else:
+            self.diameter_label.setText(
+                f"Pick diameter: {self.diameter:g} nm (Tools settings)"
+            )
+        self._update_status()
+
+    def _update_status(self) -> None:
+        if self.candidates is None:
+            self.status_label.setText("")
+            return
+        self.status_label.setText(
+            f"{len(self.selected()):,} of {len(self.candidates):,} "
+            "candidates in range"
+        )
+
+    def plot(self) -> None:
+        """Draw the 2D histogram of the candidates, the ranges and the
+        classes."""
+        self.figure.clear()
+        self.range_patch = None
+        with self.plot_context():
+            axes = self.figure.add_subplot(111)
+            style = self.plot_style
+            style.style_axes(axes)
+            style.label(axes, "Number of localizations", "RMSD (nm)")
+            candidates = self.candidates
+            if candidates is None or not len(candidates):
+                text = (
+                    "No candidates found."
+                    if candidates is not None
+                    else "Finding candidates..."
+                )
+                axes.text(
+                    0.5,
+                    0.5,
+                    text,
+                    ha="center",
+                    va="center",
+                    transform=axes.transAxes,
+                )
+                self.canvas.draw_idle()
+                return
+            n_locs = candidates["n_locs"].to_numpy(np.float64)
+            rmsd = candidates["rmsd"].to_numpy(np.float64)
+            bins_x = lib.calculate_optimal_bins(n_locs, self.MAX_BINS)
+            bins_y = lib.calculate_optimal_bins(rmsd, self.MAX_BINS)
+            counts, _, _ = np.histogram2d(n_locs, rmsd, bins=(bins_x, bins_y))
+            image = axes.pcolormesh(
+                bins_x,
+                bins_y,
+                np.ma.masked_equal(counts.T, 0),
+                norm=style.norm(),
+                cmap=style.cmap,
+                shading="flat",
+                rasterized=True,
+            )
+            if style.show_colorbar:
+                style.style_colorbar(
+                    self.figure.colorbar(image, ax=axes),
+                    label="Candidates per bin",
+                )
+            style.title(
+                self.figure,
+                f"{len(candidates):,} candidate picks of "
+                f"{self.diameter:g} nm",
+            )
+            self._draw_classes(axes)
+        self.selector = RectangleSelector(
+            axes,
+            self.on_rect_select,
+            useblit=True,
+            props=dict(fill=True, **style.selection),
+        )
+        self.selectors = [self.selector]
+        self._draw_range()
+
+    def _draw_classes(self, axes) -> None:
+        """Outline the ranges of the classes, numbered."""
+        if self.classes is None:
+            return
+        color = self.plot_style.theme_colors["text"]
+        for index, row in self.classes.iterrows():
+            x0, x1 = row["n_locs_min"], row["n_locs_max"]
+            y0, y1 = row["rmsd_min"], row["rmsd_max"]
+            axes.add_patch(
+                Rectangle(
+                    (x0, y0),
+                    x1 - x0,
+                    y1 - y0,
+                    fill=False,
+                    edgecolor=color,
+                    linestyle="--",
+                    linewidth=self.plot_style.line_width,
+                )
+            )
+            axes.annotate(
+                str(index + 1),
+                (x1, y1),
+                color=color,
+                ha="left",
+                va="bottom",
+            )
+
+    def _draw_range(self) -> None:
+        """Show the ranges as a rectangle on the histogram."""
+        if not self.figure.axes or self.candidates is None:
+            return
+        axes = self.figure.axes[0]
+        if self.range_patch is not None:
+            self.range_patch.remove()
+        (x0, x1), (y0, y1) = self.ranges()
+        self.range_patch = axes.add_patch(
+            Rectangle(
+                (x0, y0),
+                x1 - x0,
+                y1 - y0,
+                fill=True,
+                **self.plot_style.selection,
+            )
+        )
+        self.canvas.draw_idle()
+
+    def cancel_selection(self) -> None:
+        """Stop drawing the rectangle, without setting the ranges
+        (Esc), as in Filter's histograms."""
+        selector = self.selector
+        if selector is None or selector._eventpress is None:
+            return
+        selector._eventpress = None
+        selector.clear()
 
 
 class ApplyDialog(lib.Dialog):
@@ -11756,6 +12219,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self._link_interactive = False
         # single-particle tracking: tracking, analysis and drawn tracks
         self.spt = render_spt.SPTController(self)
+        # Tools > Pick by localizations and RMSD..., while open
+        self.pick_candidates_window = None
 
     def _load_drift(self, info: list[dict]) -> pd.DataFrame | None:
         drift = None
@@ -17902,6 +18367,22 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             self.update_pick_info_short()
             self.update_scene(picks_only=True)
 
+    def pick_by_n_locs_rmsd(self) -> None:
+        """Open the window that picks structures by their number of
+        localizations and RMSD, without seed picks, and find the
+        candidate picks of the chosen channel (see
+        ``PickCandidatesWindow``)."""
+        channel = self.get_channel(PickCandidatesWindow.TITLE)
+        if channel is None:
+            return
+        old = self.pick_candidates_window
+        if old is not None and not sip.isdeleted(old):
+            old.close()
+        window = PickCandidatesWindow(self, channel)
+        self.pick_candidates_window = window
+        window.show()
+        window.find_candidates()
+
     def _display_indices(
         self,
         channel: int,
@@ -20284,6 +20765,15 @@ class Window(QtWidgets.QMainWindow):
         pick_similar_action.setIcon(theme.icon("pick-similar"))
         pick_similar_action.setShortcut("Ctrl+Shift+P")
         pick_similar_action.triggered.connect(self.view.pick_similar)
+
+        pick_candidates_action = tools_menu.addAction(
+            f"{PickCandidatesWindow.TITLE}..."
+        )
+        pick_candidates_action.setToolTip(
+            "Pick similar structures without seed picks: by ranges of the\n"
+            "number of localizations and RMSD of the candidate picks."
+        )
+        pick_candidates_action.triggered.connect(self.view.pick_by_n_locs_rmsd)
 
         clear_picks_action = tools_menu.addAction("Clear picks")
         clear_picks_action.triggered.connect(self.view.clear_picks)

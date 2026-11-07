@@ -123,6 +123,10 @@ Picking
    - Box picks likewise all take the median width and height of the
      already-picked regions, while the regions you drew yourself are kept
      exactly as drawn.
+   - Without picking any structures first, ``Tools > Pick by localizations
+     and RMSD...`` picks circular structures by ranges of the two, chosen
+     on a 2D histogram of all candidate picks (see
+     :ref:`render-pick-by-n-locs-rmsd`).
 
 6. (Optional) Exporting of pick information. All localizations in picked
    regions can be saved by selecting ``File > Save picked localizations``. The

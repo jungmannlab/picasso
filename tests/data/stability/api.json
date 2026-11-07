@@ -228,6 +228,8 @@
  "picasso.postprocess": [
   "picked_locs",
   "pick_similar",
+  "pick_similar_candidates",
+  "structure_classes",
   "remove_locs_in_picks",
   "pick_properties",
   "link",

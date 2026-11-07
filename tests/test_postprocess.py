@@ -578,6 +578,217 @@ class TestPickSimilar:
             )
 
 
+class TestPickSimilarCandidates:
+    @pytest.fixture(scope="class")
+    def candidates(self, locs, info):
+        return postprocess.pick_similar_candidates(
+            locs, info, pick_size=PICK_SIZE
+        )
+
+    def test_the_origamis_are_the_candidates(self, candidates):
+        assert list(candidates.columns) == ["x", "y", "n_locs", "rmsd"]
+        assert candidates["n_locs"].dtype == np.int64
+        picks = list(zip(candidates["x"], candidates["y"]))
+        assert _matches_origamis(picks)
+
+    def test_n_locs_rmsd_and_center_of_the_localizations_within(self):
+        """Clusters far narrower than the pick (no localization near its
+        edge): each candidate is one cluster, at its center of mass, with
+        its size and RMSD."""
+        rng = np.random.default_rng(0)
+        centers = [(800.0, 800.0), (2400.0, 800.0), (800.0, 2400.0)]
+        sizes = [20, 50, 90]
+        xy = np.concatenate(
+            [rng.normal(c, 10.0, (n, 2)) for c, n in zip(centers, sizes)]
+        )
+        locs = pd.DataFrame(
+            {
+                "frame": np.arange(len(xy), dtype=np.uint32),
+                "x": xy[:, 0].astype(np.float32),
+                "y": xy[:, 1].astype(np.float32),
+            }
+        )
+        info = [{"Frames": 160, "Width": 32, "Height": 32, "Pixelsize": 130.0}]
+        candidates = postprocess.pick_similar_candidates(
+            locs, info, pick_size=300.0
+        )
+        assert len(candidates) == 3
+        xy = locs[["x", "y"]].to_numpy(np.float64)
+        for start, n in zip(np.cumsum([0] + sizes[:-1]), sizes):
+            cluster = xy[start : start + n]
+            com = cluster.mean(0)
+            (row,) = candidates[
+                np.hypot(candidates["x"] - com[0], candidates["y"] - com[1])
+                < 1.0
+            ].itertuples()
+            assert (row.x, row.y) == pytest.approx(tuple(com), abs=1e-3)
+            assert row.n_locs == n
+            rmsd = np.sqrt(np.mean(np.sum((cluster - com) ** 2, 1)))
+            assert row.rmsd == pytest.approx(rmsd, rel=1e-5)
+
+    def test_candidates_do_not_overlap(self, locs, info):
+        # a pick size of three origami spacings: many candidates converge
+        # onto the same localizations, which are kept once
+        candidates = postprocess.pick_similar_candidates(
+            locs, info, pick_size=2.5 * PX
+        )
+        xy = candidates[["x", "y"]].to_numpy()
+        distances = np.hypot(*(xy[:, None] - xy[None, :]).transpose(2, 0, 1))
+        np.fill_diagonal(distances, np.inf)
+        assert distances.min() > 2.5 * PX
+
+    def test_min_n_locs(self, locs, info, candidates):
+        threshold = int(candidates["n_locs"].median())
+        fewer = postprocess.pick_similar_candidates(
+            locs, info, pick_size=PICK_SIZE, min_n_locs=threshold
+        )
+        assert len(fewer) < len(candidates)
+        assert fewer["n_locs"].min() >= threshold
+        expected = candidates[candidates["n_locs"] >= threshold]
+        np.testing.assert_allclose(
+            np.sort(fewer["x"]), np.sort(expected["x"]), atol=1e-6
+        )
+
+    def test_progress_over_the_grid_columns(self, locs, info):
+        tracker = RecordingProgress()
+        postprocess.pick_similar_candidates(
+            locs, info, pick_size=PICK_SIZE, progress=tracker
+        )
+        assert_phases(tracker, ["Scanning candidate picks"])
+
+    def test_the_pick_size_must_be_positive(self, locs, info):
+        with pytest.raises(ValueError, match="positive"):
+            postprocess.pick_similar_candidates(locs, info, pick_size=0)
+
+
+class TestPickSimilarInRanges:
+    def test_the_candidates_in_the_ranges_are_picked(self, locs, info):
+        candidates = postprocess.pick_similar_candidates(
+            locs, info, pick_size=PICK_SIZE
+        )
+        n_locs_range = (50, 80)
+        rmsd_range = (20.0, None)
+        picks = postprocess.pick_similar(
+            locs,
+            info,
+            pick_size=PICK_SIZE,
+            n_locs_range=n_locs_range,
+            rmsd_range=rmsd_range,
+        )
+        expected = candidates.query("50 <= n_locs <= 80 and rmsd >= 20")
+        assert 0 < len(expected) < len(candidates)
+        assert picks == list(zip(expected["x"], expected["y"]))
+
+    def test_one_range_is_enough(self, locs, info):
+        picks = postprocess.pick_similar(
+            locs, info, pick_size=PICK_SIZE, rmsd_range=(0, 1e3)
+        )
+        assert _matches_origamis(picks)
+
+    def test_seeds_and_ranges_are_exclusive(self, locs, info):
+        with pytest.raises(ValueError, match="not both"):
+            postprocess.pick_similar(
+                locs,
+                info,
+                picks=ORIGAMI_PICKS[:2],
+                pick_size=PICK_SIZE,
+                n_locs_range=(10, 100),
+            )
+
+    def test_seeds_or_ranges_are_needed(self, locs, info):
+        with pytest.raises(ValueError, match="seed picks"):
+            postprocess.pick_similar(locs, info, pick_size=PICK_SIZE)
+
+    @pytest.mark.parametrize("shape", ["Square", ["Circle", "Rectangle"]])
+    def test_circles_only(self, locs, info, shape):
+        with pytest.raises(ValueError, match="circular picks only"):
+            postprocess.pick_similar(
+                locs,
+                info,
+                pick_shape=shape,
+                pick_size=PICK_SIZE,
+                n_locs_range=(10, 100),
+            )
+
+
+def _class_candidates(seed=0):
+    """Candidates of three structure classes, (n_locs, rmsd) of
+    (400, 20 nm), (1500, 45 nm) and (150, 10 nm), and 15 scattered
+    ones."""
+    rng = np.random.default_rng(seed)
+    classes = [(300, 400, 40, 20, 2), (200, 1500, 150, 45, 4)]
+    classes.append((150, 150, 20, 10, 1.5))
+    n_locs = [rng.normal(n, sn, size) for size, n, sn, _, _ in classes]
+    rmsd = [rng.normal(r, sr, size) for size, _, _, r, sr in classes]
+    n_locs.append(rng.uniform(100, 2500, 15))
+    rmsd.append(rng.uniform(5, 60, 15))
+    n_locs = np.concatenate(n_locs)
+    return pd.DataFrame(
+        {
+            "x": rng.uniform(0, 1e4, len(n_locs)),
+            "y": rng.uniform(0, 1e4, len(n_locs)),
+            "n_locs": np.round(n_locs).astype(np.int64),
+            "rmsd": np.concatenate(rmsd),
+        }
+    )
+
+
+class TestStructureClasses:
+    def test_the_classes_are_found_with_their_ranges(self):
+        candidates = _class_candidates()
+        labels, classes = postprocess.structure_classes(candidates)
+        assert len(labels) == len(candidates)
+        assert list(classes.columns) == [
+            "n_candidates",
+            "n_locs",
+            "rmsd",
+            "n_locs_min",
+            "n_locs_max",
+            "rmsd_min",
+            "rmsd_max",
+        ]
+        # the medians within a standard deviation of each class
+        found = classes.sort_values("n_locs")
+        n_locs_off = np.abs(found["n_locs"].to_numpy() - [150, 400, 1500])
+        assert np.all(n_locs_off <= [20, 40, 150])
+        rmsd_off = np.abs(found["rmsd"].to_numpy() - [10, 20, 45])
+        assert np.all(rmsd_off <= [1.5, 2, 4])
+        for index, row in classes.iterrows():
+            members = candidates[labels == index]
+            assert row["n_candidates"] == len(members)
+            n_median = np.median(members["n_locs"])
+            n_std = members["n_locs"].std(ddof=0)
+            assert row["n_locs_min"] == pytest.approx(n_median - n_std)
+            assert row["n_locs_max"] == pytest.approx(n_median + n_std)
+            r_median = np.median(members["rmsd"])
+            r_std = members["rmsd"].std(ddof=0)
+            assert row["rmsd_min"] == pytest.approx(r_median - r_std)
+            assert row["rmsd_max"] == pytest.approx(r_median + r_std)
+
+    def test_the_units_do_not_matter(self):
+        """The inputs are standardized: the RMSD in micrometers gives
+        the same classes."""
+        candidates = _class_candidates()
+        labels, _ = postprocess.structure_classes(candidates)
+        in_um = candidates.assign(rmsd=candidates["rmsd"] / 1000)
+        labels_um, _ = postprocess.structure_classes(in_um)
+        np.testing.assert_array_equal(labels, labels_um)
+
+    def test_std_range(self):
+        labels, narrow = postprocess.structure_classes(_class_candidates())
+        _, wide = postprocess.structure_classes(
+            _class_candidates(), std_range=2.0
+        )
+        np.testing.assert_allclose(
+            wide["n_locs_max"] - wide["n_locs"],
+            2 * (narrow["n_locs_max"] - narrow["n_locs"]),
+        )
+
+    def test_too_few_candidates(self):
+        with pytest.raises(ValueError, match="at least 2 candidates"):
+            postprocess.structure_classes(_class_candidates().iloc[:1])
+
+
 class TestPickSimilarSquare:
     def test_finds_remaining_origamis(self, locs, info):
         seed_picks = ORIGAMI_PICKS[:2]

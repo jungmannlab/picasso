@@ -1912,3 +1912,116 @@ class TestLocalizeAutoGradient:
         )  # fmt: skip
         assert fake.calls == []
         assert os.path.exists(_out(path, "_locs.hdf5"))
+
+
+# ---------------------------------------------------------------------------
+# Pick similar
+# ---------------------------------------------------------------------------
+
+PICK_SIZE = 1.5 * 130.0  # nm, the bundled localizations' pixel size
+
+
+class TestPickSimilar:
+    def test_by_ranges(self, locs_path, monkeypatch, capsys):
+        _picasso(
+            monkeypatch,
+            "pick-similar",
+            locs_path,
+            "-d", PICK_SIZE,
+            "--rmsd-range", 0, 100,
+            "--save-candidates",
+        )  # fmt: skip
+        out = _out(locs_path, "_pick_similar.yaml")
+        picks, shape, size = io.load_picks(out)
+        assert len(picks) == 9  # the origami
+        assert (shape, size) == ("Circle", PICK_SIZE)
+        candidates = pd.read_csv(
+            _out(locs_path, "_pick_similar_candidates.csv")
+        )
+        assert list(candidates.columns) == ["x", "y", "n_locs", "rmsd"]
+        np.testing.assert_allclose(picks, candidates[["x", "y"]].to_numpy())
+        # the default minimum: 1% of the frames
+        assert "with at least 10 localizations" in capsys.readouterr().out
+
+    def test_the_ranges_select(self, locs_path, monkeypatch):
+        _picasso(
+            monkeypatch,
+            "pick-similar",
+            locs_path,
+            "-d", PICK_SIZE,
+            "--n-locs-range", 50, 80,
+            "--min-n-locs", 2,
+            "--save-candidates",
+        )  # fmt: skip
+        picks, _, _ = io.load_picks(_out(locs_path, "_pick_similar.yaml"))
+        candidates = pd.read_csv(
+            _out(locs_path, "_pick_similar_candidates.csv")
+        )
+        expected = candidates.query("50 <= n_locs <= 80")
+        assert 0 < len(picks) == len(expected) < len(candidates)
+
+    def test_seed_picks(self, locs_path, tmp_path, monkeypatch):
+        seeds = tmp_path / "seeds.yaml"
+        io.save_picks(
+            str(seeds), [(715.0, 715.0), (2015.0, 2015.0)], "Circle", PICK_SIZE
+        )
+        _picasso(
+            monkeypatch, "pick-similar", locs_path, "-p", seeds, "-s", 100
+        )
+        out = _out(locs_path, "_pick_similar.yaml")
+        picks, shape, size = io.load_picks(out)
+        assert len(picks) == 9
+        np.testing.assert_allclose(picks[:2], [(715, 715), (2015, 2015)])
+        assert (shape, size) == ("Circle", PICK_SIZE)
+
+    def test_one_file_per_class(self, locs_path, monkeypatch):
+        classes = pd.DataFrame(
+            {
+                "n_candidates": [5, 4],
+                "n_locs": [60.0, 40.0],
+                "rmsd": [21.0, 23.0],
+                "n_locs_min": [50.0, 0.0],
+                "n_locs_max": [80.0, 49.0],
+                "rmsd_min": [0.0, 0.0],
+                "rmsd_max": [100.0, 100.0],
+            }
+        )
+
+        def fake_classes(candidates):
+            labels = np.where(candidates["n_locs"] >= 50, 0, 1)
+            return labels, classes
+
+        from picasso import postprocess
+
+        monkeypatch.setattr(postprocess, "structure_classes", fake_classes)
+        _picasso(
+            monkeypatch,
+            "pick-similar",
+            locs_path,
+            "-d", PICK_SIZE,
+            "--classes",
+            "--min-n-locs", 2,
+            "--save-candidates",
+        )  # fmt: skip
+        candidates = pd.read_csv(
+            _out(locs_path, "_pick_similar_candidates.csv")
+        )
+        # the classes are numbered from 1 (0: none)
+        assert set(candidates["class"]) <= {1, 2}
+        for number, query in ((1, "50 <= n_locs <= 80"), (2, "n_locs <= 49")):
+            picks, _, _ = io.load_picks(
+                _out(locs_path, f"_pick_similar_class{number}.yaml")
+            )
+            assert len(picks) == len(candidates.query(query))
+
+    @pytest.mark.parametrize(
+        "options",
+        [
+            ["-d", PICK_SIZE],
+            ["-d", PICK_SIZE, "--classes", "--rmsd-range", 0, 1],
+            ["--rmsd-range", 0, 1],
+        ],
+    )
+    def test_refuses(self, locs_path, monkeypatch, options):
+        with pytest.raises(SystemExit):
+            _picasso(monkeypatch, "pick-similar", locs_path, *options)

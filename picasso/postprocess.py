@@ -45,6 +45,8 @@ __all__ = [
     # picks
     "picked_locs",
     "pick_similar",
+    "pick_similar_candidates",
+    "structure_classes",
     "remove_locs_in_picks",
     "pick_properties",
     # binding events
@@ -522,7 +524,7 @@ def pick_similar(
     locs: pd.DataFrame,
     info: list[dict],
     *,
-    picks: list[tuple],
+    picks: list[tuple] | None = None,
     pick_shape: (
         Literal["Circle", "Rectangle", "Square", "Box"] | list[str]
     ) = "Circle",
@@ -530,6 +532,8 @@ def pick_similar(
     std_range: float = 2.0,
     index_blocks: tuple = None,
     grid_spacing: float = None,
+    n_locs_range: tuple[float, float] | None = None,
+    rmsd_range: tuple[float, float] | None = None,
 ) -> list[tuple]:
     """Find picks similar to the given ones, based on the number of
     localizations and their RMSD.
@@ -539,6 +543,11 @@ def pick_similar(
     (``std_range``). Only picks with number of localizations and RMSD
     within these ranges are returned. The input picks are always part of
     the output, first and in their order.
+
+    Instead of seed picks, the ranges can be given directly
+    (``n_locs_range`` and/or ``rmsd_range``, circular picks only): the
+    candidates of :func:`pick_similar_candidates` within the ranges are
+    returned.
 
     A grid of overlapping candidate picks covering the field of view is
     scanned and each candidate is shifted towards the center of mass of
@@ -562,11 +571,12 @@ def pick_similar(
         Localizations.
     info : list of dicts
         Metadata of the localizations.
-    picks : list
-        List of picks. ``(x, y)`` coordinates for circular and square
-        picks, ``((x_start, y_start), (x_end, y_end))`` center-axis
-        points for rectangular picks, and the two opposite corners
-        ``((x0, y0), (x1, y1))`` for box picks.
+    picks : list, optional
+        List of seed picks. ``(x, y)`` coordinates for circular and
+        square picks, ``((x_start, y_start), (x_end, y_end))``
+        center-axis points for rectangular picks, and the two opposite
+        corners ``((x0, y0), (x1, y1))`` for box picks. None (default)
+        with ``n_locs_range`` and/or ``rmsd_range`` given instead.
     pick_shape : {'Circle', 'Rectangle', 'Square', 'Box'} or list of str
         Shape of the picks; a list (one shape per pick) must hold one
         shape only. Default is 'Circle'.
@@ -587,6 +597,14 @@ def pick_similar(
         used for rectangular picks, where the default
         (a quarter of the median pick length) trades speed for the
         chance of missing closely spaced structures. Default is None.
+    n_locs_range : tuple of float, optional
+        Minimum and maximum number of localizations of the picks to
+        find (inclusive; either may be None for no bound), without seed
+        picks. None (default) for no bound, unless ``rmsd_range`` is
+        None as well, which needs seed picks.
+    rmsd_range : tuple of float, optional
+        Minimum and maximum RMSD (nm, inclusive) of the picks to find,
+        without seed picks; see ``n_locs_range``. Default is None.
 
     Returns
     -------
@@ -597,8 +615,25 @@ def pick_similar(
     ------
     ValueError
         If the picks have different shapes, a shape is not supported or
-        a size is missing.
+        a size is missing, or if both or neither of the seed picks and
+        the ranges are given.
     """
+    if n_locs_range is not None or rmsd_range is not None:
+        return _pick_similar_in_ranges(
+            locs,
+            info,
+            picks,
+            pick_shape,
+            pick_size,
+            grid_spacing,
+            n_locs_range,
+            rmsd_range,
+        )
+    if picks is None:
+        raise ValueError(
+            "Pick similar needs seed picks, or n_locs_range and/or "
+            "rmsd_range."
+        )
     pick_shape, pick_size = _pick_similar_shape_and_size(
         picks, pick_shape, pick_size
     )
@@ -630,6 +665,308 @@ def pick_similar(
         return _pick_similar_rectangular(
             info, picks, pick_size, std_range, index_blocks, grid_spacing
         )
+
+
+def pick_similar_candidates(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    pick_size: float,
+    min_n_locs: int = 2,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> pd.DataFrame:
+    """The circular picks that :func:`pick_similar` considers, with
+    their number of localizations and RMSD, to select picks from
+    without seed picks.
+
+    As in :func:`pick_similar`, a grid of overlapping circular picks
+    covering the field of view (a triangular lattice) is scanned and
+    each candidate is shifted to the center of mass of the
+    localizations within it until it converges. Every converged
+    candidate with at least ``min_n_locs`` localizations that does not
+    overlap a candidate found before (centers closer than
+    ``pick_size``) is returned, in the order of the scan.
+
+    The number of localizations and the RMSD tell the structures apart:
+    e.g., in a 2D histogram of the two, DNA origami of one design form a
+    cluster, which ``n_locs_range`` and ``rmsd_range`` of
+    :func:`pick_similar` select.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+    info : list of dicts
+        Metadata of the localizations.
+    pick_size : float
+        Diameter of the circular picks in nm.
+    min_n_locs : int, optional
+        Minimum number of localizations of a candidate. A candidate has
+        at least 2 (one localization has no center of mass to converge
+        to), so smaller values have no effect. Default is 2.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase over the columns of
+        the grid. Default is None.
+
+    Returns
+    -------
+    candidates : pd.DataFrame
+        One row per candidate: "n_locs" (the number of localizations
+        within the converged pick), "x" and "y" (their center of mass,
+        where the pick converged, in nm) and "rmsd" (their root mean
+        square distance from it, in nm).
+
+    Raises
+    ------
+    ValueError
+        If ``pick_size`` is not positive.
+
+    Examples
+    --------
+    >>> candidates = postprocess.pick_similar_candidates(
+    ...     locs, info, pick_size=150
+    ... )
+    >>> origami = candidates.query("300 <= n_locs <= 600 and rmsd <= 25")
+    """
+    if not pick_size > 0:
+        raise ValueError(f"pick_size must be positive, got {pick_size}.")
+    d = float(pick_size)
+    r = d / 2
+    index_blocks = get_index_blocks(locs, info, r)
+    x_range, y_shift, y_base, x_r, y_r1, y_r2 = _pick_similar_circle_grid(
+        info, d, index_blocks[1]
+    )
+    _, _, _, _, block_starts, block_ends, K, L = index_blocks
+    locs_xy = _index_blocks_xy(index_blocks)
+    found = tuple(np.empty(0) for _ in range(4))
+    n_columns = len(x_range)
+    # the scan runs in chunks of columns for the progress, each
+    # continuing the candidates found so far
+    chunk = max(1, n_columns // 100)
+    phase = "Scanning candidate picks"
+    with lib.tracked_progress(progress, phase, unit="column") as progress:
+        lib.start_phase(progress, phase, n_columns, unit="column")
+        for start in range(0, n_columns, chunk):
+            stop = min(start + chunk, n_columns)
+            found = _pick_similar_scan(
+                x_range[start:stop],
+                y_shift,
+                y_base,
+                start,
+                max(int(min_n_locs), 2),
+                np.inf,
+                -np.inf,
+                np.inf,
+                x_r[start:stop],
+                y_r1,
+                y_r2,
+                locs_xy,
+                block_starts,
+                block_ends,
+                K,
+                L,
+                *found,
+                r,
+                d**2,
+            )
+            progress.set_value(stop)
+    x, y, n_locs, rmsd = found
+    return pd.DataFrame(
+        {"x": x, "y": y, "n_locs": n_locs.astype(np.int64), "rmsd": rmsd}
+    )
+
+
+def structure_classes(
+    candidates: pd.DataFrame,
+    *,
+    min_samples: float = 0.01,
+    xi: float = 0.05,
+    min_cluster_size: float = 0.05,
+    std_range: float = 1.0,
+) -> tuple[lib.IntArray1D, pd.DataFrame]:
+    """Classes of structures among the candidate picks of
+    :func:`pick_similar_candidates`, by their number of localizations
+    and RMSD, with the ranges that pick each class.
+
+    The candidates are clustered by OPTICS with the xi method (Ankerst
+    et al., ACM SIGMOD 1999; ``sklearn.cluster.OPTICS``) in their
+    number of localizations and RMSD, each standardized to zero mean
+    and unit standard deviation, so that neither dominates through its
+    unit. A cluster can spread widely, so each class is then described
+    by the median +/- ``std_range`` standard deviations of the number of
+    localizations and of the RMSD of its candidates: the ranges that
+    :func:`pick_similar` takes (``n_locs_range``, ``rmsd_range``) to
+    pick the structures of the class.
+
+    The candidates of the background (a few localizations each) can
+    outnumber the structures and merge with them into one class: find
+    the candidates with a ``min_n_locs`` above the background, e.g., 1%
+    of the frames.
+
+    The method was written by Heinrich Grabmayr for picasso-workflow
+    (https://github.com/jungmannlab/picasso-workflow), which clusters
+    the RMSD and the number of localizations per frame as they are; here
+    both are standardized and ``min_samples`` is a fraction of the
+    candidates rather than of the frames.
+
+    Parameters
+    ----------
+    candidates : pd.DataFrame
+        Candidate picks with the columns "n_locs" and "rmsd", see
+        :func:`pick_similar_candidates`.
+    min_samples : float, optional
+        Number of candidates in a neighborhood for a candidate to be a
+        core point, as a fraction of the candidates (at least 2), or as
+        a number if larger than 1. Default is 0.01.
+    xi : float, optional
+        Minimum steepness of the reachability plot that bounds a
+        cluster, between 0 and 1. Default is 0.05.
+    min_cluster_size : float, optional
+        Minimum number of candidates in a class, as a fraction of the
+        candidates (at least 2), or as a number if larger than 1.
+        Default is 0.05.
+    std_range : float, optional
+        Number of standard deviations around the median that the ranges
+        of a class span. Default is 1.0.
+
+    Returns
+    -------
+    labels : lib.IntArray1D
+        Class of each candidate (the row of ``classes``), or -1 for
+        none.
+    classes : pd.DataFrame
+        One row per class: "n_candidates", the median number of
+        localizations and RMSD ("n_locs", "rmsd", nm) and the ranges
+        ("n_locs_min", "n_locs_max", "rmsd_min", "rmsd_max", nm; the
+        minima at least 0).
+
+    Raises
+    ------
+    ValueError
+        If there are fewer than 2 candidates.
+
+    Examples
+    --------
+    >>> candidates = postprocess.pick_similar_candidates(
+    ...     locs, info, pick_size=150, min_n_locs=info[0]["Frames"] // 100
+    ... )
+    >>> labels, classes = postprocess.structure_classes(candidates)
+    >>> first = classes.iloc[0]
+    >>> picks = postprocess.pick_similar(
+    ...     locs,
+    ...     info,
+    ...     pick_size=150,
+    ...     n_locs_range=(first["n_locs_min"], first["n_locs_max"]),
+    ...     rmsd_range=(first["rmsd_min"], first["rmsd_max"]),
+    ... )
+    """
+    from sklearn.cluster import OPTICS
+
+    if len(candidates) < 2:
+        raise ValueError(
+            "Structure classes need at least 2 candidates, got "
+            f"{len(candidates)}."
+        )
+    n_locs = candidates["n_locs"].to_numpy(np.float64)
+    rmsd = candidates["rmsd"].to_numpy(np.float64)
+    features = np.stack((n_locs, rmsd), axis=1)
+    std = features.std(axis=0)
+    std[std == 0] = 1.0  # a constant feature separates nothing
+    features = (features - features.mean(axis=0)) / std
+    labels = (
+        OPTICS(
+            min_samples=_optics_size(min_samples),
+            xi=xi,
+            min_cluster_size=_optics_size(min_cluster_size),
+        )
+        .fit(features)
+        .labels_
+    )
+    rows = []
+    for label in range(labels.max() + 1):
+        members = labels == label
+        n_median, n_std = np.median(n_locs[members]), n_locs[members].std()
+        r_median, r_std = np.median(rmsd[members]), rmsd[members].std()
+        rows.append(
+            {
+                "n_candidates": int(members.sum()),
+                "n_locs": n_median,
+                "rmsd": r_median,
+                "n_locs_min": max(n_median - std_range * n_std, 0.0),
+                "n_locs_max": n_median + std_range * n_std,
+                "rmsd_min": max(r_median - std_range * r_std, 0.0),
+                "rmsd_max": r_median + std_range * r_std,
+            }
+        )
+    columns = [
+        "n_candidates",
+        "n_locs",
+        "rmsd",
+        "n_locs_min",
+        "n_locs_max",
+        "rmsd_min",
+        "rmsd_max",
+    ]
+    return labels.astype(np.int64), pd.DataFrame(rows, columns=columns)
+
+
+def _optics_size(value: float) -> float | int:
+    """A size of ``sklearn.cluster.OPTICS``: a fraction of the samples
+    up to 1, else a number."""
+    return float(value) if value <= 1 else int(value)
+
+
+def _pick_similar_in_ranges(
+    locs: pd.DataFrame,
+    info: list[dict],
+    picks: list[tuple] | None,
+    pick_shape: str | list[str],
+    pick_size: float | list[float] | None,
+    grid_spacing: float | None,
+    n_locs_range: tuple[float, float] | None,
+    rmsd_range: tuple[float, float] | None,
+) -> list[tuple]:
+    """``pick_similar`` without seed picks: the candidates of
+    ``pick_similar_candidates`` within the ranges."""
+    if picks:
+        raise ValueError(
+            "Pick similar takes seed picks or n_locs_range/rmsd_range, "
+            "not both."
+        )
+    shapes = {pick_shape} if isinstance(pick_shape, str) else set(pick_shape)
+    if shapes - {"Circle"}:
+        raise ValueError(
+            "Pick similar without seed picks finds circular picks only."
+        )
+    if pick_size is None or np.ndim(pick_size):
+        raise ValueError(
+            "Pick similar without seed picks needs one pick_size (the "
+            "diameter)."
+        )
+    if grid_spacing is not None:
+        raise ValueError(
+            "grid_spacing is only supported for rectangular picks."
+        )
+    candidates = pick_similar_candidates(locs, info, pick_size=pick_size)
+    keep = _in_range(candidates["n_locs"], n_locs_range) & _in_range(
+        candidates["rmsd"], rmsd_range
+    )
+    return list(zip(candidates["x"][keep], candidates["y"][keep]))
+
+
+def _in_range(
+    values: pd.Series, bounds: tuple[float | None, float | None] | None
+) -> pd.Series:
+    """Whether each value is within the inclusive ``bounds``, where
+    None is no bound."""
+    if bounds is None:
+        return pd.Series(True, index=values.index)
+    low, high = bounds
+    low = -np.inf if low is None else low
+    high = np.inf if high is None else high
+    return (values >= low) & (values <= high)
 
 
 def _pick_similar_shape_and_size(
@@ -781,15 +1118,11 @@ def _pick_similar_circular(
     y_similar = np.array([_[1] for _ in picks], dtype=np.float64)
 
     # preparations for grid search
-    fov_width, fov_height = lib.field_of_view(info)
-    x_range = np.arange(d / 2, fov_width, np.sqrt(3) * d / 2)
-    y_range_base = np.arange(d / 2, fov_height - d / 2, d)
-    y_range_shift = y_range_base + d / 2
-    locs_temp, size, _, _, block_starts, block_ends, K, L = index_blocks
-    locs_xy = np.stack((locs_temp.x, locs_temp.y))
-    x_r = np.uint64(x_range / size)
-    y_r1 = np.uint64(y_range_shift / size)
-    y_r2 = np.uint64(y_range_base / size)
+    x_range, y_range_shift, y_range_base, x_r, y_r1, y_r2 = (
+        _pick_similar_circle_grid(info, d, index_blocks[1])
+    )
+    _, _, _, _, block_starts, block_ends, K, L = index_blocks
+    locs_xy = _index_blocks_xy(index_blocks)
     # pick similar
     x_similar, y_similar = _pick_similar(
         x_range,
@@ -816,8 +1149,32 @@ def _pick_similar_circular(
     return new_picks
 
 
+def _pick_similar_circle_grid(
+    info: list[dict], d: float, block_size: float
+) -> tuple[lib.FloatArray1D, ...]:
+    """The grid of overlapping circular candidate picks of diameter
+    ``d`` that pick similar scans: columns ``x`` (nm) with the y
+    positions of the odd (``y_shift``) and even (``y_base``) columns,
+    and the index blocks (of size ``block_size``) of all three."""
+    fov_width, fov_height = lib.field_of_view(info)
+    x_range = np.arange(d / 2, fov_width, np.sqrt(3) * d / 2)
+    y_range_base = np.arange(d / 2, fov_height - d / 2, d)
+    y_range_shift = y_range_base + d / 2
+    x_r = np.uint64(x_range / block_size)
+    y_r1 = np.uint64(y_range_shift / block_size)
+    y_r2 = np.uint64(y_range_base / block_size)
+    return x_range, y_range_shift, y_range_base, x_r, y_r1, y_r2
+
+
+def _index_blocks_xy(index_blocks: tuple) -> lib.FloatArray2D:
+    """``(2, N)`` x and y of the block-sorted localizations of
+    ``index_blocks`` (see ``get_index_blocks``)."""
+    locs_temp = index_blocks[0]
+    return np.stack((locs_temp.x, locs_temp.y))
+
+
 @numba.jit(nopython=True, nogil=True, cache=True)
-def _pick_similar(  # noqa: C901
+def _pick_similar(
     x: lib.FloatArray1D,
     y_shift: lib.FloatArray1D,
     y_base: lib.FloatArray1D,
@@ -846,7 +1203,8 @@ def _pick_similar(  # noqa: C901
     center of mass of the localizations within the pick. If the picked
     localizations have the required number of localizations and the
     RMSD, it is added to the output list (``x_similar`` and
-    ``y_similar``).
+    ``y_similar``). See ``_pick_similar_scan``, which it runs over the
+    whole grid.
 
     This function is implemented in numba for speed, called from
     ``pick_similar``. See that function for more user-friendly
@@ -886,10 +1244,81 @@ def _pick_similar(  # noqa: C901
     x_similar, y_similar : lib.FloatArray1D
         Arrays with the x and y coordinates of the similar picks.
     """
+    x_similar, y_similar, _, _ = _pick_similar_scan(
+        x,
+        y_shift,
+        y_base,
+        0,
+        min_n_locs,
+        max_n_locs,
+        min_rmsd,
+        max_rmsd,
+        x_r,
+        y_r1,
+        y_r2,
+        locs_xy,
+        block_starts,
+        block_ends,
+        K,
+        L,
+        x_similar,
+        y_similar,
+        np.empty(0),
+        np.empty(0),
+        r,
+        d2,
+    )
+    return x_similar, y_similar
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _pick_similar_scan(  # noqa: C901
+    x: lib.FloatArray1D,
+    y_shift: lib.FloatArray1D,
+    y_base: lib.FloatArray1D,
+    first_column: int,
+    min_n_locs: int,
+    max_n_locs: float,
+    min_rmsd: float,
+    max_rmsd: float,
+    x_r: lib.IntArray1D,
+    y_r1: lib.IntArray1D,
+    y_r2: lib.IntArray1D,
+    locs_xy: lib.FloatArray2D,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
+    K: int,
+    L: int,
+    x_similar: lib.FloatArray1D,
+    y_similar: lib.FloatArray1D,
+    n_similar: lib.FloatArray1D,
+    rmsd_similar: lib.FloatArray1D,
+    r: float,
+    d2: float,
+) -> tuple[lib.FloatArray1D, ...]:
+    """The grid scan of pick similar over the columns ``x`` of the grid
+    (see ``_pick_similar``): each candidate is shifted to the center of
+    mass of its localizations until it converges, and kept if its number
+    of localizations and its RMSD are in range and it does not overlap a
+    pick kept before (``x_similar``, ``y_similar``).
+
+    The columns can be scanned in chunks, each continuing the picks the
+    previous one returned: ``first_column`` is the index of ``x[0]`` in
+    the whole grid, which decides which columns are shifted.
+
+    Returns
+    -------
+    x_similar, y_similar : lib.FloatArray1D
+        The picks given and those found.
+    n_similar, rmsd_similar : lib.FloatArray1D
+        The number of localizations and the RMSD of the given
+        ``n_similar``/``rmsd_similar`` followed by those of the picks
+        found (not of the seed picks in ``x_similar``).
+    """
     for i, x_grid in enumerate(x):
         x_range = x_r[i]
         # y_grid is shifted for odd columns
-        if i % 2:
+        if (first_column + i) % 2:
             y = y_shift
             y_r = y_r1
         else:
@@ -947,15 +1376,15 @@ def _pick_similar(  # noqa: C901
                         (x_similar - x_test) ** 2 + (y_similar - y_test) ** 2
                         > d2
                     ):
-                        if min_n_locs <= picked_locs_xy.shape[1] <= max_n_locs:
-                            if (
-                                min_rmsd
-                                <= lib.rmsd_at_com(picked_locs_xy)
-                                <= max_rmsd
-                            ):
+                        n_picked = picked_locs_xy.shape[1]
+                        if min_n_locs <= n_picked <= max_n_locs:
+                            rmsd = lib.rmsd_at_com(picked_locs_xy)
+                            if min_rmsd <= rmsd <= max_rmsd:
                                 x_similar = np.append(x_similar, x_test)
                                 y_similar = np.append(y_similar, y_test)
-    return x_similar, y_similar
+                                n_similar = np.append(n_similar, n_picked)
+                                rmsd_similar = np.append(rmsd_similar, rmsd)
+    return x_similar, y_similar, n_similar, rmsd_similar
 
 
 def _pick_similar_grid(

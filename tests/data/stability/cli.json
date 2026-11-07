@@ -232,6 +232,19 @@
   "-b",
   "-r"
  ],
+ "pick-similar": [
+  "--classes",
+  "--min-n-locs",
+  "--n-locs-range",
+  "--pick-size",
+  "--picks",
+  "--rmsd-range",
+  "--save-candidates",
+  "--std-range",
+  "-d",
+  "-p",
+  "-s"
+ ],
  "plugins": [],
  "plugins disable": [
   "--yes"

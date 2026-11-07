@@ -1044,6 +1044,161 @@ def _nnd(
         print(f"saved {base + suffix}")
 
 
+def _pick_similar_cli(
+    files: list[str],
+    picks_path: str | None = None,
+    pick_size: float | None = None,
+    std_range: float = 2.0,
+    n_locs_range: list[float] | None = None,
+    rmsd_range: list[float] | None = None,
+    classes: bool = False,
+    min_n_locs: int | None = None,
+    save_candidates: bool = False,
+) -> list[str]:
+    """Pick similar structures in localization files (``picasso
+    pick-similar``), saving one picks file per file (per class with
+    ``classes``).
+
+    The structures are similar to the seed picks of ``picks_path`` (see
+    ``postprocess.pick_similar``), or are the candidate circular picks
+    (``postprocess.pick_similar_candidates``) within ``n_locs_range``
+    and/or ``rmsd_range``, or within the ranges of each class of
+    ``postprocess.structure_classes``, as Render's Tools > Pick by
+    localizations and RMSD finds them: candidates with at least
+    ``min_n_locs`` localizations, by default 1% of the frames.
+
+    Returns
+    -------
+    saved : list of str
+        Paths of the picks files written.
+    """
+    from glob import glob
+    from itertools import chain
+    from . import io, lib, postprocess
+
+    by_ranges = n_locs_range is not None or rmsd_range is not None
+    if (picks_path is not None) + by_ranges + bool(classes) != 1:
+        raise SystemExit(
+            "Give exactly one of --picks, --n-locs-range/--rmsd-range and "
+            "--classes."
+        )
+    if picks_path is None and pick_size is None:
+        raise SystemExit(
+            "--pick-size (the diameter in nm) is needed without --picks."
+        )
+    paths = list(chain(*[sorted(glob(_)) for _ in files]))
+    if not paths:
+        raise SystemExit("No localization files found.")
+    saved = []
+    for path in paths:
+        locs, info = io.load_locs(path)
+        base = os.path.splitext(path)[0] + "_pick_similar"
+        if picks_path is not None:
+            saved.append(
+                _pick_similar_seeded(
+                    locs, info, path, base, picks_path, std_range
+                )
+            )
+            continue
+        if min_n_locs is None:
+            n_frames = lib.get_from_metadata(info, "Frames", 0)
+            n_min = max(2, int(0.01 * n_frames))
+        else:
+            n_min = min_n_locs
+        print(
+            f"{path}: candidate picks of {pick_size:g} nm with at least "
+            f"{n_min} localizations"
+        )
+        candidates = postprocess.pick_similar_candidates(
+            locs,
+            info,
+            pick_size=pick_size,
+            min_n_locs=n_min,
+            progress="console",
+        )
+        print(f"{len(candidates)} candidate picks")
+        if classes:
+            if len(candidates) < 2:
+                raise SystemExit(
+                    f"{path}: too few candidate picks for classes."
+                )
+            labels, table = postprocess.structure_classes(candidates)
+            candidates = candidates.assign(**{"class": labels + 1})
+            if not len(table):
+                print("No classes found.")
+            else:
+                table.index = table.index + 1
+                table.index.name = "class"
+                print(table.round(1).to_string())
+            ranges = [
+                (
+                    (row["n_locs_min"], row["n_locs_max"]),
+                    (row["rmsd_min"], row["rmsd_max"]),
+                    f"{base}_class{index}.yaml",
+                )
+                for index, row in table.iterrows()
+            ]
+        else:
+            ranges = [(n_locs_range, rmsd_range, base + ".yaml")]
+        for n_range, r_range, out in ranges:
+            keep = postprocess._in_range(
+                candidates["n_locs"], n_range
+            ) & postprocess._in_range(candidates["rmsd"], r_range)
+            picks = list(zip(candidates["x"][keep], candidates["y"][keep]))
+            io.save_picks(out, picks, "Circle", pick_size)
+            print(f"saved {len(picks)} picks to {out}")
+            saved.append(out)
+        if save_candidates:
+            out = base + "_candidates.csv"
+            candidates.to_csv(out, index=False)
+            print(f"saved {out}")
+    return saved
+
+
+def _pick_similar_seeded(
+    locs: pd.DataFrame,
+    info: list[dict],
+    path: str,
+    base: str,
+    picks_path: str,
+    std_range: float,
+) -> str:
+    """``picasso pick-similar --picks``: the seed picks and the picks
+    similar to them, saved to ``base``.yaml; the new picks take the
+    median size of the seed picks, which keep theirs."""
+    import numpy as np
+
+    from . import io, lib, postprocess
+
+    seeds, shape, size = io.load_picks(
+        picks_path, lib.get_from_metadata(info, "Pixelsize")
+    )
+    try:
+        picks = postprocess.pick_similar(
+            locs,
+            info,
+            picks=seeds,
+            pick_shape=shape,
+            pick_size=size,
+            std_range=std_range,
+        )
+    except (ValueError, AssertionError) as e:
+        raise SystemExit(f"{path}: {e}")
+    shapes, sizes = lib.pick_shapes_and_sizes(seeds, shape, size)
+    n_new = len(picks) - len(seeds)
+    if shapes and shapes[0] not in lib.PICK_SHAPES_WITHOUT_SIZE:
+        sizes = list(sizes) + [float(np.median(sizes))] * n_new
+    else:
+        sizes = list(sizes) + [None] * n_new
+    out = base + ".yaml"
+    io.save_picks(out, picks, shapes[0] if shapes else "Circle", sizes)
+    print(
+        f"{path}: {n_new} picks similar to the {len(seeds)} of "
+        f"{picks_path}; saved all {len(picks)} to {out}"
+    )
+    return out
+
+
 def _warn_if_not_molecules(path: str, locs: pd.DataFrame) -> None:
     """Print a warning if the localizations in ``path`` are not
     molecules, see ``postprocess._are_molecules``."""
@@ -5447,6 +5602,86 @@ def _build_parser() -> (
         ),
     )
 
+    pick_similar_parser = subparsers.add_parser(
+        "pick-similar",
+        help=(
+            "pick structures similar to seed picks, or by ranges of their"
+            " number of localizations and RMSD without seed picks"
+        ),
+    )
+    pick_similar_parser.add_argument(
+        "files",
+        nargs="+",
+        help="one or more hdf5 localization files (unix style path patterns)",
+    )
+    pick_similar_parser.add_argument(
+        "-p",
+        "--picks",
+        default=None,
+        help=(
+            "seed picks (.yaml) saved in Render; the picks similar to"
+            " them are found (circles, squares, rectangles or boxes)"
+        ),
+    )
+    pick_similar_parser.add_argument(
+        "-d",
+        "--pick-size",
+        type=float,
+        default=None,
+        help="diameter (nm) of the circular picks, without --picks",
+    )
+    pick_similar_parser.add_argument(
+        "-s",
+        "--std-range",
+        type=float,
+        default=2.0,
+        help=(
+            "with --picks, the range around the mean of the seed picks in"
+            " standard deviations (default=2)"
+        ),
+    )
+    pick_similar_parser.add_argument(
+        "--n-locs-range",
+        type=float,
+        nargs=2,
+        default=None,
+        metavar=("MIN", "MAX"),
+        help="range of the number of localizations of the picks",
+    )
+    pick_similar_parser.add_argument(
+        "--rmsd-range",
+        type=float,
+        nargs=2,
+        default=None,
+        metavar=("MIN", "MAX"),
+        help="range of the RMSD (nm) of the picks",
+    )
+    pick_similar_parser.add_argument(
+        "--classes",
+        action="store_true",
+        help=(
+            "find classes of structures by their number of localizations"
+            " and RMSD and save the picks of each class to its own file"
+        ),
+    )
+    pick_similar_parser.add_argument(
+        "--min-n-locs",
+        type=int,
+        default=None,
+        help=(
+            "without --picks, the minimum number of localizations of a"
+            " candidate pick (default: 1%% of the frames)"
+        ),
+    )
+    pick_similar_parser.add_argument(
+        "--save-candidates",
+        action="store_true",
+        help=(
+            "without --picks, also save the candidate picks with their"
+            " number of localizations and RMSD (.csv)"
+        ),
+    )
+
     clusterfilter_parser = subparsers.add_parser(
         "cluster-filter",
         help="filter localizations by properties of their clusters",
@@ -6336,6 +6571,18 @@ def main():  # noqa: C901
                 None if args.z_range is None else tuple(args.z_range),
                 args.observed_z,
                 args.cross_null,
+            )
+        elif args.command == "pick-similar":
+            _pick_similar_cli(
+                args.files,
+                picks_path=args.picks,
+                pick_size=args.pick_size,
+                std_range=args.std_range,
+                n_locs_range=args.n_locs_range,
+                rmsd_range=args.rmsd_range,
+                classes=args.classes,
+                min_n_locs=args.min_n_locs,
+                save_candidates=args.save_candidates,
             )
         elif args.command in ("ripley-h", "rdf"):
             _pair_statistic(

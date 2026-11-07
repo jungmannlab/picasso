@@ -54,6 +54,68 @@ similarity measures.
       )
 
 
+.. _render-pick-by-n-locs-rmsd:
+
+Pick by localizations and RMSD
+------------------------------
+
+Picks similar structures without seed picks: by ranges of the number of
+localizations and of the RMSD (the root mean square distance of the
+localizations from their center of mass) that a pick contains. Available for
+circular picks.
+
+1. Set the pick diameter in ``Tools settings`` (:kbd:`Ctrl+T`) and select
+   ``Tools`` > ``Pick by localizations and RMSD...``.
+2. The field of view is scanned with candidate picks as in
+   :ref:`Pick similar <render-pick-similar>`: each is moved to the center of
+   mass of its localizations until it stops moving. The window shows the
+   number of localizations and the RMSD of the candidates as a 2D
+   histogram, in which structures of one kind form a cluster.
+
+   ``Min. localizations`` leaves out the candidates with fewer
+   localizations, by default 1% of the frames. The background forms many
+   candidates of a few localizations each, which can outnumber the
+   structures. Change it, or the pick diameter, and click
+   ``Find candidates`` to scan again.
+3. Set the ranges of the structures to pick: draw a rectangle on the
+   histogram (:kbd:`Esc` cancels it), or type them in. The number of
+   candidates in the ranges is shown next to ``Add picks``.
+
+   ``Find classes`` suggests ranges: it clusters the candidates by their
+   number of localizations and RMSD (OPTICS, on both scaled to the same
+   spread) and gives each class the ranges of its median ± one standard
+   deviation. The ranges of the classes are outlined on the histogram;
+   select a class from the list to use its ranges.
+4. Click ``Add picks`` to add the candidates in the ranges as circular picks.
+   ``File`` > ``Undo`` removes them again.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``pick_similar_candidates`` returns the candidates with their number of
+   localizations and RMSD, ``structure_classes`` their classes, and
+   ``pick_similar`` takes the ranges instead of seed picks.
+
+   .. code-block:: python
+
+      from picasso import postprocess
+
+      candidates = postprocess.pick_similar_candidates(
+          locs, info, pick_size=150, min_n_locs=info[0]["Frames"] // 100
+      )
+      labels, classes = postprocess.structure_classes(candidates)
+      print(classes)
+
+      picks = postprocess.pick_similar(
+          locs,
+          info,
+          pick_size=150,
+          n_locs_range=(400, 1000),
+          rmsd_range=(35, 50),
+      )
+
+
 .. _render-remove-locs-in-picks:
 
 Remove localizations in picks

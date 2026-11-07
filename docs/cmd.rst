@@ -1557,6 +1557,78 @@ For example, two channels with short names:
      - How pairs of channels are simulated: random shifts of the second
        channel (rectangular or circular regions only) or random labels.
 
+.. _cmd-pick-similar:
+
+pick-similar
+------------
+Picks similar structures in one or more localization files and saves the picks
+next to each file as ``<file name>_pick_similar.yaml``, which Render loads with
+``File > Load picks``. Give exactly one of:
+
+``-p``, ``--picks``
+   Seed picks saved in Render: the picks similar to them in the number of
+   localizations and the RMSD are found, as with
+   :ref:`Pick similar <render-pick-similar>`. The file holds the seed picks
+   followed by the new ones.
+``--n-locs-range``, ``--rmsd-range``
+   Without seed picks: the candidate circular picks of diameter ``-d`` whose
+   number of localizations and/or RMSD lie within the ranges, as
+   :ref:`render-pick-by-n-locs-rmsd` finds them.
+``--classes``
+   Without seed picks: the classes of structures among the candidates, by
+   their number of localizations and RMSD. The classes are printed, and the
+   picks within the ranges of each are saved to
+   ``<file name>_pick_similar_class<number>.yaml``.
+
+.. code-block:: bash
+
+   picasso pick-similar files (-p picks [-s std_range] | -d pick_size (--n-locs-range min max | --rmsd-range min max | --classes)) [--min-n-locs n] [--save-candidates]
+
+For example, the structures with 400 to 1000 localizations within an RMSD of
+35 to 50 nm, in picks of 150 nm:
+
+.. code-block:: bash
+
+   picasso pick-similar locs.hdf5 -d 150 --n-locs-range 400 1000 --rmsd-range 35 50
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-p``, ``--picks`` (str)
+     -
+     - Seed picks (.yaml) saved in Render: circles, squares, rectangles or
+       boxes.
+   * - ``-s``, ``--std-range`` (float)
+     - ``2``
+     - With ``--picks``, the range around the mean of the seed picks, in
+       standard deviations.
+   * - ``-d``, ``--pick-size`` (float)
+     -
+     - Without ``--picks``, the diameter (nm) of the circular picks.
+   * - ``--n-locs-range`` (float float)
+     - no limit
+     - The minimum and maximum number of localizations of the picks.
+   * - ``--rmsd-range`` (float float)
+     - no limit
+     - The minimum and maximum RMSD (nm) of the picks.
+   * - ``--classes``
+     - off
+     - Find the classes and save the picks of each to its own file.
+   * - ``--min-n-locs`` (int)
+     - 1% of the frames
+     - Without ``--picks``, the minimum number of localizations of a
+       candidate pick. The background forms many candidates of a few
+       localizations, which can outnumber the structures.
+   * - ``--save-candidates``
+     - off
+     - Without ``--picks``, also save the candidates with their number of
+       localizations and RMSD (and class, numbered from 1, 0 for none) to
+       ``<file name>_pick_similar_candidates.csv``.
+
 .. _cmd-plugins:
 
 plugins
