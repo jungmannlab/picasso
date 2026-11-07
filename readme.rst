@@ -200,6 +200,12 @@ Many of the functionalities provided by Picasso were published independently, pl
    * - Two-channel (cross) Ripley's H and radial distribution functions
      - Lotwick and Silverman, J. R. Stat. Soc. B, 1982
      - `10.1111/j.2517-6161.1982.tb01221.x <https://doi.org/10.1111/j.2517-6161.1982.tb01221.x>`__
+   * - Distances to the k-th nearest neighbors for random positions
+     - Thompson, Ecology, 1956
+     - `10.2307/1933159 <https://doi.org/10.2307/1933159>`__
+   * - Edge-corrected (Kaplan-Meier) nearest neighbor distance distributions
+     - Baddeley and Gill, Ann. Stat., 1997
+     - `10.1214/aos/1034276629 <https://doi.org/10.1214/aos/1034276629>`__
    * - Stitching tiles (global tile positions, inspired by)
      - Preibisch et al., Bioinformatics, 2009
      - `10.1093/bioinformatics/btp184 <https://doi.org/10.1093/bioinformatics/btp184>`__

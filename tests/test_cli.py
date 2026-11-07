@@ -576,6 +576,64 @@ def test_pair_statistic_requires_files(tmp_path, monkeypatch):
         _picasso(monkeypatch, "rdf", tmp_path / "missing*.hdf5")
 
 
+def test_knn_density_saves_tables_and_a_plot(locs_path, monkeypatch, capsys):
+    _picasso(
+        monkeypatch, "knn-density", locs_path, "-k", 3, "--k-min", 2, "-n", 2
+    )
+    base = _out(locs_path, "_knn_density")
+    curves = pd.read_csv(base + ".csv")
+    assert {"k1_per_nm", "k3_csr_per_nm"} <= set(curves.columns)
+    densities = pd.read_csv(base + "_densities.csv")
+    assert list(densities["estimate"]) == [
+        "k=1",
+        "k=2",
+        "k=3",
+        "pooled k=2-3",
+        "molecules/area",
+    ]
+    assert densities["p_value"][:3].notna().all()
+    assert os.path.getsize(base + ".png") > 0
+    out = capsys.readouterr().out
+    assert "does not contain molecules" in out  # localizations
+    assert "pooled k=2-3" in out
+
+
+def test_knn_density_in_picks_and_3d(locs_path, tmp_path, monkeypatch):
+    locs, info = io.load_locs(str(locs_path))
+    rng = np.random.default_rng(0)
+    locs["z"] = rng.uniform(-100, 100, len(locs)).astype(np.float32)
+    path = str(tmp_path / "locs_3d.hdf5")
+    io.save_locs(path, locs, info)
+    picks_path = str(tmp_path / "picks.yaml")
+    center = [float(locs["x"].median()), float(locs["y"].median())]
+    io.save_picks(picks_path, [center], "Circle", 2000.0)
+    _picasso(
+        monkeypatch,
+        "knn-density",
+        path,
+        "-p",
+        picks_path,
+        "--3d",
+        "--z-range",
+        -100,
+        100,
+        "-n",
+        0,
+        "--r-min",
+        5,
+    )
+    densities = pd.read_csv(_out(path, "_knn_density_densities.csv"))
+    assert "density_per_um3" in densities.columns
+    assert densities["p_value"].isna().all()
+
+
+def test_knn_density_rejects_bad_arguments(locs_path, monkeypatch):
+    with pytest.raises(SystemExit, match="k_min"):
+        _picasso(monkeypatch, "knn-density", locs_path, "-k", 2, "--k-min", 3)
+    with pytest.raises(SystemExit, match="No localization files"):
+        _picasso(monkeypatch, "knn-density", "missing*.hdf5")
+
+
 # ---------------------------------------------------------------------------
 # Rendering
 # ---------------------------------------------------------------------------

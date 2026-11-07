@@ -110,6 +110,19 @@
   "--keep-index",
   "-k"
  ],
+ "knn-density": [
+  "--3d",
+  "--k-max",
+  "--k-min",
+  "--no-edge-correction",
+  "--picks",
+  "--r-min",
+  "--simulations",
+  "--z-range",
+  "-k",
+  "-n",
+  "-p"
+ ],
  "lateral-calibrate": [
   "--box-side-length",
   "--calibration",

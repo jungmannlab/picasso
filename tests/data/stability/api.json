@@ -263,7 +263,11 @@
   "rdf",
   "plot_rdf",
   "nnd_distributions",
-  "plot_nnd_distributions"
+  "plot_nnd_distributions",
+  "knn_density",
+  "plot_knn_density",
+  "knn_csr_pdf",
+  "knn_csr_cdf"
  ],
  "picasso.registration": [
   "calibrate_channel_registration_from_beads",

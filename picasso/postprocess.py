@@ -26,8 +26,8 @@ import numba
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy import interpolate
-from scipy.optimize import curve_fit, OptimizeWarning
+from scipy import interpolate, special
+from scipy.optimize import curve_fit, minimize_scalar, OptimizeWarning
 from scipy.spatial import KDTree
 from scipy.stats import rankdata
 
@@ -86,6 +86,10 @@ __all__ = [
     "plot_rdf",
     "nnd_distributions",
     "plot_nnd_distributions",
+    "knn_density",
+    "plot_knn_density",
+    "knn_csr_pdf",
+    "knn_csr_cdf",
 ]
 
 #: Convergence tolerance (nm) of the center-of-mass iterations of
@@ -8870,6 +8874,933 @@ def _nnd_tables(nnd_result: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                 ][a, b]
             summary.append(row)
     return pd.DataFrame(curves), pd.DataFrame(summary)
+
+
+#: Area (2D) or volume (3D) of the ball of radius 1: the area (volume)
+#: within distance r of a point is ``_UNIT_BALL[dim] * r**dim``
+_UNIT_BALL = {2: np.pi, 3: 4.0 / 3.0 * np.pi}
+
+
+def _check_knn_order(k: int, dim: int) -> None:
+    """Raise ValueError unless ``k`` is a positive integer and ``dim``
+    is 2 or 3."""
+    if dim not in _UNIT_BALL:
+        raise ValueError(f"dim must be 2 or 3, not {dim!r}.")
+    if isinstance(k, bool) or int(k) != k or k < 1:
+        raise ValueError(f"k must be a positive integer, not {k!r}.")
+
+
+def knn_csr_pdf(
+    r: float | np.ndarray,
+    density: float,
+    *,
+    k: int = 1,
+    dim: Literal[2, 3] = 2,
+) -> float | np.ndarray:
+    """Probability density of the distance from a point to its k-th
+    nearest neighbor under complete spatial randomness (CSR).
+
+    For points placed uniformly at random (a homogeneous Poisson
+    process) with ``density`` points per unit area, the number of
+    points within distance r of a point follows a Poisson distribution
+    with mean ``u = density * pi * r^2`` (in 3D, ``density * 4/3 * pi *
+    r^3``). The distance to the k-th nearest neighbor then has the
+    probability density (Thompson, 1956)::
+
+        f_k(r) = dim * u^k * exp(-u) / (r * (k - 1)!)
+
+    Parameters
+    ----------
+    r : float or np.ndarray
+        Distances, in any unit of length.
+    density : float
+        Number of points per unit area (2D) or volume (3D), in the unit
+        of ``r``: e.g., per nm^2 for distances in nm.
+    k : int, optional
+        Order of the neighbor: 1 for the nearest neighbor, 2 for the
+        second nearest, etc. Default is 1.
+    dim : {2, 3}, optional
+        Number of dimensions. Default is 2.
+
+    Returns
+    -------
+    pdf : float or np.ndarray
+        Probability density at each distance, per unit of ``r``; 0 for
+        distances of 0 or less.
+
+    Raises
+    ------
+    ValueError
+        If ``density`` is not positive, ``k`` is not a positive integer
+        or ``dim`` is not 2 or 3.
+
+    See Also
+    --------
+    knn_csr_cdf : Cumulative distribution function.
+    knn_density : Fit the density to measured distances.
+
+    References
+    ----------
+    Thompson, H. R. Distribution of distance to nth neighbour in a
+    population of randomly distributed individuals. Ecology 37,
+    391-394 (1956). https://doi.org/10.2307/1933159
+
+    Examples
+    --------
+    Distances in nm of 100 molecules per um^2 (1e-4 per nm^2):
+
+    >>> pdf = postprocess.knn_csr_pdf([20.0, 50.0], 1e-4, k=2)
+    >>> print(pdf.round(5))
+    [0.00139 0.01125]
+    """
+    _check_knn_order(k, dim)
+    if not density > 0:
+        raise ValueError(f"density must be positive, not {density!r}.")
+    r = np.asarray(r, dtype=np.float64)
+    positive = r > 0
+    r_positive = np.where(positive, r, 1.0)
+    u = density * _UNIT_BALL[dim] * r_positive**dim
+    log_pdf = (
+        np.log(dim)
+        + k * np.log(u)
+        - u
+        - np.log(r_positive)
+        - special.gammaln(k)
+    )
+    return np.where(positive, np.exp(log_pdf), 0.0)[()]
+
+
+def knn_csr_cdf(
+    r: float | np.ndarray,
+    density: float,
+    *,
+    k: int = 1,
+    dim: Literal[2, 3] = 2,
+) -> float | np.ndarray:
+    """Cumulative distribution function of the distance from a point to
+    its k-th nearest neighbor under complete spatial randomness (CSR).
+
+    The probability that the k-th nearest neighbor lies within distance
+    r is the probability that at least k points lie within r, i.e., the
+    regularized lower incomplete gamma function of the expected number
+    of points ``u`` there (see ``knn_csr_pdf``; Thompson, 1956)::
+
+        F_k(r) = P(k, u) = 1 - exp(-u) * sum_(j < k) u^j / j!
+
+    Parameters
+    ----------
+    r : float or np.ndarray
+        Distances, in any unit of length.
+    density : float
+        Number of points per unit area (2D) or volume (3D), in the unit
+        of ``r``: e.g., per nm^2 for distances in nm.
+    k : int, optional
+        Order of the neighbor: 1 for the nearest neighbor, 2 for the
+        second nearest, etc. Default is 1.
+    dim : {2, 3}, optional
+        Number of dimensions. Default is 2.
+
+    Returns
+    -------
+    cdf : float or np.ndarray
+        Probability that the k-th nearest neighbor lies within each
+        distance; 0 for distances of 0 or less.
+
+    Raises
+    ------
+    ValueError
+        If ``density`` is not positive, ``k`` is not a positive integer
+        or ``dim`` is not 2 or 3.
+
+    See Also
+    --------
+    knn_csr_pdf : Probability density.
+    knn_density : Fit the density to measured distances.
+
+    References
+    ----------
+    Thompson, H. R. Distribution of distance to nth neighbour in a
+    population of randomly distributed individuals. Ecology 37,
+    391-394 (1956). https://doi.org/10.2307/1933159
+
+    Examples
+    --------
+    The median distance to the nearest neighbor of 100 molecules per
+    um^2 (1e-4 per nm^2) is about 47 nm:
+
+    >>> print(postprocess.knn_csr_cdf(47.0, 1e-4).round(3))
+    0.5
+    """
+    _check_knn_order(k, dim)
+    if not density > 0:
+        raise ValueError(f"density must be positive, not {density!r}.")
+    r = np.clip(np.asarray(r, dtype=np.float64), 0.0, None)
+    return special.gammainc(k, density * _UNIT_BALL[dim] * r**dim)[()]
+
+
+def _log_knn_sf(u: float | np.ndarray, k: int) -> float | np.ndarray:
+    """Logarithm of the probability that the k-th nearest neighbor
+    under CSR lies beyond the distance within which ``u`` neighbors are
+    expected, i.e., of the regularized upper incomplete gamma function
+    Q(k, u) = exp(-u) * sum_(j < k) u^j / j!, accurate for large u."""
+    u = np.asarray(u, dtype=np.float64)
+    j = np.arange(k)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        terms = j * np.log(u)[..., None] - special.gammaln(j + 1)
+    terms[..., 0] = 0.0  # u^0 / 0! = 1, also at u = 0
+    return -u + special.logsumexp(terms, axis=-1)
+
+
+class _KnnSample(NamedTuple):
+    """The k-th nearest neighbor distances in nm used in the fit (at
+    least ``r_min``) of one order k: the ``exact`` distances, and the
+    distances to the region boundary of the molecules whose k-th
+    nearest neighbor lies farther than the boundary (``censored``)."""
+
+    k: int
+    exact: lib.FloatArray1D
+    censored: lib.FloatArray1D
+
+
+def _knn_region_distances(
+    points: tuple,
+    region: _Region,
+    region_z: tuple[float, float] | None,
+    k_max: int,
+    edge_correction: bool,
+) -> tuple[lib.FloatArray2D, lib.FloatArray1D]:
+    """The distances (nm) from each of the ``points`` ``(x, y, z)`` (z
+    None in 2D) in a region to its ``k_max`` nearest neighbors in the
+    region (inf where there are fewer), shape (n, k_max), and to the
+    region boundary (in 3D, also to the top and bottom of ``region_z``;
+    inf without ``edge_correction``)."""
+    x, y, z = points
+    coordinates = np.column_stack([x, y] if z is None else [x, y, z])
+    distances = KDTree(coordinates).query(coordinates, k=k_max + 1)[0]
+    if not edge_correction:
+        return distances[:, 1:], np.full(len(x), np.inf)
+    boundary = _boundary_distances(
+        x, y, region.kind, region.circle, region.segments
+    )
+    if z is not None:
+        z_min, z_max = region_z
+        boundary = np.minimum(boundary, np.minimum(z - z_min, z_max - z))
+    return distances[:, 1:], boundary
+
+
+def _knn_samples(
+    observed: list[tuple[lib.FloatArray2D, lib.FloatArray1D]],
+    k_max: int,
+    r_min: float,
+) -> list[_KnnSample]:
+    """The sample of each order k = 1, ..., ``k_max`` from the
+    neighbor and boundary distances of each region (``observed``, see
+    ``_knn_region_distances``). A distance up to the boundary distance
+    is exact; a longer one is censored at the boundary distance. Exact
+    distances shorter than ``r_min`` are left out, and so are censored
+    ones whose boundary distance is shorter than ``r_min`` (it is then
+    unknown whether the distance is shorter), as are molecules without
+    a k-th neighbor without edge correction."""
+    distances = np.concatenate([d for d, _ in observed])
+    boundary = np.concatenate([b for _, b in observed])
+    samples = []
+    for k in range(1, k_max + 1):
+        r = distances[:, k - 1]
+        seen = np.minimum(r, boundary)
+        used = np.isfinite(seen) & (seen >= r_min)
+        exact = r <= boundary
+        samples.append(_KnnSample(k, r[used & exact], boundary[used & ~exact]))
+    return samples
+
+
+def _knn_log_likelihood(
+    rate: float,
+    samples: list[_KnnSample],
+    dim: int,
+    r_min: float,
+) -> float:
+    """Log-likelihood (up to a constant) of the ``samples`` under CSR,
+    with ``rate`` = density * ``_UNIT_BALL[dim]``: the probability
+    density of each exact distance and the probability of each
+    censored one being longer than its boundary distance, both given
+    that the distance is at least ``r_min``."""
+    log_rate = np.log(rate)
+    total = 0.0
+    for sample in samples:
+        total += sample.k * len(sample.exact) * log_rate - rate * np.sum(
+            sample.exact**dim
+        )
+        if len(sample.censored):
+            total += np.sum(_log_knn_sf(rate * sample.censored**dim, sample.k))
+        if r_min > 0:
+            n = len(sample.exact) + len(sample.censored)
+            total -= n * _log_knn_sf(rate * r_min**dim, sample.k)
+    return total
+
+
+def _fit_knn_density(
+    samples: list[_KnnSample],
+    dim: int,
+    r_min: float,
+) -> float:
+    """Maximum likelihood density (per nm^dim) of one or more samples
+    (orders k) under CSR; NaN without exact distances."""
+    n_events = sum(sample.k * len(sample.exact) for sample in samples)
+    exposure = sum(
+        np.sum(sample.exact**dim) + np.sum(sample.censored**dim)
+        for sample in samples
+    )
+    if not n_events or not exposure > 0:
+        return np.nan
+    # the closed-form estimate without censoring and r_min; the fit
+    # only lies above it
+    start = np.log(n_events / exposure)
+    result = minimize_scalar(
+        lambda log_rate: -_knn_log_likelihood(
+            np.exp(log_rate), samples, dim, r_min
+        ),
+        bounds=(start - 1.0, start + 10.0),
+        method="bounded",
+        options={"xatol": 1e-9},
+    )
+    return float(np.exp(result.x)) / _UNIT_BALL[dim]
+
+
+def _knn_kaplan_meier(
+    sample: _KnnSample,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
+    """Kaplan-Meier estimate of the distribution of the distances of a
+    sample, given that they are at least ``r_min``: the exact distances
+    in ascending order and the probability that a distance is longer
+    than each (Baddeley and Gill, 1997)."""
+    times = np.concatenate([sample.exact, sample.censored])
+    is_exact = np.arange(len(times)) < len(sample.exact)
+    order = np.lexsort((~is_exact, times))  # exact first at ties
+    times, is_exact = times[order], is_exact[order]
+    at_risk = len(times) - np.arange(len(times))
+    survival = np.cumprod(np.where(is_exact, 1.0 - 1.0 / at_risk, 1.0))
+    return times[is_exact], survival[is_exact]
+
+
+def _knn_ks_distance(
+    times: lib.FloatArray1D,
+    survival: lib.FloatArray1D,
+    density: float,
+    k: int,
+    dim: int,
+    r_min: float,
+) -> float:
+    """Largest difference between the cumulative distribution of a
+    Kaplan-Meier estimate (``times``, ``survival``, see
+    ``_knn_kaplan_meier``) and that of CSR with ``density``, given
+    that the distance is at least ``r_min`` (Kolmogorov-Smirnov
+    distance)."""
+    rate = density * _UNIT_BALL[dim]
+    model = -np.expm1(
+        _log_knn_sf(rate * times**dim, k) - _log_knn_sf(rate * r_min**dim, k)
+    )
+    after = 1.0 - survival
+    before = 1.0 - np.concatenate([[1.0], survival[:-1]])
+    return float(
+        max(np.max(np.abs(after - model)), np.max(np.abs(before - model)))
+    )
+
+
+def _knn_analysis(
+    observed: list[tuple[lib.FloatArray2D, lib.FloatArray1D]],
+    k_max: int,
+    k_min: int,
+    r_min: float,
+    dim: int,
+    edges: lib.FloatArray1D | None = None,
+) -> dict:
+    """Fit the density to the neighbor and boundary distances of the
+    regions (``observed``) for each order k, and pooled over ``k_min``
+    to ``k_max``, with the KS distance of each order and (if ``edges``
+    is given) the histogram of its Kaplan-Meier estimate."""
+    samples = _knn_samples(observed, k_max, r_min)
+    densities = np.array(
+        [_fit_knn_density([sample], dim, r_min) for sample in samples]
+    )
+    pooled = _fit_knn_density(samples[k_min - 1 :], dim, r_min)
+    ks_distances = np.full(k_max, np.nan)
+    histograms = None
+    if edges is not None:
+        histograms = np.full((k_max, len(edges) - 1), np.nan)
+    for i, sample in enumerate(samples):
+        if np.isnan(densities[i]):
+            continue
+        times, survival = _knn_kaplan_meier(sample)
+        ks_distances[i] = _knn_ks_distance(
+            times, survival, densities[i], sample.k, dim, r_min
+        )
+        if edges is not None:
+            survival_at = np.concatenate([[1.0], survival])[
+                np.searchsorted(times, edges, side="right")
+            ]
+            histograms[i] = -np.diff(survival_at) / np.diff(edges)
+    return {
+        "samples": samples,
+        "densities": densities,
+        "density": pooled,
+        "ks_distances": ks_distances,
+        "histograms": histograms,
+    }
+
+
+def knn_density(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    picks: list[tuple] | None = None,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | list[str]
+        | None
+    ) = None,
+    pick_size: float | list[float | None] | None = None,
+    k_max: int = 5,
+    k_min: int = 1,
+    r_min: float = 0.0,
+    edge_correction: bool = True,
+    n_simulations: int = 99,
+    use_z: bool = False,
+    z_range: tuple[float, float] | None = None,
+    r_max: float | None = None,
+    steps: int = 50,
+    random_seed: int | None = 0,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> dict:
+    """Density of molecules from the distances to their k nearest
+    neighbors, and a test of whether the molecules are distributed at
+    random (complete spatial randomness, CSR).
+
+    For molecules placed uniformly at random, the distance from a
+    molecule to its k-th nearest neighbor follows a known distribution
+    that depends only on the density (Thompson, 1956; see
+    ``knn_csr_pdf``). The density is fitted to the distances to the
+    k-th nearest neighbors by maximum likelihood, for each order k = 1,
+    ..., ``k_max`` separately and for the orders ``k_min`` to ``k_max``
+    together (pooled). The fits reflect the density around the
+    molecules, which may differ from the number of molecules per area
+    (``"count_density"``), e.g., if the regions include areas without
+    molecules.
+
+    For molecules at random, all orders give the same density, and the
+    distances follow the fitted distributions. For clustered molecules,
+    the nearest neighbors are closer than at random, so the density
+    fitted to k = 1 is the highest and it decreases with k.
+
+    Neighbors outside a region are not seen, which makes the distances
+    of molecules near its boundary too long. With ``edge_correction``,
+    a distance longer than that from the molecule to the region
+    boundary is not used as measured; the fit uses only that the
+    neighbor lies farther than the boundary (a censored distance, as in
+    the Kaplan-Meier estimate of Baddeley and Gill, 1997), which removes
+    the bias.
+
+    How well the fitted distribution describes the distances of each
+    order is measured by the Kolmogorov-Smirnov (KS) distance, the
+    largest difference between the measured and fitted cumulative
+    distributions (with edge correction, the Kaplan-Meier estimate of
+    the measured one). Since the density is fitted to the same
+    distances, the usual KS p-values would be too high. Instead, each
+    region is simulated ``n_simulations`` times with as many uniformly
+    random points as it holds molecules, the density is fitted to each
+    simulation in the same way, and the p-value is the fraction of the
+    simulations, counting the data as one of them, whose KS distance is
+    at least that of the data. The spread of the densities fitted to
+    the simulations gives the standard errors.
+
+    The method was written by Heinrich Grabmayr for picasso-workflow
+    (https://github.com/jungmannlab/picasso-workflow), which fits the
+    pooled density without edge correction and computes the p-values
+    from the KS distances directly; here, the distances are corrected
+    for the edges and the p-values come from simulations.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Molecules, i.e., one localization per molecule, such as the
+        molecules found by ``g5m.g5m`` or the cluster centers of
+        ``clusterer.find_cluster_centers``.
+    info : list of dicts
+        Metadata of the localizations, used for the field of view if
+        ``picks`` is None.
+    picks : list of tuples or None, optional
+        Regions of interest in nm, in the format of ``pick_shape`` (see
+        ``picked_locs``). Each molecule's neighbors are searched in the
+        same region. If None, the whole field of view (``Width`` x
+        ``Height`` in the metadata) is used. Default is None.
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
+"Brush"}, list of str or None, optional
+        Shape of the picks, or the shape of each pick (see
+        ``lib.pick_shapes_and_sizes``). Required if ``picks`` is given.
+        Default is None.
+    pick_size : float, list of float or None, optional
+        Size of the picks in nm, or the size of each pick: diameter for
+        circles, width for rectangles, side length for squares, None for
+        polygons, boxes and brush picks. Default is None.
+    k_max : int, optional
+        Highest order of the neighbors, at least 1. Default is 5.
+    k_min : int, optional
+        Lowest order of the pooled fit, from 1 to ``k_max``; e.g., 2
+        leaves out the nearest neighbors, which are affected the most by
+        molecules counted twice. Default is 1.
+    r_min : float, optional
+        Shortest distance in nm used. Shorter distances are left out
+        and the distributions are fitted to the longer ones only, e.g.,
+        to ignore molecules counted twice or closer than the resolution.
+        Default is 0.
+    edge_correction : bool, optional
+        If True, distances longer than the distance to the region
+        boundary (in 3D, also to the top and bottom of the z range) are
+        censored, see above. Without it, the densities are biased
+        downwards by the molecules near the boundary, more so in small
+        regions. Default is True.
+    n_simulations : int, optional
+        Number of CSR simulations for the p-values and standard errors.
+        The smallest p-value is ``1 / (n_simulations + 1)``, i.e., 0.01
+        for 99 simulations. 0 skips the simulations. Default is 99.
+    use_z : bool, optional
+        If True, the distances are measured in 3D (x, y and z in nm),
+        which requires a ``z`` column, and the densities are per volume.
+        Default is False.
+    z_range : tuple of floats or None, optional
+        ``(z_min, z_max)`` in nm over which every region extends in 3D;
+        localizations outside of it are ignored. If None, each region
+        extends over the z range of its molecules. Only used in 3D.
+        Default is None.
+    r_max : float or None, optional
+        Upper end in nm of the histograms of the distances
+        (``"histograms"``); does not affect the fits. If None, the 99th
+        percentile of the distances to the ``k_max``-th neighbors is
+        used. Default is None.
+    steps : int, optional
+        Number of histogram bins up to ``r_max``. Default is 50.
+    random_seed : int or None, optional
+        Seed of the simulations. None gives different simulations on
+        each call. Default is 0.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating k-NN distances"
+        over the regions, then (if ``n_simulations > 0``) "Simulating
+        CSR" over the simulations. Default is None.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with the keys:
+
+        - "k": the orders 1, ..., ``k_max``.
+        - "densities": density fitted to each order k, in molecules per
+          nm^2 (per nm^3 in 3D; multiply by 1e6 (1e9) for um^-2
+          (um^-3)); NaN for orders without distances.
+        - "density": density fitted to the orders ``k_min`` to
+          ``k_max`` together, per nm^2 (nm^3).
+        - "count_density": number of molecules divided by the total area
+          (volume) of the regions, per nm^2 (nm^3).
+        - "densities_se", "density_se": standard errors of the fitted
+          densities from the simulations, or None without simulations.
+        - "ks_distances": KS distance of each order.
+        - "p_values": p-value of each order, or None without
+          simulations.
+        - "n_distances": number of exact distances of each order, and
+          "n_censored": number of censored ones.
+        - "edges": edges of the histogram bins in nm, shape (steps + 1,).
+        - "histograms": distribution of the measured distances of each
+          order given that they are at least ``r_min`` (with edge
+          correction, the Kaplan-Meier estimate), as probability
+          density per nm in each bin, shape (k_max, steps).
+        - "n_molecules": number of molecules in the regions.
+        - "n_regions", "n_simulations", "k_min", "r_min",
+          "edge_correction", "use_z".
+
+    Raises
+    ------
+    ValueError
+        If the parameters are invalid, z is missing in 3D or no
+        molecule has a neighbor in its region at a distance of at least
+        ``r_min``.
+
+    Warns
+    -----
+    UserWarning
+        If ``locs`` are not molecules (no ``n_events`` or
+        ``std_frame`` column). Each molecule is then counted as many
+        times as it was localized, which appears as clustering at short
+        distances.
+
+    See Also
+    --------
+    plot_knn_density : Plot the result.
+    knn_csr_pdf : Distribution of the distances under CSR.
+    nnd_distributions : Distributions of the nearest neighbor
+        distances within and between channels, compared with
+        simulations.
+
+    References
+    ----------
+    Thompson, H. R. Distribution of distance to nth neighbour in a
+    population of randomly distributed individuals. Ecology 37,
+    391-394 (1956). https://doi.org/10.2307/1933159
+
+    Baddeley, A. J., Gill, R. D. Kaplan-Meier estimators of distance
+    distributions for spatial point processes. Ann Stat 25, 263-292
+    (1997). https://doi.org/10.1214/aos/1034276629
+
+    Examples
+    --------
+    >>> result = postprocess.knn_density(molecules, info)
+    >>> print(f"{result['density'] * 1e6:.0f} molecules per um^2")
+    """
+    if isinstance(k_max, bool) or int(k_max) != k_max or k_max < 1:
+        raise ValueError(f"k_max must be a positive integer, not {k_max!r}.")
+    if isinstance(k_min, bool) or int(k_min) != k_min:
+        raise ValueError(f"k_min must be an integer, not {k_min!r}.")
+    if not 1 <= k_min <= k_max:
+        raise ValueError("k_min must be between 1 and k_max.")
+    k_max, k_min = int(k_max), int(k_min)
+    if not r_min >= 0:
+        raise ValueError("r_min must not be negative.")
+    if r_max is not None and not r_max > r_min:
+        raise ValueError("r_max must be larger than r_min.")
+    if steps < 1:
+        raise ValueError("steps must be at least 1.")
+    if n_simulations < 0:
+        raise ValueError("n_simulations must not be negative.")
+    if use_z:
+        if "z" not in locs.columns:
+            raise ValueError("3D requires z in the localizations.")
+        if z_range is not None and not z_range[0] < z_range[1]:
+            raise ValueError("z_range must be (z_min, z_max), z_min < z_max.")
+    dim = 3 if use_z else 2
+    regions = _statistic_regions(info, picks, pick_shape, pick_size, False)
+    _warn_if_not_molecules(locs, "The localizations are", stacklevel=3)
+
+    coordinates = [
+        (
+            locs["x"].to_numpy(dtype=np.float64),
+            locs["y"].to_numpy(dtype=np.float64),
+            locs["z"].to_numpy(dtype=np.float64) if use_z else None,
+        )
+    ]
+    n_regions = len(regions)
+    observed = []
+    region_counts = []  # (region, z range, number of molecules)
+    n_molecules = 0
+    size = 0.0  # total area (volume) of the regions
+    with lib.tracked_progress(
+        progress, "Calculating k-NN distances", unit="region"
+    ) as progress:
+        lib.start_phase(
+            progress, "Calculating k-NN distances", n_regions, unit="region"
+        )
+        progress.set_value(0)
+        for i, region in enumerate(regions):
+            region_data = _nnd_region_points(
+                region, coordinates, use_z, z_range
+            )
+            if region_data is not None:
+                region_z, (points,) = region_data
+                n = len(points[0])
+                n_molecules += n
+                size += region.area * (
+                    region_z[1] - region_z[0] if use_z else 1.0
+                )
+                if n:
+                    observed.append(
+                        _knn_region_distances(
+                            points, region, region_z, k_max, edge_correction
+                        )
+                    )
+                    region_counts.append((region, region_z, n))
+            progress.set_value(i + 1)
+        progress.set_value(n_regions)
+        if not observed:
+            raise ValueError("No region contains molecules.")
+        samples = _knn_samples(observed, k_max, r_min)
+        if r_max is None:
+            exact = next(
+                (s.exact for s in reversed(samples) if len(s.exact)), None
+            )
+            if exact is None:
+                raise ValueError(
+                    "No molecule has a neighbor in its region at a "
+                    f"distance of at least r_min ({r_min} nm)."
+                )
+            r_max = float(np.quantile(exact, 0.99))
+            r_max = r_max if r_max > r_min else r_min + 1.0
+        edges = np.linspace(0.0, r_max, steps + 1)
+        data = _knn_analysis(observed, k_max, k_min, r_min, dim, edges)
+        if np.isnan(data["densities"]).all():
+            raise ValueError(
+                "No molecule has a neighbor in its region at a distance of "
+                f"at least r_min ({r_min} nm)."
+            )
+
+        densities_se = density_se = p_values = None
+        if n_simulations:
+            rng = np.random.default_rng(random_seed)
+            simulated_densities = np.full((n_simulations, k_max), np.nan)
+            simulated_density = np.full(n_simulations, np.nan)
+            simulated_ks = np.full((n_simulations, k_max), np.nan)
+            lib.start_phase(
+                progress, "Simulating CSR", n_simulations, unit="simulation"
+            )
+            progress.set_value(0)
+            for s in range(n_simulations):
+                simulated = []
+                for region, region_z, n in region_counts:
+                    x, y = _uniform_in_region(n, region, rng)
+                    z = rng.uniform(*region_z, n) if use_z else None
+                    simulated.append(
+                        _knn_region_distances(
+                            (x, y, z), region, region_z, k_max, edge_correction
+                        )
+                    )
+                fit = _knn_analysis(simulated, k_max, k_min, r_min, dim)
+                simulated_densities[s] = fit["densities"]
+                simulated_density[s] = fit["density"]
+                simulated_ks[s] = fit["ks_distances"]
+                progress.set_value(s + 1)
+            progress.set_value(n_simulations)
+            with warnings.catch_warnings(), np.errstate(invalid="ignore"):
+                # orders without distances in all simulations
+                warnings.simplefilter("ignore", RuntimeWarning)
+                densities_se = data["densities"] * _relative_spread(
+                    simulated_densities
+                )
+                density_se = data["density"] * _relative_spread(
+                    simulated_density
+                )
+            valid = ~np.isnan(simulated_ks)
+            p_values = (
+                1 + np.sum(valid & (simulated_ks >= data["ks_distances"]), 0)
+            ) / (1 + valid.sum(axis=0))
+            p_values[np.isnan(data["ks_distances"])] = np.nan
+
+    return {
+        "k": np.arange(1, k_max + 1),
+        "densities": data["densities"],
+        "density": data["density"],
+        "count_density": n_molecules / size if size > 0 else np.nan,
+        "densities_se": densities_se,
+        "density_se": density_se,
+        "ks_distances": data["ks_distances"],
+        "p_values": p_values,
+        "n_distances": np.array([len(s.exact) for s in data["samples"]]),
+        "n_censored": np.array([len(s.censored) for s in data["samples"]]),
+        "edges": edges,
+        "histograms": data["histograms"],
+        "n_molecules": n_molecules,
+        "n_regions": n_regions,
+        "n_simulations": n_simulations,
+        "k_min": k_min,
+        "r_min": float(r_min),
+        "edge_correction": edge_correction,
+        "use_z": use_z,
+    }
+
+
+def _relative_spread(values: np.ndarray) -> np.ndarray | float:
+    """Standard deviation over the first axis of ``values`` divided by
+    their mean, ignoring NaN; NaN for fewer than two values."""
+    return np.nanstd(values, axis=0, ddof=1) / np.nanmean(values, axis=0)
+
+
+def plot_knn_density(
+    knn_result: dict,
+    fig: plt.Figure | None = None,
+) -> plt.Figure:
+    """Plot the distributions of the distances to the k-th nearest
+    neighbors with the distributions of complete spatial randomness
+    (CSR) at the fitted densities, and the fitted densities by k.
+
+    Parameters
+    ----------
+    knn_result : dict
+        Result of ``knn_density``.
+    fig : plt.Figure or None, optional
+        Figure to plot on, cleared first. If None, a new figure is
+        created. Default is None.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    if fig is None:
+        fig = plt.Figure(constrained_layout=True)
+    else:
+        fig.clear()
+    ax_distances, ax_densities = fig.subplots(
+        1, 2, gridspec_kw={"width_ratios": [2, 1]}
+    )
+    use_z = knn_result["use_z"]
+    dim = 3 if use_z else 2
+    scale = 1e9 if use_z else 1e6  # per um^dim
+    unit = "µm⁻³" if use_z else "µm⁻²"
+    edges = knn_result["edges"]
+    r_min = knn_result["r_min"]
+    # colors of the active style, resolved now (lines look "CN" colors
+    # up only when drawn)
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    r = np.linspace(edges[0], edges[-1], 400)
+    densities = knn_result["densities"]
+    p_values = knn_result["p_values"]
+    se = knn_result["densities_se"]
+    for i, k in enumerate(knn_result["k"]):
+        if np.isnan(densities[i]):
+            continue
+        color = colors[i % len(colors)]
+        label = f"k = {k}"
+        if p_values is not None:
+            label += f" (p = {p_values[i]:.2g})"
+        ax_distances.stairs(
+            knn_result["histograms"][i],
+            edges,
+            color=color,
+            linewidth=1.5,
+            label=label,
+        )
+        rate = densities[i] * _UNIT_BALL[dim]
+        pdf = knn_csr_pdf(r, densities[i], k=int(k), dim=dim) / np.exp(
+            _log_knn_sf(rate * r_min**dim, int(k))
+        )
+        pdf[r < r_min] = np.nan
+        ax_distances.plot(r, pdf, color=color, linestyle="--", linewidth=1)
+        ax_densities.errorbar(
+            k,
+            densities[i] * scale,
+            yerr=None if se is None else se[i] * scale,
+            fmt="o",
+            color=color,
+            capsize=3,
+        )
+    ax_distances.plot(
+        [], [], color="0.4", linestyle="--", label="CSR, fitted density"
+    )
+    if r_min > 0:
+        ax_distances.axvspan(
+            0,
+            r_min,
+            color="0.5",
+            alpha=0.2,
+            linewidth=0,
+            label="Shorter than r_min",
+        )
+    ax_distances.set_xlim(0, edges[-1])
+    ax_distances.set_ylim(bottom=0)
+    ax_distances.set_xlabel("Distance to the k-th nearest neighbor (nm)")
+    ax_distances.set_ylabel("Probability density (1/nm)")
+    ax_distances.legend(loc="best")
+
+    k_min, k_max = knn_result["k_min"], int(knn_result["k"][-1])
+    pooled = knn_result["density"] * scale
+    orders = f"k = {k_min}-{k_max}" if k_min < k_max else f"k = {k_max}"
+    pooled_label = f"Pooled ({orders}): {pooled:.3g}"
+    if knn_result["density_se"] is not None:
+        pooled_label += f" ± {knn_result['density_se'] * scale:.2g}"
+    ax_densities.axhline(
+        pooled, color="0.2", linestyle="--", linewidth=1, label=pooled_label
+    )
+    per = "volume" if use_z else "area"
+    count = knn_result["count_density"] * scale
+    ax_densities.axhline(
+        count,
+        color="0.5",
+        linestyle=":",
+        linewidth=1,
+        label=f"Molecules / {per}: {count:.3g}",
+    )
+    ax_densities.set_xticks(knn_result["k"])
+    ax_densities.set_xlim(0.5, k_max + 0.5)
+    ax_densities.set_ylim(bottom=0)
+    ax_densities.set_xlabel("k")
+    ax_densities.set_ylabel(f"Fitted density ({unit})")
+    ax_densities.legend(loc="best")
+    title = "Distances to the k-th nearest neighbors" + (
+        " (3D)" if use_z else ""
+    )
+    if knn_result["n_simulations"]:
+        title += (
+            f"\np-values and errors from {knn_result['n_simulations']} "
+            "simulations of random positions"
+        )
+    fig.suptitle(title)
+    return fig
+
+
+def _knn_density_tables(
+    knn_result: dict,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The result of ``knn_density`` as two tables: the distributions
+    of the distances by bin (measured and CSR at the fitted density of
+    each order, per nm) and the fitted densities (each order, pooled
+    and the number of molecules per area) with their standard errors,
+    KS distances, p-values and numbers of distances. Used for saving
+    the result as .csv files."""
+    use_z = knn_result["use_z"]
+    dim = 3 if use_z else 2
+    scale, unit = (1e9, "um3") if use_z else (1e6, "um2")
+    edges = knn_result["edges"]
+    centers = (edges[:-1] + edges[1:]) / 2
+    r_min = knn_result["r_min"]
+    curves = {"bin_start_nm": edges[:-1], "bin_end_nm": edges[1:]}
+    densities = knn_result["densities"]
+    for i, k in enumerate(knn_result["k"]):
+        curves[f"k{k}_per_nm"] = knn_result["histograms"][i]
+        csr = np.full(len(centers), np.nan)
+        if not np.isnan(densities[i]):
+            rate = densities[i] * _UNIT_BALL[dim]
+            csr = knn_csr_pdf(centers, densities[i], k=int(k), dim=dim) / (
+                np.exp(_log_knn_sf(rate * r_min**dim, int(k)))
+            )
+            csr[centers < r_min] = np.nan
+        curves[f"k{k}_csr_per_nm"] = csr
+
+    def se(values, i=None):
+        if values is None:
+            return np.nan
+        return (values if i is None else values[i]) * scale
+
+    rows = []
+    for i, k in enumerate(knn_result["k"]):
+        rows.append(
+            {
+                "estimate": f"k={k}",
+                f"density_per_{unit}": densities[i] * scale,
+                f"density_se_per_{unit}": se(knn_result["densities_se"], i),
+                "ks_distance": knn_result["ks_distances"][i],
+                "p_value": (
+                    np.nan
+                    if knn_result["p_values"] is None
+                    else knn_result["p_values"][i]
+                ),
+                "n_distances": knn_result["n_distances"][i],
+                "n_censored": knn_result["n_censored"][i],
+            }
+        )
+    k_min, k_max = knn_result["k_min"], int(knn_result["k"][-1])
+    rows.append(
+        {
+            "estimate": f"pooled k={k_min}-{k_max}",
+            f"density_per_{unit}": knn_result["density"] * scale,
+            f"density_se_per_{unit}": se(knn_result["density_se"]),
+        }
+    )
+    rows.append(
+        {
+            "estimate": "molecules/" + ("volume" if use_z else "area"),
+            f"density_per_{unit}": knn_result["count_density"] * scale,
+        }
+    )
+    summary = pd.DataFrame(rows)
+    counts = ["n_distances", "n_censored"]
+    summary[counts] = summary[counts].astype("Int64")
+    return pd.DataFrame(curves), summary
 
 
 def resi(

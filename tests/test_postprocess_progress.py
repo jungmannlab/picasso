@@ -360,6 +360,16 @@ CASES = [
         ["Calculating NNDs", "Simulating envelope"],
     ),
     (
+        "knn_density",
+        lambda l, i, p: postprocess.knn_density(
+            _molecules(500, 0),
+            STAT_INFO,
+            n_simulations=2,
+            progress=p,
+        ),
+        ["Calculating k-NN distances", "Simulating CSR"],
+    ),
+    (
         "rcc",
         lambda l, i, p: imageprocess.rcc(
             _shifted_gaussians(), max_shift=10, progress=p

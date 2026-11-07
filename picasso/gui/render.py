@@ -9054,10 +9054,12 @@ class CBCDialog(lib.Dialog):
 #: Statistics of ``Postprocess > Spatial statistics``, by key: the
 #: window title, the functions of ``postprocess`` that compute, plot
 #: and tabulate them, the documentation, the suffixes of the saved files
-#: (the functions, and the summary next to them),
-#: the default maximum radius and number of steps, and whether the
-#: statistic takes several channels at once ("multichannel"; otherwise
-#: one channel or a channel and a partner)
+#: (the functions, and the summary next to them), the default maximum
+#: radius and number of steps, whether the statistic takes several
+#: channels at once ("multichannel"; otherwise one channel), whether it
+#: offers a partner channel ("partner"), whether it takes the orders of
+#: the neighbors and a shortest distance instead of the radii
+#: ("neighbors") and, optionally, the size of the plot window ("size")
 SPATIAL_STATISTICS = {
     "ripley_h": {
         "title": "Ripley's H function",
@@ -9070,6 +9072,8 @@ SPATIAL_STATISTICS = {
         "r_max": 500.0,
         "steps": 100,
         "multichannel": False,
+        "partner": True,
+        "neighbors": False,
     },
     "rdf": {
         "title": "Radial distribution function",
@@ -9082,6 +9086,8 @@ SPATIAL_STATISTICS = {
         "r_max": 500.0,
         "steps": 50,
         "multichannel": False,
+        "partner": True,
+        "neighbors": False,
     },
     "nnd": {
         "title": "Nearest neighbor distances",
@@ -9094,6 +9100,23 @@ SPATIAL_STATISTICS = {
         "r_max": 200.0,
         "steps": 40,
         "multichannel": True,
+        "partner": False,
+        "neighbors": False,
+    },
+    "knn": {
+        "title": "Density from k nearest neighbors",
+        "compute": postprocess.knn_density,
+        "plot": postprocess.plot_knn_density,
+        "tables": postprocess._knn_density_tables,
+        "docs": docs_url("render/analysis.html#render-knn-density"),
+        "suffix": "_knn_density",
+        "summary_suffix": "_densities",
+        "r_max": None,  # the histograms extend over the distances
+        "steps": 50,
+        "multichannel": False,
+        "partner": False,
+        "neighbors": True,
+        "size": (1000, 480),
     },
 }
 
@@ -9101,8 +9124,9 @@ SPATIAL_STATISTICS = {
 class SpatialStatisticDialog(lib.Dialog):
     """Choose the channel, regions and parameters of a spatial
     statistic of ``SPATIAL_STATISTICS``, e.g., Ripley's H function
-    (``postprocess.ripley_h``) or the radial distribution function
-    (``postprocess.rdf``).
+    (``postprocess.ripley_h``), the radial distribution function
+    (``postprocess.rdf``) or the density from the k nearest neighbors
+    (``postprocess.knn_density``).
 
     ...
 
@@ -9117,11 +9141,18 @@ class SpatialStatisticDialog(lib.Dialog):
         How the envelope is simulated with a partner channel: random
         shifts of the partner or random labels.
     edge_correction : QCheckBox
-        If checked, Ripley's isotropic edge correction is applied.
+        If checked, Ripley's isotropic edge correction is applied (for
+        the k nearest neighbors, distances beyond the region boundary
+        are censored).
+    k_max, k_min : QSpinBox
+        Highest order of the neighbors, and the lowest order of the
+        pooled density.
     partner : QComboBox
         Second channel for the cross function, or none (data None).
     r_max : QDoubleSpinBox
         Maximum radius in nm.
+    r_min : QDoubleSpinBox
+        Shortest distance to a neighbor used, in nm.
     region : QComboBox
         Regions in which the function is computed: the picks (if any),
         the current view or the whole field of view.
@@ -9180,6 +9211,7 @@ class SpatialStatisticDialog(lib.Dialog):
             self.partner.addItem(check.text(), i)
         grid.addWidget(self.partner, 2, 1)
         self.multichannel = self.statistic["multichannel"]
+        self.neighbors = self.statistic["neighbors"]
         channels_label = QtWidgets.QLabel("Channels:")
         channels_label.setToolTip(
             "Channels whose nearest neighbor distances are compared;\n"
@@ -9207,13 +9239,18 @@ class SpatialStatisticDialog(lib.Dialog):
             hidden = [channels_label, self.channels_list]
             if len(view.locs_paths) < 2:
                 hidden += [channel_label, self.channel]
+            if len(view.locs_paths) < 2 or not self.statistic["partner"]:
                 hidden += [partner_label, self.partner]
         for widget in hidden:
             widget.hide()
 
         region_label = QtWidgets.QLabel("Regions:")
         region_label.setToolTip(
-            "Regions of interest in which the function is computed.\n"
+            "Regions of interest in which the neighbors are searched:\n"
+            "the neighbors of each molecule in the same region. The\n"
+            "distances of all regions are fitted together."
+            if self.neighbors
+            else "Regions of interest in which the function is computed.\n"
             "With picks, it is computed in each pick and averaged. The\n"
             "density is the number of localizations divided by the\n"
             "region's area, so the regions should lie within the sample\n"
@@ -9257,7 +9294,8 @@ class SpatialStatisticDialog(lib.Dialog):
         self.r_max = QtWidgets.QDoubleSpinBox()
         self.r_max.setRange(0.1, 1e6)
         self.r_max.setDecimals(1)
-        self.r_max.setValue(self.statistic["r_max"])
+        if self.statistic["r_max"] is not None:
+            self.r_max.setValue(self.statistic["r_max"])
         self.r_max.setSingleStep(10)
         grid.addWidget(self.r_max, 4, 1)
         steps_label = QtWidgets.QLabel(
@@ -9274,20 +9312,69 @@ class SpatialStatisticDialog(lib.Dialog):
         self.steps.setRange(2, 10_000)
         self.steps.setValue(self.statistic["steps"])
         grid.addWidget(self.steps, 5, 1)
+        # the k nearest neighbors replace the radii
+        k_max_label = QtWidgets.QLabel("Neighbors (k):")
+        k_max_label.setToolTip(
+            "Highest order of the neighbors: the density is fitted to\n"
+            "the distances to the 1st, 2nd, ..., k-th nearest neighbors."
+        )
+        grid.addWidget(k_max_label, 6, 0)
+        self.k_max = QtWidgets.QSpinBox()
+        self.k_max.setRange(1, 100)
+        self.k_max.setValue(5)
+        grid.addWidget(self.k_max, 6, 1)
+        k_min_label = QtWidgets.QLabel("Pooled from k:")
+        k_min_label.setToolTip(
+            "Lowest order of the pooled density, which is fitted to the\n"
+            "neighbors from this order to the highest; e.g., 2 leaves\n"
+            "out the nearest neighbors, which are affected the most by\n"
+            "molecules counted twice."
+        )
+        grid.addWidget(k_min_label, 7, 0)
+        self.k_min = QtWidgets.QSpinBox()
+        self.k_min.setRange(1, self.k_max.value())
+        self.k_min.setValue(1)
+        grid.addWidget(self.k_min, 7, 1)
+        self.k_max.valueChanged.connect(self.k_min.setMaximum)
+        r_min_label = QtWidgets.QLabel("Min. distance (nm):")
+        r_min_label.setToolTip(
+            "Shorter distances to the neighbors are left out and the\n"
+            "distributions are fitted to the longer ones, e.g., to\n"
+            "ignore molecules counted twice."
+        )
+        grid.addWidget(r_min_label, 8, 0)
+        self.r_min = QtWidgets.QDoubleSpinBox()
+        self.r_min.setRange(0.0, 1e5)
+        self.r_min.setDecimals(1)
+        self.r_min.setSingleStep(1)
+        grid.addWidget(self.r_min, 8, 1)
+        if self.neighbors:
+            hidden = [r_label, self.r_max, steps_label, self.steps]
+        else:
+            hidden = [k_max_label, self.k_max, k_min_label, self.k_min]
+            hidden += [r_min_label, self.r_min]
+        for widget in hidden:
+            widget.hide()
         simulations_label = QtWidgets.QLabel("Simulations:")
         simulations_label.setToolTip(
-            "Number of simulations for the envelope. For one channel,\n"
+            "Number of simulations of uniformly random points in the\n"
+            "same regions, as many as there are molecules (complete\n"
+            "spatial randomness, CSR), for the p-values and the errors\n"
+            "of the densities. The smallest p-value is\n"
+            "1 / (simulations + 1). 0 skips the simulations."
+            if self.neighbors
+            else "Number of simulations for the envelope. For one channel,\n"
             "uniformly random points in the same regions, as many as\n"
             "there are localizations (complete spatial randomness,\n"
             "CSR); for two channels, see the envelope. A mean function\n"
             "outside the envelope is significant at the pointwise\n"
             "level 2 / (simulations + 1). 0 skips the simulations."
         )
-        grid.addWidget(simulations_label, 6, 0)
+        grid.addWidget(simulations_label, 9, 0)
         self.simulations = QtWidgets.QSpinBox()
         self.simulations.setRange(0, 9_999)
         self.simulations.setValue(99)
-        grid.addWidget(self.simulations, 6, 1)
+        grid.addWidget(self.simulations, 9, 1)
         self.cross_null_label = QtWidgets.QLabel("Envelope:")
         self.cross_null_label.setToolTip(
             "How the two channels are simulated. Random shifts: the\n"
@@ -9300,44 +9387,51 @@ class SpatialStatisticDialog(lib.Dialog):
             "channel clustered more strongly than the other also\n"
             "falls outside of it."
         )
-        grid.addWidget(self.cross_null_label, 7, 0)
+        grid.addWidget(self.cross_null_label, 10, 0)
         self.cross_null = QtWidgets.QComboBox()
         self.cross_null.addItem("Random shifts (independence)", "shift")
         self.cross_null.addItem("Random labels (same distribution)", "labels")
-        grid.addWidget(self.cross_null, 7, 1)
+        grid.addWidget(self.cross_null, 10, 1)
         self.edge_correction = QtWidgets.QCheckBox("Edge correction")
         self.edge_correction.setToolTip(
-            "Ripley's isotropic edge correction: weight each pair by\n"
+            "Neighbors outside the region are not seen: a distance\n"
+            "longer than that to the region boundary is used only as\n"
+            "lying beyond the boundary (censored)."
+            if self.neighbors
+            else "Ripley's isotropic edge correction: weight each pair by\n"
             "the inverse of the fraction of the circle around the\n"
             "localization that lies inside the region, since the\n"
             "neighbors outside of it are not seen."
         )
         self.edge_correction.setChecked(True)
-        grid.addWidget(self.edge_correction, 8, 0, 1, 2)
+        grid.addWidget(self.edge_correction, 11, 0, 1, 2)
         # NNDs are compared with simulations in the same regions instead
         self.edge_correction.setVisible(not self.multichannel)
 
         # 3D
         self.use_z = QtWidgets.QCheckBox("3D (x, y and z)")
         self.use_z.setToolTip(
-            "Compute the function in 3D. Requires z. 3D samples are\n"
+            "Measure the distances in 3D. Requires z. The densities\n"
+            "are then per volume."
+            if self.neighbors
+            else "Compute the function in 3D. Requires z. 3D samples are\n"
             "usually thin, so keep the max. radius below about a third\n"
             "of the z range: larger spheres mostly reach the top or\n"
             "bottom of the region and the function gets noisy."
         )
-        grid.addWidget(self.use_z, 9, 0, 1, 2)
+        grid.addWidget(self.use_z, 12, 0, 1, 2)
         self.z_limits_label = QtWidgets.QLabel("z range:")
         self.z_limits_label.setToolTip(
             "z range over which the regions extend. The volume, and\n"
             "thus the density, depends on it."
         )
-        grid.addWidget(self.z_limits_label, 10, 0)
+        grid.addWidget(self.z_limits_label, 13, 0)
         self.z_limits = QtWidgets.QComboBox()
         self.z_limits.addItem("Localizations in each region", "data")
         self.z_limits.addItem("Manual", "manual")
-        grid.addWidget(self.z_limits, 10, 1)
+        grid.addWidget(self.z_limits, 13, 1)
         self.z_min_label = QtWidgets.QLabel("z min / max (nm):")
-        grid.addWidget(self.z_min_label, 11, 0)
+        grid.addWidget(self.z_min_label, 14, 0)
         z_box = QtWidgets.QHBoxLayout()
         self.z_min = QtWidgets.QDoubleSpinBox()
         self.z_max = QtWidgets.QDoubleSpinBox()
@@ -9348,7 +9442,7 @@ class SpatialStatisticDialog(lib.Dialog):
             z_box.addWidget(spin)
         self.z_min.setToolTip("Bottom of the regions; lower z is ignored.")
         self.z_max.setToolTip("Top of the regions; higher z is ignored.")
-        grid.addLayout(z_box, 11, 1)
+        grid.addLayout(z_box, 14, 1)
         self.simulated_z_label = QtWidgets.QLabel("Simulated z:")
         self.simulated_z_label.setToolTip(
             "z of the simulated points. Uniform: complete spatial\n"
@@ -9359,11 +9453,11 @@ class SpatialStatisticDialog(lib.Dialog):
             "the z distribution, but hides real clustering in z (e.g.,\n"
             "a layer of molecules)."
         )
-        grid.addWidget(self.simulated_z_label, 12, 0)
+        grid.addWidget(self.simulated_z_label, 15, 0)
         self.simulated_z = QtWidgets.QComboBox()
         self.simulated_z.addItem("Uniform over the z range", "uniform")
         self.simulated_z.addItem("Observed z values, shuffled", "observed")
-        grid.addWidget(self.simulated_z, 12, 1)
+        grid.addWidget(self.simulated_z, 15, 1)
         vbox.addLayout(grid)
 
         self.channel.currentIndexChanged.connect(self.on_channel_changed)
@@ -9431,10 +9525,14 @@ class SpatialStatisticDialog(lib.Dialog):
             widget.setVisible(use_z)
         for widget in (self.z_min_label, self.z_min, self.z_max):
             widget.setVisible(use_z and manual)
-        # within a channel, multichannel statistics simulate z, too
+        # within a channel, multichannel statistics simulate z, too;
+        # the k nearest neighbors are compared with uniform z only
         for widget in (self.simulated_z_label, self.simulated_z):
             widget.setVisible(
-                use_z and simulate and (self.multichannel or not cross)
+                use_z
+                and simulate
+                and not self.neighbors
+                and (self.multichannel or not cross)
             )
         for widget in (self.cross_null_label, self.cross_null):
             widget.setVisible(cross and simulate)
@@ -9508,8 +9606,11 @@ class SpatialStatisticDialog(lib.Dialog):
             "partner": dialog.partner.currentData(),
             "cross_null": dialog.cross_null.currentData(),
             "channels": dialog.channels(),
+            "k_max": dialog.k_max.value(),
+            "k_min": dialog.k_min.value(),
+            "r_min": dialog.r_min.value(),
         }
-        if dialog.multichannel:
+        if dialog.multichannel or not dialog.statistic["partner"]:
             params["partner"] = None
         if params["use_z"]:
             if dialog.z_limits.currentData() == "manual":
@@ -9517,7 +9618,8 @@ class SpatialStatisticDialog(lib.Dialog):
                     dialog.z_min.value(),
                     dialog.z_max.value(),
                 )
-            if params["partner"] is None:  # within a channel
+            if params["partner"] is None and not dialog.neighbors:
+                # within a channel
                 params["simulated_z"] = dialog.simulated_z.currentData()
         return params, result == QtWidgets.QDialog.DialogCode.Accepted
 
@@ -9539,12 +9641,14 @@ class SpatialStatisticPlotWindow(lib.GenericPlotWindow):
                 min(400 + 300 * n_channels, 1600),
                 min(250 + 250 * n_channels, 1200),
             )
+        elif "size" in self.statistic:
+            self.resize(*self.statistic["size"])
         self.toolbar.addSeparator()
         save_action = self.toolbar.addAction("Save data")
         save_action.setIcon(theme.icon("export-csv"))
         save_action.setToolTip(
-            "Save the data and its summary (of each region, or of each\n"
-            "pair of channels) as .csv files."
+            "Save the data and its summary (of each region, pair of\n"
+            "channels or order of neighbors) as .csv files."
         )
         save_action.triggered.connect(self.save_data)
         theme.follow_toolbar_style(self.toolbar, save_action)
@@ -9567,7 +9671,7 @@ class SpatialStatisticPlotWindow(lib.GenericPlotWindow):
             + self.statistic["suffix"]
             + (
                 "_cross"
-                if self.result["cross_null"]
+                if self.result.get("cross_null")
                 and not self.statistic["multichannel"]
                 else ""
             )
@@ -9578,9 +9682,9 @@ class SpatialStatisticPlotWindow(lib.GenericPlotWindow):
             self.write_data(path)
 
     def write_data(self, path: str) -> list[str]:
-        """Save the data to ``path`` and its summary (of each region or
-        pair of channels) next to it, ``<path stem>_regions.csv`` or
-        ``<path stem>_summary.csv``; return both paths."""
+        """Save the data to ``path`` and its summary (of each region,
+        pair of channels or order of neighbors) next to it, e.g.,
+        ``<path stem>_regions.csv``; return both paths."""
         curves, summary = self.statistic["tables"](self.result)
         summary_path = (
             os.path.splitext(path)[0]
@@ -16935,8 +17039,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """Ask for the channel, regions and parameters of a spatial
         statistic (a key of ``SPATIAL_STATISTICS``, e.g., Ripley's H
         function or the radial distribution function), compute it on a
-        worker thread and plot it, see ``postprocess.ripley_h`` and
-        ``postprocess.rdf``."""
+        worker thread and plot it, see ``postprocess.ripley_h``,
+        ``postprocess.rdf``, ``postprocess.nnd_distributions`` and
+        ``postprocess.knn_density``."""
         if not self.locs_paths:
             return
         params, ok = SpatialStatisticDialog.getParams(self.window, statistic)
@@ -16999,18 +17104,28 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         else:
             picks, pick_shape, pick_size = None, None, None
         kwargs = dict(
-            r_max=params["r_max"],
-            steps=params["steps"],
             n_simulations=params["n_simulations"],
             use_z=params["use_z"],
             z_range=params["z_range"],
-            simulated_z=params["simulated_z"],
-            cross_null=params["cross_null"],
         )
+        if spec["neighbors"]:
+            kwargs.update(
+                k_max=params["k_max"],
+                k_min=params["k_min"],
+                r_min=params["r_min"],
+                edge_correction=params["edge_correction"],
+            )
+        else:
+            kwargs.update(
+                r_max=params["r_max"],
+                steps=params["steps"],
+                simulated_z=params["simulated_z"],
+                cross_null=params["cross_null"],
+            )
         if spec["multichannel"]:
             locs = [self.locs[i] for i in used]
             kwargs["names"] = titles
-        else:
+        elif spec["partner"]:
             kwargs["edge_correction"] = params["edge_correction"]
             kwargs["partner_locs"] = (
                 None if partner is None else self.locs[partner]
@@ -20979,6 +21094,16 @@ class Window(QtWidgets.QMainWindow):
         )
         nnd_action.triggered.connect(
             lambda: self.view.spatial_statistic("nnd")
+        )
+        knn_action = spatial_menu.addAction(
+            "Density from k nearest neighbors..."
+        )
+        knn_action.setToolTip(
+            "Density fitted to the distances to the k nearest neighbors,"
+            " and whether the molecules are randomly distributed."
+        )
+        knn_action.triggered.connect(
+            lambda: self.view.spatial_statistic("knn")
         )
 
         self.load_user_settings()

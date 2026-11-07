@@ -1044,6 +1044,83 @@ def _nnd(
         print(f"saved {base + suffix}")
 
 
+def _knn_density(
+    files: list[str],
+    picks_path: str | None,
+    k_max: int,
+    k_min: int,
+    r_min: float,
+    n_simulations: int,
+    edge_correction: bool,
+    use_3d: bool = False,
+    z_range: tuple[float, float] | None = None,
+) -> None:
+    """Density of the molecules in each of ``files`` fitted to the
+    distances to their ``k_max`` nearest neighbors, in the picks of
+    ``picks_path`` or in the whole field of view, in 2D or, with
+    ``use_3d``, in 3D over ``z_range`` (nm; None for the z range of
+    each region's molecules), with p-values from ``n_simulations``
+    random simulations. Prints the densities and saves the
+    distributions (``<file>_knn_density.csv``), the densities
+    (``..._densities.csv``) and a plot (``.png``) next to each file.
+    See ``postprocess.knn_density`` for details."""
+    import warnings
+    from glob import glob
+    from itertools import chain
+    from . import io, lib, postprocess
+
+    paths = list(chain(*[sorted(glob(_)) for _ in files]))
+    if not paths:
+        raise SystemExit("No localization files found.")
+    for path in paths:
+        locs, info = io.load_locs(path)
+        _warn_if_not_molecules(path, locs)
+        picks, shape, size = None, None, None
+        if picks_path is not None:
+            # the pixel size converts picks saved before Picasso 1.0
+            picks, shape, size = io.load_picks(
+                picks_path, lib.get_from_metadata(info, "Pixelsize")
+            )
+        print(f"Density from the k nearest neighbors of {path}:")
+        try:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                result = postprocess.knn_density(
+                    locs,
+                    info,
+                    picks=picks,
+                    pick_shape=shape,
+                    pick_size=size,
+                    k_max=k_max,
+                    k_min=k_min,
+                    r_min=r_min,
+                    edge_correction=edge_correction,
+                    n_simulations=n_simulations,
+                    use_z=use_3d,
+                    z_range=z_range,
+                    progress="console",
+                )
+        except ValueError as e:
+            raise SystemExit(f"{path}: {e}")
+        for warning in caught:
+            if "not molecules" not in str(warning.message):  # see above
+                print(f"WARNING: {warning.message}")
+        curves, densities = postprocess._knn_density_tables(result)
+        print(
+            densities.to_string(
+                index=False, float_format=lambda value: f"{value:.4g}"
+            )
+        )
+        base = os.path.splitext(path)[0] + "_knn_density"
+        curves.to_csv(base + ".csv", index=False)
+        densities.to_csv(base + "_densities.csv", index=False)
+        figure = postprocess.plot_knn_density(result)
+        figure.set_size_inches(11, 4.5)
+        figure.savefig(base + ".png", dpi=150)
+        for suffix in (".csv", "_densities.csv", ".png"):
+            print(f"  saved {base + suffix}")
+
+
 def _pick_similar_cli(
     files: list[str],
     picks_path: str | None = None,
@@ -5603,6 +5680,91 @@ def _build_parser() -> (
         ),
     )
 
+    # density from the k nearest neighbors
+    knn_parser = subparsers.add_parser(
+        "knn-density",
+        help=(
+            "density of molecules fitted to the distances to their k"
+            " nearest neighbors: are they randomly distributed"
+        ),
+    )
+    knn_parser.add_argument(
+        "files",
+        nargs="+",
+        help="hdf5 localization files (unix style path patterns)",
+    )
+    knn_parser.add_argument(
+        "-p",
+        "--picks",
+        default=None,
+        help=(
+            "picks (.yaml) saved in Render; the regions of interest in"
+            " which the neighbors are searched (default: the whole field"
+            " of view)"
+        ),
+    )
+    knn_parser.add_argument(
+        "-k",
+        "--k-max",
+        type=int,
+        default=5,
+        help="highest order of the neighbors (default=5)",
+    )
+    knn_parser.add_argument(
+        "--k-min",
+        type=int,
+        default=1,
+        help=(
+            "lowest order of the neighbors of the pooled density, e.g., 2"
+            " to leave out the nearest neighbors (default=1)"
+        ),
+    )
+    knn_parser.add_argument(
+        "--r-min",
+        type=float,
+        default=0.0,
+        help=(
+            "shortest distance to a neighbor used in nm; shorter ones are"
+            " left out, e.g., molecules counted twice (default=0)"
+        ),
+    )
+    knn_parser.add_argument(
+        "-n",
+        "--simulations",
+        type=int,
+        default=99,
+        help=(
+            "number of simulations of complete spatial randomness for the"
+            " p-values and errors, 0 to skip (default=99)"
+        ),
+    )
+    knn_parser.add_argument(
+        "--no-edge-correction",
+        dest="edge_correction",
+        action="store_false",
+        help=(
+            "use the distances as measured, also those longer than the"
+            " distance to the region boundary"
+        ),
+    )
+    knn_parser.add_argument(
+        "--3d",
+        dest="use_3d",
+        action="store_true",
+        help="measure the distances in 3D (x, y and z), requires z",
+    )
+    knn_parser.add_argument(
+        "--z-range",
+        nargs=2,
+        type=float,
+        metavar=("ZMIN", "ZMAX"),
+        default=None,
+        help=(
+            "z range in nm over which the regions extend in 3D (default:"
+            " the z range of the molecules in each region)"
+        ),
+    )
+
     pick_similar_parser = subparsers.add_parser(
         "pick-similar",
         help=(
@@ -6572,6 +6734,18 @@ def main():  # noqa: C901
                 None if args.z_range is None else tuple(args.z_range),
                 args.observed_z,
                 args.cross_null,
+            )
+        elif args.command == "knn-density":
+            _knn_density(
+                args.files,
+                args.picks,
+                args.k_max,
+                args.k_min,
+                args.r_min,
+                args.simulations,
+                args.edge_correction,
+                args.use_3d,
+                None if args.z_range is None else tuple(args.z_range),
             )
         elif args.command == "pick-similar":
             _pick_similar_cli(

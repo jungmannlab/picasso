@@ -3768,3 +3768,286 @@ class TestNndDistributions:
             )
         with pytest.raises(ValueError, match="r_max"):
             postprocess.nnd_distributions(a, self.INFO, r_max=0)
+
+
+class TestKnnCsrDistributions:
+    @pytest.mark.parametrize("dim, density", [(2, 1e-4), (3, 1e-6)])
+    @pytest.mark.parametrize("k", [1, 2, 5])
+    def test_pdf_is_the_derivative_of_the_cdf(self, k, dim, density):
+        r = np.linspace(0.0, 400.0, 40_001)
+        pdf = postprocess.knn_csr_pdf(r, density, k=k, dim=dim)
+        cdf = postprocess.knn_csr_cdf(r, density, k=k, dim=dim)
+        integral = np.concatenate(
+            [[0.0], np.cumsum((pdf[1:] + pdf[:-1]) / 2 * np.diff(r))]
+        )
+        np.testing.assert_allclose(integral, cdf, atol=1e-6)
+        assert cdf[-1] == pytest.approx(1.0, abs=1e-6)
+
+    def test_nearest_neighbor(self):
+        r = np.array([10.0, 50.0, 100.0])
+        density = 1e-4  # 100 per um^2
+        np.testing.assert_allclose(
+            postprocess.knn_csr_cdf(r, density),
+            1 - np.exp(-density * np.pi * r**2),
+        )
+        np.testing.assert_allclose(
+            postprocess.knn_csr_pdf(r, density),
+            2 * np.pi * density * r * np.exp(-density * np.pi * r**2),
+        )
+        np.testing.assert_allclose(
+            postprocess.knn_csr_cdf(r, 1e-6, dim=3),
+            1 - np.exp(-1e-6 * 4 / 3 * np.pi * r**3),
+        )
+
+    def test_scalars_and_negative_distances(self):
+        assert isinstance(postprocess.knn_csr_pdf(20.0, 1e-4), float)
+        assert postprocess.knn_csr_pdf(-1.0, 1e-4) == 0.0
+        assert postprocess.knn_csr_cdf(-1.0, 1e-4) == 0.0
+        # no overflow for distant neighbors
+        assert postprocess.knn_csr_pdf(1e6, 1e-4, k=3) == 0.0
+
+    def test_invalid_parameters(self):
+        with pytest.raises(ValueError, match="density"):
+            postprocess.knn_csr_pdf(1.0, 0.0)
+        with pytest.raises(ValueError, match="k must"):
+            postprocess.knn_csr_cdf(1.0, 1e-4, k=0)
+        with pytest.raises(ValueError, match="k must"):
+            postprocess.knn_csr_cdf(1.0, 1e-4, k=1.5)
+        with pytest.raises(ValueError, match="dim"):
+            postprocess.knn_csr_pdf(1.0, 1e-4, dim=1)
+
+
+class TestKnnDensity:
+    INFO = TestRipleyH.INFO
+    SIZE = 10_000.0
+
+    def _random(self, n, seed, z=False):
+        rng = np.random.default_rng(seed)
+        locs = _ripley_locs(*rng.uniform(0, self.SIZE, size=(2, n)))
+        if z:
+            locs["z"] = rng.uniform(-400, 400, n)
+        return locs
+
+    def test_random_molecules_give_the_count_density(self):
+        locs = self._random(10_000, 0)
+        result = postprocess.knn_density(locs, self.INFO, n_simulations=19)
+        count_density = 10_000 / self.SIZE**2
+        assert result["count_density"] == pytest.approx(count_density)
+        np.testing.assert_allclose(
+            result["densities"], count_density, rtol=0.03
+        )
+        assert result["density"] == pytest.approx(count_density, rel=0.02)
+        np.testing.assert_array_equal(result["k"], [1, 2, 3, 4, 5])
+        assert result["n_molecules"] == 10_000
+        # the distances of each order are exact or censored
+        np.testing.assert_array_equal(
+            result["n_distances"] + result["n_censored"], 10_000
+        )
+        assert (result["n_censored"] > 0).all()
+        # standard errors of about 1 / sqrt(k n)
+        relative_se = result["densities_se"] / result["densities"]
+        assert ((relative_se > 0.002) & (relative_se < 0.02)).all()
+        assert np.median(result["p_values"]) > 0.2
+        # the histograms follow the fitted distributions
+        edges = result["edges"]
+        for i, k in enumerate(result["k"]):
+            cumulative = np.cumsum(result["histograms"][i] * np.diff(edges))
+            expected = postprocess.knn_csr_cdf(
+                edges[1:], result["densities"][i], k=k
+            )
+            np.testing.assert_allclose(cumulative, expected, atol=0.01)
+
+    def test_edge_correction_removes_the_bias_in_small_picks(self):
+        locs = self._random(20_000, 1)
+        centers = np.linspace(1000, 9000, 5)
+        picks = [(x, y) for x in centers for y in centers]
+        kwargs = dict(
+            picks=picks, pick_shape="Circle", pick_size=1500, n_simulations=0
+        )
+        corrected = postprocess.knn_density(locs, self.INFO, **kwargs)
+        uncorrected = postprocess.knn_density(
+            locs, self.INFO, edge_correction=False, **kwargs
+        )
+        count_density = corrected["count_density"]
+        np.testing.assert_allclose(
+            corrected["densities"], count_density, rtol=0.05
+        )
+        # neighbors outside the picks are missed, more so for larger k
+        assert uncorrected["densities"][0] < 0.96 * count_density
+        assert (np.diff(uncorrected["densities"]) < 0).all()
+        assert not uncorrected["n_censored"].any()
+        assert not uncorrected["edge_correction"]
+        n_picked = sum(
+            len(pick)
+            for pick in postprocess.picked_locs(
+                locs,
+                self.INFO,
+                picks=picks,
+                pick_shape="Circle",
+                pick_size=1500,
+            )
+        )
+        assert corrected["n_molecules"] == n_picked
+        assert corrected["n_regions"] == 25
+
+    def test_clustered_molecules(self):
+        rng = np.random.default_rng(2)
+        centers = rng.uniform(500, self.SIZE - 500, size=(1000, 2))
+        xy = np.repeat(centers, 5, axis=0) + rng.normal(0, 20, (5000, 2))
+        result = postprocess.knn_density(
+            _ripley_locs(*xy.T), self.INFO, n_simulations=19
+        )
+        densities = result["densities"]
+        assert densities[0] > 5 * result["count_density"]
+        # the fifth neighbor lies in another cluster
+        assert densities[4] < 0.2 * densities[3]
+        np.testing.assert_allclose(result["p_values"], 1 / 20)
+
+    def test_r_min_leaves_out_short_distances(self):
+        locs = self._random(10_000, 3)
+        result = postprocess.knn_density(
+            locs, self.INFO, r_min=30, n_simulations=0
+        )
+        np.testing.assert_allclose(
+            result["densities"], 10_000 / self.SIZE**2, rtol=0.03
+        )
+        # about 25 % of the nearest neighbors are closer than 30 nm
+        assert 0.65 < result["n_distances"][0] / 10_000 < 0.8
+        assert result["r_min"] == 30
+        assert (result["histograms"][:, result["edges"][1:] <= 30] == 0).all()
+
+    def test_pooled_orders(self):
+        rng = np.random.default_rng(4)
+        centers = rng.uniform(500, self.SIZE - 500, size=(2000, 2))
+        xy = np.repeat(centers, 2, axis=0) + rng.normal(0, 10, (4000, 2))
+        locs = _ripley_locs(*xy.T)
+        all_orders = postprocess.knn_density(locs, self.INFO, n_simulations=0)
+        without_pairs = postprocess.knn_density(
+            locs, self.INFO, k_min=2, n_simulations=0
+        )
+        # the pooled fit lies between the fits of its orders
+        assert (
+            without_pairs["densities"][1:].min()
+            <= without_pairs["density"]
+            <= without_pairs["densities"][1:].max()
+        )
+        assert without_pairs["density"] < all_orders["density"]
+        assert without_pairs["k_min"] == 2
+
+    def test_3d(self):
+        locs = self._random(10_000, 5, z=True)
+        result = postprocess.knn_density(
+            locs, self.INFO, use_z=True, n_simulations=0
+        )
+        count_density = 10_000 / (self.SIZE**2 * 800)
+        assert result["count_density"] == pytest.approx(
+            count_density, rel=0.01
+        )
+        np.testing.assert_allclose(
+            result["densities"], count_density, rtol=0.04
+        )
+        uncorrected = postprocess.knn_density(
+            locs,
+            self.INFO,
+            use_z=True,
+            edge_correction=False,
+            n_simulations=0,
+        )
+        assert (uncorrected["densities"] < 0.95 * count_density).all()
+        with pytest.raises(ValueError, match="requires z"):
+            postprocess.knn_density(
+                locs.drop(columns="z"), self.INFO, use_z=True
+            )
+
+    def test_simulations(self):
+        locs = self._random(2000, 6)
+        first = postprocess.knn_density(locs, self.INFO, n_simulations=9)
+        second = postprocess.knn_density(locs, self.INFO, n_simulations=9)
+        np.testing.assert_array_equal(first["p_values"], second["p_values"])
+        assert first["n_simulations"] == 9
+        assert ((first["p_values"] >= 0.1) & (first["p_values"] <= 1)).all()
+        none = postprocess.knn_density(locs, self.INFO, n_simulations=0)
+        assert none["p_values"] is None
+        assert none["densities_se"] is None and none["density_se"] is None
+        np.testing.assert_array_equal(none["densities"], first["densities"])
+
+    def test_regions_without_neighbors(self):
+        locs = _ripley_locs([1000.0, 1050.0, 5000.0], [1000.0, 1000.0, 5000.0])
+        picks = [(1000, 1000), (5000, 5000), (8000, 8000)]
+        result = postprocess.knn_density(
+            locs,
+            self.INFO,
+            picks=picks,
+            pick_shape="Circle",
+            pick_size=1000,
+            k_max=2,
+            n_simulations=0,
+        )
+        assert result["n_molecules"] == 3
+        assert result["n_distances"][0] == 2
+        assert np.isnan(result["densities"][1])  # no second neighbors
+        with pytest.raises(ValueError, match="No region contains"):
+            postprocess.knn_density(
+                locs,
+                self.INFO,
+                picks=[(8000, 8000)],
+                pick_shape="Circle",
+                pick_size=1000,
+            )
+        with pytest.raises(ValueError, match="r_min"):
+            postprocess.knn_density(
+                locs,
+                self.INFO,
+                picks=picks,
+                pick_shape="Circle",
+                pick_size=1000,
+                r_min=100,
+            )
+
+    def test_warns_for_localizations(self):
+        locs = self._random(500, 7).drop(columns="n_events")
+        with pytest.warns(UserWarning, match="not molecules"):
+            postprocess.knn_density(locs, self.INFO, n_simulations=0)
+
+    def test_plot_and_tables(self):
+        result = postprocess.knn_density(
+            self._random(2000, 8), self.INFO, r_min=10, n_simulations=4
+        )
+        fig = postprocess.plot_knn_density(result)
+        assert len(fig.axes) == 2
+        assert "4 simulations" in fig.get_suptitle()
+        curves, summary = postprocess._knn_density_tables(result)
+        assert len(curves) == 50
+        assert {"k1_per_nm", "k1_csr_per_nm", "k5_csr_per_nm"} <= set(
+            curves.columns
+        )
+        assert list(summary["estimate"]) == [
+            "k=1",
+            "k=2",
+            "k=3",
+            "k=4",
+            "k=5",
+            "pooled k=1-5",
+            "molecules/area",
+        ]
+        np.testing.assert_allclose(
+            summary["density_per_um2"][:5], result["densities"] * 1e6
+        )
+        assert summary["n_distances"].dtype == "Int64"
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            (dict(k_max=0), "k_max"),
+            (dict(k_min=3, k_max=2), "k_min"),
+            (dict(r_min=-1.0), "r_min"),
+            (dict(r_min=50.0, r_max=40.0), "r_max"),
+            (dict(steps=0), "steps"),
+            (dict(n_simulations=-1), "n_simulations"),
+            (dict(use_z=True, z_range=(1.0, 0.0)), "z_range"),
+        ],
+    )
+    def test_invalid_parameters(self, kwargs, match):
+        locs = self._random(100, 9, z=True)
+        with pytest.raises(ValueError, match=match):
+            postprocess.knn_density(locs, self.INFO, **kwargs)

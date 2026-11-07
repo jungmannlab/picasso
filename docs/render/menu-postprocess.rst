@@ -587,3 +587,9 @@ Nearest neighbor distances (all channels)
 The distributions of the first nearest neighbor distances within and between
 channels, compared with random simulations, see
 :ref:`render-nnd-distributions`.
+
+Density from k nearest neighbors
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The density fitted to the distances to the k nearest neighbors, and whether
+the molecules are randomly distributed, see :ref:`render-knn-density`.

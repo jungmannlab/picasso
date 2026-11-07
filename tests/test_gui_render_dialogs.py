@@ -1884,6 +1884,7 @@ def _molecules(window) -> None:
         ("ripley_h", lambda d: d.region.setCurrentIndex(1)),  # the FOV
         ("rdf", lambda d: d.partner.setCurrentIndex(2)),  # cross
         ("nnd", lambda d: None),
+        ("knn", lambda d: d.k_max.setValue(2)),
     ],
 )
 def test_spatial_statistic_with_the_dialog(
@@ -1975,6 +1976,28 @@ def test_spatial_statistic_dialog_in_3d(window_3d, answers, monkeypatch):
     assert ok
     assert params["z_range"] == (-50.0, 50.0)
     assert params["simulated_z"] == "observed"
+
+
+def test_knn_dialog_in_3d(window_3d, monkeypatch):
+    dialog = gui_render.SpatialStatisticDialog(window_3d, "knn")
+    dialog.use_z.setChecked(True)
+    assert not dialog.z_limits.isHidden()
+    # compared with uniform z only
+    assert dialog.simulated_z.isHidden()
+    dialog.close()
+
+    def setup(dialog):
+        dialog.use_z.setChecked(True)
+        dialog.k_max.setValue(4)
+        dialog.k_min.setValue(2)
+        dialog.r_min.setValue(5.0)
+
+    _accept_with(monkeypatch, gui_render.SpatialStatisticDialog, setup)
+    params, ok = gui_render.SpatialStatisticDialog.getParams(window_3d, "knn")
+    assert ok and params["use_z"]
+    assert (params["k_max"], params["k_min"], params["r_min"]) == (4, 2, 5.0)
+    assert params["partner"] is None
+    assert params["simulated_z"] == "uniform"
 
 
 # ---------------------------------------------------------------------------

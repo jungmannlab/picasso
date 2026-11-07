@@ -1558,6 +1558,77 @@ For example, two channels with short names:
      - How pairs of channels are simulated: random shifts of the second
        channel (rectangular or circular regions only) or random labels.
 
+.. _cmd-knn-density:
+
+knn-density
+-----------
+Density of molecules fitted to the distances to their k nearest neighbors
+(Thompson, Ecology, 1956, DOI: `10.2307/1933159
+<https://doi.org/10.2307/1933159>`__), for each order k separately and pooled,
+and whether the molecules are randomly distributed: for random molecules, all
+orders give the same density, for clustered ones, it decreases with k. The
+p-value of each order compares the distances with the fitted distribution
+against random simulations in the same regions. Computed in 2D or, with
+``--3d``, in 3D, in the picks given with ``-p`` or in the whole field of view,
+with the distances beyond the region boundary corrected for. The files should
+contain molecules, see `ripley-h`_. See :ref:`render-knn-density` for details.
+
+Prints the densities and saves next to each file ``<file
+name>_knn_density.csv`` (the distributions of the distances of each order,
+measured and for random molecules at the fitted density), ``<file
+name>_knn_density_densities.csv`` (the density of each order, pooled and the
+number of molecules per area, per um^2 or, in 3D, per um^3, with the standard
+errors, p-values and numbers of distances) and the plot ``<file
+name>_knn_density.png``.
+
+.. code-block:: bash
+
+   picasso knn-density files [-p picks] [-k k_max] [--k-min k_min] [--r-min r_min] [-n simulations] [--no-edge-correction] [--3d] [--z-range zmin zmax]
+
+For example, in the picks saved in Render, leaving out distances below 10 nm:
+
+.. code-block:: bash
+
+   picasso knn-density molecules.hdf5 -p picks.yaml --r-min 10
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-p``, ``--picks`` (str)
+     - whole field of view
+     - Picks (.yaml) saved in Render; the regions of interest in which the
+       neighbors are searched.
+   * - ``-k``, ``--k-max`` (int)
+     - ``5``
+     - The highest order of the neighbors.
+   * - ``--k-min`` (int)
+     - ``1``
+     - The lowest order of the pooled density, e.g., ``2`` to leave out the
+       nearest neighbors.
+   * - ``--r-min`` (float)
+     - ``0``
+     - The shortest distance to a neighbor used (nm); shorter ones are left
+       out, e.g., molecules counted twice.
+   * - ``-n``, ``--simulations`` (int)
+     - ``99``
+     - The number of random simulations for the p-values and standard errors,
+       ``0`` to skip them.
+   * - ``--no-edge-correction``
+     - off
+     - Use the distances as measured, also those longer than the distance to
+       the region boundary.
+   * - ``--3d``
+     - off
+     - Measure the distances in 3D (x, y and z); requires z. The densities
+       are then per volume.
+   * - ``--z-range`` (float float)
+     - z of each region
+     - The z range (nm) over which the regions extend in 3D.
+
 .. _cmd-pick-similar:
 
 pick-similar
