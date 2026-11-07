@@ -14,6 +14,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import special
 
 from picasso import io, lib, postprocess
 
@@ -1754,6 +1755,251 @@ class TestBindingEventCores:
         assert "group" in out.columns
 
 
+def _docking_sites(
+    n_sites: int,
+    n_frames: int,
+    *,
+    destroyed: float = 0.0,
+    tau_dark: float = 200.0,
+    tau_bright: float = 3.0,
+    seed: int = 0,
+) -> list[pd.DataFrame]:
+    """Localizations of DNA-PAINT docking sites, one per list element:
+    binding events with exponential dark and bright times (frames); the
+    fraction ``destroyed`` of the sites stops binding at a uniformly
+    random time."""
+    rng = np.random.default_rng(seed)
+    sites = []
+    for _ in range(n_sites):
+        end = n_frames
+        if rng.uniform() < destroyed:
+            end = rng.uniform(0, n_frames)
+        frames = []
+        t = rng.exponential(tau_dark)
+        while t < end:
+            length = rng.exponential(tau_bright)
+            frames.extend(range(int(t), int(min(t + length, end)) + 1))
+            t += length + rng.exponential(tau_dark)
+        frames = np.unique(np.clip(frames, 0, n_frames - 1))
+        sites.append(_site_locs(frames, rng))
+    return sites
+
+
+def _site_locs(frames, rng=None) -> pd.DataFrame:
+    """Localizations of one docking site in ``frames``."""
+    rng = np.random.default_rng(0) if rng is None else rng
+    n = len(frames)
+    return pd.DataFrame(
+        {
+            "frame": np.asarray(frames, dtype=np.uint32),
+            "x": rng.normal(0, 3, n).astype(np.float32),
+            "y": rng.normal(0, 3, n).astype(np.float32),
+            "photons": np.full(n, 1000, dtype=np.float32),
+            "sx": np.full(n, 120, dtype=np.float32),
+            "sy": np.full(n, 120, dtype=np.float32),
+            "bg": np.full(n, 20, dtype=np.float32),
+            "lpx": np.full(n, 3, dtype=np.float32),
+            "lpy": np.full(n, 3, dtype=np.float32),
+        }
+    )
+
+
+class TestDockingSiteDamage:
+    N_FRAMES = 10_000
+    INFO = [{"Frames": N_FRAMES, "Pixelsize": 130.0}]
+
+    def test_intact_sites(self):
+        sites = _docking_sites(600, self.N_FRAMES, seed=1)
+        result = postprocess.docking_site_damage(sites, self.INFO)
+        assert result["n_sites"] == 600
+        # r follows an exponential distribution with mean 1
+        assert result["mu"] == pytest.approx(1.0, abs=0.1)
+        assert np.nanmean(result["r"]) == pytest.approx(1.0, abs=0.1)
+        assert result["r_cutoff"] == pytest.approx(4 * result["mu"])
+        assert abs(result["fraction_destroyed"]) < 0.02
+        assert result["fraction_destroyed"] == pytest.approx(
+            result["fraction_above_cutoff"] - np.exp(-4)
+        )
+        np.testing.assert_allclose(np.nanmedian(result["dark"]), 200, rtol=0.1)
+        assert result["counts"].sum() == 600
+        assert len(result["edges"]) == len(result["counts"]) + 1
+
+    def test_destroyed_sites(self):
+        sites = _docking_sites(600, self.N_FRAMES, destroyed=0.3, seed=2)
+        result = postprocess.docking_site_damage(sites, self.INFO)
+        # sites destroyed within the last 4 dark times stay below the
+        # cut-off: about 0.3 * (1 - 4 * 200 / 10,000)
+        assert result["fraction_destroyed"] == pytest.approx(0.276, abs=0.05)
+        drop = postprocess.localization_rate_drop(pd.concat(sites), self.INFO)
+        assert drop == pytest.approx(0.3 * 0.8 / 0.9, abs=0.07)
+
+    def test_sites_without_a_mean_dark_time(self):
+        sites = _docking_sites(50, self.N_FRAMES, seed=3)
+        one_event = _site_locs([10, 11])
+        sites += [sites[0].iloc[:0], one_event]
+        result = postprocess.docking_site_damage(sites, self.INFO)
+        assert result["n_sites"] == 50
+        assert np.isnan(result["r"][-2:]).all()
+        assert np.isnan(result["t_end"][-2])
+        assert result["t_end"][-1] == self.N_FRAMES - 1 - 11
+        with pytest.raises(ValueError, match="mean dark time"):
+            postprocess.docking_site_damage([one_event], self.INFO)
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            (dict(max_dark_time=-1), "max_dark_time"),
+            (dict(cutoff=0.0), "cutoff"),
+            (dict(bin_width=0.0), "bin_width"),
+        ],
+    )
+    def test_invalid_parameters(self, kwargs, match):
+        with pytest.raises(ValueError, match=match):
+            postprocess.docking_site_damage([], self.INFO, **kwargs)
+
+    def test_needs_the_number_of_frames(self):
+        with pytest.raises(KeyError, match="Frames"):
+            postprocess.docking_site_damage([], [{}])
+
+    def test_plot(self):
+        sites = _docking_sites(100, self.N_FRAMES, destroyed=0.2, seed=4)
+        result = postprocess.docking_site_damage(sites, self.INFO)
+        fig = postprocess.plot_docking_site_damage(result)
+        (ax,) = fig.axes
+        # the bulk, not the destroyed sites far beyond
+        x_max = max(10, 2.5 * result["r_cutoff"])
+        assert ax.get_xlim() == pytest.approx((0, x_max))
+        assert x_max < result["edges"][-1]
+        labels = ax.get_legend_handles_labels()[1]
+        assert labels[0] == f"{result['n_sites']} sites"
+        assert "destroyed" in labels[-1]
+
+    def test_cdf_mean_is_unbiased_for_few_events(self):
+        rng = np.random.default_rng(5)
+        estimates = [
+            postprocess._exponential_cdf_mean(rng.exponential(100.0, 20))
+            for _ in range(300)
+        ]
+        assert np.mean(estimates) == pytest.approx(100, rel=0.04)
+        assert np.isnan(postprocess._exponential_cdf_mean(np.array([5.0])))
+        # missing dark times (-1) are ignored
+        assert postprocess._exponential_cdf_mean(
+            np.array([-1.0, 4.0, 4.0])
+        ) == pytest.approx(4.0)
+
+
+class TestDyePerformance:
+    """``dye_performance``, as in Render's Info dialog and
+    ``picasso dye-performance``."""
+
+    N_FRAMES = TestDockingSiteDamage.N_FRAMES
+    INFO = TestDockingSiteDamage.INFO
+
+    def test_all_values(self):
+        sites = _docking_sites(100, self.N_FRAMES, seed=6)
+        result = postprocess.dye_performance(sites, self.INFO)
+        assert result["errors"] == {}
+        pooled = result["locs"]
+        # a group per pick, so that binding events stay within a pick
+        assert pooled["group"].nunique() == 100
+        # the SBR of the centers of binding events (1000 photons, sx =
+        # sy = 120 nm, 130 nm pixels, bg = 20)
+        scale = 65 / np.sqrt(2) / 120
+        expected = 1000 * special.erf(scale) ** 2 / 20
+        np.testing.assert_allclose(result["sbr"], expected, rtol=1e-5)
+        cores, _ = postprocess.select_binding_event_cores(pooled, r_max=np.inf)
+        assert len(result["sbr"]) == len(cores)
+        assert result["damage"]["n_sites"] == 100
+        assert result[
+            "localization_drop"
+        ] == postprocess.localization_rate_drop(pooled, self.INFO)
+
+    def test_without_a_gaussian_fit(self):
+        """Without sx and sy (e.g., spline fits) there is no SBR; picks
+        without enough binding events have no damage."""
+        locs = _site_locs(np.arange(10)).drop(columns=["sx", "sy"])
+        info = [{"Frames": 100, "Pixelsize": 130.0}]
+        result = postprocess.dye_performance([locs], info, max_dark_time=3)
+        assert result["sbr"] is None and result["damage"] is None
+        assert result["localization_drop"] == pytest.approx(1.0)
+        assert "sx, sy" in result["errors"]["sbr"]
+        assert "mean dark time" in result["errors"]["damage"]
+        empty = postprocess.dye_performance([locs.iloc[:0]], info)
+        assert empty["locs"] is None
+        assert set(empty["errors"]) == {"sbr", "localization_drop", "damage"}
+
+
+class TestLocalizationRateDrop:
+    INFO = [{"Frames": 1000}]
+
+    def test_compares_the_first_and_last_fifth(self):
+        frames = np.concatenate([np.arange(200), np.arange(800, 1000, 2)])
+        locs = pd.DataFrame({"frame": np.concatenate([frames, [500]])})
+        drop = postprocess.localization_rate_drop(locs, self.INFO)
+        assert drop == pytest.approx(0.5)
+        drop = postprocess.localization_rate_drop(
+            locs, self.INFO, fraction=0.5
+        )
+        assert drop == pytest.approx(1 - 101 / 200)  # frame 500 is late
+
+    def test_increase_is_negative(self):
+        locs = pd.DataFrame({"frame": [0, 900, 950]})
+        assert postprocess.localization_rate_drop(locs, self.INFO) == -1.0
+
+    @pytest.mark.parametrize("fraction", [0.0, 0.6])
+    def test_invalid_fraction(self, fraction):
+        locs = pd.DataFrame({"frame": [0]})
+        with pytest.raises(ValueError, match="fraction"):
+            postprocess.localization_rate_drop(
+                locs, self.INFO, fraction=fraction
+            )
+
+    def test_needs_localizations_at_the_start(self):
+        locs = pd.DataFrame({"frame": [900]})
+        with pytest.raises(ValueError, match="first 20%"):
+            postprocess.localization_rate_drop(locs, self.INFO)
+
+    def test_plot(self):
+        frames = np.concatenate([np.arange(200), np.arange(800, 1000, 2)])
+        locs = pd.DataFrame({"frame": frames})
+        fig = postprocess.plot_localization_rate(locs, self.INFO, n_bins=10)
+        (ax,) = fig.axes
+        # mean localizations per bin of 100 frames: 100 and 50
+        levels = ax.collections[-1].get_segments()
+        assert [segment[0][1] for segment in levels] == [100, 50]
+        assert "drop 50.0%" in ax.get_legend_handles_labels()[1][-1]
+        with pytest.raises(ValueError, match="n_bins"):
+            postprocess.plot_localization_rate(locs, self.INFO, n_bins=0)
+
+
+class TestSignalToBackground:
+    INFO = [{"Pixelsize": 130.0}]
+
+    def test_photons_in_one_pixel_over_the_background(self):
+        sx, sy = 110.0, 150.0
+        # the Gaussian integrated over a pixel centered on its peak
+        t = np.linspace(-65, 65, 4001)
+        gx = np.exp(-(t**2) / (2 * sx**2)) / (np.sqrt(2 * np.pi) * sx)
+        gy = np.exp(-(t**2) / (2 * sy**2)) / (np.sqrt(2 * np.pi) * sy)
+        fraction = np.trapezoid(gx, t) * np.trapezoid(gy, t)
+        locs = pd.DataFrame(
+            {
+                "photons": [1000.0, 1000.0, 1000.0],
+                "sx": [sx] * 3,
+                "sy": [sy] * 3,
+                "bg": [20.0, 0.0, -1.0],
+            }
+        )
+        sbr = postprocess.signal_to_background(locs, self.INFO)
+        assert sbr[0] == pytest.approx(1000 * fraction / 20, rel=1e-6)
+        assert np.isnan(sbr[1:]).all()
+
+    def test_needs_a_gaussian_fit(self):
+        locs = pd.DataFrame({"photons": [1.0], "bg": [1.0]})
+        with pytest.raises(ValueError, match="sx, sy"):
+            postprocess.signal_to_background(locs, self.INFO)
+
+
 class TestDarkTimes:
     def test_dark_times_min_positive(self, locs, info):
         linked, _ = postprocess.link(locs.copy(), info)
@@ -1838,6 +2084,22 @@ class TestEvaluatePicks:
         # Returned new_locs must have length and dark columns
         for col in ("len", "dark"):
             assert col in new_locs.columns
+
+    def test_empty_picks_are_nan(self, locs, info, origami_picks):
+        """Empty picks were left as uninitialized memory (np.empty),
+        which showed huge numbers in Render's Info dialog."""
+        pl = postprocess.picked_locs(
+            locs,
+            info,
+            picks=origami_picks[:2],
+            pick_shape="Circle",
+            pick_size=PICK_SIZE,
+        )
+        pl.insert(1, pl[0].iloc[:0])
+        stats = postprocess.evaluate_picks(pl, info, max_dark_time=3)
+        for values in stats[:6]:
+            assert np.isnan(values[1])
+        assert stats[0][0] == len(pl[0]) and stats[0][2] == len(pl[2])
 
 
 class TestCombineLocsInPicks:

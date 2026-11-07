@@ -3186,6 +3186,27 @@ def test_pick_statistics(window, qt_offscreen):
     info_dialog.pick_hist_window.close()
 
 
+def test_pick_statistics_dye_performance(window, qt_offscreen):
+    """SBR, localization drop and destroyed docking sites (Steen et
+    al., 2024) are shown, with the ratios r and the localizations over
+    time in the kinetics window."""
+    _circle_picks(window, n=3)
+    window.view.update_pick_info_long()
+    _wait_for_tasks(qt_offscreen)
+    info_dialog = window.info_dialog
+    assert float(info_dialog.sbr_mean.text()) > 0
+    assert float(info_dialog.sbr_std.text()) >= 0
+    float(info_dialog.loc_drop.text())
+    float(info_dialog.destroyed_sites.text())
+    hist_window = info_dialog.pick_hist_window
+    titles = [ax.get_title() for ax in hist_window.figure.axes]
+    assert "Docking site damage" in titles
+    assert "Localizations over time" in titles
+    hist_window.redraw()  # e.g., after a change of the plot style
+    assert len(hist_window.figure.axes) == 4
+    hist_window.close()
+
+
 def test_test_clusterer_g5m_calibration(window, monkeypatch, tmp_path):
     import yaml
 

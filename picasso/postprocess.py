@@ -55,6 +55,12 @@ __all__ = [
     "compute_dark_times",
     "dark_times",
     "select_binding_event_cores",
+    "dye_performance",
+    "signal_to_background",
+    "docking_site_damage",
+    "plot_docking_site_damage",
+    "localization_rate_drop",
+    "plot_localization_rate",
     "combine_locs_in_picks",
     "groupprops",
     # drift and alignment
@@ -4115,8 +4121,8 @@ def evaluate_picks(
     """Calculate pick statistics: number of localizations and binding
     events, rmsd, bright and dark times.
 
-    Returned arrays may contain NaNs (``np.empty`` is used for
-    initialization and not all picks may be evaluated successfully).
+    Returned arrays hold NaN for the picks that are not evaluated, e.g.,
+    empty ones.
 
     Parameters
     ----------
@@ -4154,13 +4160,14 @@ def evaluate_picks(
         with added 'length' and 'dark' fields/columns.
     """
     n_picks = len(picked_locs)
-    N = np.empty(n_picks)  # number of locs per pick
-    n_events = np.empty(n_picks)  # number of events per pick
-    rmsd = np.empty(n_picks)  # rmsd in each pick
-    length = np.empty(n_picks)  # estimated mean bright time
-    dark = np.empty(n_picks)  # estimated mean dark time
+    # NaN for the picks that are not evaluated, e.g., empty ones
+    N = np.full(n_picks, np.nan)  # number of locs per pick
+    n_events = np.full(n_picks, np.nan)  # number of events per pick
+    rmsd = np.full(n_picks, np.nan)  # rmsd in each pick
+    length = np.full(n_picks, np.nan)  # estimated mean bright time
+    dark = np.full(n_picks, np.nan)  # estimated mean dark time
     has_z = "z" in picked_locs[0].columns
-    rmsd_z = np.empty(n_picks)
+    rmsd_z = np.full(n_picks, np.nan)
     new_locs = []  # linked locs in each pick
     # e.g., the statistics of one-localization picks; scoped, so that
     # the warning filters of the caller are kept
@@ -4720,6 +4727,618 @@ def select_binding_event_cores(
     # relabel the surviving events with consecutive group ids
     event_id = np.unique(link_group[keep], return_inverse=True)[1]
     return lib.append_group(out_locs, event_id.astype(np.int32)), info
+
+
+def dye_performance(
+    picked_locs: list[pd.DataFrame],
+    info: list[dict],
+    *,
+    max_dark_time: int = 0,
+    cutoff: float = 4.0,
+    fraction: float = 0.2,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> dict:
+    """Performance of a DNA-PAINT dye at picked docking sites (Steen et
+    al., 2024): the signal-to-background ratio (SBR), the drop of the
+    number of localizations over the measurement and the fraction of
+    destroyed docking sites.
+
+    The SBR (``signal_to_background``) is computed for the
+    localizations in the centers of binding events of at least three
+    frames (``select_binding_event_cores``), since the first and the
+    last frame record only a part of a binding; the binding events stay
+    within each pick. The localization drop compares the first and the
+    last ``fraction`` of the frames (``localization_rate_drop``), and
+    the destroyed docking sites are estimated from the time after the
+    last binding event of each pick (``docking_site_damage``). A value
+    that cannot be computed is None, with the reason in "errors".
+
+    Parameters
+    ----------
+    picked_locs : list of pd.DataFrames
+        Localizations of each docking site, e.g., of picks of single
+        docking sites (see ``picked_locs``).
+    info : list of dicts
+        Metadata of the localizations, which holds the number of frames
+        (``Frames``) and the camera pixel size (``Pixelsize``, nm).
+    max_dark_time : int, optional
+        Largest number of frames without a localization within a binding
+        event, see ``link``. Steen et al. link only localizations in
+        consecutive frames. Default is 0.
+    cutoff : float, optional
+        Cut-off of the ratio r of ``docking_site_damage`` in units of
+        its fitted mean. Default is 4.
+    fraction : float, optional
+        Fraction of the frames at the beginning and at the end compared
+        by ``localization_rate_drop``. Default is 0.2.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating kinetics" over
+        the picks. Default is None.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with the keys:
+
+        - "sbr": SBR of each localization in the center of a binding
+          event, or None (e.g., without ``sx`` and ``sy`` of a Gaussian
+          fit).
+        - "localization_drop": relative decrease of the number of
+          localizations, e.g., 0.3 for 30%, or None.
+        - "damage": result of ``docking_site_damage``, or None (e.g.,
+          if no pick has three binding events).
+        - "locs": the localizations of all picks, with the pick in the
+          ``group`` column (kept if present), or None without
+          localizations.
+        - "errors": why each of "sbr", "localization_drop" and "damage"
+          that is None could not be computed.
+
+    See Also
+    --------
+    plot_docking_site_damage : Plot the docking site damage.
+    plot_localization_rate : Plot the localizations over time.
+
+    References
+    ----------
+    Steen, P. R. et al. The DNA-PAINT palette: a comprehensive
+    performance analysis of fluorescent dyes. Nat Methods 21, 1755-1762
+    (2024). https://doi.org/10.1038/s41592-024-02374-8
+    """
+    result = {
+        "sbr": None,
+        "localization_drop": None,
+        "damage": None,
+        "locs": None,
+        "errors": {},
+    }
+    picked = [locs for locs in picked_locs if len(locs)]
+    if not picked:
+        result["errors"] = dict.fromkeys(
+            ("sbr", "localization_drop", "damage"),
+            "no localizations in the picks",
+        )
+        return result
+    pooled = pd.concat(picked, ignore_index=True)
+    if "group" not in pooled.columns:  # one group per pick
+        pooled["group"] = np.repeat(
+            np.arange(len(picked), dtype=np.int32),
+            [len(locs) for locs in picked],
+        )
+    result["locs"] = pooled
+    try:
+        result["localization_drop"] = localization_rate_drop(
+            pooled, info, fraction=fraction
+        )
+    except (ValueError, KeyError) as e:
+        result["errors"]["localization_drop"] = str(e).strip("'")
+    try:
+        result["damage"] = docking_site_damage(
+            picked_locs,
+            info,
+            max_dark_time=max_dark_time,
+            cutoff=cutoff,
+            progress=progress,
+        )
+    except (ValueError, KeyError) as e:
+        result["errors"]["damage"] = str(e).strip("'")
+    try:
+        cores, _ = select_binding_event_cores(
+            pooled, r_max=np.inf, max_dark_time=max_dark_time
+        )
+        result["sbr"] = signal_to_background(cores, info)
+    except (ValueError, KeyError) as e:
+        result["errors"]["sbr"] = str(e).strip("'")
+    return result
+
+
+def signal_to_background(
+    locs: pd.DataFrame,
+    info: list[dict],
+) -> lib.FloatArray1D:
+    """Signal-to-background ratio (SBR) of each localization, as defined
+    by Steen et al. (2024): the photons of the fitted Gaussian PSF that
+    fall within one camera pixel centered on the localization, divided
+    by the background per pixel::
+
+        SBR = photons * erf(a / (2 sqrt(2) sx)) * erf(a / (2 sqrt(2) sy))
+              / bg
+
+    with the camera pixel size ``a`` (``Pixelsize`` in the metadata).
+
+    The first and the last frame of a binding event record only a part
+    of it (the imager binds or unbinds during the exposure), so their
+    SBR is too low. Steen et al. report the SBR of the other
+    localizations of binding events of at least three frames, see
+    ``select_binding_event_cores``.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations of a Gaussian fit, with the columns ``photons``,
+        ``sx``, ``sy`` (nm) and ``bg`` (photons per pixel).
+    info : list of dicts
+        Metadata of the localizations, which holds the camera pixel size
+        (``Pixelsize``, nm).
+
+    Returns
+    -------
+    sbr : lib.FloatArray1D
+        SBR of each localization; NaN where the background is not
+        positive.
+
+    Raises
+    ------
+    ValueError
+        If a column is missing, e.g., for spline fits, which have no
+        ``sx`` and ``sy``.
+    KeyError
+        If the metadata has no ``Pixelsize``.
+
+    References
+    ----------
+    Steen, P. R. et al. The DNA-PAINT palette: a comprehensive
+    performance analysis of fluorescent dyes. Nat Methods 21, 1755-1762
+    (2024). https://doi.org/10.1038/s41592-024-02374-8
+    """
+    missing = [c for c in ("photons", "sx", "sy", "bg") if c not in locs]
+    if missing:
+        raise ValueError(
+            "The SBR needs the columns photons, sx, sy and bg of a "
+            f"Gaussian fit; missing: {', '.join(missing)}."
+        )
+    pixel_size = float(
+        lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    )
+    # half the pixel over sqrt(2) times the PSF width
+    scale = 0.5 * pixel_size / np.sqrt(2)
+    peak = (
+        locs["photons"].to_numpy(dtype=np.float64)
+        * special.erf(scale / locs["sx"].to_numpy(dtype=np.float64))
+        * special.erf(scale / locs["sy"].to_numpy(dtype=np.float64))
+    )
+    bg = locs["bg"].to_numpy(dtype=np.float64)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(bg > 0, peak / bg, np.nan)
+
+
+def docking_site_damage(
+    picked_locs: list[pd.DataFrame],
+    info: list[dict],
+    *,
+    max_dark_time: int = 0,
+    cutoff: float = 4.0,
+    bin_width: float = 0.5,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> dict:
+    """Fraction of docking sites destroyed during the measurement,
+    estimated from the time after their last binding event (Steen et
+    al., 2024).
+
+    Each pick holds the localizations of one docking site. Its
+    localizations are linked into binding events (see ``link``) and its
+    mean dark time, tau_d, is fitted to the cumulative distribution of
+    its dark times: 1 - exp(-t / tau_d) is fitted to the fractions
+    0, 1 / (n - 1), ..., 1 of its n sorted dark times, as by Steen et al.
+    (unlike ``pick_kinetics``, without an amplitude and an offset, which
+    overestimate tau_d for sites with few binding events). The time
+    from its last localization to the end of the measurement, t_end (in
+    frames without signal, like the dark times), gives the ratio::
+
+        r = t_end / tau_d
+
+    At an intact docking site, binding continues until the end, so r
+    follows an exponential distribution with mean 1. A destroyed site
+    stops binding, so its r is large. The exponential a * exp(-r / mu)
+    is fitted to the histogram of r of all sites; mu is above 1 if the
+    binding slows down over time, e.g., as sites are damaged. The
+    fraction of sites with r > ``cutoff`` * mu, minus the fraction
+    expected for an exponential distribution (exp(-``cutoff``), 1.83%
+    for the default cut-off of 4), estimates the fraction of destroyed
+    docking sites.
+
+    Parameters
+    ----------
+    picked_locs : list of pd.DataFrames
+        Localizations of each docking site, e.g., of picks of single
+        docking sites (see ``picked_locs``).
+    info : list of dicts
+        Metadata of the localizations, which holds the number of frames
+        of the measurement (``Frames``).
+    max_dark_time : int, optional
+        Largest number of frames without a localization within a binding
+        event, see ``link``. Steen et al. link only localizations in
+        consecutive frames. Default is 0.
+    cutoff : float, optional
+        Cut-off of r in units of the fitted mean mu. Default is 4.
+    bin_width : float, optional
+        Width of the bins of the histogram of r that the exponential is
+        fitted to. Default is 0.5.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating kinetics" over
+        the picks. Default is None.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with the keys:
+
+        - "r": ratio r of each pick; NaN for picks without a mean dark
+          time.
+        - "t_end": frames after the last localization of each pick
+          (NaN for empty picks).
+        - "dark": mean dark time of each pick in frames (NaN with fewer
+          than two dark times or if the fit failed).
+        - "n_sites": number of picks with r.
+        - "edges", "counts": histogram of r.
+        - "amplitude", "mu": parameters of the exponential fitted to
+          the histogram (NaN if the fit failed).
+        - "r_cutoff": cut-off of r, ``cutoff`` * mu.
+        - "fraction_above_cutoff": fraction of the sites with r above
+          the cut-off.
+        - "fraction_destroyed": estimated fraction of destroyed docking
+          sites, i.e., ``fraction_above_cutoff`` minus exp(-``cutoff``);
+          may be slightly negative without damage.
+        - "max_dark_time", "cutoff", "bin_width": the parameters.
+
+    Raises
+    ------
+    ValueError
+        If the parameters are invalid or no pick has a mean dark time.
+    KeyError
+        If the metadata has no ``Frames``.
+
+    See Also
+    --------
+    plot_docking_site_damage : Plot the result.
+    localization_rate_drop : Decrease of the number of localizations
+        over the measurement.
+
+    References
+    ----------
+    Steen, P. R. et al. The DNA-PAINT palette: a comprehensive
+    performance analysis of fluorescent dyes. Nat Methods 21, 1755-1762
+    (2024). https://doi.org/10.1038/s41592-024-02374-8
+    """
+    if max_dark_time < 0:
+        raise ValueError("max_dark_time must not be negative.")
+    if not cutoff > 0:
+        raise ValueError("cutoff must be positive.")
+    if not bin_width > 0:
+        raise ValueError("bin_width must be positive.")
+    n_frames = int(lib.get_from_metadata(info, "Frames", raise_error=True))
+    n_picks = len(picked_locs)
+    t_end = np.full(n_picks, np.nan)
+    dark = np.full(n_picks, np.nan)
+    with (
+        lib.tracked_progress(
+            progress, "Calculating kinetics", unit="pick"
+        ) as progress,
+        warnings.catch_warnings(),
+    ):
+        warnings.simplefilter(
+            "ignore", category=(OptimizeWarning, RuntimeWarning)
+        )
+        lib.start_phase(progress, "Calculating kinetics", n_picks, unit="pick")
+        progress.set_value(0)
+        for i, locs in enumerate(picked_locs):
+            if len(locs):
+                t_end[i] = n_frames - 1 - int(locs["frame"].max())
+                if "len" not in locs.columns:
+                    locs = _link(
+                        locs,
+                        info,
+                        r_max=np.inf,  # one docking site per pick
+                        max_dark_time=max_dark_time,
+                    )
+                dark[i] = _exponential_cdf_mean(
+                    dark_times(locs).astype(np.float64)
+                )
+            progress.set_value(i + 1)
+        progress.set_value(n_picks)
+    r = t_end / dark
+    valid = r[np.isfinite(r)]
+    if not len(valid):
+        raise ValueError(
+            "No pick has a mean dark time (at least three binding events)."
+        )
+    n_bins = max(int(np.ceil(valid.max() / bin_width)), 1)
+    edges = np.arange(n_bins + 1) * bin_width
+    counts = np.histogram(valid, edges)[0]
+    centers = edges[:-1] + 0.5 * bin_width
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", OptimizeWarning)
+            (amplitude, mu), _ = curve_fit(
+                lambda x, a, m: a * np.exp(-x / m),
+                centers,
+                counts,
+                p0=(max(counts.max(), 1), 1.0),
+                bounds=((0, 1e-9), (np.inf, np.inf)),
+            )
+    except (RuntimeError, ValueError):
+        amplitude = mu = np.nan
+    r_cutoff = cutoff * mu
+    above = float(np.mean(valid > r_cutoff)) if mu > 0 else np.nan
+    return {
+        "r": r,
+        "t_end": t_end,
+        "dark": dark,
+        "n_sites": len(valid),
+        "edges": edges,
+        "counts": counts,
+        "amplitude": float(amplitude),
+        "mu": float(mu),
+        "r_cutoff": float(r_cutoff),
+        "fraction_above_cutoff": above,
+        "fraction_destroyed": above - np.exp(-cutoff),
+        "max_dark_time": max_dark_time,
+        "cutoff": cutoff,
+        "bin_width": bin_width,
+    }
+
+
+def _exponential_cdf_mean(times: lib.FloatArray1D) -> float:
+    """Mean of the exponential distribution whose cumulative
+    distribution function, 1 - exp(-t / tau), fits the empirical one of
+    ``times`` best (least squares at the fractions 0, 1 / (n - 1), ...,
+    1 of the n sorted times; Steen et al., 2024). Negative times
+    (missing dark times, see ``dark_times``) are ignored; NaN for fewer
+    than two times or a failed fit."""
+    times = np.sort(times[times >= 0])
+    n = len(times)
+    if n < 2:
+        return np.nan
+    if times[-1] == times[0]:
+        return float(times[0]) if times[0] > 0 else np.nan
+    fractions = np.arange(n) / (n - 1)
+    try:
+        (tau,), _ = curve_fit(
+            lambda t, tau: 1 - np.exp(-t / tau),
+            times,
+            fractions,
+            p0=(max(times.mean(), 1e-9),),
+            bounds=(1e-9, np.inf),
+        )
+    except (RuntimeError, ValueError):
+        return np.nan
+    return float(tau)
+
+
+def plot_docking_site_damage(
+    damage_result: dict,
+    ax: plt.Axes | None = None,
+) -> plt.Figure:
+    """Plot the histogram of the ratios r of ``docking_site_damage``
+    with the fitted exponential and the cut-off, up to r = 10 (or 2.5
+    times the cut-off).
+
+    Parameters
+    ----------
+    damage_result : dict
+        Result of ``docking_site_damage``.
+    ax : plt.Axes or None, optional
+        Axes to plot on. If None, a new figure with one axes is created.
+        Default is None.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    if ax is None:
+        fig = plt.Figure(constrained_layout=True)
+        ax = fig.add_subplot()
+    else:
+        fig = ax.figure
+    data_color, fit_color = plt.rcParams["axes.prop_cycle"].by_key()["color"][
+        :2
+    ]
+    edges = damage_result["edges"]
+    ax.stairs(
+        damage_result["counts"],
+        edges,
+        fill=True,
+        color=data_color,
+        alpha=lib.OUTLINED_FILL_ALPHA,
+        label=f"{damage_result['n_sites']:,} sites",
+    )
+    mu = damage_result["mu"]
+    # the bulk of the distribution; destroyed sites reach far beyond
+    r_max = 10.0
+    if np.isfinite(mu):
+        r_max = max(r_max, 2.5 * damage_result["r_cutoff"])
+    r_max = min(r_max, edges[-1])
+    if np.isfinite(mu):
+        r = np.linspace(0, r_max, 200)
+        ax.plot(
+            r,
+            damage_result["amplitude"] * np.exp(-r / mu),
+            color=fit_color,
+            label=f"Exponential fit, μ = {mu:.2f}",
+        )
+        ax.axvline(
+            damage_result["r_cutoff"],
+            color=fit_color,
+            linestyle="--",
+            linewidth=1,
+            label=(
+                f"Cut-off {damage_result['cutoff']:g}μ: "
+                f"{100 * damage_result['fraction_destroyed']:.1f}% "
+                "destroyed"
+            ),
+        )
+    ax.set_xlim(0, r_max)
+    ax.set_xlabel("r = time after the last event / mean dark time")
+    ax.set_ylabel("Docking sites")
+    ax.set_title("Docking site damage")
+    ax.legend(loc="best")
+    return fig
+
+
+def localization_rate_drop(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    fraction: float = 0.2,
+) -> float:
+    """Relative decrease of the number of localizations from the
+    beginning to the end of the measurement, e.g., as docking sites are
+    damaged (Steen et al., 2024): one minus the number of localizations
+    in the last ``fraction`` of the frames over that in the first
+    ``fraction``.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations, e.g., of picked docking sites (see
+        ``picked_locs``).
+    info : list of dicts
+        Metadata of the localizations, which holds the number of frames
+        (``Frames``).
+    fraction : float, optional
+        Fraction of the frames at the beginning and at the end that are
+        compared, at most 0.5. Default is 0.2.
+
+    Returns
+    -------
+    drop : float
+        Relative decrease, e.g., 0.3 for 30% fewer localizations at the
+        end; negative for an increase.
+
+    Raises
+    ------
+    ValueError
+        If ``fraction`` is not in (0, 0.5] or there are no localizations
+        in the first ``fraction`` of the frames.
+    KeyError
+        If the metadata has no ``Frames``.
+
+    See Also
+    --------
+    plot_localization_rate : Plot the localizations over time.
+
+    References
+    ----------
+    Steen, P. R. et al. The DNA-PAINT palette: a comprehensive
+    performance analysis of fluorescent dyes. Nat Methods 21, 1755-1762
+    (2024). https://doi.org/10.1038/s41592-024-02374-8
+    """
+    if not 0 < fraction <= 0.5:
+        raise ValueError("fraction must be in (0, 0.5].")
+    n_frames = int(lib.get_from_metadata(info, "Frames", raise_error=True))
+    frame = locs["frame"].to_numpy()
+    n_first = int(np.count_nonzero(frame < fraction * n_frames))
+    n_last = int(np.count_nonzero(frame >= (1 - fraction) * n_frames))
+    if not n_first:
+        raise ValueError(
+            f"No localizations in the first {100 * fraction:g}% of the "
+            "frames."
+        )
+    return 1.0 - n_last / n_first
+
+
+def plot_localization_rate(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    fraction: float = 0.2,
+    n_bins: int = 50,
+    ax: plt.Axes | None = None,
+) -> plt.Figure:
+    """Plot the number of localizations over the measurement with the
+    mean levels of the first and the last ``fraction`` of the frames,
+    whose ratio gives ``localization_rate_drop``.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations, e.g., of picked docking sites.
+    info : list of dicts
+        Metadata of the localizations, which holds the number of frames
+        (``Frames``).
+    fraction : float, optional
+        Fraction of the frames at the beginning and at the end that are
+        compared, see ``localization_rate_drop``. Default is 0.2.
+    n_bins : int, optional
+        Number of time bins. Default is 50.
+    ax : plt.Axes or None, optional
+        Axes to plot on. If None, a new figure with one axes is created.
+        Default is None.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    if not 0 < fraction <= 0.5:
+        raise ValueError("fraction must be in (0, 0.5].")
+    if n_bins < 1:
+        raise ValueError("n_bins must be at least 1.")
+    if ax is None:
+        fig = plt.Figure(constrained_layout=True)
+        ax = fig.add_subplot()
+    else:
+        fig = ax.figure
+    data_color, level_color = plt.rcParams["axes.prop_cycle"].by_key()[
+        "color"
+    ][:2]
+    n_frames = int(lib.get_from_metadata(info, "Frames", raise_error=True))
+    frame = locs["frame"].to_numpy()
+    edges = np.linspace(0, n_frames, n_bins + 1)
+    ax.stairs(
+        np.histogram(frame, edges)[0],
+        edges,
+        fill=True,
+        color=data_color,
+        alpha=lib.OUTLINED_FILL_ALPHA,
+        label=f"{len(frame):,} localizations",
+    )
+    # mean number per bin in the first and the last part
+    window = fraction * n_frames
+    per_bin = (n_frames / n_bins) / window
+    n_first = np.count_nonzero(frame < window)
+    n_last = np.count_nonzero(frame >= n_frames - window)
+    label = "First and last {:g}%".format(100 * fraction)
+    if n_first:
+        label += f": drop {100 * (1 - n_last / n_first):.1f}%"
+    ax.hlines(
+        [n_first * per_bin, n_last * per_bin],
+        [0, n_frames - window],
+        [window, n_frames],
+        color=level_color,
+        linewidth=2,
+        label=label,
+    )
+    ax.set_xlim(0, n_frames)
+    ax.set_xlabel("Frame")
+    ax.set_ylabel("Localizations per bin")
+    ax.set_title("Localizations over time")
+    ax.legend(loc="best")
+    return fig
 
 
 def combine_locs_in_picks(

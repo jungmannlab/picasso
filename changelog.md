@@ -49,6 +49,7 @@ Last change: 07-NOV-2026 CEST
 - Faster FRC.
 - FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*).
 - Resolution by decorrelation analysis (Descloux et al., *Nat. Methods* 2019), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-info-decorrelation).
+- The pick statistics of the Info dialog include the dye performance of picked docking sites (Steen et al., *Nat. Methods* 2024). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-info-dye-performance).
 - Pick similar without seed picks, see the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-pick-by-n-locs-rmsd).
 - *Mask image* refines the mask: fill holes, remove small regions, keep the largest ones, and grow or shrink it by a distance. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-mask-image).
 - *Mask image* adds the regions of the mask (e.g., the cells) as polygon picks, e.g., to analyze each cell separately with the spatial statistics; `picasso.masking.mask_to_polygons` in Python. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-mask-image).
@@ -81,6 +82,7 @@ Last change: 07-NOV-2026 CEST
 - *Align channels* can remove the localizations that lie outside the overlap of the aligned channels. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-postprocess.html#render-align-non-overlapping).
 - Optional confirmation before `File > Remove all localizations`, turned on with the user setting `Confirm removing all localizations` (off by default). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-file.html#render-remove-all-localizations).
 - Fixed: closing a channel in Render did not remove its drift data, so the drift of the channels after it was misaligned.
+- Fixed: the pick statistics of the Info dialog showed meaningless huge numbers when a pick held no localizations (also in `picasso.postprocess.evaluate_picks`, which now gives NaN for such picks).
 - Fixed: 3D histogram rendering scaled z unnecessarily.
 - Fixed NeNA (and FRC) overwriting group columns of localizations.
 - Fixed: DBSCAN, HDBSCAN and SMLM clusterer saved the cluster areas as `*_centers_areas.csv` instead of `*_areas.csv` when the cluster centers were saved, too.

@@ -82,6 +82,14 @@
   "-s",
   "-t"
  ],
+ "dye-performance": [
+  "--cutoff",
+  "--fraction",
+  "--max-dark-time",
+  "--picks",
+  "-p",
+  "-t"
+ ],
  "filter": [],
  "g5m": [
   "--bootstrap-sem",

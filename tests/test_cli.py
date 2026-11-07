@@ -601,6 +601,51 @@ def test_decorrelation_rejects_bad_arguments(locs_path, monkeypatch):
         )
 
 
+def test_dye_performance_of_groups_and_picks(tmp_path, monkeypatch, capsys):
+    from tests.test_postprocess import _docking_sites
+
+    sites = _docking_sites(60, 10_000, destroyed=0.3, seed=7)
+    centers = [
+        (1000.0 * (k % 10) + 500, 1000.0 * (k // 10) + 500) for k in range(60)
+    ]
+    for k, site in enumerate(sites):
+        site["x"] += centers[k][0]
+        site["y"] += centers[k][1]
+        site["group"] = np.int32(k)
+    locs = pd.concat(sites, ignore_index=True)
+    info = [
+        {"Frames": 10_000, "Pixelsize": 130.0, "Width": 100, "Height": 100}
+    ]
+    path = str(tmp_path / "sites.hdf5")
+    io.save_locs(path, locs, info)
+    _picasso(monkeypatch, "dye-performance", path)
+    out = capsys.readouterr().out
+    assert "(60 docking sites)" in out
+    assert "SBR" in out and "localization drop" in out
+    base = _out(path, "_dye_performance")
+    summary = pd.read_csv(base + ".csv")
+    assert summary["n_sites"][0] == 60
+    assert summary["destroyed_sites_percent"][0] > 10
+    assert summary["max_dark_time"][0] == 0
+    table = pd.read_csv(base + "_sites.csv")
+    assert list(table["site"]) == list(range(60))
+    assert {"t_end_frames", "dark_time_frames", "r"} <= set(table.columns)
+    assert os.path.getsize(base + ".png") > 0
+    # the same docking sites as picks
+    ungrouped = str(tmp_path / "ungrouped.hdf5")
+    io.save_locs(ungrouped, locs.drop(columns="group"), info)
+    picks_path = str(tmp_path / "picks.yaml")
+    io.save_picks(picks_path, centers, "Circle", 100.0)
+    _picasso(monkeypatch, "dye-performance", ungrouped, "-p", picks_path)
+    picked = pd.read_csv(_out(ungrouped, "_dye_performance.csv"))
+    for column in ("destroyed_sites_percent", "sbr_mean"):
+        assert picked[column][0] == pytest.approx(summary[column][0])
+    with pytest.raises(SystemExit, match="group"):
+        _picasso(monkeypatch, "dye-performance", ungrouped)
+    with pytest.raises(SystemExit, match="fraction"):
+        _picasso(monkeypatch, "dye-performance", path, "--fraction", 0.7)
+
+
 def test_knn_density_saves_tables_and_a_plot(locs_path, monkeypatch, capsys):
     _picasso(
         monkeypatch, "knn-density", locs_path, "-k", 3, "--k-min", 2, "-n", 2

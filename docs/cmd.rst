@@ -1610,6 +1610,61 @@ For example, at pixel sizes of 4, 8 and 16 nm:
      - The largest side length (pixels) of the rendered images; smaller
        pixel sizes are skipped. ``0`` for no limit.
 
+.. _cmd-dye-performance:
+
+dye-performance
+---------------
+Performance of a DNA-PAINT dye at picked docking sites (Steen et al., Nature
+Methods, 2024, DOI: `10.1038/s41592-024-02374-8
+<https://doi.org/10.1038/s41592-024-02374-8>`__): the signal-to-background
+ratio (SBR) of the localizations in the centers of binding events, the drop of
+the number of localizations from the first to the last 20% of the frames and
+the percentage of destroyed docking sites. Each docking site is a pick of
+``--picks`` or, without picks, a group of the localizations, e.g., in picked
+localizations saved in Render. See :ref:`render-info-dye-performance` for
+details.
+
+Prints the three values and saves next to each file ``<file
+name>_dye_performance.csv`` (the values, the fitted mean ``mu`` of the ratios
+r, the cut-off and the parameters), ``<file name>_dye_performance_sites.csv``
+(for each site: number of localizations, frames after its last localization,
+mean dark time and r) and the plots ``<file name>_dye_performance.png``.
+
+.. code-block:: bash
+
+   picasso dye-performance files [-p picks.yaml] [-t max_dark_time] [--cutoff c] [--fraction f]
+
+For example, for the docking sites picked in ``sites_picks.yaml``:
+
+.. code-block:: bash
+
+   picasso dye-performance locs.hdf5 -p sites_picks.yaml
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-p``, ``--picks`` (path)
+     - none
+     - A picks file (.yaml) with one docking site per pick. Without it, each
+       group of the localizations is a docking site.
+   * - ``-t``, ``--max-dark-time`` (int)
+     - ``0``
+     - The largest number of frames without a localization within a binding
+       event; ``0`` links only localizations in consecutive frames, as Steen
+       et al.
+   * - ``--cutoff`` (float)
+     - ``4``
+     - The cut-off of the ratio r (frames after the last localization over
+       the mean dark time) for destroyed sites, in units of its fitted mean.
+   * - ``--fraction`` (float)
+     - ``0.2``
+     - The fraction of the frames at the beginning and at the end compared
+       for the localization drop.
+
 .. _cmd-knn-density:
 
 knn-density

@@ -584,7 +584,9 @@ deviation over the picks of:
 - ``RMSD to COM (nm)``, the root mean square distance of the localizations to
   the pick's center of mass, and ``RMSD in z (nm)`` for 3D data;
 - ``Bright time (frames)`` and ``Dark time (frames)``, the mean bright and
-  dark times of each pick, fitted to their cumulative distributions.
+  dark times of each pick, fitted to their cumulative distributions;
+- ``SBR``, ``Localization drop (%)`` and ``Destroyed sites (%)``, the
+  performance of the dye, see :ref:`render-info-dye-performance`.
 
 ``Ignore dark times <=`` sets the longest gap (in frames) within one binding
 event: localizations separated by at most this many frames are linked into
@@ -605,7 +607,74 @@ qPAINT:
    deviation over the picks.
 
 ``Show fitted binding kinetics`` plots the distributions of the bright and dark
-times with their fits.
+times with their fits, the histogram of the ratios :math:`r` (see below) with
+the fitted exponential and the cut-off, and the picked localizations over time.
+
+.. _render-info-dye-performance:
+
+Dye performance: SBR, localization drop and destroyed docking sites
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Three values characterize the dye and the imaging conditions, following `Steen
+et al., Nature Methods, 2024 <https://doi.org/10.1038/s41592-024-02374-8>`__.
+Pick single docking sites, e.g., on DNA origami, so that each pick holds one
+docking site.
+
+- ``SBR``, the signal-to-background ratio: the photons of the fitted PSF within
+  one camera pixel around the localization, divided by the background per
+  pixel. Only the localizations in the centers of binding events of at least
+  three frames are used, since the first and the last frame record only a part
+  of a binding (see :ref:`render-select-central-frames`). Mean and standard
+  deviation over these localizations. It needs a Gaussian fit (``sx`` and
+  ``sy``).
+- ``Localization drop (%)``, the decrease of the number of picked
+  localizations from the first to the last 20% of the frames, e.g., as the
+  docking sites are damaged.
+- ``Destroyed sites (%)``, the estimated percentage of docking sites destroyed
+  during the measurement. For each pick, :math:`r = t_\mathrm{end} /
+  \tau_d` is the time from its last localization to the end of the
+  measurement over its mean dark time. An intact docking site keeps binding
+  until the end, so :math:`r` follows an exponential distribution with mean
+  1; a destroyed one stops binding, so its :math:`r` is large. An exponential
+  with mean :math:`\mu` is fitted to the histogram of :math:`r`;
+  :math:`\mu` is above 1 if the binding slows down over the measurement. The
+  percentage of picks with :math:`r > 4\mu`, minus the 1.83%
+  (:math:`e^{-4}`) expected for an exponential distribution, is reported.
+  Picks with fewer than three binding events are left out. The mean dark
+  time of each pick is fitted to the cumulative distribution of its dark
+  times without an amplitude and an offset, as in the paper, so it can differ
+  slightly from ``Dark time (frames)``.
+
+``Ignore dark times <=`` also sets the binding events here; Steen et al. link
+only localizations in consecutive frames (0).
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``dye_performance`` computes all three from the localizations of each
+   docking site, e.g., from ``picked_locs``; ``signal_to_background``,
+   ``localization_rate_drop`` and ``docking_site_damage`` compute each one.
+   The same is available on the command line as ``picasso dye-performance``
+   (see :ref:`cmd-dye-performance`).
+
+   .. code-block:: python
+
+      import numpy as np
+      from picasso import io, postprocess
+
+      locs, info = io.load_locs("origami_locs.hdf5")
+      picks, shape, size = io.load_picks("sites_picks.yaml")
+      picked = postprocess.picked_locs(
+          locs, info, picks=picks, pick_shape=shape, pick_size=size
+      )
+
+      result = postprocess.dye_performance(picked, info)  # max_dark_time=0
+      print(np.nanmean(result["sbr"]), result["localization_drop"])
+      damage = result["damage"]
+      print(damage["fraction_destroyed"], damage["mu"])
+      fig = postprocess.plot_docking_site_damage(damage)
+      fig = postprocess.plot_localization_rate(result["locs"], info)
 
 Dark times are counted as the number of frames without signal between two
 binding events in a pick; see "HDF5 Pick Property Files" in the file format

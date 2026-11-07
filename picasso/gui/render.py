@@ -459,9 +459,12 @@ class PickHistWindow(lib.GenericPlotWindow):
         pooled_locs: pd.DataFrame,
         fit_result_len: dict,
         fit_result_dark: dict,
+        damage: dict | None = None,
+        picked: tuple[pd.DataFrame, list[dict]] | None = None,
     ) -> None:
         """Plot two histograms for experimental data and exponential
-        fits.
+        fits and, if given, the docking site damage and the picked
+        localizations over time.
 
         Parameters
         ----------
@@ -473,8 +476,23 @@ class PickHistWindow(lib.GenericPlotWindow):
         fit_result_dark : dict
             Cumulative exponential fit results for dark times, see
             ``fit_cum_exp``.
+        damage : dict or None, optional
+            Result of ``postprocess.docking_site_damage``. Default is
+            None.
+        picked : tuple or None, optional
+            The picked localizations and their metadata, shown over
+            time (``postprocess.plot_localization_rate``). Default is
+            None.
         """
-        self._plot_args = (pooled_locs, fit_result_len, fit_result_dark)
+        self._plot_args = (
+            pooled_locs,
+            fit_result_len,
+            fit_result_dark,
+            damage,
+            picked,
+        )
+        if (damage is not None or picked is not None) and self.height() < 800:
+            self.resize(self.width(), 900)  # two rows of plots
         self._draw()
         self.canvas.draw()
         self.plotted = True
@@ -483,12 +501,25 @@ class PickHistWindow(lib.GenericPlotWindow):
         """Draw the last plotted data with the current plot style."""
         if self._plot_args is None:
             return
-        pooled_locs, fit_result_len, fit_result_dark = self._plot_args
+        (pooled_locs, fit_result_len, fit_result_dark, damage, picked) = (
+            self._plot_args
+        )
+        extra = damage is not None or picked is not None
         with self.plot_context():
             self.figure.clear()
-            self.axes1 = self.figure.add_subplot(121)
-            self.axes2 = self.figure.add_subplot(122)
+            rows = 2 if extra else 1
+            self.axes1 = self.figure.add_subplot(rows, 2, 1)
+            self.axes2 = self.figure.add_subplot(rows, 2, 2)
             self._draw_axes(pooled_locs, fit_result_len, fit_result_dark)
+            if damage is not None:
+                postprocess.plot_docking_site_damage(
+                    damage, ax=self.figure.add_subplot(2, 2, 3)
+                )
+            if picked is not None:
+                with contextlib.suppress(KeyError):  # no number of frames
+                    postprocess.plot_localization_rate(
+                        *picked, ax=self.figure.add_subplot(2, 2, 4)
+                    )
 
     def _draw_axes(
         self,
@@ -6171,6 +6202,9 @@ class InfoDialog(lib.Dialog):
     decorrelation_pixel_size : QDoubleSpinBox
         Pixel size (nm) of the decorrelation analysis; 0 scans pixel
         sizes from 2 to 64 nm.
+    destroyed_sites : QLabel
+        Shows the estimated percentage of destroyed docking sites, see
+        ``postprocess.docking_site_damage``.
     decorrelation_resolution : QLabel
         Shows the decorrelation resolution (nm).
     decorrelation_result : dict
@@ -6189,6 +6223,9 @@ class InfoDialog(lib.Dialog):
         resolution).
     influx_rate : FloatEdit(QLineEdit)
         Contains the calculated or input influx rate (1/frames).
+    loc_drop : QLabel
+        Shows the decrease (%) of the number of picked localizations
+        over the measurement, see ``postprocess.localization_rate_drop``.
     locs_label : QLabel
         Shows the number of locs in the current FOV.
     lp : float
@@ -6235,6 +6272,11 @@ class InfoDialog(lib.Dialog):
     rmsd_z_std : QLabel
         Shows the std root mean square displacement in all picks in
         z axis.
+    sbr_mean : QLabel
+        Shows the mean signal-to-background ratio of the picked
+        localizations in the centers of binding events.
+    sbr_std : QLabel
+        Shows the std of the signal-to-background ratio.
     units_per_pick : QSpinBox
         Contains the number of binding sites per pick.
     wh_label : QLabel
@@ -6661,6 +6703,42 @@ class InfoDialog(lib.Dialog):
         self.picks_grid.addWidget(self.dark_mean, row, 1)
         self.dark_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.dark_std, row, 2)
+        # dye performance of picked docking sites (Steen et al., 2024)
+        row = self.picks_grid.rowCount()
+        sbr_label = QtWidgets.QLabel("SBR:")
+        sbr_label.setToolTip(
+            "Signal-to-background ratio of the localizations in the\n"
+            "centers of binding events of at least three frames: the\n"
+            "photons within one camera pixel around the localization\n"
+            "over the background (Steen et al., 2024). Mean and std over\n"
+            "the localizations."
+        )
+        self.picks_grid.addWidget(sbr_label, row, 0)
+        self.sbr_mean = QtWidgets.QLabel()
+        self.picks_grid.addWidget(self.sbr_mean, row, 1)
+        self.sbr_std = QtWidgets.QLabel()
+        self.picks_grid.addWidget(self.sbr_std, row, 2)
+        row = self.picks_grid.rowCount()
+        loc_drop_label = QtWidgets.QLabel("Localization drop (%):")
+        loc_drop_label.setToolTip(
+            "Decrease of the number of picked localizations from the\n"
+            "first to the last 20% of the frames (Steen et al., 2024)."
+        )
+        self.picks_grid.addWidget(loc_drop_label, row, 0)
+        self.loc_drop = QtWidgets.QLabel()
+        self.picks_grid.addWidget(self.loc_drop, row, 1)
+        row = self.picks_grid.rowCount()
+        destroyed_label = QtWidgets.QLabel("Destroyed sites (%):")
+        destroyed_label.setToolTip(
+            "Estimated percentage of docking sites destroyed during the\n"
+            "measurement, from the time after the last binding event of\n"
+            "each pick relative to its mean dark time (Steen et al.,\n"
+            "2024). Assumes one docking site per pick; see Show fitted\n"
+            "binding kinetics."
+        )
+        self.picks_grid.addWidget(destroyed_label, row, 0)
+        self.destroyed_sites = QtWidgets.QLabel()
+        self.picks_grid.addWidget(self.destroyed_sites, row, 1)
         row = self.picks_grid.rowCount()
         nunits_label = QtWidgets.QLabel("No. of units per pick:")
         nunits_label.setToolTip("Input the number of binding sites per pick.")
@@ -6704,7 +6782,9 @@ class InfoDialog(lib.Dialog):
         self.pick_hist_window = PickHistWindow()
         pick_hists = QtWidgets.QPushButton("Show fitted binding kinetics")
         pick_hists.setToolTip(
-            "Show histograms with fitted mean bright and dark times per pick."
+            "Show histograms with fitted mean bright and dark times per\n"
+            "pick, the ratios used for the destroyed docking sites and the\n"
+            "localizations over time."
         )
         pick_hists.clicked.connect(self.open_pick_hist)
         self.picks_grid.addWidget(
@@ -20414,24 +20494,34 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             lib.start_phase(progress, "Fitting kinetics", 0)
             fit_result_len = lib.fit_cum_exp(new_locs["len"].to_numpy())
             fit_result_dark = lib.fit_cum_exp(new_locs["dark"].to_numpy())
-            return stats, fit_result_len, fit_result_dark
+            dye = postprocess.dye_performance(
+                picked_locs,
+                info,
+                max_dark_time=max_dark_time,
+                progress=progress,
+            )
+            return stats, fit_result_len, fit_result_dark, dye
 
         lib.run_task(
             compute,
             "Creating localization list",
             self,
-            lambda result: self._show_pick_info_long(is_3d, *result),
+            lambda result: self._show_pick_info_long(is_3d, info, *result),
         )
 
     def _show_pick_info_long(
         self,
         is_3d: bool,
+        info: list[dict],
         stats: tuple,
         fit_result_len: dict,
         fit_result_dark: dict,
+        dye: dict,
     ) -> None:
         """Display pick statistics computed by
-        ``update_pick_info_long``."""
+        ``update_pick_info_long`` for localizations with the metadata
+        ``info``; ``dye`` is the result of
+        ``postprocess.dye_performance``."""
         N, n_events, rmsd, rmsd_z, length, dark, new_locs = stats
         info_dialog = self.window.info_dialog
         # mean and std number of locs per pick
@@ -20452,6 +20542,22 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         # mean and std dark time
         info_dialog.dark_mean.setText(f"{np.nanmean(dark):.2f}")
         info_dialog.dark_std.setText(f"{np.nanstd(dark):.2f}")
+        # dye performance, "-" where it could not be computed
+        sbr, damage = dye["sbr"], dye["damage"]
+        drop = dye["localization_drop"]
+        has_sbr = sbr is not None and np.isfinite(sbr).any()
+        info_dialog.sbr_mean.setText(
+            f"{np.nanmean(sbr):.2f}" if has_sbr else "-"
+        )
+        info_dialog.sbr_std.setText(f"{np.nanstd(sbr):.2f}" if has_sbr else "")
+        info_dialog.loc_drop.setText(
+            "-" if drop is None else f"{100 * drop:.1f}"
+        )
+        info_dialog.destroyed_sites.setText(
+            "-"
+            if damage is None
+            else f"{100 * damage['fraction_destroyed']:.1f}"
+        )
         info_dialog.pick_info = {
             "pooled dark": lib.estimate_kinetic_rate(
                 new_locs["dark"].to_numpy()
@@ -20461,7 +20567,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         }
         info_dialog.update_n_units()
         info_dialog.pick_hist_window.plot(
-            new_locs, fit_result_len, fit_result_dark
+            new_locs,
+            fit_result_len,
+            fit_result_dark,
+            damage=damage,
+            picked=None if dye["locs"] is None else (dye["locs"], info),
         )
 
     def update_pick_info_short(self) -> None:

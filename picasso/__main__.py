@@ -1199,6 +1199,165 @@ def _decorrelation(
             print(f"  saved {base + suffix}")
 
 
+def _dye_performance_cli(
+    files: list[str],
+    picks_path: str | None,
+    max_dark_time: int,
+    cutoff: float,
+    fraction: float,
+) -> None:
+    """Dye performance of the docking sites in each of ``files`` (Steen
+    et al., 2024): the docking sites are the picks of ``picks_path`` or,
+    without picks, the groups of the localizations (e.g., picked
+    localizations saved in Render). Prints the SBR, the localization
+    drop and the destroyed docking sites and saves the summary
+    (``<file>_dye_performance.csv``), the values of each site
+    (``..._sites.csv``) and a plot (``.png``) next to each file. See
+    ``postprocess.dye_performance`` for details."""
+    from glob import glob
+    from itertools import chain
+    import numpy as np
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    from . import io, lib, postprocess
+
+    if max_dark_time < 0:
+        raise SystemExit("--max-dark-time must not be negative.")
+    if not cutoff > 0:
+        raise SystemExit("--cutoff must be positive.")
+    if not 0 < fraction <= 0.5:
+        raise SystemExit("--fraction must be in (0, 0.5].")
+    paths = list(chain(*[sorted(glob(_)) for _ in files]))
+    if not paths:
+        raise SystemExit("No localization files found.")
+    for path in paths:
+        locs, info = io.load_locs(path)
+        if picks_path is not None:
+            # the pixel size converts picks saved before Picasso 1.0
+            picks, shape, size = io.load_picks(
+                picks_path, lib.get_from_metadata(info, "Pixelsize")
+            )
+            picked = postprocess.picked_locs(
+                locs,
+                info,
+                picks=picks,
+                pick_shape=shape,
+                pick_size=size,
+                progress="console",
+            )
+            sites = np.arange(len(picked))
+        elif "group" in locs.columns:
+            sites, picked = zip(*locs.groupby("group", sort=True))
+            sites = np.asarray(sites)
+        else:
+            raise SystemExit(
+                f"{path}: each docking site must be a pick (-p) or a group of"
+                " the localizations (e.g., picked localizations saved in"
+                " Render)."
+            )
+        print(f"Dye performance of {path} ({len(picked):,} docking sites):")
+        result = postprocess.dye_performance(
+            list(picked),
+            info,
+            max_dark_time=max_dark_time,
+            cutoff=cutoff,
+            fraction=fraction,
+            progress="console",
+        )
+        errors = result["errors"]
+        sbr, damage = result["sbr"], result["damage"]
+        drop = result["localization_drop"]
+        summary = {"n_sites": len(picked)}
+        if sbr is not None and np.isfinite(sbr).any():
+            n_sbr = int(np.isfinite(sbr).sum())
+            summary |= {
+                "sbr_mean": np.nanmean(sbr),
+                "sbr_std": np.nanstd(sbr),
+                "n_sbr_localizations": n_sbr,
+            }
+            print(
+                f"  SBR {summary['sbr_mean']:.2f} +/- {summary['sbr_std']:.2f}"
+                f" ({n_sbr:,} localizations in the centers of binding"
+                " events)"
+            )
+        else:
+            reason = errors.get(
+                "sbr",
+                "no localization in the center of a binding event of at"
+                " least three frames",
+            )
+            print(f"  SBR not available: {reason}")
+        if drop is not None:
+            summary["localization_drop_percent"] = 100 * drop
+            print(
+                f"  localization drop {100 * drop:.1f}% (first vs. last"
+                f" {100 * fraction:g}% of the frames)"
+            )
+        else:
+            print(
+                "  localization drop not available:"
+                f" {errors['localization_drop']}"
+            )
+        if damage is not None:
+            summary |= {
+                "n_sites_with_r": damage["n_sites"],
+                "mu": damage["mu"],
+                "r_cutoff": damage["r_cutoff"],
+                "sites_above_cutoff_percent": (
+                    100 * damage["fraction_above_cutoff"]
+                ),
+                "destroyed_sites_percent": 100 * damage["fraction_destroyed"],
+            }
+            print(
+                "  destroyed docking sites"
+                f" {100 * damage['fraction_destroyed']:.1f}% (r >"
+                f" {damage['r_cutoff']:.2f} = {cutoff:g} mu, mu ="
+                f" {damage['mu']:.2f}; {damage['n_sites']:,} sites with a"
+                " mean dark time)"
+            )
+        else:
+            print(
+                "  destroyed docking sites not available:"
+                f" {errors['damage']}"
+            )
+        summary |= {
+            "max_dark_time": max_dark_time,
+            "cutoff": cutoff,
+            "fraction": fraction,
+        }
+        base = os.path.splitext(path)[0] + "_dye_performance"
+        pd.DataFrame([summary]).to_csv(base + ".csv", index=False)
+        site_table = pd.DataFrame(
+            {
+                "site": sites,
+                "n_locs": [len(site_locs) for site_locs in picked],
+            }
+        )
+        if damage is not None:
+            site_table["t_end_frames"] = damage["t_end"]
+            site_table["dark_time_frames"] = damage["dark"]
+            site_table["r"] = damage["r"]
+        site_table.to_csv(base + "_sites.csv", index=False)
+        saved = [".csv", "_sites.csv"]
+        if result["locs"] is not None:
+            figure = plt.Figure(constrained_layout=True, figsize=(11, 4.5))
+            ax_damage, ax_rate = figure.subplots(1, 2)
+            if damage is not None:
+                postprocess.plot_docking_site_damage(damage, ax=ax_damage)
+            else:
+                ax_damage.set_axis_off()
+            if drop is not None:
+                postprocess.plot_localization_rate(
+                    result["locs"], info, fraction=fraction, ax=ax_rate
+                )
+            else:
+                ax_rate.set_axis_off()
+            figure.savefig(base + ".png", dpi=150)
+            saved.append(".png")
+        for suffix in saved:
+            print(f"  saved {base + suffix}")
+
+
 def _pick_similar_cli(
     files: list[str],
     picks_path: str | None = None,
@@ -5805,6 +5964,60 @@ def _build_parser() -> (
         ),
     )
 
+    # dye performance of picked docking sites
+    dye_parser = subparsers.add_parser(
+        "dye-performance",
+        help=(
+            "signal-to-background ratio, localization drop and destroyed"
+            " docking sites of picked docking sites (Steen et al., 2024)"
+        ),
+    )
+    dye_parser.add_argument(
+        "files",
+        nargs="+",
+        help=(
+            "hdf5 localization files (unix style path patterns); without"
+            " --picks, each group of the localizations is a docking site,"
+            " e.g., in picked localizations saved in Render"
+        ),
+    )
+    dye_parser.add_argument(
+        "-p",
+        "--picks",
+        default=None,
+        help="picks file (.yaml) with one docking site per pick",
+    )
+    dye_parser.add_argument(
+        "-t",
+        "--max-dark-time",
+        type=int,
+        default=0,
+        help=(
+            "largest number of frames without a localization within a"
+            " binding event; 0 links only consecutive frames, as Steen et"
+            " al. (default=0)"
+        ),
+    )
+    dye_parser.add_argument(
+        "--cutoff",
+        type=float,
+        default=4.0,
+        help=(
+            "cut-off of the ratio r (time after the last binding event over"
+            " the mean dark time) for destroyed sites, in units of its"
+            " fitted mean (default=4)"
+        ),
+    )
+    dye_parser.add_argument(
+        "--fraction",
+        type=float,
+        default=0.2,
+        help=(
+            "fraction of the frames at the beginning and the end compared"
+            " for the localization drop (default=0.2)"
+        ),
+    )
+
     # density from the k nearest neighbors
     knn_parser = subparsers.add_parser(
         "knn-density",
@@ -6867,6 +7080,14 @@ def main():  # noqa: C901
                 args.n_radii,
                 args.n_filters,
                 args.max_image_size,
+            )
+        elif args.command == "dye-performance":
+            _dye_performance_cli(
+                args.files,
+                args.picks,
+                args.max_dark_time,
+                args.cutoff,
+                args.fraction,
             )
         elif args.command == "knn-density":
             _knn_density(
