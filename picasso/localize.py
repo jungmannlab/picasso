@@ -87,6 +87,8 @@ _log = logging.getLogger(__name__)
 
 __all__ = [
     "FIT_METHODS",
+    "FIT_METHOD_ALIASES",
+    "resolve_fit_method",
     "IDENTIFY_METHODS",
     "IdentificationParameters",
     "NetGradient",
@@ -101,6 +103,7 @@ __all__ = [
     "clip_rois",
     "add_roi_id",
     "get_spots",
+    "to_photons",
     "fit",
     "fit_spots_gauss",
     "gauss_schedule",
@@ -1856,7 +1859,9 @@ class SummedChannelsMovie:
         if calibration is not None:
             offset = calibration.get("offset")
             gain = calibration.get("gain")
-        return _to_photons(frame, self.camera_infos[channel], offset, gain)
+        return to_photons(
+            frame, self.camera_infos[channel], offset=offset, gain_patch=gain
+        )
 
     def __getitem__(self, it):
         if isinstance(it, tuple):
@@ -3546,18 +3551,39 @@ def _sensitivity(
     return 1.0 / gain_patch
 
 
-def _to_photons(
+def to_photons(
     spots: lib.FloatArray3D,
     camera_info: dict,
+    *,
     offset: lib.FloatArray3D | None = None,
     gain_patch: lib.FloatArray3D | None = None,
 ) -> lib.FloatArray3D:
-    """Convert the cut spots to photon counts based on camera
-    information.
+    """Convert camera counts to photons (photoelectrons).
 
-    ``offset`` and ``gain_patch`` are per-spot ``(k, box, box)`` patches of an
-    sCMOS camera calibration; each overrides the corresponding scalar
-    (``Baseline``, ``Sensitivity``) where it is given.
+    The baseline is subtracted and the counts are scaled by
+    ``Sensitivity / Gain``: photons = (counts - Baseline) *
+    Sensitivity / Gain.
+
+    Parameters
+    ----------
+    spots : lib.FloatArray3D
+        Camera counts (ADU), e.g., the spots cut by ``get_spots``
+        (``(n_spots, box, box)``) or a frame.
+    camera_info : dict
+        Camera parameters with the keys "Baseline", "Sensitivity"
+        (electrons per count) and "Gain" (EM gain, 1 without EM).
+    offset : lib.FloatArray3D or None, optional
+        Per-pixel offset of an sCMOS camera calibration, in the shape of
+        ``spots``, replacing "Baseline". Default is None.
+    gain_patch : lib.FloatArray3D or None, optional
+        Per-pixel gain (counts per photoelectron) of an sCMOS camera
+        calibration, in the shape of ``spots``; its reciprocal replaces
+        "Sensitivity". Default is None.
+
+    Returns
+    -------
+    photons : lib.FloatArray3D
+        ``spots`` in photons, as float32.
     """
     spots = np.float32(spots)
     baseline = camera_info["Baseline"] if offset is None else offset
@@ -3573,7 +3599,7 @@ def _variance_to_photons(
 ) -> lib.FloatArray3D:
     """Convert a readout variance from ADU squared to photoelectrons squared.
 
-    :func:`_to_photons` scales counts by ``Sensitivity / Gain``, so a variance
+    :func:`to_photons` scales counts by ``Sensitivity / Gain``, so a variance
     scales by its square. This is Huang et al.'s ``var / g^2``, the quantity
     the noise model adds to both the data and the model mean.
     """
@@ -3968,7 +3994,9 @@ def _get_spots(
                 camera_info,
                 gain_patch,
             )
-    spots = _to_photons(spots, camera_info, offset, gain_patch)
+    spots = to_photons(
+        spots, camera_info, offset=offset, gain_patch=gain_patch
+    )
     if return_variance:
         return spots, variance
     return spots
@@ -4286,7 +4314,7 @@ def _validate_fit_args(
     # array in it would be dumped element by element into every sidecar. The
     # per-pixel maps travel as ``camera_calibration`` precisely so that cannot
     # happen. Checked here rather than at the merge so the message arrives
-    # before _to_photons turns it into an opaque broadcast error.
+    # before to_photons turns it into an opaque broadcast error.
     for _key, _value in camera_info.items():
         if isinstance(_value, np.ndarray):
             raise ValueError(
@@ -4573,6 +4601,70 @@ FIT_METHODS = tuple(
     gauss_fit_methods()
     + ["spline", "spline-mle", "spline-gpu", "spline-mle-gpu", "avg"]
 )
+
+#: Short names of the fitting methods, as ``picasso localize
+#: --fit-method`` takes them, mapped to the fitting method (one of
+#: ``FIT_METHODS``). The names ending in "-3d" ask for an astigmatic 3D
+#: fit: the 2D Gaussian fit followed by ``zfit.zfit`` with a z
+#: calibration (see ``resolve_fit_method``).
+FIT_METHOD_ALIASES = {
+    "mle": "gaussmle",
+    "mle-gpu": "gaussmle-gpu",
+    "mle-spherical": "gaussmle-spherical",
+    "mle-spherical-gpu": "gaussmle-spherical-gpu",
+    "mle-rotated": "gaussmle-rotated",
+    "mle-rotated-gpu": "gaussmle-rotated-gpu",
+    "lq": "gausslq",
+    "lq-spherical": "gausslq-spherical",
+    "lq-spherical-gpu": "gausslq-spherical-gpu",
+    "lq-rotated": "gausslq-rotated",
+    "lq-rotated-gpu": "gausslq-rotated-gpu",
+    "lq-gpu": "gausslq-gpu",
+    "lq-3d": "gausslq",
+    "lq-gpu-3d": "gausslq-gpu",
+    "mle-3d": "gaussmle",
+    "spline": "spline",
+    "spline-mle": "spline-mle",
+    "spline-gpu": "spline-gpu",
+    "spline-mle-gpu": "spline-mle-gpu",
+    "avg": "avg",
+}
+
+
+def resolve_fit_method(name: str) -> tuple[str, bool]:
+    """Return the fitting method that a short name stands for.
+
+    Parameters
+    ----------
+    name : str
+        Short name of the fitting method, one of
+        ``FIT_METHOD_ALIASES`` (as ``picasso localize --fit-method``
+        takes it), e.g., "mle", "lq-gpu-3d" or "spline".
+
+    Returns
+    -------
+    fitting_method : str
+        The fitting method, one of ``FIT_METHODS``, as ``fit`` and
+        ``localize`` take it.
+    astigmatic_3d : bool
+        Whether the name asks for an astigmatic 3D fit (the names ending
+        in "-3d"): the 2D fit is followed by ``zfit.zfit`` with a z
+        calibration. Spline fits find z themselves and are not
+        included.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` is not a short name of a fitting method.
+    """
+    try:
+        fitting_method = FIT_METHOD_ALIASES[name]
+    except KeyError:
+        raise ValueError(
+            f"Unknown fitting method {name!r}; choose one of "
+            f"{', '.join(FIT_METHOD_ALIASES)}."
+        ) from None
+    return fitting_method, name.endswith("-3d")
 
 
 _GAUSS_SCHEDULES = {
@@ -10006,7 +10098,7 @@ def _frame_photons(
     gain: np.ndarray | None,
 ) -> np.ndarray:
     """A camera frame in photons (float64), with the full-frame maps of an
-    sCMOS camera calibration where given (see :func:`_to_photons`)."""
+    sCMOS camera calibration where given (see :func:`to_photons`)."""
     baseline = camera_info["Baseline"] if offset is None else offset
     sensitivity = camera_info["Sensitivity"] if gain is None else 1.0 / gain
     return (
@@ -11298,7 +11390,7 @@ def localize(
     )
 
 
-#: Camera keys ``fit`` reads off ``camera_info`` (see ``_to_photons`` /
+#: Camera keys ``fit`` reads off ``camera_info`` (see ``to_photons`` /
 #: ``_sensitivity``); the rest of a picasso info list is movie metadata.
 #: Pulled out of the info list-of-dicts by ``localize_frames`` when no
 #: ``camera_info`` is passed explicitly.

@@ -1033,9 +1033,9 @@ def _circle_moments_at(
     runtime. Coordinates are shifted by ``(xc, yc)`` before accumulation
     to avoid loss of precision in the second moments.
 
-    Note that the block bounds are inclusive of the first row and
-    column (``0 <= k < K``), like ``_get_block_locs_at`` and
-    unlike ``_n_block_locs_at``.
+    The block bounds include the first row and column
+    (``0 <= k < K``), like ``_get_block_locs_at`` and
+    ``_n_block_locs_at``.
 
     Parameters
     ----------
@@ -2225,21 +2225,16 @@ def _n_block_locs_at(
     block_ends: lib.IntArray2D,
 ) -> int:
     """Return the number of localizations in the blocks around the
-    given coordinates."""
-    step = 0
+    given coordinates (the 3 x 3 blocks centered on them, clipped to
+    the grid; 0 if none of them is on the grid)."""
+    n_block_locs = np.uint32(0)
     for k in range(y_range - 1, y_range + 2):
-        if 0 < k < K:
+        if 0 <= k < K:
             for ll in range(x_range - 1, x_range + 2):
-                if 0 < ll < L:
-                    if step == 0:
-                        n_block_locs = np.uint32(
-                            block_ends[k][ll] - block_starts[k][ll]
-                        )
-                        step = 1
-                    else:
-                        n_block_locs += np.uint32(
-                            block_ends[k][ll] - block_starts[k][ll]
-                        )
+                if 0 <= ll < L:
+                    n_block_locs += np.uint32(
+                        block_ends[k][ll] - block_starts[k][ll]
+                    )
     return n_block_locs
 
 
@@ -2748,6 +2743,7 @@ def frc(
     viewport: tuple[tuple[float, float], tuple[float, float]],
     random_seed: int = 42,
     lp: float | None = None,
+    max_image_size: int | None = 16384,
 ) -> dict:
     """Calculate the Fourier Ring Correlation (FRC) resolution.
 
@@ -2769,6 +2765,12 @@ def frc(
         Localization precision (nm) that sets the bin size of the
         rendered images (``lp / 2``). If None (default), NeNA of
         ``locs`` is used.
+    max_image_size : int or None, optional
+        Largest side length (pixels) of the rendered images. A larger
+        (square) viewport raises a ValueError instead of rendering
+        images that may not fit into memory, which grows with the
+        square of the side length. None renders any size. Default is
+        16384.
 
     Returns
     -------
@@ -2777,6 +2779,12 @@ def frc(
         "frequencies" (for spatial frequencies probed (nm^-1)),
         "resolution" (estimated resolution in nm) and "images"
         (2 grayscale images rendered and masked).
+
+    Raises
+    ------
+    ValueError
+        If the rendered images would be larger than
+        ``max_image_size`` pixels on a side.
     """
     if lp is None:
         lp = nena(locs, info)[1]
@@ -2796,6 +2804,16 @@ def frc(
 
     # select the locs within the viewport
     (y_min, x_min), (y_max, x_max) = viewport
+    image_size = (x_max - x_min) / (lp / 2)
+    if max_image_size is not None and image_size > max_image_size:
+        raise ValueError(
+            f"The FRC images would be {image_size:,.0f} x "
+            f"{image_size:,.0f} pixels (bin size {lp / 2:.2f} nm, half "
+            f"the localization precision), more than max_image_size = "
+            f"{max_image_size:,} pixels on a side, and may not fit into "
+            "memory. Use a smaller viewport (e.g., frc_rois for the whole "
+            "field of view) or raise max_image_size."
+        )
     in_view = (
         (locs["x"] > x_min)
         & (locs["y"] > y_min)
@@ -4693,8 +4711,11 @@ def _undrift_from_picked_coordinate(
     center of mass. The drift of a frame is the average over the picks
     with a localization in it (one per pick; the last one if a pick has
     several), each pick weighted by the inverse of its mean square
-    deviation from the unweighted average drift. Frames without
-    localizations are interpolated linearly.
+    deviation from the unweighted average drift. A pick that does not
+    deviate at all (e.g., the only pick, or a pick alone in all of its
+    frames) takes the median weight of the others, or all picks weigh
+    the same if none deviates. Frames without localizations are
+    interpolated linearly.
 
     The statistics are accumulated over the localizations, never over a
     (picks x frames) table, whose memory would grow with the number of
@@ -4740,8 +4761,14 @@ def _undrift_from_picked_coordinate(
             np.bincount(pick_e, minlength=n_picks)
         )
         # new mean drift over picks, where each pick is weighted
-        # according to its msd
-        weights = 1 / msd[pick_e]
+        # according to its msd; a pick with msd 0 would weigh infinitely
+        # and turn its frames into NaN
+        deviates = msd > 0
+        pick_weights = np.ones(n_picks)
+        pick_weights[deviates] = 1 / msd[deviates]
+        if deviates.any():
+            pick_weights[~deviates] = np.median(pick_weights[deviates])
+        weights = pick_weights[pick_e]
         drift_mean = np.bincount(
             frame_e, weights=weights * drift, minlength=n_frames
         ) / np.bincount(frame_e, weights=weights, minlength=n_frames)
@@ -4749,6 +4776,8 @@ def _undrift_from_picked_coordinate(
 
     # Linear interpolation for frames without localizations
     nans = np.isnan(drift_mean)
+    if nans.all():
+        raise ValueError("No picked localizations to compute the drift from.")
     drift_mean[nans] = np.interp(
         np.flatnonzero(nans), np.flatnonzero(~nans), drift_mean[~nans]
     )

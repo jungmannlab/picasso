@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 06-NOV-2026 CEST
+Last change: 07-NOV-2026 CEST
 
 ## 1.0.0
 
@@ -90,6 +90,8 @@ Last change: 06-NOV-2026 CEST
 - Fixed: *Test clusterer* failed when no cluster was found, instead of saying so, and when the display options or projections were changed before the first test. `picasso.clusterer.find_cluster_centers` failed in the same way for localizations without clusters, e.g., when DBSCAN, HDBSCAN or the SMLM clusterer found none and the cluster centers were to be saved.
 - Fixed: *Analyze cluster* (k-means in picks) started clustering, and failed, when the number of clusters was canceled, and saved the pick properties (`_properties.hdf5`) in the current folder when saving was canceled. Also, the new group ids of the clusters are integers instead of floats.
 - Fixed: showing the FRC plot failed when the FRC calculation it starts was canceled.
+- Fixed: *Undrift from picked* failed for a single pick, for picks without noise and for picks that each cover their own frames: a pick alone in all of its frames got an infinite weight. Such picks now get the median weight of the other picks (`picasso.postprocess.undrift_from_picked`).
+- Fixed: *Pick similar* left out the first row and column of its search grid when counting the localizations around a candidate, so circular picks near the top and left edges of the field of view could be missed.
 - Fixed: *Export channels in grayscale* with a suffix of another format raised an error instead of naming the possible formats; *Export view manually* left the contrast changed, and its fields unresponsive, when the DPI of a PDF was canceled; the export of z slices of separate channels showed all channels afterwards.
 - Fixed: *Select picks* raised an error when a pick was rejected again after going back to it, *Select picks (trace)* left the trace window open when canceled, and with all channels shown a pick of exactly 3 or 4 localizations was not drawn in the channel colors.
 - Fixed: closing a pick of *Select picks (XY / 3D / XYZ projections)* or *Analyze cluster* with Escape or the close button removed the pick; it now stops the selection, as *Cancel*.
@@ -183,6 +185,8 @@ The [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html)
 - Fixed: `picasso smlm-cluster` required `basic_fa` and `radius_z`, although they are optional, and switched the frame analysis on for any `basic_fa`, including `False`. It now takes `yes`/`no` (or `true`/`false`, `1`/`0`).
 - Fixed: `picasso undrift-fiducials` failed for movies shorter than 7000 frames: the RCC before picking the fiducials used segments of 2000 frames. It now uses at most a quarter of the frames.
 - Fixed: `picasso hdf2csv` wrote the row numbers as an extra unnamed first column.
+- `picasso.localize.FIT_METHOD_ALIASES` and `resolve_fit_method` give the fitting method behind a short name of `picasso localize --fit-method` (e.g., "mle-3d"), and `picasso.localize.to_photons` converts camera counts to photons.
+- `picasso.postprocess.frc` raises an error instead of rendering images larger than `max_image_size` pixels on a side (16384 by default), which may not fit into memory.
 - Fixed: SPINNA's batch analysis (`picasso spinna -p`) read the `rotation_mode` *None* as missing and used *2D*. Also, the summary's column *File location of experimental data* was misspelled, and the experimental data were converted to nm with 130 nm whatever their pixel size.
 - Fixed: the GUIs could crash when quitting (seen on macOS): their windows were left to Python's shutdown, which deletes them in no fixed order.
 - Fixed: a camera configuration (`~/.picasso/config.yaml`) that is not valid stopped every Picasso module and command from starting. Picasso now starts without cameras configured and warns; Localize shows why when it opens.

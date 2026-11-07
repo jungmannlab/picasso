@@ -568,7 +568,43 @@ class TestAddRoiId:
 
 
 # ---------------------------------------------------------------------------
-# _to_photons
+# resolve_fit_method
+# ---------------------------------------------------------------------------
+
+
+class TestResolveFitMethod:
+    def test_every_alias_is_a_fitting_method(self):
+        for name, method in localize.FIT_METHOD_ALIASES.items():
+            assert localize.resolve_fit_method(name)[0] == method
+            assert method in localize.FIT_METHODS
+
+    def test_astigmatic_3d(self):
+        assert localize.resolve_fit_method("lq-gpu-3d") == (
+            "gausslq-gpu",
+            True,
+        )
+        assert localize.resolve_fit_method("mle") == ("gaussmle", False)
+        # spline fits find z themselves
+        assert localize.resolve_fit_method("spline") == ("spline", False)
+
+    def test_unknown_name_raises(self):
+        with pytest.raises(ValueError, match="Unknown fitting method"):
+            localize.resolve_fit_method("gaussmle")
+
+    def test_cli_choices_are_the_aliases(self):
+        from picasso import __main__ as cli
+
+        _, subparsers = cli._build_parser()
+        fit_method = next(
+            a
+            for a in subparsers.choices["localize"]._actions
+            if a.dest == "fit_method"
+        )
+        assert list(fit_method.choices) == list(localize.FIT_METHOD_ALIASES)
+
+
+# ---------------------------------------------------------------------------
+# to_photons
 # ---------------------------------------------------------------------------
 
 
@@ -577,37 +613,37 @@ class TestToPhotons:
 
     def test_identity_camera_returns_input(self):
         spots = np.arange(2 * BOX * BOX, dtype=np.float32).reshape(2, BOX, BOX)
-        out = localize._to_photons(spots, CAMERA_INFO)
+        out = localize.to_photons(spots, CAMERA_INFO)
         np.testing.assert_allclose(out, spots)
 
     def test_baseline_subtracts(self):
         spots = np.full((2, BOX, BOX), 500.0, dtype=np.float32)
         cam = {"Baseline": 100, "Sensitivity": 1, "Gain": 1}
-        out = localize._to_photons(spots, cam)
+        out = localize.to_photons(spots, cam)
         np.testing.assert_allclose(out, 400.0)
 
     def test_sensitivity_multiplies(self):
         spots = np.full((2, BOX, BOX), 50.0, dtype=np.float32)
         cam = {"Baseline": 0, "Sensitivity": 3, "Gain": 1}
-        out = localize._to_photons(spots, cam)
+        out = localize.to_photons(spots, cam)
         np.testing.assert_allclose(out, 150.0)
 
     def test_gain_divides(self):
         spots = np.full((2, BOX, BOX), 60.0, dtype=np.float32)
         cam = {"Baseline": 0, "Sensitivity": 1, "Gain": 3}
-        out = localize._to_photons(spots, cam)
+        out = localize.to_photons(spots, cam)
         np.testing.assert_allclose(out, 20.0)
 
     def test_combined_transform(self):
         spots = np.full((1, BOX, BOX), 1000.0, dtype=np.float32)
         cam = {"Baseline": 100, "Sensitivity": 2, "Gain": 4}
-        out = localize._to_photons(spots, cam)
+        out = localize.to_photons(spots, cam)
         # (1000 - 100) * 2 / 4 = 450
         np.testing.assert_allclose(out, 450.0)
 
     def test_output_is_float32(self):
         spots = np.ones((1, BOX, BOX), dtype=np.uint16) * 100
-        out = localize._to_photons(spots, CAMERA_INFO)
+        out = localize.to_photons(spots, CAMERA_INFO)
         assert out.dtype == np.float32
 
 
@@ -10338,8 +10374,8 @@ class TestPhotonConversionWithMaps:
         info = {"Baseline": 100.0, "Sensitivity": 0.47, "Gain": 1}
         flat = np.full_like(spots, 100.0)
         np.testing.assert_allclose(
-            localize._to_photons(spots, info, offset=flat),
-            localize._to_photons(spots, info),
+            localize.to_photons(spots, info, offset=flat),
+            localize.to_photons(spots, info),
             rtol=0,
             atol=0,
         )
@@ -10350,8 +10386,8 @@ class TestPhotonConversionWithMaps:
         info = {"Baseline": 100.0, "Sensitivity": 0.5, "Gain": 1}
         gain = np.full_like(spots, 2.0)  # sensitivity = 1 / 2.0 = 0.5
         np.testing.assert_allclose(
-            localize._to_photons(spots, info, gain_patch=gain),
-            localize._to_photons(spots, info),
+            localize.to_photons(spots, info, gain_patch=gain),
+            localize.to_photons(spots, info),
             rtol=1e-6,
         )
 

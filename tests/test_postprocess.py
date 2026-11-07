@@ -161,25 +161,40 @@ class TestIndexBlocks:
     def test_n_block_locs_at_matches_get_block_locs_at(self, locs, info):
         ib = postprocess.get_index_blocks(locs, info, 1.0 * PX)
         _, _, _, _, b_starts, b_ends, K, L = ib
-        # Pick a populated cell (away from boundary, where n_block_locs_at
-        # uses strict inequality and skips the edges)
-        for y_idx in range(2, K - 2):
-            for x_idx in range(2, L - 2):
+        locs_xy = ib[0][["x", "y"]].to_numpy().T
+        # every cell, including the first and last rows and columns of
+        # the grid, counts the localizations that get_block_locs_at
+        # returns there
+        for y_idx in range(K):
+            for x_idx in range(L):
                 n = postprocess._n_block_locs_at(
                     x_idx, y_idx, K, L, b_starts, b_ends
                 )
-                if n == 0:
-                    continue
-                # Expected: sum over the 3x3 cells around (y_idx, x_idx),
-                # excluding boundary rows (n_block_locs_at uses 0 < k < K)
-                expected = 0
-                for k in range(y_idx - 1, y_idx + 2):
-                    if 0 < k < K:
-                        for ll in range(x_idx - 1, x_idx + 2):
-                            if 0 < ll < L:
-                                expected += b_ends[k, ll] - b_starts[k, ll]
+                expected = (
+                    b_ends[
+                        max(y_idx - 1, 0) : y_idx + 2,
+                        max(x_idx - 1, 0) : x_idx + 2,
+                    ].sum()
+                    - b_starts[
+                        max(y_idx - 1, 0) : y_idx + 2,
+                        max(x_idx - 1, 0) : x_idx + 2,
+                    ].sum()
+                )
                 assert int(n) == int(expected)
-                return  # one populated cell is enough
+                if n:
+                    at = postprocess.get_block_locs_at(
+                        x_idx, y_idx, locs_xy, b_starts, b_ends, K, L
+                    )
+                    assert at.shape[1] == int(n)
+
+    def test_n_block_locs_at_off_grid_is_zero(self):
+        # a position whose 3 x 3 neighborhood lies entirely off the grid
+        # counts nothing
+        starts = np.zeros((2, 2), dtype=np.uint32)
+        ends = np.full((2, 2), 3, dtype=np.uint32)
+        assert postprocess._n_block_locs_at(5, 5, 2, 2, starts, ends) == 0
+        # the first row and column count
+        assert postprocess._n_block_locs_at(0, 0, 2, 2, starts, ends) == 12
 
 
 # ---------------------------------------------------------------------------
@@ -1214,6 +1229,26 @@ class TestFrc:
         monkeypatch.setattr(postprocess, "nena", fail)
         frc_res = postprocess.frc(locs, info, viewport=viewport, lp=lp)
         assert frc_res["resolution"] == pytest.approx(expected["resolution"])
+
+    def test_too_large_images_raise(self, locs, info, monkeypatch):
+        viewport = ((15 * PX, 15 * PX), (16 * PX, 16 * PX))
+        lp = 1.0  # 2 * PX pixels on a side
+
+        def fail(*args, **kwargs):
+            raise AssertionError("nothing may be rendered")
+
+        monkeypatch.setattr(postprocess.render, "render", fail)
+        with pytest.raises(ValueError, match="max_image_size"):
+            postprocess.frc(
+                locs, info, viewport=viewport, lp=lp, max_image_size=PX
+            )
+
+    def test_max_image_size_none_renders_any_size(self, locs, info):
+        viewport = ((15 * PX, 15 * PX), (16 * PX, 16 * PX))
+        frc_res = postprocess.frc(
+            locs, info, viewport=viewport, max_image_size=None
+        )
+        assert frc_res["resolution"] > 0
 
     def test_does_not_modify_locs(self, locs, info):
         ref = locs.copy()

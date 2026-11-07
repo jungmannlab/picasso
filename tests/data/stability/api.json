@@ -157,6 +157,8 @@
  ],
  "picasso.localize": [
   "FIT_METHODS",
+  "FIT_METHOD_ALIASES",
+  "resolve_fit_method",
   "IDENTIFY_METHODS",
   "IdentificationParameters",
   "NetGradient",
@@ -170,6 +172,7 @@
   "clip_rois",
   "add_roi_id",
   "get_spots",
+  "to_photons",
   "fit",
   "fit_spots_gauss",
   "gauss_schedule",

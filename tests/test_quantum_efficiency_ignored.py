@@ -133,7 +133,7 @@ class TestApi:
         spots = [[[200.0, 300.0], [400.0, 500.0]]]
         camera_info = {"Baseline": 100, "Sensitivity": 0.5, "Gain": 1}
 
-        without_qe = localize._to_photons(spots, camera_info)
-        with_qe = localize._to_photons(spots, camera_info | {"Qe": 0.2})
+        without_qe = localize.to_photons(spots, camera_info)
+        with_qe = localize.to_photons(spots, camera_info | {"Qe": 0.2})
 
         assert (without_qe == with_qe).all()

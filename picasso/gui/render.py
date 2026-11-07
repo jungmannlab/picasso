@@ -6244,8 +6244,13 @@ class InfoDialog(lib.Dialog):
                 nena_result, lp = postprocess.nena(locs, info)
                 self._record_nena(locs, info, nena_result, lp)
             # calculate frc
+            # the size was confirmed above
             self.frc_result = postprocess.frc(
-                locs, info, viewport=self.window.view.viewport, lp=lp
+                locs,
+                info,
+                viewport=self.window.view.viewport,
+                lp=lp,
+                max_image_size=None,
             )
             if path:  # save images
                 base, ext = os.path.splitext(path)

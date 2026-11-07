@@ -1820,30 +1820,6 @@ def _localize_load_3d_calibration(
     return zpath, magnification_factor, z_calibration
 
 
-_FIT_METHOD_MAP = {
-    "lq": "gausslq",
-    "lq-spherical": "gausslq-spherical",
-    "lq-spherical-gpu": "gausslq-spherical-gpu",
-    "lq-rotated": "gausslq-rotated",
-    "lq-rotated-gpu": "gausslq-rotated-gpu",
-    "lq-3d": "gausslq",
-    "lq-gpu": "gausslq-gpu",
-    "lq-gpu-3d": "gausslq-gpu",
-    "mle": "gaussmle",
-    "mle-gpu": "gaussmle-gpu",
-    "mle-spherical": "gaussmle-spherical",
-    "mle-spherical-gpu": "gaussmle-spherical-gpu",
-    "mle-rotated": "gaussmle-rotated",
-    "mle-rotated-gpu": "gaussmle-rotated-gpu",
-    "mle-3d": "gaussmle",
-    "spline": "spline",
-    "spline-mle": "spline-mle",
-    "spline-gpu": "spline-gpu",
-    "spline-mle-gpu": "spline-mle-gpu",
-    "avg": "avg",
-}
-
-
 def _add_identification_method_args(
     parser: argparse.ArgumentParser, what: str = "spot"
 ) -> None:
@@ -2286,9 +2262,9 @@ def _localize_movie(
     ``_localize_process_file``, whose arguments it takes; ``suffix`` is
     inserted into the output names before ``_locs`` (a channel of a .ptu
     file)."""
-    from .localize import localize
+    from .localize import localize, resolve_fit_method
 
-    fitting_method = _FIT_METHOD_MAP[args.fit_method]
+    fitting_method = resolve_fit_method(args.fit_method)[0]
     cam_info = dict(camera_info)
     cam_info["Pixelsize"] = _resolve_camera_pixelsize(
         args.pixelsize, movie, info, path
@@ -2488,7 +2464,9 @@ def _localize_region_fit(
             "least one --roi is needed. Pass the regions, e.g. "
             "--roi 0 0 256 256 --roi 0 256 256 512."
         )
-    methods = [_FIT_METHOD_MAP[method] for method in fit_methods]
+    from .localize import resolve_fit_method
+
+    methods = [resolve_fit_method(method)[0] for method in fit_methods]
     if len(methods) not in (1, n_regions):
         raise Exception(
             f"{len(methods)} fitting methods were given but {n_regions} "
@@ -2883,7 +2861,7 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
     args.gradient = gradients[0]
     spline_paths = args.spline_calibration or []
     args.spline_calibration = spline_paths[0] if spline_paths else ""
-    if _FIT_METHOD_MAP[args.fit_method].endswith("-gpu"):
+    if localize.resolve_fit_method(args.fit_method)[0].endswith("-gpu"):
         if localize.CUDA_AVAILABLE:
             print("CUDA GPU found")
         else:
