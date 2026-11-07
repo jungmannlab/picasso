@@ -9,8 +9,11 @@
  ],
  "align": [
   "--display",
+  "--max-shift",
+  "--method",
   "--remove-non-overlapping",
   "-d",
+  "-m",
   "-r"
  ],
  "average": [],

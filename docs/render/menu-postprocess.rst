@@ -199,13 +199,29 @@ always end up in separate events.
 
 .. _render-align-channels:
 
-Align channels (RCC or from picked)
------------------------------------
+Align channels
+--------------
 
-Aligns channels to each other when several datasets are loaded. If picks are
-selected, the alignment will be via the center of mass of the picks;
-otherwise, redundant cross-correlation (RCC, see :ref:`render-rcc`) will be
-used (always 2D only).
+Aligns channels to each other when several datasets are loaded; the first
+channel stays in place. Choose the ``Method``:
+
+- ``Cross-correlation of images (RCC)``: redundant cross-correlation of the
+  rendered images (see :ref:`render-rcc`), 2D only. Chosen if there are no
+  picks.
+- ``Picked structures``: the centers of mass of the localizations of each
+  channel in the picks, e.g., of gold particles or DNA origami, in 2D or 3D.
+  Chosen if there are picks.
+- ``Displacements between localizations``: for each pair of channels, the
+  displacements from every localization of one channel to every localization
+  of the other within ``Max. shift (nm)`` are histogrammed. Structures imaged
+  in both channels give a peak at the shift between them, which is fitted
+  with a 2D Gaussian; unlike RCC, it is not limited by the pixels of rendered
+  images. The uncertainty of each shift (standard error, from fitting the
+  peak again with the localizations of each region of the field of view left
+  out in turn) is saved in the metadata, and the shifts of all pairs are
+  combined weighted by their uncertainties. A pair of channels without such
+  a peak (no common structures) is left out; if the channels cannot be
+  aligned, a message says so. 2D only.
 
 .. _render-align-non-overlapping:
 
@@ -224,9 +240,11 @@ overlap at all, all localizations are kept and a warning is shown.
    :icon: code
    :class-container: api-example
 
-   ``align`` finds the shifts by RCC (``method="rcc"``, the default) or
-   from picked localizations (``method="picked"``), like the menu entry; the
-   circle size is the diameter. Pass ``keep_non_overlapping=False`` to remove
+   ``align`` finds the shifts by RCC (``method="rcc"``, the default), from
+   picked localizations (``method="picked"``) or from the displacements
+   between the localizations (``method="points"``, see
+   ``align_from_points``), like the menu entry; the circle size is the
+   diameter. Pass ``keep_non_overlapping=False`` to remove
    the localizations outside the overlap of the aligned channels;
    ``remove_non_overlapping_locs`` does the same for channels aligned
    otherwise, and ``overlap_region`` returns the overlap. The metadata of
@@ -241,6 +259,11 @@ overlap at all, all localizations are kept and a warning is shown.
           [locs_ch1, locs_ch2], [info_ch1, info_ch2],
           method="picked", picks=picks, pick_shape="Circle", pick_size=2 * radius,
       )
+      aligned, aligned_infos = postprocess.align(
+          [locs_ch1, locs_ch2], [info_ch1, info_ch2],
+          method="points", max_shift=500.0,  # nm
+      )
+      aligned_infos[1][-1]["Shift x uncertainty (nm)"]
       # remove the localizations outside the overlap of the channels and
       # get the shift of each channel (nm)
       aligned, aligned_infos, (shift_x, shift_y) = postprocess.align(

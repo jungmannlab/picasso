@@ -1286,17 +1286,49 @@ Compute the dark time for grouped localizations.
 
 align
 -----
-Align one localization file to another via RCC, 2D only (two or more files). The
-RCC is repeated until the shifts converge, as in Render. Pass ``-d/--display``
-to plot the mean shift per iteration. All localizations are kept by
-default; pass ``-r/--remove-non-overlapping`` to remove the localizations
-outside the region where all aligned files overlap (see
-:ref:`render-align-non-overlapping`).
+Align one localization file to another (two or more files), 2D only, via RCC
+or via the displacements between the localizations (``-m points``, see
+:ref:`render-align-channels`), which also prints the shift of each file with
+its uncertainty. The RCC is repeated until the shifts converge, as in Render.
+Pass ``-d/--display`` to plot the mean shift per RCC iteration. All
+localizations are kept by default; pass ``-r/--remove-non-overlapping`` to
+remove the localizations outside the region where all aligned files overlap
+(see :ref:`render-align-non-overlapping`). The aligned files are saved as
+``<file name>_align.hdf5``.
 
 .. code-block:: bash
 
-   picasso align file1 file2 [...]
+   picasso align file1 file2 [...] [-m rcc|points] [--max-shift nm] [-d] [-r]
+
+For example:
+
+.. code-block:: bash
+
    picasso align file1 file2 --remove-non-overlapping
+   picasso align file1 file2 -m points --max-shift 300
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-m``, ``--method`` (``rcc`` or ``points``)
+     - ``rcc``
+     - How the shifts are found: the cross-correlation of the rendered images
+       or the peak of the displacements between the localizations.
+   * - ``--max-shift`` (float)
+     - ``500``
+     - The largest shift (nm) between two files searched for by ``-m
+       points``.
+   * - ``-d``, ``--display``
+     - off
+     - Plot the mean shift per RCC iteration.
+   * - ``-r``, ``--remove-non-overlapping``
+     - off
+     - Remove the localizations outside the region where all aligned files
+       overlap.
 
 group-properties
 ----------------

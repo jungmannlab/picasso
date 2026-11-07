@@ -4364,6 +4364,109 @@ class LinkDialog(lib.Dialog):
         )
 
 
+class AlignChannelsDialog(lib.Dialog):
+    """Choose how ``View.align`` finds the shifts between the channels,
+    see ``postprocess.align``.
+
+    Attributes
+    ----------
+    method : QComboBox
+        The method, by its name in ``METHODS``. Picked structures can be
+        chosen only if there are picks.
+    max_shift : QDoubleSpinBox
+        Largest shift (nm) between two channels searched for by the
+        displacements between localizations; shown only for that
+        method.
+    """
+
+    #: Names of the methods of ``postprocess.align`` in the dialog
+    METHODS = {
+        "Cross-correlation of images (RCC)": "rcc",
+        "Picked structures": "picked",
+        "Displacements between localizations": "points",
+    }
+    #: Method and largest shift chosen last in this session (the picked
+    #: structures are preselected whenever there are picks)
+    last_method = "rcc"
+    last_max_shift = 500.0
+
+    def __init__(self, window: QtWidgets.QMainWindow, has_picks: bool) -> None:
+        super().__init__(window)
+        self.setWindowTitle("Align channels")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        method_label = QtWidgets.QLabel("Method:")
+        grid.addWidget(method_label, 0, 0)
+        self.method = QtWidgets.QComboBox()
+        tooltips = (
+            "Cross-correlation of the rendered images of the channels\n"
+            "(redundant cross-correlation, 2D).",
+            "Centers of mass of the localizations of each channel in the\n"
+            "picks, e.g., of gold particles or DNA origami (2D or 3D).",
+            "Peak of the displacements between the localizations of each\n"
+            "pair of channels, fitted with an uncertainty, which is saved\n"
+            "in the metadata (2D). The channels must share structures.",
+        )
+        for k, (name, tooltip) in enumerate(zip(self.METHODS, tooltips)):
+            self.method.addItem(name)
+            self.method.setItemData(
+                k, tooltip, QtCore.Qt.ItemDataRole.ToolTipRole
+            )
+        if not has_picks:  # picked structures need picks
+            self.method.model().item(1).setEnabled(False)
+        grid.addWidget(self.method, 0, 1)
+        self.max_shift_label = QtWidgets.QLabel("Max. shift (nm):")
+        self.max_shift_label.setToolTip(
+            "Largest shift between two channels that is searched for.\n"
+            "Larger values find larger shifts but are slower."
+        )
+        grid.addWidget(self.max_shift_label, 1, 0)
+        self.max_shift = QtWidgets.QDoubleSpinBox()
+        self.max_shift.setRange(1, 1e5)
+        self.max_shift.setDecimals(0)
+        self.max_shift.setSingleStep(100)
+        self.max_shift.setValue(self.last_max_shift)
+        grid.addWidget(self.max_shift, 1, 1)
+        vbox.addLayout(grid)
+        self.method.currentTextChanged.connect(self._show_method_widgets)
+        default = "picked" if has_picks else self.last_method
+        self.method.setCurrentIndex(list(self.METHODS.values()).index(default))
+        self._show_method_widgets()
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        vbox.addWidget(buttons)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+    def _show_method_widgets(self) -> None:
+        """Show the largest shift only for the displacements between
+        localizations."""
+        points = self.METHODS[self.method.currentText()] == "points"
+        self.max_shift_label.setVisible(points)
+        self.max_shift.setVisible(points)
+
+    @staticmethod
+    def getParams(
+        parent: QtWidgets.QWidget, has_picks: bool
+    ) -> tuple[str, float, bool]:
+        """Create the dialog and return the method of
+        ``postprocess.align``, the largest shift (nm) and whether it was
+        accepted."""
+        dialog = AlignChannelsDialog(parent, has_picks)
+        accepted = dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted
+        method = AlignChannelsDialog.METHODS[dialog.method.currentText()]
+        max_shift = dialog.max_shift.value()
+        if accepted:
+            if method != "picked":
+                AlignChannelsDialog.last_method = method
+            AlignChannelsDialog.last_max_shift = max_shift
+        return method, max_shift, accepted
+
+
 class SMLMDialog(lib.Dialog):
     """Choose inputs for SMLM clusterer.
 
@@ -13685,24 +13788,41 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             y_max = viewport[1][0] + y_margin
         return [(y_min, x_min), (y_max, x_max)]
 
-    def align(self) -> None:
-        """Align channels by RCC or from picked localizations. The
-        localizations outside the region where all aligned channels
-        overlap are removed unless the user settings keep them (see
-        ``keep_non_overlapping_setting``), or if the channels do not
-        overlap."""
+    def align_channels(self) -> None:
+        """Choose how to align the channels (``AlignChannelsDialog``)
+        and align them, see ``align``."""
+        method, max_shift, ok = AlignChannelsDialog.getParams(
+            self, has_picks=len(self._picks) > 0
+        )
+        if ok:
+            self.align(method, max_shift)
+
+    def align(
+        self,
+        method: Literal["rcc", "picked", "points"] | None = None,
+        max_shift: float = 500.0,
+    ) -> None:
+        """Align channels by RCC, from picked localizations or from the
+        displacements between the localizations (see
+        ``postprocess.align``; ``max_shift`` in nm for the latter). If
+        ``method`` is None, from the picks if there are any, else by
+        RCC. The localizations outside the region where all aligned
+        channels overlap are removed unless the user settings keep them
+        (see ``keep_non_overlapping_setting``), or if the channels do
+        not overlap."""
         locs, infos = self.locs, self.infos
-        kwargs = {"paths": list(self.locs_paths)}
-        if len(self._picks) > 0:  # shift from picked
+        if method is None:
+            method = "picked" if len(self._picks) > 0 else "rcc"
+        kwargs = {"paths": list(self.locs_paths), "method": method}
+        if method == "picked":  # shift from picked
             kwargs |= {
-                "method": "picked",
                 **self._pick_args(),
                 "index_blocks": [
                     self._circle_pick_index(c) for c in range(len(self.locs))
                 ],
             }
-        else:  # align using whole images
-            kwargs["method"] = "rcc"
+        elif method == "points":
+            kwargs["max_shift"] = max_shift
         keep = keep_non_overlapping_setting()
 
         def align():
@@ -13720,9 +13840,13 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 return *result, True
             return *result, False
 
-        aligned, infos, all_kept = lib.run_with_status(
-            align, "Aligning channels...", self
-        )
+        try:
+            aligned, infos, all_kept = lib.run_with_status(
+                align, "Aligning channels...", self
+            )
+        except ValueError as error:  # e.g., no shift between the channels
+            QtWidgets.QMessageBox.warning(self, "Align channels", str(error))
+            return
         with self.undo_step("Align channels"):
             self.locs = aligned
             for channel, info in enumerate(infos):
@@ -21426,11 +21550,9 @@ class Window(QtWidgets.QMainWindow):
         event_cores_action.triggered.connect(
             self.view.select_binding_event_cores
         )
-        align_action = postprocess_menu.addAction(
-            "Align channels (RCC or from picked)"
-        )
+        align_action = postprocess_menu.addAction("Align channels...")
         align_action.setIcon(theme.icon("align"))
-        align_action.triggered.connect(self.view.align)
+        align_action.triggered.connect(self.view.align_channels)
         stitch_action = postprocess_menu.addAction("Stitch tiles...")
         stitch_action.triggered.connect(self.view.stitch)
         combine_action = postprocess_menu.addAction(

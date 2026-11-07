@@ -28,6 +28,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib import ticker
 from scipy import interpolate, special
+from scipy import ndimage as ndi
 from scipy.optimize import curve_fit, minimize_scalar, OptimizeWarning
 from scipy.spatial import KDTree
 from scipy.stats import rankdata
@@ -72,6 +73,7 @@ __all__ = [
     "align",
     "align_rcc",
     "align_from_picked",
+    "align_from_points",
     # resolution
     "nena",
     "plot_nena",
@@ -6453,7 +6455,7 @@ def align(
     locs: list[pd.DataFrame],
     infos: list[list[dict]],
     *,
-    method: Literal["rcc", "picked"] = "rcc",
+    method: Literal["rcc", "picked", "points"] = "rcc",
     picks: list[tuple] | None = None,
     pick_shape: (
         Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
@@ -6461,6 +6463,7 @@ def align(
     ) = "Circle",
     pick_size: float | list[float | None] | None = None,
     index_blocks: list[tuple | None] | None = None,
+    max_shift: float = 500.0,
     display: bool = False,
     return_shifts: bool = False,
     keep_non_overlapping: bool = True,
@@ -6472,10 +6475,12 @@ def align(
     """Align localizations from multiple channels (one per element in
     ``locs``).
 
-    The shifts between the channels are found either by RCC of the
-    rendered images (``method="rcc"``, see ``align_rcc``) or from the
-    localizations in picked regions (``method="picked"``, see
-    ``align_from_picked``). The input DataFrames are not modified.
+    The shifts between the channels are found by RCC of the rendered
+    images (``method="rcc"``, see ``align_rcc``), from the localizations
+    in picked regions (``method="picked"``, see ``align_from_picked``)
+    or from the displacements between the localizations of the channels
+    (``method="points"``, see ``align_from_points``). The input
+    DataFrames are not modified.
 
     Parameters
     ----------
@@ -6483,7 +6488,7 @@ def align(
         Localizations of each channel.
     infos : list of list of dicts
         Metadata of each channel in ``locs``.
-    method : {"rcc", "picked"}, optional
+    method : {"rcc", "picked", "points"}, optional
         How the shifts are found. Default is "rcc".
     picks : list or None, optional
         Picked regions, in the format required by ``pick_shape``, see
@@ -6502,6 +6507,10 @@ def align(
         Per-channel precomputed spatial indices for circular picks, see
         ``align_from_picked``. Only used for ``method="picked"``.
         Default is None.
+    max_shift : float, optional
+        Largest shift (nm) between two channels searched for, see
+        ``align_from_points``. Only used for ``method="points"``.
+        Default is 500.
     display : bool, optional
         If True, plots the mean shift per RCC iteration. Only used for
         ``method="rcc"``. Default is False.
@@ -6536,15 +6545,17 @@ def align(
     ------
     ValueError
         If ``method`` is unknown, if ``picks`` are missing for
-        ``method="picked"`` or given for ``method="rcc"``, or if
+        ``method="picked"`` or given for another method, if
+        ``method="points"`` finds no shift (see ``align_from_points``),
+        or if
         ``keep_non_overlapping`` is False and the aligned channels do
         not overlap.
     """
+    if method in ("rcc", "points") and picks is not None:
+        raise ValueError(
+            f"picks are only used with method='picked', not {method!r}."
+        )
     if method == "rcc":
-        if picks is not None:
-            raise ValueError(
-                "picks are only used with method='picked', not 'rcc'."
-            )
         locs, infos, shifts = align_rcc(
             locs,
             infos,
@@ -6567,9 +6578,19 @@ def align(
             keep_non_overlapping=keep_non_overlapping,
             paths=paths,
         )
+    elif method == "points":
+        locs, infos, shifts = align_from_points(
+            locs,
+            infos,
+            max_shift=max_shift,
+            return_shifts=True,
+            keep_non_overlapping=keep_non_overlapping,
+            paths=paths,
+        )
     else:
         raise ValueError(
-            f"Unknown alignment method {method!r}, use 'rcc' or 'picked'."
+            f"Unknown alignment method {method!r}, use 'rcc', 'picked' or "
+            "'points'."
         )
     if return_shifts:
         return locs, infos, shifts
@@ -6875,6 +6896,452 @@ def align_from_picked(
     if return_shifts:
         return aligned_locs, infos, shifts
     return aligned_locs, infos
+
+
+def align_from_points(
+    locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+    *,
+    max_shift: float = 500.0,
+    return_shifts: bool = False,
+    keep_non_overlapping: bool = True,
+    paths: list[str] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> (
+    tuple[list[pd.DataFrame], list[list[dict]]]
+    | tuple[list[pd.DataFrame], list[list[dict]], tuple]
+):
+    """Align localizations from multiple channels by the displacements
+    between their localizations, without rendering images. The input
+    DataFrames are not modified.
+
+    For each pair of channels, the displacements (x and y, nm) from
+    every localization of the first channel to every localization of
+    the second within ``max_shift`` are histogrammed, which is the
+    cross-correlation of the two sets of localizations: the structures
+    imaged in both channels give a peak at the shift between them,
+    unrelated localizations a flat background. A 2D Gaussian on a
+    constant background is fitted to the peak, first coarsely over the
+    whole range, then on a finer histogram around it; its center is the
+    shift. Its uncertainty (standard error) is estimated by a jackknife
+    over spatial blocks of the field of view: the peak is fitted again
+    with the localizations of each block left out. (The counts of the
+    histogram are not independent, since each localization takes part
+    in many pairs, so the errors of the fit would be too small.) Pairs
+    of channels without a peak, i.e., whose highest point of the
+    smoothed histogram is less than 20 times its noise (robust standard
+    deviation) above its median, are left out. The shift of
+    each channel is then found by weighted least squares from the shifts
+    of all pairs, weighted by the inverse variance of each (see
+    ``lib.minimize_shifts``), so that the first channel stays in place.
+
+    Unlike ``align_rcc``, the shifts are not limited by the pixels of
+    rendered images and come with an uncertainty; the shifts must be
+    smaller than ``max_shift``.
+
+    Parameters
+    ----------
+    locs : list of pd.DataFrames
+        Localizations of each channel.
+    infos : list of list of dicts
+        Metadata of each channel in ``locs``.
+    max_shift : float, optional
+        Largest shift (nm) between two channels that is searched for in x
+        and y. Larger values find larger shifts but count more pairs of
+        unrelated localizations, which is slower and gives a higher
+        background. Default is 500.
+    return_shifts : bool, optional
+        If True, also returns the shifts subtracted from each channel.
+        Default is False.
+    keep_non_overlapping : bool, optional
+        If False, localizations outside the region where all aligned
+        channels overlap are removed, see
+        ``remove_non_overlapping_locs``. Default is True (all
+        localizations are kept).
+    paths : list of str or None, optional
+        Paths of the channels' files, saved in the metadata
+        (``"Files"``). Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Finding shifts" over the pairs
+        of channels. Default is None.
+
+    Returns
+    -------
+    locs : list of pd.DataFrames
+        Aligned localizations of each channel.
+    infos : list of lists of dicts
+        Metadata of each aligned channel: its ``infos`` element with an
+        entry recording the alignment appended (see
+        ``lib.append_metadata``), with the shift subtracted from the
+        channel and its uncertainty (standard error, nm).
+    shifts : tuple of np.ndarrays
+        ``(shift_x, shift_y)``, the shift subtracted from each channel in
+        nm. Returned only if ``return_shifts`` is True.
+
+    Raises
+    ------
+    ValueError
+        If ``max_shift`` is not positive, fewer than two channels are
+        given, or the pairs of channels with a significant peak do not
+        connect every channel to the first one.
+    """
+    if not max_shift > 0:
+        raise ValueError("max_shift must be positive.")
+    n_channels = len(locs)
+    if n_channels < 2:
+        raise ValueError("At least two channels are needed.")
+    shifts_x = np.full((n_channels, n_channels), np.nan)
+    shifts_y = np.full((n_channels, n_channels), np.nan)
+    weights_x = np.zeros((n_channels, n_channels))
+    weights_y = np.zeros((n_channels, n_channels))
+    pairs = [
+        (i, j) for i in range(n_channels) for j in range(i + 1, n_channels)
+    ]
+    with lib.tracked_progress(progress, "Finding shifts", unit="pair") as (
+        progress
+    ):
+        lib.start_phase(progress, "Finding shifts", len(pairs), unit="pair")
+        progress.set_value(0)
+        for k, (i, j) in enumerate(pairs):
+            shift = _point_set_shift(locs[i], locs[j], max_shift)
+            if shift is not None:
+                shifts_x[i, j], shifts_y[i, j], error_x, error_y = shift
+                weights_x[i, j] = 1 / error_x**2
+                weights_y[i, j] = 1 / error_y**2
+            progress.set_value(k + 1)
+        progress.set_value(len(pairs))
+    try:
+        shift_y, shift_x, (covariance_y, covariance_x) = lib.minimize_shifts(
+            shifts_x,
+            shifts_y,
+            weights=[weights_x, weights_y],
+            return_covariance=True,
+        )
+    except ValueError:
+        raise ValueError(
+            "The shift could not be found between enough pairs of channels "
+            f"(no peak of the displacements within {max_shift:g} nm); the "
+            "channels may not share structures or be shifted by more than "
+            "max_shift."
+        ) from None
+    locs = [
+        locs_.assign(x=locs_["x"] - dx, y=locs_["y"] - dy)
+        for locs_, dx, dy in zip(locs, shift_x, shift_y)
+    ]
+    if not keep_non_overlapping:
+        locs = remove_non_overlapping_locs(locs)
+    shifts = (shift_x, shift_y)
+    entry = lib.step_info(
+        "Align",
+        **{
+            "Method": "Points",
+            "Max. shift (nm)": float(max_shift),
+            "Remove non-overlapping": not keep_non_overlapping,
+        },
+    )
+    infos = _aligned_infos(infos, shifts, entry, paths)
+    for info, error_x, error_y in zip(
+        infos, np.diag(covariance_x), np.diag(covariance_y)
+    ):
+        info[-1]["Shift x uncertainty (nm)"] = float(np.sqrt(error_x))
+        info[-1]["Shift y uncertainty (nm)"] = float(np.sqrt(error_y))
+    if return_shifts:
+        return locs, infos, shifts
+    return locs, infos
+
+
+#: Number of bins of the coarse displacement histogram in x and y, see
+#: ``_point_set_shift``
+_SHIFT_COARSE_BINS = 100
+#: Number of bins of the fine displacement histogram around the coarse
+#: peak in x and y
+_SHIFT_FINE_BINS = 40
+#: Smallest amplitude of the displacement peak, in standard errors of
+#: the fitted amplitude, for the peak to count
+_SHIFT_MIN_SIGNIFICANCE = 5.0
+#: Smallest height of the peak of the smoothed coarse displacement
+#: histogram above its median, in units of its robust noise (1.4826
+#: times the median absolute deviation), for two channels to share
+#: structures: unrelated channels reach about 12 (clustered), related
+#: ones over 100 in simulations
+_SHIFT_MIN_PROMINENCE = 20.0
+#: Blocks per side of the grid over the field of view whose
+#: localizations are left out in turn to estimate the uncertainty of a
+#: shift (jackknife); the finer grid is used if the coarser has fewer
+#: than ``_SHIFT_MIN_BLOCKS`` blocks with pairs
+_SHIFT_BLOCK_GRIDS = (4, 8)
+_SHIFT_MIN_BLOCKS = 8
+
+
+def _point_set_shift(
+    reference: pd.DataFrame,
+    moving: pd.DataFrame,
+    max_shift: float,
+) -> tuple[float, float, float, float] | None:
+    """Shift (nm) of the localizations ``moving`` relative to
+    ``reference``, x and y with their standard errors, from the peak of
+    the histogram of the displacements between them (see
+    ``align_from_points``), or None without a significant peak."""
+    if not len(reference) or not len(moving):
+        return None
+    tx = reference["x"].to_numpy(dtype=np.float64)
+    ty = reference["y"].to_numpy(dtype=np.float64)
+    x = moving["x"].to_numpy(dtype=np.float64)
+    y = moving["y"].to_numpy(dtype=np.float64)
+    # coarse: the whole range
+    bin_size = 2 * max_shift / _SHIFT_COARSE_BINS
+    (counts,) = _displacement_histogram(
+        x, y, tx, ty, 0.0, 0.0, max_shift, _SHIFT_COARSE_BINS
+    )
+    smoothed = ndi.gaussian_filter(counts, 1.0)
+    median = np.median(smoothed)
+    # at least the smoothed count of a single pair
+    noise = max(1.4826 * np.median(np.abs(smoothed - median)), 1 / (2 * np.pi))
+    if smoothed.max() - median < _SHIFT_MIN_PROMINENCE * noise:
+        return None  # no common structures
+    peak = _fit_displacement_peak(counts, max_shift, bin_size)
+    if peak is None:
+        return None
+    center_x, center_y, _, _, sigma = peak
+    # fine: around the coarse peak, by spatial block of the moving points
+    half_width = min(max(4 * sigma, 3 * bin_size), max_shift)
+    fine_bin_size = 2 * half_width / _SHIFT_FINE_BINS
+    for n_side in _SHIFT_BLOCK_GRIDS:
+        block = _spatial_blocks(x, y, n_side)
+        block_counts = _displacement_histogram(
+            x,
+            y,
+            tx,
+            ty,
+            center_x,
+            center_y,
+            half_width,
+            _SHIFT_FINE_BINS,
+            block,
+            n_side**2,
+        )
+        used = np.flatnonzero(block_counts.sum(axis=(1, 2)))
+        if len(used) >= _SHIFT_MIN_BLOCKS:
+            break
+    counts = block_counts.sum(axis=0)
+    peak = _fit_displacement_peak(counts, half_width, fine_bin_size)
+    if peak is None:
+        return None
+    fine_x, fine_y, error_x, error_y, _ = peak
+    # jackknife: the peak without the pairs of each block in turn
+    centers = []
+    for k in used:
+        left_out = _fit_displacement_peak(
+            counts - block_counts[k], half_width, fine_bin_size
+        )
+        if left_out is not None:
+            centers.append(left_out[:2])
+    if len(centers) >= 4:  # else the errors of the fit
+        centers = np.array(centers)
+        n = len(centers)
+        error_x, error_y = np.sqrt(
+            (n - 1) / n * ((centers - centers.mean(axis=0)) ** 2).sum(axis=0)
+        )
+    return center_x + fine_x, center_y + fine_y, error_x, error_y
+
+
+def _spatial_blocks(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    n_side: int,
+) -> lib.IntArray1D:
+    """Index of the block of each point ``(x, y)`` in a grid of
+    ``n_side`` x ``n_side`` blocks over their bounding box."""
+    blocks = []
+    for values in (x, y):
+        low, high = values.min(), values.max()
+        scaled = (values - low) / max(high - low, 1e-12) * n_side
+        blocks.append(np.minimum(scaled.astype(np.int64), n_side - 1))
+    return blocks[1] * n_side + blocks[0]
+
+
+def _displacement_histogram(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    tx: lib.FloatArray1D,
+    ty: lib.FloatArray1D,
+    center_x: float,
+    center_y: float,
+    half_width: float,
+    n_bins: int,
+    block: lib.IntArray1D | None = None,
+    n_blocks: int = 1,
+) -> lib.FloatArray3D:
+    """Histograms (rows y, columns x) of the displacements ``(x, y) -
+    (tx, ty)`` of all pairs of points within ``half_width`` of
+    ``(center_x, center_y)`` in x and y, over that square in ``n_bins``
+    bins per side: one per block of the points ``(x, y)`` (``block``,
+    the block of each point, None for one block), shape (n_blocks,
+    n_bins, n_bins)."""
+    if block is None:
+        block = np.zeros(len(x), dtype=np.int64)
+    # the reference points sorted by the cell of a grid with cells of
+    # at least the half width, so that the partners of a point are in
+    # the adjacent cells
+    x_min, y_min = tx.min(), ty.min()
+    extent = max(tx.max() - x_min, ty.max() - y_min)
+    cell_size = max(half_width, extent / 1024)
+    n_cells_x = int((tx.max() - x_min) // cell_size) + 1
+    n_cells_y = int((ty.max() - y_min) // cell_size) + 1
+    cell = ((ty - y_min) // cell_size).astype(np.int64) * n_cells_x + (
+        (tx - x_min) // cell_size
+    ).astype(np.int64)
+    order = np.argsort(cell, kind="stable")
+    cell_starts = np.searchsorted(
+        cell[order], np.arange(n_cells_x * n_cells_y + 1)
+    )
+    args = (
+        x - center_x,
+        y - center_y,
+        np.ascontiguousarray(tx[order]),
+        np.ascontiguousarray(ty[order]),
+        cell_starts,
+        x_min,
+        y_min,
+        cell_size,
+        n_cells_x,
+        n_cells_y,
+        half_width,
+        n_bins,
+        block,
+        n_blocks,
+    )
+    n = len(x)
+    n_threads = lib.n_workers() if n > 10_000 else 1
+    bounds = np.linspace(0, n, n_threads + 1).astype(np.int64)
+    if n_threads == 1:
+        return _displacement_counts(*args, 0, n).astype(np.float64)
+    with _ThreadPoolExecutor(n_threads) as executor:
+        futures = [
+            executor.submit(_displacement_counts, *args, start, end)
+            for start, end in zip(bounds[:-1], bounds[1:])
+        ]
+        return np.sum([f.result() for f in futures], axis=0).astype(np.float64)
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _displacement_counts(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    tx: lib.FloatArray1D,
+    ty: lib.FloatArray1D,
+    cell_starts: lib.IntArray1D,
+    x_min: float,
+    y_min: float,
+    cell_size: float,
+    n_cells_x: int,
+    n_cells_y: int,
+    half_width: float,
+    n_bins: int,
+    block: lib.IntArray1D,
+    n_blocks: int,
+    start: int,
+    end: int,
+) -> lib.IntArray3D:
+    """Counts of ``_displacement_histogram`` of the points ``start`` to
+    ``end`` of ``(x, y)`` (already shifted by the center of the
+    window); the reference points ``(tx, ty)`` are sorted by the cell
+    of a grid, see there."""
+    counts = np.zeros((n_blocks, n_bins, n_bins), dtype=np.int64)
+    bin_size = 2 * half_width / n_bins
+    for k in range(start, end):
+        px = x[k]
+        py = y[k]
+        cx = int(np.floor((px - x_min) / cell_size))
+        cy = int(np.floor((py - y_min) / cell_size))
+        for gy in range(max(cy - 1, 0), min(cy + 2, n_cells_y)):
+            for gx in range(max(cx - 1, 0), min(cx + 2, n_cells_x)):
+                cell = gy * n_cells_x + gx
+                for m in range(cell_starts[cell], cell_starts[cell + 1]):
+                    dx = px - tx[m] + half_width
+                    dy = py - ty[m] + half_width
+                    if 0.0 <= dx < 2 * half_width and 0.0 <= dy < 2 * (
+                        half_width
+                    ):
+                        bx = min(int(dx / bin_size), n_bins - 1)
+                        by = min(int(dy / bin_size), n_bins - 1)
+                        counts[block[k], by, bx] += 1
+    return counts
+
+
+def _fit_displacement_peak(
+    counts: lib.FloatArray2D,
+    half_width: float,
+    bin_size: float,
+) -> tuple[float, float, float, float, float] | None:
+    """Fit a 2D Gaussian on a constant background to the highest peak of
+    a displacement histogram over ``[-half_width, half_width)`` in x
+    and y (rows y, columns x), by least squares with Poisson weights.
+    Returns the center x and y, their standard errors and the larger
+    width of the peak (nm), or None if the fit fails or the peak is not
+    significant."""
+    if not counts.any():
+        return None
+    centers = -half_width + (np.arange(counts.shape[0]) + 0.5) * bin_size
+    grid_x, grid_y = np.meshgrid(centers, centers)
+    smoothed = ndi.gaussian_filter(counts, 1.0)
+    row, column = np.unravel_index(np.argmax(smoothed), smoothed.shape)
+    background = float(np.median(counts))
+    p0 = (
+        max(smoothed[row, column] - background, 1.0),
+        centers[column],
+        centers[row],
+        2 * bin_size,
+        2 * bin_size,
+        background,
+    )
+
+    def model(xy, amplitude, x0, y0, sigma_x, sigma_y, offset):
+        gx, gy = xy
+        return offset + amplitude * np.exp(
+            -0.5 * (((gx - x0) / sigma_x) ** 2 + ((gy - y0) / sigma_y) ** 2)
+        )
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", OptimizeWarning)
+            params, covariance = curve_fit(
+                model,
+                (grid_x.ravel(), grid_y.ravel()),
+                counts.ravel(),
+                p0=p0,
+                sigma=np.sqrt(np.maximum(counts.ravel(), 1.0)),
+                absolute_sigma=True,
+                bounds=(
+                    (
+                        0,
+                        -half_width,
+                        -half_width,
+                        bin_size / 4,
+                        bin_size / 4,
+                        0,
+                    ),
+                    (
+                        np.inf,
+                        half_width,
+                        half_width,
+                        2 * half_width,
+                        2 * half_width,
+                        np.inf,
+                    ),
+                ),
+            )
+    except (RuntimeError, ValueError):
+        return None
+    errors = np.sqrt(np.diag(covariance))
+    if not np.isfinite(errors).all():
+        return None
+    amplitude, x0, y0, sigma_x, sigma_y, _ = params
+    if amplitude < _SHIFT_MIN_SIGNIFICANCE * errors[0]:
+        return None
+    return float(x0), float(y0), errors[1], errors[2], max(sigma_x, sigma_y)
 
 
 def overlap_region(

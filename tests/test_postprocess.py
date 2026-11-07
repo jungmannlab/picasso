@@ -2493,6 +2493,123 @@ class TestAlign:
         with pytest.raises(ValueError, match="only used with"):
             postprocess.align(locs, infos, picks=origami_picks)
 
+    @staticmethod
+    def _halves(locs, shift_x, shift_y):
+        """The localizations split at random into two channels, the
+        second shifted by ``(shift_x, shift_y)`` nm."""
+        rng = np.random.default_rng(0)
+        second = rng.uniform(size=len(locs)) < 0.5
+        a = locs[~second].copy()
+        b = locs[second].copy()
+        b["x"] += shift_x
+        b["y"] += shift_y
+        return a, b
+
+    def test_align_from_points(self, info):
+        rng = np.random.default_rng(2)
+        sites = rng.uniform(0, 20_000, (1000, 2))
+        a = self._sites_channel(sites, (0.0, 0.0), rng)
+        b = self._sites_channel(sites, (25.3, -8.1), rng)
+        b_before = b.copy()
+        aligned, infos, (shift_x, shift_y) = postprocess.align_from_points(
+            [a, b], [info, info], return_shifts=True
+        )
+        assert shift_x[0] == shift_y[0] == 0
+        entry = infos[1][-1]
+        error_x = entry["Shift x uncertainty (nm)"]
+        error_y = entry["Shift y uncertainty (nm)"]
+        assert 0 < error_x < 0.3 and 0 < error_y < 0.3
+        assert shift_x[1] == pytest.approx(25.3, abs=4 * error_x)
+        assert shift_y[1] == pytest.approx(-8.1, abs=4 * error_y)
+        np.testing.assert_allclose(
+            aligned[1]["x"].to_numpy(), b["x"].to_numpy() - shift_x[1]
+        )
+        assert entry["Method"] == "Points"
+        assert entry["Max. shift (nm)"] == 500.0
+        assert entry["Shift x (nm)"] == pytest.approx(shift_x[1])
+        assert infos[0][-1]["Shift x uncertainty (nm)"] == 0
+        pd.testing.assert_frame_equal(b, b_before)  # not modified
+
+    def test_align_points_matches_align_from_points(self, locs_copy, info):
+        a, b = self._halves(locs_copy, -40.0, 12.0)
+        aligned, infos, shifts = postprocess.align(
+            [a, b],
+            [info, info],
+            method="points",
+            max_shift=300.0,
+            return_shifts=True,
+        )
+        expected, expected_infos, expected_shifts = (
+            postprocess.align_from_points(
+                [a, b], [info, info], max_shift=300.0, return_shifts=True
+            )
+        )
+        for out, exp in zip(aligned, expected):
+            pd.testing.assert_frame_equal(out, exp)
+        for shift, exp in zip(shifts, expected_shifts, strict=True):
+            np.testing.assert_array_equal(shift, exp)
+        assert infos[1][-1]["Max. shift (nm)"] == 300.0
+
+    @staticmethod
+    def _sites_channel(sites, shift, rng):
+        """Ten localizations (6 nm precision) at each of ``sites``,
+        shifted by ``shift`` nm, and random ones."""
+        points = np.repeat(sites, 10, axis=0) + rng.normal(
+            0, 6, (10 * len(sites), 2)
+        )
+        points = np.vstack([points, rng.uniform(0, 20_000, (2000, 2))])
+        points = points + shift
+        return pd.DataFrame(
+            {
+                "frame": np.zeros(len(points), dtype=np.uint32),
+                "x": points[:, 0].astype(np.float32),
+                "y": points[:, 1].astype(np.float32),
+            }
+        )
+
+    def test_align_from_points_without_common_structures(self, info):
+        """A pair of channels without common structures is left out; the
+        shifts are found through the other pairs."""
+        rng = np.random.default_rng(1)
+        sites, other = rng.uniform(0, 20_000, (2, 1000, 2))
+        channels = [
+            self._sites_channel(sites, (0.0, 0.0), rng),
+            pd.concat(
+                [
+                    self._sites_channel(sites, (20.0, 5.0), rng),
+                    self._sites_channel(other, (20.0, 5.0), rng),
+                ]
+            ),
+            self._sites_channel(other, (-15.0, 30.0), rng),
+        ]
+        _, infos, (shift_x, shift_y) = postprocess.align_from_points(
+            channels, [info] * 3, return_shifts=True
+        )
+        np.testing.assert_allclose(shift_x, [0, 20, -15], atol=0.5)
+        np.testing.assert_allclose(shift_y, [0, 5, 30], atol=0.5)
+        # the third channel inherits the uncertainty of the second
+        errors = [entry[-1]["Shift x uncertainty (nm)"] for entry in infos]
+        assert errors[2] > errors[1] > 0
+        with pytest.raises(ValueError, match="could not be found"):
+            postprocess.align_from_points(
+                [channels[0], channels[2]], [info] * 2
+            )
+
+    def test_align_from_points_invalid_arguments(self, locs_copy, info):
+        with pytest.raises(ValueError, match="max_shift"):
+            postprocess.align_from_points(
+                [locs_copy, locs_copy], [info, info], max_shift=0
+            )
+        with pytest.raises(ValueError, match="two channels"):
+            postprocess.align_from_points([locs_copy], [info])
+        with pytest.raises(ValueError, match="only used with"):
+            postprocess.align(
+                [locs_copy, locs_copy],
+                [info, info],
+                method="points",
+                picks=[(0.0, 0.0)],
+            )
+
     def test_align_rcc_converges(self, locs_copy, info):
         a = locs_copy
         b = a.copy()

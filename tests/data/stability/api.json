@@ -259,6 +259,7 @@
   "align",
   "align_rcc",
   "align_from_picked",
+  "align_from_points",
   "nena",
   "plot_nena",
   "frc",

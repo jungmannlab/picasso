@@ -1421,6 +1421,172 @@ class TestMinimizeShifts:
         np.testing.assert_allclose(shift_x, offsets[:, 1], atol=1e-9)
         np.testing.assert_allclose(shift_z, offsets[:, 2], atol=1e-9)
 
+    @staticmethod
+    def _pairwise(offsets, sigma=None, rng=None):
+        """Pairwise shifts ``offsets[j] - offsets[i]``, with Gaussian
+        noise of standard deviation ``sigma[i, j]``."""
+        shifts = offsets[None, :] - offsets[:, None]
+        if sigma is not None:
+            shifts = shifts + rng.normal(size=shifts.shape) * sigma
+        return shifts
+
+    def test_unweighted_result_is_unchanged(self):
+        """Without weights and missing pairs, the result equals that of
+        the original implementation exactly."""
+        rng = np.random.default_rng(0)
+        n = 6
+        shifts_x, shifts_y = rng.normal(size=(2, n, n))
+        steps = np.linalg.pinv(
+            np.array(
+                [
+                    [1.0 if i <= k < j else 0.0 for k in range(n - 1)]
+                    for i in range(n - 1)
+                    for j in range(i + 1, n)
+                ]
+            )
+        )
+        rows, columns = np.triu_indices(n, 1)
+        for shifts, result in zip(
+            (shifts_y, shifts_x), lib.minimize_shifts(shifts_x, shifts_y)
+        ):
+            expected = np.insert(
+                np.cumsum(steps @ shifts[rows, columns]), 0, 0
+            )
+            np.testing.assert_array_equal(result, expected)
+
+    def test_weights(self):
+        rng = np.random.default_rng(1)
+        offsets = np.array([0.0, 2.0, -1.0, 4.0, 1.5])
+        n = len(offsets)
+        sigma = rng.uniform(0.1, 2.0, size=(n, n))
+        shifts = self._pairwise(offsets, sigma, rng)
+        weights = 1 / sigma**2
+        shift_y, shift_x = lib.minimize_shifts(shifts, shifts, weights=weights)
+        # weighted least squares of the shifts of segments 1, ..., n - 1
+        rows, columns = np.triu_indices(n, 1)
+        A = np.zeros((len(rows), n - 1))
+        A[np.arange(len(rows)), columns - 1] = 1
+        has_i = rows > 0
+        A[np.flatnonzero(has_i), rows[has_i] - 1] = -1
+        scale = np.sqrt(weights[rows, columns])
+        expected = np.linalg.lstsq(
+            A * scale[:, None], shifts[rows, columns] * scale, rcond=None
+        )[0]
+        np.testing.assert_allclose(shift_x[1:], expected, rtol=1e-10)
+        np.testing.assert_array_equal(shift_x, shift_y)
+        # equal weights give the unweighted result
+        np.testing.assert_allclose(
+            lib.minimize_shifts(shifts, shifts, weights=np.full((n, n), 3.0)),
+            lib.minimize_shifts(shifts, shifts),
+            atol=1e-12,
+        )
+
+    def test_a_wrong_pair_with_a_small_weight_hardly_matters(self):
+        offsets = np.array([0.0, 1.0, 2.0, 3.0])
+        shifts = self._pairwise(offsets)
+        shifts[0, 3] += 10.0  # an outlier
+        weights = np.ones((4, 4))
+        weights[0, 3] = 1e-6
+        _, unweighted = lib.minimize_shifts(shifts, shifts)
+        _, weighted = lib.minimize_shifts(shifts, shifts, weights=weights)
+        assert np.abs(unweighted - offsets).max() > 1
+        np.testing.assert_allclose(weighted, offsets, atol=1e-4)
+
+    def test_missing_pairs(self):
+        offsets = np.array([0.0, 2.0, -1.0, 4.0])
+        shifts = self._pairwise(offsets)
+        chain = np.full((4, 4), np.nan)  # only neighboring segments
+        for i in range(3):
+            chain[i, i + 1] = shifts[i, i + 1]
+        shift_y, shift_x, shift_z = lib.minimize_shifts(chain, chain, chain)
+        for result in (shift_y, shift_x, shift_z):
+            np.testing.assert_allclose(result, offsets, atol=1e-12)
+        # a weight of 0 leaves a pair out, too
+        weights = np.ones((4, 4))
+        weights[0, 1] = 0.0
+        shifts[0, 1] = np.inf
+        np.testing.assert_allclose(
+            lib.minimize_shifts(shifts, shifts, weights=weights)[0],
+            offsets,
+            atol=1e-12,
+        )
+        chain[1, 2] = np.nan  # segments 2 and 3 are not connected to 0
+        with pytest.raises(ValueError, match="do not connect"):
+            lib.minimize_shifts(chain, chain)
+
+    def test_covariance_matches_the_spread_of_the_shifts(self):
+        rng = np.random.default_rng(2)
+        offsets = np.array([0.0, 2.0, -1.0, 4.0, 1.5])
+        n = len(offsets)
+        sigma = rng.uniform(0.2, 1.0, size=(n, n))
+        weights = 1 / sigma**2
+        shifts = [self._pairwise(offsets, sigma, rng) for _ in range(4000)]
+        solved = np.array(
+            [lib.minimize_shifts(s, s, weights=weights)[1] for s in shifts]
+        )
+        *_, (cov_y, cov_x) = lib.minimize_shifts(
+            shifts[0], shifts[0], weights=weights, return_covariance=True
+        )
+        np.testing.assert_array_equal(cov_x[0], 0)
+        np.testing.assert_allclose(
+            cov_x[1:, 1:], np.cov(solved[:, 1:].T), rtol=0.1, atol=2e-3
+        )
+        np.testing.assert_array_equal(cov_x, cov_y)
+
+    def test_covariance_without_weights_from_the_residuals(self):
+        rng = np.random.default_rng(3)
+        offsets = np.array([0.0, 2.0, -1.0, 4.0, 1.5, 0.5])
+        n = len(offsets)
+        variances = []
+        for _ in range(500):
+            shifts = self._pairwise(offsets, np.full((n, n), 0.5), rng)
+            *_, (cov_y, _cov_x) = lib.minimize_shifts(
+                shifts, shifts, return_covariance=True
+            )
+            variances.append(np.diag(cov_y))
+        # equal weights of 1 / 0.25 give the exact covariance
+        *_, (exact, _) = lib.minimize_shifts(
+            shifts,
+            shifts,
+            weights=np.full((n, n), 4.0),
+            return_covariance=True,
+        )
+        np.testing.assert_allclose(
+            np.mean(variances, axis=0), np.diag(exact), rtol=0.1
+        )
+        # no redundant pair: the variance cannot be estimated
+        *_, (cov_y, _) = lib.minimize_shifts(
+            shifts[:2, :2], shifts[:2, :2], return_covariance=True
+        )
+        assert np.isnan(cov_y[1, 1])
+
+    def test_weights_per_dimension(self):
+        offsets = np.array([0.0, 1.0, 2.0])
+        shifts_x = self._pairwise(offsets)
+        shifts_y = self._pairwise(2 * offsets)
+        shifts_x[0, 2] += 3.0  # wrong in x only
+        down = np.ones((3, 3))
+        down[0, 2] = 1e-9
+        shift_y, shift_x = lib.minimize_shifts(
+            shifts_x, shifts_y, weights=[down, np.ones((3, 3))]
+        )
+        np.testing.assert_allclose(shift_x, offsets, atol=1e-6)
+        np.testing.assert_allclose(shift_y, 2 * offsets, atol=1e-12)
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            (dict(weights=-np.ones((3, 3))), "negative"),
+            (dict(weights=np.ones((2, 2))), "shape"),
+            (dict(weights=[np.ones((3, 3))] * 3), "3 weight arrays"),
+            (dict(shifts_z=np.zeros((2, 2))), "shape"),
+        ],
+    )
+    def test_invalid_input(self, kwargs, match):
+        shifts = np.zeros((3, 3))
+        with pytest.raises(ValueError, match=match):
+            lib.minimize_shifts(shifts, shifts, **kwargs)
+
 
 # ---------------------------------------------------------------------------
 # Group syncing

@@ -3465,47 +3465,162 @@ def minimize_shifts(
     shifts_x: FloatArray2D,
     shifts_y: FloatArray2D,
     shifts_z: FloatArray2D | None = None,
-) -> tuple[FloatArray1D, FloatArray1D, FloatArray1D | None]:
-    """Minimize shifts in x, y, and z directions. Used for drift
-    correction.
+    *,
+    weights: FloatArray2D | list[FloatArray2D] | None = None,
+    return_covariance: bool = False,
+) -> tuple:
+    """Find the shift of each segment (e.g., of each time segment for
+    undrifting or of each channel for aligning) from the shifts measured
+    between pairs of segments, by least squares. Used for drift
+    correction and channel alignment.
+
+    For each pair i < j, ``shifts_x[i, j]`` (and ``shifts_y``,
+    ``shifts_z``) is the measured shift of segment j relative to segment
+    i, i.e., ``shift_x[j] - shift_x[i]``. The first segment is the
+    reference (shift 0). The entries for i >= j are not used. Each
+    dimension is solved separately.
 
     Parameters
     ----------
     shifts_x, shifts_y : FloatArray2D
-        Shifts in x and y directions, shape (n_channels, n_channels).
+        Shifts in x and y directions, shape (n_segments, n_segments).
+        NaN marks a pair that was not measured, which is left out.
     shifts_z : FloatArray2D, optional
-        Shifts in z direction, shape (n_channels, n_channels). If None,
+        Shifts in z direction, shape (n_segments, n_segments). If None,
         only x and y shifts are minimized.
+    weights : FloatArray2D, list of FloatArray2D or None, optional
+        Weight of each pair, shape (n_segments, n_segments), usually the
+        inverse variance of its measured shift, 1 / sigma^2; or one such
+        array per dimension (x, y and z, in this order). Pairs with
+        weight 0 are left out. If None, all pairs count equally (the
+        result is the same as with equal weights). Default is None.
+    return_covariance : bool, optional
+        If True, the covariance matrix of the shifts of each dimension is
+        returned as well. With ``weights``, it is (A^T W A)^-1, taking
+        the weights as the inverse variances of the measured shifts;
+        without, the variance of the measured shifts is estimated from
+        the residuals of the fit, which needs more pairs than segments
+        minus one (otherwise the covariance is NaN). Default is False.
 
     Returns
     -------
     shift_y, shift_x : FloatArray1D
-        Minimized shifts in y and x direction.
+        Minimized shifts in y and x direction, shape (n_segments,).
     shift_z : FloatArray1D, optional
         Minimized shifts in z direction if ``shifts_z`` is specified.
+    covariances : tuple of FloatArray2D, optional
+        If ``return_covariance``, the covariance matrices of
+        ``shift_y``, ``shift_x`` (and ``shift_z``), each of shape
+        (n_segments, n_segments); the row and column of the reference
+        segment are 0. The square roots of their diagonals are the
+        standard errors of the shifts.
+
+    Raises
+    ------
+    ValueError
+        If the shapes do not match, a weight is negative or NaN, or the
+        measured pairs of a dimension do not connect every segment to
+        the first one.
     """
-    n_channels = shifts_x.shape[0]
-    n_pairs = int(n_channels * (n_channels - 1) / 2)
-    n_dims = 2 if shifts_z is None else 3
-    rij = np.zeros((n_pairs, n_dims))
-    A = np.zeros((n_pairs, n_channels - 1))
-    flag = 0
-    for i in range(n_channels - 1):
-        for j in range(i + 1, n_channels):
-            rij[flag, 0] = shifts_y[i, j]
-            rij[flag, 1] = shifts_x[i, j]
-            if n_dims == 3:
-                rij[flag, 2] = shifts_z[i, j]
-            A[flag, i:j] = 1
-            flag += 1
-    Dj = np.dot(np.linalg.pinv(A), rij)
-    shift_y = np.insert(np.cumsum(Dj[:, 0]), 0, 0)
-    shift_x = np.insert(np.cumsum(Dj[:, 1]), 0, 0)
-    if n_dims == 2:
-        return shift_y, shift_x
+    n_segments = shifts_x.shape[0]
+    # in the order of the returned shifts: y, x, z
+    measured = [shifts_y, shifts_x] + ([] if shifts_z is None else [shifts_z])
+    for shifts in measured:
+        if np.shape(shifts) != (n_segments, n_segments):
+            raise ValueError(
+                "The shifts must have the shape (n_segments, n_segments)."
+            )
+    if weights is None:
+        dim_weights = [None] * len(measured)
     else:
-        shift_z = np.insert(np.cumsum(Dj[:, 2]), 0, 0)
-        return shift_y, shift_x, shift_z
+        if np.ndim(weights) == 2:
+            weights = [weights] * len(measured)
+        elif len(weights) != len(measured):
+            raise ValueError(
+                f"{len(weights)} weight arrays given for {len(measured)} "
+                "dimensions."
+            )
+        else:  # x, y(, z) -> y, x(, z)
+            weights = [weights[1], weights[0], *weights[2:]]
+        dim_weights = []
+        for weights_ in weights:
+            weights_ = np.asarray(weights_, dtype=np.float64)
+            if weights_.shape != (n_segments, n_segments):
+                raise ValueError(
+                    "The weights must have the shape (n_segments, n_segments)."
+                )
+            dim_weights.append(weights_)
+    rows, columns = np.triu_indices(n_segments, 1)
+    n_pairs = len(rows)
+    # unknowns: the steps between consecutive segments, whose cumulative
+    # sums are the shifts; pair (i, j) sums the steps i to j - 1
+    A = np.zeros((n_pairs, n_segments - 1))
+    for flag, (i, j) in enumerate(zip(rows, columns)):
+        A[flag, i:j] = 1
+    # the shifts from the steps
+    to_shifts = np.tril(np.ones((n_segments - 1, n_segments - 1)))
+    results, covariances = [], []
+    for shifts, weights_ in zip(measured, dim_weights):
+        r = np.asarray(shifts, dtype=np.float64)[rows, columns]
+        if weights_ is None:
+            w = np.ones(n_pairs)
+        else:
+            w = weights_[rows, columns]
+            if not (w >= 0).all():
+                raise ValueError("The weights must not be negative or NaN.")
+        valid = np.isfinite(r) & (w > 0)
+        if valid.all() and weights_ is None:
+            steps = np.dot(np.linalg.pinv(A), r)  # the original solution
+        else:
+            if not _pairs_connect(rows[valid], columns[valid], n_segments):
+                raise ValueError(
+                    "The measured pairs do not connect every segment to "
+                    "the first one, so their shifts are undetermined."
+                )
+            A_valid = A[valid]
+            normal = A_valid.T @ (w[valid, None] * A_valid)
+            steps = np.linalg.solve(normal, A_valid.T @ (w[valid] * r[valid]))
+        results.append(np.insert(np.cumsum(steps), 0, 0))
+        if return_covariance:
+            covariance = np.zeros((n_segments, n_segments))
+            if n_segments > 1:
+                A_valid = A[valid]
+                normal = A_valid.T @ (w[valid, None] * A_valid)
+                steps_covariance = np.linalg.inv(normal)
+                if weights_ is None:
+                    # the variance of the measured shifts from the
+                    # residuals
+                    n_free = int(valid.sum()) - (n_segments - 1)
+                    residuals = r[valid] - A_valid @ steps
+                    steps_covariance *= (
+                        residuals @ residuals / n_free if n_free else np.nan
+                    )
+                covariance[1:, 1:] = to_shifts @ steps_covariance @ to_shifts.T
+            covariances.append(covariance)
+    if return_covariance:
+        return *results, tuple(covariances)
+    return tuple(results)
+
+
+def _pairs_connect(
+    rows: IntArray1D,
+    columns: IntArray1D,
+    n_segments: int,
+) -> bool:
+    """Whether the pairs ``(rows[k], columns[k])`` connect every one of
+    ``n_segments`` segments to the first one."""
+    neighbors = [[] for _ in range(n_segments)]
+    for i, j in zip(rows, columns):
+        neighbors[i].append(j)
+        neighbors[j].append(i)
+    reached = {0}
+    queue = [0]
+    while queue:
+        for neighbor in neighbors[queue.pop()]:
+            if neighbor not in reached:
+                reached.add(neighbor)
+                queue.append(neighbor)
+    return len(reached) == n_segments
 
 
 def n_futures_done(futures: list[Future]) -> int:

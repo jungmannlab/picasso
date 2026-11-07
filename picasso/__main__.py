@@ -1786,11 +1786,17 @@ def _dark(files: str) -> None:
 
 
 def _align(
-    files: str, display: bool, remove_non_overlapping: bool = False
+    files: str,
+    display: bool,
+    remove_non_overlapping: bool = False,
+    method: str = "rcc",
+    max_shift: float = 500.0,
 ) -> None:
-    """Align localization files using RCC, see ``postprocess.align_rcc``
-    for details. If ``remove_non_overlapping``, the localizations
-    outside the region where all aligned files overlap are removed."""
+    """Align localization files by RCC or by the displacements between
+    their localizations (``method="points"``, searching shifts up to
+    ``max_shift`` nm), see ``postprocess.align`` for details. If
+    ``remove_non_overlapping``, the localizations outside the region
+    where all aligned files overlap are removed."""
     from glob import glob
     from itertools import chain
     from .io import load_locs, save_locs
@@ -1804,14 +1810,28 @@ def _align(
     locs_infos = [load_locs(_) for _ in files]
     locs = [_[0] for _ in locs_infos]
     infos = [_[1] for _ in locs_infos]
-    aligned_locs, aligned_infos = align(
-        locs,
-        infos,
-        method="rcc",
-        display=display,
-        keep_non_overlapping=not remove_non_overlapping,
-        paths=files,
-    )
+    try:
+        aligned_locs, aligned_infos = align(
+            locs,
+            infos,
+            method=method,
+            max_shift=max_shift,
+            display=display,
+            keep_non_overlapping=not remove_non_overlapping,
+            paths=files,
+        )
+    except ValueError as e:
+        raise SystemExit(str(e))
+    if method == "points":
+        print("Shifts (nm):")
+        for file, info in zip(files, aligned_infos):
+            entry = info[-1]
+            print(
+                f"  {file}: x {entry['Shift x (nm)']:.2f} +/-"
+                f" {entry['Shift x uncertainty (nm)']:.2f}, y"
+                f" {entry['Shift y (nm)']:.2f} +/-"
+                f" {entry['Shift y uncertainty (nm)']:.2f}"
+            )
     for file, locs_, info in zip(files, aligned_locs, aligned_infos):
         base, ext = splitext(file)
         save_locs(base + "_align.hdf5", locs_, info)
@@ -6478,6 +6498,27 @@ def _build_parser() -> (
         "align", help="align one localization file to another"
     )
     align_parser.add_argument(
+        "-m",
+        "--method",
+        choices=["rcc", "points"],
+        default="rcc",
+        help=(
+            "how the shifts are found: rcc, the cross-correlation of the"
+            " rendered images, or points, the peak of the displacements"
+            " between the localizations, with an uncertainty"
+            " (default=rcc)"
+        ),
+    )
+    align_parser.add_argument(
+        "--max-shift",
+        type=float,
+        default=500.0,
+        help=(
+            "largest shift (nm) between two files searched for by"
+            " --method points (default=500)"
+        ),
+    )
+    align_parser.add_argument(
         "-d",
         "--display",
         help="display the mean shift per RCC iteration",
@@ -7131,7 +7172,13 @@ def main():  # noqa: C901
         elif args.command == "dark":
             _dark(args.files)
         elif args.command == "align":
-            _align(args.file, args.display, args.remove_non_overlapping)
+            _align(
+                args.file,
+                args.display,
+                args.remove_non_overlapping,
+                args.method,
+                args.max_shift,
+            )
         elif args.command == "join":
             _join(args.file, args.keep_index)
         elif args.command == "stitch":

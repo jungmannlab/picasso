@@ -80,6 +80,7 @@ Last change: 07-NOV-2026 CEST
 - `Colorblind-safe colors` checkbox in the Files dialog colors the channels magenta, green, cyan, blue, and so on, which people with red-green color blindness can tell apart. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-view.html#render-default-colors).
 - The Info dialog shows the median localization precision of any loaded channel.
 - *Align channels* can remove the localizations that lie outside the overlap of the aligned channels. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-postprocess.html#render-align-non-overlapping).
+- *Align channels* can align from the displacements between the localizations, without rendering images and with the uncertainty of each shift. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-postprocess.html#render-align-channels).
 - Optional confirmation before `File > Remove all localizations`, turned on with the user setting `Confirm removing all localizations` (off by default). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-file.html#render-remove-all-localizations).
 - Fixed: closing a channel in Render did not remove its drift data, so the drift of the channels after it was misaligned.
 - Fixed: the pick statistics of the Info dialog showed meaningless huge numbers when a pick held no localizations (also in `picasso.postprocess.evaluate_picks`, which now gives NaN for such picks).
@@ -170,6 +171,7 @@ The [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html)
 ### Others
 - Many plots are now customizable.
 - `picasso.registration.register_to_template` registers points onto a template without known correspondences, e.g., the docking sites resolved in a DNA origami onto its design, with a rigid transform that tolerates missing and extra points and may reflect.
+- `picasso.lib.minimize_shifts`, which finds the shift of each time segment or channel from the shifts measured between pairs of them, weights the pairs (e.g., by the inverse variance of their shifts), leaves out pairs that were not measured (NaN) and returns the covariance of the shifts.
 - Customizable scale bar, see the [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html). The structure preview can now print the length of its scale bar.
 - High contrast (`File > Appearance... > Contrast`): black and white text and backgrounds, and frames in the color of the text around buttons, input fields and tables. By default it follows macOS's *Increase contrast* and Windows' contrast themes. See the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#appearance).
 - Screen readers (VoiceOver, Narrator, Orca) announce the input fields of all Picasso windows by their labels, fields in tables by their column and icon-only buttons by their tooltip. See the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#accessibility). Note this is an experimental feature, if there is room for improvement, please raise a [GitHub issue](https://github.com/jungmannlab/picasso/issues)
