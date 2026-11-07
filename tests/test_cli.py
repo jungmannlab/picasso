@@ -1269,9 +1269,13 @@ def test_spinna_batch_area_from_the_metadata(
     assert row["Area (um^2)"] == 25.0
 
 
-def test_spinna_batch_fits_the_labeling_efficiency(tmp_path, monkeypatch):
+@pytest.mark.parametrize("bootstrap", [False, True])
+def test_spinna_batch_fits_the_labeling_efficiency(
+    bootstrap, tmp_path, monkeypatch
+):
     """Half of A and half of B form heterodimers 10 nm apart, so both
-    labeling efficiencies are 50%."""
+    labeling efficiencies are 50%; with bootstrapping, they are given
+    with their uncertainty."""
     rng = np.random.default_rng(0)
     a = rng.uniform(0, 5000, (400, 2))
     b = np.vstack([a[:200] + [10, 0], rng.uniform(0, 5000, (200, 2))])
@@ -1289,13 +1293,23 @@ def test_spinna_batch_fits_the_labeling_efficiency(tmp_path, monkeypatch):
         "NND_bin": 4,
         "NND_maxdist": 200,
     }
-    results = _spinna(monkeypatch, tmp_path, row)
+    if bootstrap:
+        path = tmp_path / "params.csv"
+        pd.DataFrame([row]).to_csv(path, index=False)
+        _picasso(monkeypatch, "spinna", "-p", path, "-a", "-b")
+        results = str(tmp_path / "params__fitting_results")
+    else:
+        results = _spinna(monkeypatch, tmp_path, row)
     (summary,) = pd.read_csv(
         os.path.join(results, "summary_results.csv")
     ).to_dict("records")
     for target in "AB":
-        fitted = summary[f"Fitted labeling efficiency (%) for {target}"]
-        assert fitted == pytest.approx(50, abs=15)
+        fitted = str(summary[f"Fitted labeling efficiency (%) for {target}"])
+        mean, *std = fitted.split(" +/- ")
+        assert float(mean) == pytest.approx(50, abs=15)
+        assert len(std) == bootstrap
+        if bootstrap:
+            assert float(std[0]) >= 0
     assert os.path.exists(os.path.join(results, "le_NND_A_B.png"))
 
 

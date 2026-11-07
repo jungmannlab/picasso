@@ -2238,6 +2238,48 @@ def test_fit_le_reports_phases(mols_real):
     _assert_phases_end_at_maximum(recorder)
 
 
+def test_fit_le_bootstrap_std(mols_real):
+    coords = mols_real[["x", "y"]].to_numpy()
+
+    def fit_le(**kwargs):
+        # compare_models replaces the lists of label_unc by the fit
+        return spinna.fit_le(
+            target_a="A",
+            target_b="B",
+            exp_data={"A": coords, "B": coords},
+            # fine enough for the refits to find different candidates
+            granularity=40,
+            label_unc={"A": [3.0], "B": [3.0]},
+            distances=[10.0],
+            width=ROI,
+            height=ROI,
+            parallel=False,
+            fitting_mode="brute-force",
+            **kwargs,
+        )
+
+    np.random.seed(0)
+    recorder = _PhaseRecorder()
+    result = fit_le(bootstrap=True, progress=recorder)
+    assert len(result) == 7
+    le_values, le_std = result[0], result[6]
+    assert set(le_std) == set(le_values) == {"A", "B"}
+    assert all(np.isfinite(v) and v > 0 for v in le_std.values())
+    # the refits around the best fit come after the fit itself
+    labels = recorder.labels()
+    assert labels[0].startswith("[Round 1/1] Final comparison")
+    assert labels[1:] == [
+        f"Labeling efficiency uncertainty | Bootstrapping {i}/20"
+        for i in range(1, 21)
+    ]
+    _assert_phases_end_at_maximum(recorder)
+    # without bootstrapping, the same best fit and no le_std
+    np.random.seed(0)
+    unbootstrapped = fit_le()
+    assert len(unbootstrapped) == 6
+    assert unbootstrapped[0] == pytest.approx(le_values)
+
+
 @pytest.mark.slow
 def test_parallel_fit_reports_finished_candidates(small_spinner):
     # regression: the parallel fit set the label directly, bypassing

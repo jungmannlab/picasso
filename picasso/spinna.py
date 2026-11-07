@@ -4035,6 +4035,30 @@ class SPINNA:
         (opt_proportions, props_std) : tuple
         (score, score_std) : tuple
         """
+        boot_props, bootstrap_scores = self._bootstrap_samples(
+            N_structures, opt_N_structures, progress
+        )
+        score_std = np.std(bootstrap_scores)
+        props_std = np.std(boot_props, axis=0)
+        return (opt_proportions, props_std), (score, score_std)
+
+    def _bootstrap_samples(
+        self,
+        N_structures: lib.IntArray2D,
+        opt_N_structures: lib.IntArray1D,
+        progress: lib.Progress,
+    ) -> tuple[lib.FloatArray2D, lib.FloatArray1D]:
+        """Refit the structure proportions to data simulated from the
+        best fit, ``N_BOOTSTRAPS`` times, see :meth:`_run_bootstrap`.
+
+        Returns
+        -------
+        boot_props : lib.FloatArray2D
+            Best-fitting proportions of each bootstrap round, shape
+            (N_BOOTSTRAPS, n_structures).
+        bootstrap_scores : lib.FloatArray1D
+            Best KS2 score of each bootstrap round.
+        """
         exp_dists_gt = deepcopy(self.dists_gt)
         N_structures_subset = self.get_subset_N_structures(
             N_structures, opt_N_structures
@@ -4065,9 +4089,7 @@ class SPINNA:
         finally:
             # also when canceled, so the instance keeps the real data
             self.dists_gt = exp_dists_gt
-        score_std = np.std(bootstrap_scores)
-        props_std = np.std(boot_props, axis=0)
-        return (opt_proportions, props_std), (score, score_std)
+        return np.array(boot_props), np.array(bootstrap_scores)
 
     def _evaluate_single(self, N_row: lib.IntArray1D) -> float:
         """Evaluate a single candidate: simulate and score.
@@ -5079,7 +5101,11 @@ def fit_le(
     fitting_mode: Literal[
         "coarse-to-fine", "bayesian", "brute-force"
     ] = "coarse-to-fine",
-) -> tuple[dict, dict, float, float, lib.FloatArray1D, StructureMixer]:
+    bootstrap: bool = False,
+) -> (
+    tuple[dict, dict, float, float, lib.FloatArray1D, StructureMixer]
+    | tuple[dict, dict, float, float, lib.FloatArray1D, StructureMixer, dict]
+):
     """Fit labeling efficiency (LE) for two molecular target species.
 
     Builds the three required structures internally (monomer A, monomer B,
@@ -5133,6 +5159,15 @@ def fit_le(
     fitting_mode : {"coarse-to-fine", "bayesian", "brute-force"}, optional
         How the stoichiometry search space is explored; see
         :meth:`SPINNA.fit`. Default is "coarse-to-fine".
+    bootstrap : bool, optional
+        If True, the uncertainty of the LE values is estimated by
+        bootstrapping: data are simulated from the best fit 20 times,
+        the structure proportions are refitted near the best fit (see
+        :meth:`SPINNA.fit`), and the standard deviation of the LE
+        values of the refits is returned as ``le_std``. The refits can
+        only find the candidates of the search space, so a coarse
+        ``granularity`` limits it: if every refit finds the best fit
+        again, it is 0. Default is False.
 
     Returns
     -------
@@ -5150,6 +5185,9 @@ def fit_le(
     best_mixer : StructureMixer
         Mixer corresponding to the best fit (its ``structures`` attribute
         holds [monomer_a, monomer_b, heterodimer(best_distance)]).
+    le_std : dict
+        Only if ``bootstrap`` is True: standard deviation of the LE
+        value of each target over the bootstrap samples (percent).
 
     Raises
     ------
@@ -5185,34 +5223,94 @@ def fit_le(
     # proportions absorb the true LE (le is on the 0-1 scale internally)
     le = {target_a: 1.0, target_b: 1.0}
 
-    best_score, idx, fitted_label_unc, best_mixer, best_props = compare_models(
-        models=models,
-        exp_data=exp_data,
-        granularity=granularity,
-        label_unc=label_unc,
-        le=le,
-        N_sim=N_sim,
-        mask_dict=mask_dict,
-        width=width,
-        height=height,
-        depth=depth,
-        random_rot_mode=random_rot_mode,
-        parallel=parallel,
-        savedir=savedir,
-        progress=progress,
-        fitting_mode=fitting_mode,
-    )
+    with lib.tracked_progress(
+        progress, "Spinning structures", unit="candidate"
+    ) as progress:
+        best_score, idx, fitted_label_unc, best_mixer, best_props = (
+            compare_models(
+                models=models,
+                exp_data=exp_data,
+                granularity=granularity,
+                label_unc=label_unc,
+                le=le,
+                N_sim=N_sim,
+                mask_dict=mask_dict,
+                width=width,
+                height=height,
+                depth=depth,
+                random_rot_mode=random_rot_mode,
+                parallel=parallel,
+                savedir=savedir,
+                progress=progress,
+                fitting_mode=fitting_mode,
+            )
+        )
+        best_distance = float(distances[idx])
+        le_values = get_le_from_props(best_mixer.structures, best_props)
+        result = (
+            le_values,
+            fitted_label_unc,
+            best_distance,
+            best_score,
+            best_props,
+            best_mixer,
+        )
+        if not bootstrap:
+            return result
+        le_std = _le_std_from_bootstrap(
+            best_mixer, exp_data, best_props, granularity, N_sim, progress
+        )
+    return result + (le_std,)
 
-    best_distance = float(distances[idx])
-    le_values = get_le_from_props(best_mixer.structures, best_props)
-    return (
-        le_values,
-        fitted_label_unc,
-        best_distance,
-        best_score,
-        best_props,
-        best_mixer,
+
+def _le_std_from_bootstrap(
+    mixer: StructureMixer,
+    exp_data: dict,
+    best_props: lib.FloatArray1D,
+    granularity: int,
+    N_sim: int,
+    progress: lib.Progress,
+) -> dict:
+    """Standard deviation of the LE values of ``fit_le`` over bootstrap
+    samples simulated from its best fit (``mixer`` and
+    ``best_props``), see :meth:`SPINNA._run_bootstrap`.
+
+    The LE of each sample is taken from its structure proportions, so
+    that the correlation of the proportions (which sum to 1) is kept.
+
+    Returns
+    -------
+    le_std : dict
+        Standard deviation of the LE value of each target (percent).
+    """
+    # as in compare_models_given_label_unc, with LE = 100% in the fit
+    N_total = {target: len(coords) for target, coords in exp_data.items()}
+    search_space = generate_N_structures(
+        mixer.structures, N_total, granularity
     )
+    if isinstance(search_space, dict):
+        search_space = mixer.convert_N_structures_to_array(search_space)
+    # the candidate of the best fit
+    props = np.atleast_2d(mixer.convert_counts_to_props(search_space))
+    opt_N_structures = search_space[
+        np.argmin(np.abs(props - best_props).sum(axis=1))
+    ]
+    spinner = SPINNA(
+        mixer=mixer,
+        gt_coords=exp_data,
+        N_sim=N_sim,
+        progress_title="Labeling efficiency uncertainty",
+    )
+    boot_props, _ = spinner._bootstrap_samples(
+        search_space, opt_N_structures, progress
+    )
+    le_samples = [
+        get_le_from_props(mixer.structures, sample) for sample in boot_props
+    ]
+    return {
+        target: float(np.std([le[target] for le in le_samples]))
+        for target in le_samples[0]
+    }
 
 
 def check_structures_valid_for_fitting(structures: list[Structure]) -> bool:
@@ -5286,7 +5384,8 @@ def get_le_from_props(
         List of the structures used for fitting.
     opt_props : lib.FloatArray1D or tuple
         Fitted proportions of the structures. If bootstraping was used,
-        the tuple is accepted and only the mean value is used.
+        the tuple is accepted and only the mean value is used; for the
+        uncertainty of the LE values, see ``fit_le(bootstrap=True)``.
 
     Returns
     -------
@@ -5768,8 +5867,11 @@ def _spinna_collect_le_fit_results(
     distances_search: list | None,
     best_distance: float | None,
     le_values: dict | None,
+    le_std: dict | None = None,
 ) -> dict:
-    """Assemble the results dict for an LE-fitting row."""
+    """Assemble the results dict for an LE-fitting row; with
+    bootstrapping (``le_std``), each LE is given as "mean +/- s.d.".
+    """
     results: dict = {
         "Molecular targets": targets,
         "File location of experimental data": [
@@ -5799,9 +5901,10 @@ def _spinna_collect_le_fit_results(
         )
     if le_values is not None:
         for target in targets:
-            results[f"Fitted labeling efficiency (%) for {target}"] = (
-                f"{float(le_values[target]):.2f}"
-            )
+            le_text = f"{float(le_values[target]):.2f}"
+            if le_std is not None:
+                le_text += f" +/- {float(le_std[target]):.2f}"
+            results[f"Fitted labeling efficiency (%) for {target}"] = le_text
     results["Best fitting structure proportions (%)"] = ", ".join(
         f"{s.title}: {float(p):.2f}" for s, p in zip(structures, opt_props)
     )
@@ -5921,6 +6024,7 @@ def _spinna_collect_results(
     distances_search: list | None = None,
     best_distance: float | None = None,
     le_values: dict | None = None,
+    le_std: dict | None = None,
 ) -> dict:
     """Assemble the full results dict from fitting output.
 
@@ -5953,6 +6057,7 @@ def _spinna_collect_results(
                 distances_search,
                 best_distance,
                 le_values,
+                le_std,
             )
         )
     else:
@@ -6178,6 +6283,7 @@ def _spinna_process_row(
             random_rot_mode=random_rot_mode,
             save_filename=save_filename,
             parallel=parallel,
+            bootstrap=bootstrap,
             progress=progress,
             fitting_mode=fitting_mode,
         )
@@ -6275,12 +6381,14 @@ def _spinna_process_row_le(
     random_rot_mode: str | None,
     save_filename: str,
     parallel: bool,
+    bootstrap: bool,
     progress: lib.Progress,
     fitting_mode: str | None,
 ) -> dict:
     """LE-fitting branch of ``_spinna_process_row``: builds monomer/
     heterodimer structures via ``spinna.fit_le`` and recovers per-target
-    LE from the fitted structure proportions."""
+    LE from the fitted structure proportions (with their uncertainty if
+    ``bootstrap``)."""
     distances = _spinna_parse_distances(row)
     mask_dict, width, height, depth = _spinna_compute_roi(
         targets,
@@ -6297,14 +6405,7 @@ def _spinna_process_row_le(
     label_unc_input = {t: list(v) for t, v in label_unc.items()}
     distances_input = list(distances)
 
-    (
-        le_values,
-        fitted_label_unc,
-        best_distance,
-        score,
-        best_props,
-        best_mixer,
-    ) = fit_le(
+    fitted = fit_le(
         target_a=targets[0],
         target_b=targets[1],
         exp_data=exp_data,
@@ -6323,7 +6424,11 @@ def _spinna_process_row_le(
         fitting_mode=(
             fitting_mode if fitting_mode is not None else "bayesian"
         ),
+        bootstrap=bootstrap,
     )
+    le_values, fitted_label_unc, best_distance, score, best_props = fitted[:5]
+    best_mixer = fitted[5]
+    le_std = fitted[6] if bootstrap else None
 
     structures = best_mixer.structures
     results = _spinna_collect_results(
@@ -6351,6 +6456,7 @@ def _spinna_process_row_le(
         distances_search=distances_input,
         best_distance=best_distance,
         le_values=le_values,
+        le_std=le_std,
     )
 
     with open(f"{save_filename}_fit_summary.txt", "w") as f:
@@ -6450,9 +6556,9 @@ def batch_analysis(
         ``label_unc_TARGET``, and the per-target LE is recovered from
         the fitted structure proportions. Exactly two ``exp_data_*``
         columns must be present; the first column maps to ``target_a``.
-        ``-b/--bootstrap`` is ignored on LE-fitting rows. For more
-        details about the LE fitting, see Hellmeier, Strauss, et al.
-        Nature Methods, 2024.
+        With ``bootstrap`` (``-b/--bootstrap``), each LE is given with
+        its uncertainty, see ``fit_le``. For more details about the LE
+        fitting, see Hellmeier, Strauss, et al. Nature Methods, 2024.
     - "distances" : Comma-separated list of candidate heterodimer
         distances in nm (e.g. ``"5,10,15,20"``). A single value fixes
         the distance. Required when ``le_fitting=1``; ignored

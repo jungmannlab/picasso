@@ -3560,7 +3560,9 @@ class SimulationsTab(lib.Dialog):
 
         self.bootstrap_check = QtWidgets.QCheckBox("Bootstrap")
         self.bootstrap_check.setToolTip(
-            "Perform bootstrap analysis during fitting?"
+            "Perform bootstrap analysis during fitting? With Fit labeling"
+            "\nefficiency, it gives the uncertainty of the labeling"
+            "\nefficiencies."
         )
         self.bootstrap_check.setChecked(False)
         fitting_layout.addWidget(self.bootstrap_check, 1, 1)
@@ -4573,29 +4575,31 @@ class SimulationsTab(lib.Dialog):
             "Brute force": "brute-force",
         }[self.settings_dialog.fitting_mode.currentText()]
 
+        bootstrap = self.bootstrap_check.isChecked()
         try:
-            le_values, best_lunc, best_d, score, props, best_mixer = (
-                spinna.fit_le(
-                    target_a=self.targets[0],
-                    target_b=self.targets[1],
-                    exp_data=self.exp_data,
-                    granularity=self.granularity,
-                    label_unc=label_unc,
-                    distances=distances,
-                    N_sim=self.n_sim_fit,
-                    mask_dict=base_mixer.mask_dict,
-                    width=base_mixer.roi[0],
-                    height=base_mixer.roi[1],
-                    depth=base_mixer.roi[2],
-                    random_rot_mode=base_mixer.random_rot_mode,
-                    parallel=self.settings_dialog.parallel_check.isChecked(),
-                    savedir=savedir,
-                    progress=progress,
-                    fitting_mode=fitting_mode,
-                )
+            fitted = spinna.fit_le(
+                target_a=self.targets[0],
+                target_b=self.targets[1],
+                exp_data=self.exp_data,
+                granularity=self.granularity,
+                label_unc=label_unc,
+                distances=distances,
+                N_sim=self.n_sim_fit,
+                mask_dict=base_mixer.mask_dict,
+                width=base_mixer.roi[0],
+                height=base_mixer.roi[1],
+                depth=base_mixer.roi[2],
+                random_rot_mode=base_mixer.random_rot_mode,
+                parallel=self.settings_dialog.parallel_check.isChecked(),
+                savedir=savedir,
+                progress=progress,
+                fitting_mode=fitting_mode,
+                bootstrap=bootstrap,
             )
         finally:
             progress.close()
+        le_values, best_lunc, best_d, score, props, best_mixer = fitted[:6]
+        le_std = fitted[6] if bootstrap else None
 
         # push fitted label_unc back into the simulations-tab spin boxes
         for spin, l in zip(self.label_unc_spins, best_lunc.values()):
@@ -4623,17 +4627,18 @@ class SimulationsTab(lib.Dialog):
         lunc_text = ", ".join(
             f"{t}={float(v):.2f} nm" for t, v in best_lunc.items()
         )
-        text = (
-            f"LE {self.targets[0]}: {le_values[self.targets[0]]:.1f}%, "
-            f"LE {self.targets[1]}: {le_values[self.targets[1]]:.1f}%, "
-            f"distance: {best_d:.2f} nm, "
-            f"label_unc: {lunc_text}"
+        le_text = ", ".join(
+            f"LE {t}: {le_values[t]:.1f}%"
+            + (f" +/- {le_std[t]:.1f}%" if le_std is not None else "")
+            for t in self.targets
         )
+        text = f"{le_text}, distance: {best_d:.2f} nm, label_unc: {lunc_text}"
         self.fit_results_display.setText(text)
 
         # save a .txt summary of the fit
         self._save_le_fit_summary(
             le_values=le_values,
+            le_std=le_std,
             best_lunc=best_lunc,
             best_d=best_d,
             score=score,
@@ -4682,6 +4687,7 @@ class SimulationsTab(lib.Dialog):
         self,
         *,
         le_values: dict,
+        le_std: dict | None,
         best_lunc: dict,
         best_d: float,
         score: float,
@@ -4691,7 +4697,8 @@ class SimulationsTab(lib.Dialog):
     ) -> None:
         """Write a .txt summary of the Fit LE results, mirroring the
         format produced by ``save_fit_results`` for the stoichiometry
-        fit."""
+        fit; with bootstrapping (``le_std``), each LE is given as
+        "mean +/- s.d."."""
         metadata = {
             "Date": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
             "Molecular targets": ", ".join(self.targets),
@@ -4719,9 +4726,10 @@ class SimulationsTab(lib.Dialog):
         )
         metadata["Fitted heterodimer distance (nm)"] = f"{best_d:.4f}"
         for target in self.targets:
-            metadata[f"Fitted labeling efficiency (%) ({target})"] = (
-                f"{float(le_values[target]):.2f}"
-            )
+            le_text = f"{float(le_values[target]):.2f}"
+            if le_std is not None:
+                le_text += f" +/- {float(le_std[target]):.2f}"
+            metadata[f"Fitted labeling efficiency (%) ({target})"] = le_text
         metadata["Best fitting structure proportions (%)"] = ", ".join(
             f"{structure.title}: {float(p):.2f}"
             for structure, p in zip(self.structures, props)

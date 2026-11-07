@@ -332,6 +332,13 @@ below the button and the label uncertainties are set in the *Load data* box.
 The LEs in the *Load data* box are set to 100%. A summary can be saved as
 a .txt file.
 
+With *Bootstrap* checked, each LE is given with its uncertainty (mean +/-
+s.d.): data are simulated 20 times from the best fit, the structure
+proportions are refitted near it and the standard deviation of their LEs is
+reported. The refits can only find the candidates of the search space, so a
+coarse granularity limits the uncertainty (it is 0 if every refit finds the
+best fit again).
+
 .. dropdown:: Python
    :icon: code
    :class-container: api-example
@@ -351,6 +358,9 @@ a .txt file.
           N_sim=N_SIM,
           width=ROI, height=ROI,
       )
+
+   With ``bootstrap=True``, ``fit_le`` returns the uncertainty of each LE
+   (``le_std``, percent) as a seventh value.
 
 .. _spinna-fitting-modes:
 
@@ -763,7 +773,8 @@ Optional columns are:
        - the per-target LE is recovered from the fitted structure proportions;
        - exactly two ``exp_data_*`` columns must be present; the first maps to
          ``target_a``;
-       - ``-b/--bootstrap`` is ignored on LE-fitting rows.
+       - with ``-b/--bootstrap``, each LE is given with its uncertainty
+         (mean +/- s.d.), see :ref:`spinna-le-fitting`.
 
        For more details, see
        `Hellmeier, Strauss, et al. Nature Methods, 2024 <https://doi.org/10.1038/s41592-024-02242-5>`_.
