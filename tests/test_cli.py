@@ -10,6 +10,7 @@ argument parsing, the wiring to the analysis and the output files.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 
@@ -1366,7 +1367,7 @@ def test_spinna_batch_of_two_targets_with_bootstrap(tmp_path, monkeypatch):
 
 
 def test_spinna_batch_without_rotations(
-    spinna_row, tmp_path, monkeypatch, capsys
+    spinna_row, tmp_path, monkeypatch, caplog
 ):
     from picasso import spinna
 
@@ -1379,8 +1380,9 @@ def test_spinna_batch_without_rotations(
 
     monkeypatch.setattr(spinna, "StructureMixer", RecordingMixer)
     spinna_row["rotation_mode"] = "None"
-    results = _spinna(monkeypatch, tmp_path, spinna_row)
-    assert "Invalid rotation_mode" not in capsys.readouterr().out
+    with caplog.at_level(logging.WARNING, logger="picasso.spinna"):
+        results = _spinna(monkeypatch, tmp_path, spinna_row)
+    assert "Invalid rotation_mode" not in caplog.text
     assert modes == [None]
     (row,) = pd.read_csv(
         os.path.join(results, "summary_results.csv"), keep_default_na=False
@@ -1392,11 +1394,12 @@ def test_spinna_batch_without_rotations(
     "value, message", [("", False), ("4D", True)], ids=["empty", "invalid"]
 )
 def test_spinna_batch_default_rotations(
-    value, message, spinna_row, tmp_path, monkeypatch, capsys
+    value, message, spinna_row, tmp_path, monkeypatch, caplog
 ):
     spinna_row["rotation_mode"] = value
-    results = _spinna(monkeypatch, tmp_path, spinna_row)
-    assert ("Invalid rotation_mode '4D'" in capsys.readouterr().out) is message
+    with caplog.at_level(logging.WARNING, logger="picasso.spinna"):
+        results = _spinna(monkeypatch, tmp_path, spinna_row)
+    assert ("Invalid rotation_mode '4D'" in caplog.text) is message
     (row,) = pd.read_csv(os.path.join(results, "summary_results.csv")).to_dict(
         "records"
     )

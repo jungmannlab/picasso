@@ -647,6 +647,18 @@ script directly.
                  )
          pd.DataFrame(rows).to_csv("spinna_batch.csv", index=False)
 
+      A parameters file (see below) runs as on the command line with
+      ``spinna.batch_analysis``, which returns the folder with the results
+      and the summary of all rows:
+
+      .. code-block:: python
+
+         from picasso import spinna
+
+         result_dir, summary = spinna.batch_analysis(
+             "parameters.csv", progress="console"
+         )
+
 .. _spinna-batch-columns:
 
 Parameters file

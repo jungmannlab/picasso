@@ -197,8 +197,31 @@ def test_find_target_counts_missing_target_zero(monomer_dimer_structures):
 def test_targets_from_structures_is_unique_and_order_preserving(
     het_structures,
 ):
-    targets = spinna._targets_from_structures(het_structures)
+    targets = spinna.targets_from_structures(het_structures)
     assert targets == ["A", "B"]
+
+
+def test_fit_label_uncertainty_with_one_value_fits_nothing(
+    monomer_dimer_structures, monkeypatch
+):
+    def fail(*args, **kwargs):
+        raise AssertionError("nothing may be fitted")
+
+    monkeypatch.setattr(spinna, "compare_models_given_label_unc", fail)
+    label_unc = {"target": [4.0]}
+    fitted, scores = spinna.fit_label_uncertainty(
+        [monomer_dimer_structures],
+        {"target": np.zeros((10, 2))},
+        3,
+        label_unc,
+        {"target": LE},
+        width=ROI,
+        height=ROI,
+        parallel=False,
+    )
+    assert fitted == {"target": 4.0}
+    assert scores == {}
+    assert label_unc == {"target": [4.0]}  # not modified
 
 
 def test_get_structures_permutation_homo_dimer(monomer_dimer_structures):
@@ -1767,6 +1790,40 @@ def test_compare_models_full_fits_label_unc(
     assert label_unc_out["target"] in (3.0, 6.0)
     assert isinstance(best_mixer, StructureMixer)
     assert len(best_props) == 2
+
+
+@pytest.mark.slow
+def test_fit_label_uncertainty_scores_each_candidate(
+    mols_real, monomer_dimer_structures
+):
+    coords = mols_real[["x", "y"]].to_numpy()
+    models = [monomer_dimer_structures]
+    kwargs = dict(
+        exp_data={"target": coords},
+        granularity=3,
+        le={"target": LE},
+        width=ROI,
+        height=ROI,
+        N_sim=1,
+        parallel=False,
+    )
+    label_unc = {"target": [3.0, 6.0]}
+    np.random.seed(0)
+    fitted, scores = spinna.fit_label_uncertainty(
+        models, label_unc=label_unc, **kwargs
+    )
+    assert label_unc == {"target": [3.0, 6.0]}  # not modified
+    assert scores["target"]["candidates"] == [3.0, 6.0]
+    target_scores = scores["target"]["scores"]
+    assert len(target_scores) == 2
+    assert np.isfinite(target_scores).all()
+    best = scores["target"]["candidates"][int(np.argmin(target_scores))]
+    assert fitted == {"target": best}
+    # the first step of compare_models
+    np.random.seed(0)
+    label_unc_compared = {"target": [3.0, 6.0]}
+    spinna.compare_models(models, label_unc=label_unc_compared, **kwargs)
+    assert label_unc_compared == fitted
 
 
 def test_fit_le_smoke(mols_real):

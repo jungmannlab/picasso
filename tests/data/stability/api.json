@@ -348,8 +348,11 @@
   "get_NN_dist_simulated",
   "NND_score",
   "plot_NN",
+  "targets_from_structures",
+  "fit_label_uncertainty",
   "compare_models",
-  "fit_le"
+  "fit_le",
+  "batch_analysis"
  ],
  "picasso.spline": [
   "calibrate_spline",

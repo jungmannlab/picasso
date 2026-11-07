@@ -11,6 +11,7 @@ stoichiometries of oligomerization states.
 
 from __future__ import annotations
 
+import logging
 import os
 import time
 import warnings
@@ -35,6 +36,8 @@ from sklearn.exceptions import ConvergenceWarning
 
 from . import io, lib, masking, render
 
+_log = logging.getLogger(__name__)
+
 __all__ = [
     "Structure",
     "StructureMixer",
@@ -46,8 +49,11 @@ __all__ = [
     "get_NN_dist_simulated",
     "NND_score",
     "plot_NN",
+    "targets_from_structures",
+    "fit_label_uncertainty",
     "compare_models",
     "fit_le",
+    "batch_analysis",
 ]
 
 
@@ -188,8 +194,20 @@ def _get_structures_permutation(t_counts: lib.FloatArray2D) -> lib.IntArray1D:
     return perm
 
 
-def _targets_from_structures(structures: list[Structure]) -> list[str]:
-    """Extract the unique names of molecular targets in structures."""
+def targets_from_structures(structures: list[Structure]) -> list[str]:
+    """Return the names of the molecular targets in structures.
+
+    Parameters
+    ----------
+    structures : list of Structure
+        Structures, e.g., a SPINNA model.
+
+    Returns
+    -------
+    targets : list of str
+        Unique names of the molecular targets, in the order in which
+        they first appear in ``structures``.
+    """
     targets = []
     for structure in structures:
         for target in structure.targets:
@@ -380,7 +398,7 @@ def generate_N_structures(
         iteration. Keys are the names of the structures and values
         are lists of integers.
     """
-    targets = _targets_from_structures(structures)
+    targets = targets_from_structures(structures)
 
     # number of molecular targets in each structure; each row gives one
     # target species and each column gives one structure
@@ -4353,10 +4371,13 @@ def _fit_label_unc_for_target(
     -------
     best_l_unc : float
         The label-uncertainty value that produced the lowest KS2 score.
+    scores : list of float or None
+        KS2 score of each candidate value, or None if only one value
+        was given (and nothing was fitted).
     """
     l_unc = label_unc[target]
     if len(l_unc) == 1:
-        return l_unc[0]
+        return float(l_unc[0]), None
 
     # build models containing only the target's monomers
     target_models = [
@@ -4369,6 +4390,7 @@ def _fit_label_unc_for_target(
 
     best_score = np.inf
     best_l_unc = 5.0
+    scores = []
     for k, l_unc_ in enumerate(l_unc):
         progress_title = (
             f"Fitting label uncertainty for {target}: "
@@ -4397,10 +4419,198 @@ def _fit_label_unc_for_target(
             round_counter=round_counter,
             total_rounds=total_rounds,
         )[0]
+        scores.append(float(score))
         if score < best_score:
             best_score = score
             best_l_unc = l_unc_
-    return float(best_l_unc)
+    return float(best_l_unc), scores
+
+
+def _fit_label_uncertainties(
+    targets: list[str],
+    models: list[list[Structure]],
+    label_unc: dict,
+    nn_counts_keys: list,
+    progress: lib.Progress,
+    round_counter: list,
+    total_rounds: int,
+    **fit_kwargs,
+) -> tuple[dict, dict]:
+    """Fit the label uncertainty of each target in turn, see
+    :func:`fit_label_uncertainty`, with a normalized tracker and the
+    round counting of :func:`compare_models`.
+
+    While one target is fitted, the other targets take the first of
+    their candidate values. ``fit_kwargs`` are the remaining arguments
+    of :func:`_fit_label_unc_for_target`.
+
+    Returns
+    -------
+    fitted : dict
+        Best-fitting label uncertainty (nm) of each target in
+        ``targets``.
+    scores : dict
+        For each target with more than one candidate value, a dict
+        with "candidates" (nm) and "scores" (KS2 score of each).
+    """
+    # used for the fitting of label uncertainties, each target must be
+    # specified
+    label_unc_start = {
+        target: float(lunc[0]) for target, lunc in label_unc.items()
+    }
+    fitted = {}
+    scores = {}
+    for target in targets:
+        fitted[target], target_scores = _fit_label_unc_for_target(
+            target=target,
+            models=models,
+            label_unc=label_unc,
+            label_unc_input_=label_unc_start,
+            nn_counts_keys=nn_counts_keys,
+            progress=progress,
+            round_counter=round_counter,
+            total_rounds=total_rounds,
+            **fit_kwargs,
+        )
+        if target_scores is not None:
+            scores[target] = {
+                "candidates": [float(c) for c in label_unc[target]],
+                "scores": target_scores,
+            }
+    return fitted, scores
+
+
+def _nn_counts_keys(targets: list[str]) -> list[str]:
+    """Keys "target1-target2" of the NN counts of all pairs of
+    targets."""
+    return [
+        f"{target1}-{target2}"
+        for ii, target1 in enumerate(targets)
+        for target2 in targets[ii:]
+    ]
+
+
+def fit_label_uncertainty(
+    models: list[list[Structure]],
+    exp_data: dict,
+    granularity: int,
+    label_unc: dict,
+    le: dict,
+    N_sim: int = 1,
+    mask_dict: dict | None = None,
+    width: float | None = None,
+    height: float | None = None,
+    depth: float | None = None,
+    random_rot_mode: Literal["2D", "3D"] | None = "2D",
+    parallel: bool = True,
+    savedir: str = "",
+    progress: lib.Progress | Literal["console"] | None = None,
+    fitting_mode: Literal[
+        "coarse-to-fine", "bayesian", "brute-force"
+    ] = "coarse-to-fine",
+) -> tuple[dict, dict]:
+    """Fit the label uncertainty of each molecular target species.
+
+    For each target with more than one candidate value in
+    ``label_unc``, every candidate is scored by fitting the monomers of
+    that target (in each model) to the nearest neighbor distances of
+    the target to itself; the candidate with the lowest
+    Kolmogorov-Smirnov two-sample statistic (KS2) wins. While one
+    target is fitted, the other targets take the first of their
+    candidate values. This is the first step of
+    :func:`compare_models`, which then compares the models with the
+    fitted label uncertainties.
+
+    Parameters
+    ----------
+    models : list of lists of Structure
+        Each element contains the list of structures that form a SPINNA
+        model. Only the monomers (structures with a single molecule of
+        one target) are used.
+    exp_data : dict
+        Dictionary with molecular targets' names as keys and spatial
+        coordinates of the observed molecules as values.
+    granularity : int
+        Granularity as in ``generate_N_structures``.
+    label_unc : dict
+        Candidate label uncertainties (nm) of each molecular target
+        species, a list of floats per target. A list with one value
+        fixes the label uncertainty of that target. Not modified.
+    le : dict
+        Labeling efficiency of each molecular target species.
+    N_sim : int, optional
+        Number of times each simulation is repeated to obtain smoother
+        NND histograms. Default is 1.
+    mask_dict : dict or None, optional
+        Dictionary of the form {"mask": mask, "info": mask_info}, see
+        :func:`compare_models`. Default is None.
+    width, height, depth : float or None, optional
+        Width, height and depth of the simulated ROI in nm, see
+        :func:`compare_models`. Default is None.
+    random_rot_mode : {"2D", "3D"} or None, optional
+        Mode of random rotation of structures, see
+        :func:`compare_models`. Default is "2D".
+    parallel : bool, optional
+        If True, the candidates are scored in a pool of worker
+        processes (75% of the CPU cores, see ``lib.n_workers``); if
+        False, one after another in the calling process. Default is
+        True.
+    savedir : str, optional
+        Path to the directory where the fitting scores are saved as
+        .csv files. If "" is given, the files are not saved. Default
+        is "".
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Every stoichiometry fit (one per model
+        and candidate value) reports the phases of :meth:`SPINNA.fit`,
+        titled "[Round r/R] Fitting label uncertainty for <target>:
+        <value> nm (k/K) | model m/M". Default is None.
+    fitting_mode : {"coarse-to-fine", "bayesian", "brute-force"}, optional
+        How the stoichiometry search space is explored, see
+        :func:`compare_models`. Default is "coarse-to-fine".
+
+    Returns
+    -------
+    label_unc : dict
+        Best-fitting label uncertainty (nm) of each molecular target
+        species of the models, a float per target.
+    scores : dict
+        For each target with more than one candidate value, a dict with
+        "candidates" (the candidate label uncertainties, nm) and
+        "scores" (the KS2 score of each candidate; lower is better).
+    """
+    targets = targets_from_structures(models[0])
+    n_models = len(models)
+    total_rounds = sum(
+        len(label_unc[target]) * n_models
+        for target in targets
+        if len(label_unc[target]) > 1
+    )
+    with lib.tracked_progress(
+        progress, "Spinning structures", unit="candidate"
+    ) as progress:
+        return _fit_label_uncertainties(
+            targets=targets,
+            models=models,
+            label_unc=label_unc,
+            nn_counts_keys=_nn_counts_keys(targets),
+            progress=progress,
+            round_counter=[0],
+            total_rounds=total_rounds,
+            exp_data=exp_data,
+            granularity=granularity,
+            le=le,
+            mask_dict=mask_dict,
+            width=width,
+            height=height,
+            depth=depth,
+            random_rot_mode=random_rot_mode,
+            N_sim=N_sim,
+            parallel=parallel,
+            savedir=savedir,
+            fitting_mode=fitting_mode,
+        )
 
 
 def _compute_nn_counts(
@@ -4474,7 +4684,9 @@ def compare_models(
     label_unc : dict
         Dictionary specifying the label uncertainty for each molecular
         target species. Keys specify the species and values are lists
-        of floats.
+        of floats. The label uncertainties are fitted first (see
+        ``fit_label_uncertainty``), and the fitted values replace the
+        lists in ``label_unc``.
     le : dict
         Dictionary specifying the labeling efficiency for each
         molecular target species. Keys specify the species and values
@@ -4545,22 +4757,8 @@ def compare_models(
         data.
     """
     # extract the molecular targets from the models
-    targets = []
-    for structure in models[0]:
-        for target in structure.targets:
-            if target not in targets:
-                targets.append(target)
-
-    nn_counts = {}
-    for ii, target1 in enumerate(targets):
-        for target2 in targets[ii:]:
-            nn_counts[f"{target1}-{target2}"] = 0
-
-    # used for the fitting of label uncertainties, each target must be
-    # specified
-    label_unc_input_ = {
-        target: float(lunc[0]) for target, lunc in label_unc.items()
-    }
+    targets = targets_from_structures(models[0])
+    nn_counts = {key: 0 for key in _nn_counts_keys(targets)}
 
     # count the total number of SPINNA rounds (one per fit_stoichiometry
     # call) so the progress titles can show "Round X/Y"
@@ -4578,29 +4776,28 @@ def compare_models(
         # the structures that contain the target. The fitting can be
         # skipped if label_unc is already provided without the search
         # space.
-        for target in targets:
-            label_unc[target] = _fit_label_unc_for_target(
-                target=target,
-                models=models,
-                label_unc=label_unc,
-                label_unc_input_=label_unc_input_,
-                nn_counts_keys=list(nn_counts.keys()),
-                exp_data=exp_data,
-                granularity=granularity,
-                le=le,
-                mask_dict=mask_dict,
-                width=width,
-                height=height,
-                depth=depth,
-                random_rot_mode=random_rot_mode,
-                N_sim=N_sim,
-                parallel=parallel,
-                savedir=savedir,
-                progress=progress,
-                fitting_mode=fitting_mode,
-                round_counter=round_counter,
-                total_rounds=total_rounds,
-            )
+        fitted, _ = _fit_label_uncertainties(
+            targets=targets,
+            models=models,
+            label_unc=label_unc,
+            nn_counts_keys=list(nn_counts.keys()),
+            progress=progress,
+            round_counter=round_counter,
+            total_rounds=total_rounds,
+            exp_data=exp_data,
+            granularity=granularity,
+            le=le,
+            mask_dict=mask_dict,
+            width=width,
+            height=height,
+            depth=depth,
+            random_rot_mode=random_rot_mode,
+            N_sim=N_sim,
+            parallel=parallel,
+            savedir=savedir,
+            fitting_mode=fitting_mode,
+        )
+        label_unc.update(fitted)
 
         # test the models with the best fitting label uncertainties; note
         # that here we'd like to pay the attention to the NNDs that are
@@ -5143,3 +5340,1172 @@ def get_le_from_props(
         target_b: props_["AB"] / (props_["A"] + props_["AB"]) * 100,
     }
     return le_values
+
+
+# SPINNA batch analysis (``picasso spinna -p``)
+
+
+def _parse_float_list(value) -> list:
+    """Parse a CSV cell into a list of floats. Accepts a numeric scalar
+    or a comma-separated string like ``"3,4,5"``."""
+    if isinstance(value, bool):
+        raise ValueError("Expected a number or comma-separated string.")
+    if isinstance(value, (int, float)):
+        return [float(value)]
+    return [float(x.strip()) for x in str(value).split(",") if x.strip()]
+
+
+def _spinna_targets_from_row(row) -> list:
+    """Derive target names from the ``exp_data_*`` columns of a CSV row.
+
+    LE fitting does not load a structures yaml, so targets come from
+    column names. The first non-empty ``exp_data_*`` column maps to
+    ``target_a`` in ``spinna.fit_le``.
+    """
+    prefix = "exp_data_"
+    targets = [
+        c[len(prefix) :]
+        for c in row.index
+        if c.startswith(prefix) and pd.notna(row[c])
+    ]
+    if len(targets) != 2:
+        raise ValueError(
+            "LE fitting requires exactly two targets (two non-empty "
+            f"exp_data_* columns); found: {targets}"
+        )
+    return targets
+
+
+def _spinna_parse_distances(row) -> list:
+    """Parse the ``distances`` column of an LE-fitting row into a list
+    of candidate heterodimer distances (nm)."""
+    if "distances" not in row.index or pd.isna(row["distances"]):
+        raise ValueError("Column 'distances' is required when le_fitting=1.")
+    distances = _parse_float_list(row["distances"])
+    if not distances:
+        raise ValueError("'distances' must contain at least one value.")
+    return distances
+
+
+def _spinna_validate_parameters(
+    parameters_filename: str,
+) -> tuple:
+    """Validate the parameters file and create a result directory name.
+
+    Also checks that all required columns are present; the result
+    directory name is made unique.
+
+    Parameters
+    ----------
+    parameters_filename : str
+        Path to the ``.csv`` file with the SPINNA fitting parameters.
+
+    Returns
+    -------
+    tuple[pd.DataFrame, str]
+        ``(parameters, result_dir)``
+    """
+    if not isinstance(parameters_filename, str):
+        raise TypeError(
+            "parameters_filename must be a string ending with .csv"
+        )
+    elif not parameters_filename.endswith(".csv"):
+        raise TypeError("parameters_filename must end with .csv")
+
+    parameters = pd.read_csv(parameters_filename)
+    if "rotation_mode" in parameters.columns:
+        # "None" (no rotations) is a value, which pandas reads as missing
+        parameters["rotation_mode"] = pd.read_csv(
+            parameters_filename,
+            usecols=["rotation_mode"],
+            dtype=str,
+            keep_default_na=False,
+        )["rotation_mode"]
+
+    path, ext = os.path.splitext(parameters_filename)
+    result_dir = path + "__fitting_results"
+    if os.path.isdir(result_dir):
+        i = 1
+        while True:
+            result_dir_ = result_dir + f"_{i}"
+            if not os.path.isdir(result_dir_):
+                result_dir = result_dir_
+                break
+            else:
+                i += 1
+
+    for column in [
+        "granularity",
+        "save_filename",
+        "NND_bin",
+        "NND_maxdist",
+        "sim_repeats",
+    ]:
+        if column not in parameters.columns:
+            raise ValueError(
+                f"Column {column} not found in the parameters file."
+            )
+
+    return parameters, result_dir
+
+
+def _spinna_check_target_columns(row, target: str, le_fitting: bool) -> None:
+    """Raise if a target's required columns are missing from the row."""
+    for col_name in [f"{_}_{target}" for _ in ["label_unc", "exp_data"]]:
+        if col_name not in row.index:
+            raise ValueError(
+                f"Column {col_name} not found in the parameters file."
+            )
+    if not le_fitting and f"le_{target}" not in row.index:
+        raise ValueError(
+            f"Column le_{target} not found in the parameters file."
+        )
+
+
+def _spinna_parse_target_uncertainty(
+    row, target: str, le_fitting: bool
+) -> tuple:
+    """Parse ``label_unc_TARGET`` and ``le_TARGET`` for one target."""
+    if le_fitting:
+        label_unc = _parse_float_list(row[f"label_unc_{target}"])
+        if not label_unc:
+            raise ValueError(
+                f"label_unc_{target} must contain at least one value."
+            )
+        return label_unc, 1.0
+    return float(row[f"label_unc_{target}"]), float(row[f"le_{target}"]) / 100
+
+
+def _spinna_stack_exp_data(locs) -> tuple:
+    """Stack loc coordinates (nm) into an (N, dim) array."""
+    if "z" in locs.columns:
+        return np.stack((locs.x, locs.y, locs.z)).T, 3
+    return np.stack((locs.x, locs.y)).T, 2
+
+
+def _spinna_load_target_data(
+    row,
+    targets: list,
+    le_fitting: bool = False,
+) -> tuple:
+    """Load per-target experimental data and parameters from a CSV row.
+
+    When ``le_fitting`` is True, ``label_unc_TARGET`` is parsed as a
+    comma-separated list of candidates (single values are still accepted),
+    ``le_TARGET`` is not read (LE is what is being fit), and
+    ``n_simulated`` is the raw localization count (no LE division).
+
+    Parameters
+    ----------
+    row : pd.Series
+        One row of the parameters file.
+    targets : list of str
+        Names of the targets.
+    le_fitting : bool, optional
+        Whether the labeling efficiency is fitted. Default is False.
+
+    Returns
+    -------
+    tuple[dict, dict, dict, dict, int, dict]
+        ``(label_unc, le, exp_data, n_simulated, dim, infos)``
+    """
+    label_unc: dict = {}
+    le: dict = {}
+    exp_data: dict = {}
+    n_simulated: dict = {}
+    infos: dict = {}
+    dim = 2
+
+    for target in targets:
+        _spinna_check_target_columns(row, target, le_fitting)
+        label_unc[target], le[target] = _spinna_parse_target_uncertainty(
+            row, target, le_fitting
+        )
+
+        locs, info = io.load_locs(str(row[f"exp_data_{target}"]))
+        infos[target] = info
+        exp_data[target], dim = _spinna_stack_exp_data(locs)
+
+        if le_fitting:
+            n_simulated[target] = len(locs)
+        else:
+            n_simulated[target] = int(len(locs) / le[target])
+
+    return label_unc, le, exp_data, n_simulated, dim, infos
+
+
+def _spinna_resolve_roi_3d(row) -> tuple:
+    """Resolve a homogeneous 3D ROI (volume, z_range) from a row.
+
+    Parameters
+    ----------
+    row : pd.Series
+        One row of the parameters file.
+
+    Returns
+    -------
+    tuple[float | None, float | None, bool]
+        ``(volume, z_range, apply_mask)``
+    """
+    if "volume" not in row.index:
+        return None, None, True
+    volume = float(row["volume"])
+    if "z_range" not in row.index:
+        raise ValueError(
+            "Column z_range not found in the parameters file."
+            " 3D simulation was specified with homogeneous"
+            " distribution. Please specify z_range."
+        )
+    return volume, float(row["z_range"]), False
+
+
+def _spinna_resolve_roi_2d(row, targets: list, infos: dict | None) -> tuple:
+    """Resolve a homogeneous 2D ROI (area) from a row.
+
+    If the ``area`` column is missing or empty, the area is recovered from
+    the experimental data metadata key ``"Area (um^2)"`` (taken from the
+    first target's info).
+
+    Parameters
+    ----------
+    row : pd.Series
+        One row of the parameters file.
+    targets : list of str
+        Names of the targets.
+    infos : dict or None
+        Metadata of the experimental data per target.
+
+    Returns
+    -------
+    tuple[float | None, bool]
+        ``(area, apply_mask)``
+    """
+    if "area" in row.index and pd.notna(row["area"]):
+        return float(row["area"]), False
+    if infos:
+        meta_area = lib.get_from_metadata(infos[targets[0]], "Area (um^2)")
+        if meta_area is not None:
+            return float(meta_area), False
+    return None, True
+
+
+def _spinna_resolve_mask_paths(row, targets: list) -> dict:
+    """Collect and validate the per-target mask filenames from a row."""
+    mask_paths = {}
+    for target in targets:
+        if f"mask_filename_{target}" not in row.index:
+            raise ValueError(
+                f"Column mask_filename_{target} not found in the"
+                " parameters file."
+            )
+        mask_paths[target] = row[f"mask_filename_{target}"]
+    return mask_paths
+
+
+def _spinna_resolve_roi(
+    row, dim: int, targets: list, infos: dict | None = None
+) -> tuple:
+    """Determine ROI parameters for a row: homogeneous or masked.
+
+    Parameters
+    ----------
+    row : pd.Series
+        One row of the parameters file.
+    dim : int
+        Dimensionality of the data, 2 or 3.
+    targets : list of str
+        Names of the targets.
+    infos : dict or None, optional
+        Metadata of the experimental data per target, used to recover
+        the 2D area. Default is None.
+
+    Returns
+    -------
+    tuple[bool, dict, float | None, float | None, float | None]
+        ``(apply_mask, mask_paths, area, volume, z_range)``
+    """
+    apply_mask = True
+    area = volume = z_range = None
+
+    if dim == 3:
+        volume, z_range, apply_mask = _spinna_resolve_roi_3d(row)
+    elif dim == 2:
+        area, apply_mask = _spinna_resolve_roi_2d(row, targets, infos)
+
+    mask_paths = _spinna_resolve_mask_paths(row, targets) if apply_mask else {}
+    return apply_mask, mask_paths, area, volume, z_range
+
+
+def _spinna_compute_roi(
+    targets: list,
+    apply_mask: bool,
+    mask_paths: dict,
+    dim: int,
+    area,
+    volume,
+    z_range,
+) -> tuple:
+    """Resolve the simulation ROI for a row.
+
+    Parameters
+    ----------
+    targets : list of str
+        Names of the targets.
+    apply_mask : bool
+        Whether masks are used instead of a homogeneous ROI.
+    mask_paths : dict
+        Path of the ``.npy`` mask per target.
+    dim : int
+        Dimensionality of the data, 2 or 3.
+    area : float or None
+        Area of the 2D homogeneous ROI in um^2.
+    volume : float or None
+        Volume of the 3D homogeneous ROI in um^3.
+    z_range : float or None
+        Depth of the 3D homogeneous ROI in nm.
+
+    Returns
+    -------
+    tuple[dict | None, float | None, float | None, float | None]
+        ``(mask_dict, width, height, depth)``
+    """
+    from .io import FORMAT_VERSION_ATTR, check_format_version, load_yaml
+
+    if apply_mask:
+        masks: dict = {}
+        mask_info: dict = {}
+        width = height = depth = None
+        for target in targets:
+            masks[target] = np.load(mask_paths[target])
+            mask_path = os.path.splitext(mask_paths[target])[0] + ".yaml"
+            mask_info[target] = load_yaml(mask_path)
+            check_format_version(
+                mask_info[target].get(FORMAT_VERSION_ATTR),
+                mask_path,
+                kind="mask",
+            )
+        mask_dict = {"mask": masks, "info": mask_info}
+    else:
+        mask_dict = None
+        if dim == 2:
+            width = height = np.sqrt(area * 1e6)
+            depth = None
+        else:  # dim == 3
+            depth = z_range
+            width = height = np.sqrt(volume * 1e9 / depth)
+
+    return mask_dict, width, height, depth
+
+
+def _spinna_build_mixer(
+    structures: list,
+    targets: list,
+    label_unc: dict,
+    le: dict,
+    random_rot_mode: str | None,
+    apply_mask: bool,
+    mask_paths: dict,
+    dim: int,
+    area,
+    volume,
+    z_range,
+):
+    """Build a ``StructureMixer`` from resolved ROI and target data."""
+    mask_dict, width, height, depth = _spinna_compute_roi(
+        targets,
+        apply_mask,
+        mask_paths,
+        dim,
+        area,
+        volume,
+        z_range,
+    )
+    return StructureMixer(
+        structures=structures,
+        label_unc=label_unc,
+        le=le,
+        mask_dict=mask_dict,
+        width=width,
+        height=height,
+        depth=depth,
+        random_rot_mode=random_rot_mode,
+    )
+
+
+def _spinna_roi_results(
+    row, targets: list, apply_mask: bool, dim: int, area, volume, z_range
+) -> dict:
+    """Report the ROI (mask paths, or area/volume/z-range) used for a row."""
+    if apply_mask:
+        return {
+            "File location of masks": [
+                row[f"mask_filename_{target}"] for target in targets
+            ]
+        }
+    if dim == 2:
+        return {"Area (um^2)": area}
+    if dim == 3:
+        return {"Volume (um^3)": volume, "Z range (nm)": z_range}
+    return {}
+
+
+def _spinna_collect_le_fit_results(
+    row,
+    targets: list,
+    structures: list,
+    opt_props,
+    score,
+    label_unc: dict,
+    random_rot_mode: str | None,
+    dim: int,
+    granularity,
+    sim_repeats: int,
+    apply_mask: bool,
+    area,
+    volume,
+    z_range,
+    label_unc_search: dict | None,
+    distances_search: list | None,
+    best_distance: float | None,
+    le_values: dict | None,
+) -> dict:
+    """Assemble the results dict for an LE-fitting row."""
+    results: dict = {
+        "Molecular targets": targets,
+        "File location of experimental data": [
+            str(row[f"exp_data_{target}"]) for target in targets
+        ],
+        "Parameters search space granularity": granularity,
+        "Dimensionality": f"{dim}D",
+        "Rotation mode": str(random_rot_mode),
+        "Number of simulation repeats": sim_repeats,
+    }
+    if label_unc_search is not None:
+        for target in targets:
+            results[f"Label-uncertainty search space (nm) for {target}"] = (
+                ", ".join(f"{float(v):.2f}" for v in label_unc_search[target])
+            )
+    for target in targets:
+        results[f"Fitted label uncertainty (nm) for {target}"] = (
+            f"{float(label_unc[target]):.4f}"
+        )
+    if distances_search is not None:
+        results["Heterodimer distance search space (nm)"] = ", ".join(
+            f"{float(v):.2f}" for v in distances_search
+        )
+    if best_distance is not None:
+        results["Fitted heterodimer distance (nm)"] = (
+            f"{float(best_distance):.4f}"
+        )
+    if le_values is not None:
+        for target in targets:
+            results[f"Fitted labeling efficiency (%) for {target}"] = (
+                f"{float(le_values[target]):.2f}"
+            )
+    results["Best fitting structure proportions (%)"] = ", ".join(
+        f"{s.title}: {float(p):.2f}" for s, p in zip(structures, opt_props)
+    )
+    results["Modified Kolmogorov-Smirnov score"] = score
+    results.update(
+        _spinna_roi_results(
+            row, targets, apply_mask, dim, area, volume, z_range
+        )
+    )
+    return results
+
+
+def _spinna_relative_proportions(
+    targets: list, structures: list, mixer, opt_props, n_simulated: dict
+) -> dict:
+    """Report each target's relative proportion across structures."""
+    opt_props_ = opt_props[0] if isinstance(opt_props, tuple) else opt_props
+    results = {}
+    for target in targets:
+        rel_props = mixer.convert_props_for_target(
+            opt_props_, target, n_simulated
+        )
+        idx_valid = np.where(rel_props != np.inf)[0]
+        value = ", ".join(
+            [f"{structures[i].title}: {rel_props[i]:.2f}%" for i in idx_valid]
+        )
+        results[f"Relative proportions of {target} in"] = value
+    return results
+
+
+def _spinna_collect_structure_results(
+    row,
+    targets: list,
+    structures: list,
+    mixer,
+    opt_props,
+    score,
+    label_unc: dict,
+    le: dict,
+    random_rot_mode: str | None,
+    dim: int,
+    granularity,
+    N_structures: dict,
+    sim_repeats: int,
+    apply_mask: bool,
+    area,
+    volume,
+    z_range,
+    n_simulated: dict,
+) -> dict:
+    """Assemble the results dict for a structure-fitting row."""
+    results: dict = {
+        "File location of structures": row["structures_filename"],
+        "Molecular targets": targets,
+        "File location of experimental data": [
+            str(row[f"exp_data_{target}"]) for target in targets
+        ],
+        "Labeling efficiency (%)": [le[target] * 100 for target in targets],
+        "Label uncertainty (nm)": list(label_unc.values()),
+        "Rotation mode": str(random_rot_mode),
+        "Dimensionality": f"{dim}D",
+        "Parameters search space granularity": granularity,
+        "Fitted structures names": list(N_structures.keys()),
+        "Number of simulation repeats": sim_repeats,
+    }
+
+    if isinstance(opt_props, tuple):
+        props_mean, props_std = opt_props
+        results["Modified Kolmogorov-Smirnov score +/- s.d."] = score
+        results["Fitted proportions of structures"] = ", ".join(
+            [
+                f"{props_mean[i]:.2f} +/- {props_std[i]:.2f}%"
+                for i in range(len(props_mean))
+            ]
+        )
+    else:
+        results["Modified Kolmogorov-Smirnov score"] = score
+        results["Fitted proportions of structures"] = opt_props
+
+    if len(targets) > 1:
+        results.update(
+            _spinna_relative_proportions(
+                targets, structures, mixer, opt_props, n_simulated
+            )
+        )
+
+    results.update(
+        _spinna_roi_results(
+            row, targets, apply_mask, dim, area, volume, z_range
+        )
+    )
+    return results
+
+
+def _spinna_collect_results(
+    row,
+    targets: list,
+    structures: list,
+    mixer,
+    opt_props,
+    score,
+    label_unc: dict,
+    le: dict,
+    random_rot_mode: str | None,
+    dim: int,
+    granularity,
+    N_structures: dict,
+    sim_repeats: int,
+    apply_mask: bool,
+    mask_paths: dict,
+    area,
+    volume,
+    z_range,
+    n_simulated: dict,
+    le_fitting: bool = False,
+    label_unc_search: dict | None = None,
+    distances_search: list | None = None,
+    best_distance: float | None = None,
+    le_values: dict | None = None,
+) -> dict:
+    """Assemble the full results dict from fitting output.
+
+    When ``le_fitting`` is True, the dict reports the recovered LE
+    values, fitted label uncertainty and heterodimer distance (plus the
+    search spaces used), mirroring the GUI's Fit LE summary keys.
+    """
+    from datetime import datetime
+
+    results = {"Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+    if le_fitting:
+        results.update(
+            _spinna_collect_le_fit_results(
+                row,
+                targets,
+                structures,
+                opt_props,
+                score,
+                label_unc,
+                random_rot_mode,
+                dim,
+                granularity,
+                sim_repeats,
+                apply_mask,
+                area,
+                volume,
+                z_range,
+                label_unc_search,
+                distances_search,
+                best_distance,
+                le_values,
+            )
+        )
+    else:
+        results.update(
+            _spinna_collect_structure_results(
+                row,
+                targets,
+                structures,
+                mixer,
+                opt_props,
+                score,
+                label_unc,
+                le,
+                random_rot_mode,
+                dim,
+                granularity,
+                N_structures,
+                sim_repeats,
+                apply_mask,
+                area,
+                volume,
+                z_range,
+                n_simulated,
+            )
+        )
+
+    return results
+
+
+def _spinna_plot_nnd(
+    mixer,
+    targets: list,
+    exp_data: dict,
+    opt_props,
+    n_simulated: dict,
+    sim_repeats: int,
+    NND_bin: float,
+    NND_maxdist: float,
+    nn_plotted: int,
+    save_filename: str,
+) -> None:
+    """Compute and save NND plots for all target pairs."""
+    nn_counts = {
+        f"{t1}-{t2}": nn_plotted
+        for i, t1 in enumerate(targets)
+        for t2 in targets[i:]
+    }
+    mixer.nn_counts = nn_counts
+    n_total = sum(n_simulated.values())
+
+    opt_for_counts = (
+        opt_props[0] if isinstance(opt_props, tuple) else opt_props
+    )
+    dist_sim = get_NN_dist_simulated(
+        mixer.convert_props_to_counts(opt_for_counts, n_total),
+        sim_repeats,
+        mixer,
+        duplicate=True,
+    )
+
+    for i, (t1, t2, _) in enumerate(mixer.get_neighbor_idx(duplicate=True)):
+        fig, ax = plot_NN(
+            dist=dist_sim[i],
+            mode="plot",
+            show_legend=False,
+            return_fig=True,
+            figsize=(4.947, 3.71),
+            alpha=1.0,
+            binsize=NND_bin,
+            xlim=[0, NND_maxdist],
+            title=f"Nearest Neighbors Distances: {t1} -> {t2}",
+        )
+        fig, ax = plot_NN(
+            data1=exp_data[t1],
+            data2=exp_data[t2],
+            n_neighbors=nn_plotted,
+            show_legend=False,
+            fig=fig,
+            ax=ax,
+            mode="hist",
+            return_fig=True,
+            binsize=NND_bin,
+            xlim=[0, NND_maxdist],
+            title=f"Nearest Neighbors Distances: {t1} -> {t2}",
+            savefig=[
+                f"{save_filename}_NND_{t1}_{t2}.{_}" for _ in ["png", "svg"]
+            ],
+        )
+        # release the figure; otherwise pyplot keeps every figure of
+        # every batch row in memory (growing RAM + "too many figures")
+        plt.close(fig)
+
+
+def _spinna_row_rotation_mode(row) -> str | None:
+    """Read ``rotation_mode`` from a row: "3D", "2D" or None for "None"
+    (no rotations), defaulting to "2D" when it is missing or empty."""
+    if "rotation_mode" not in row.index:
+        return "2D"
+    value = row["rotation_mode"]
+    mode = "" if pd.isna(value) else str(value).strip()
+    if mode in ("2D", "3D"):
+        return mode
+    if mode == "None":
+        return None
+    if mode:
+        _log.warning(
+            f"Invalid rotation_mode '{mode}'. Must be one of '3D', '2D', "
+            "'None'. Using default: 2D"
+        )
+    return "2D"
+
+
+def _spinna_row_nn_plotted(row) -> int:
+    """Read ``nn_plotted`` from a row, defaulting to 4."""
+    if "nn_plotted" in row.index:
+        if not isinstance(row["nn_plotted"], int):
+            _log.warning("Invalid nn_plotted. Using default: 4")
+        else:
+            return int(row["nn_plotted"])
+    return 4
+
+
+def _spinna_row_fitting_mode(row) -> str | None:
+    """Read ``fitting_mode`` from a row.
+
+    None means "use the per-branch default" (bayesian for standard
+    SPINNA, coarse-to-fine for LE fitting).
+    """
+    if "fitting_mode" not in row.index or pd.isna(row["fitting_mode"]):
+        return None
+    mode = str(row["fitting_mode"]).strip()
+    if mode in ("coarse-to-fine", "bayesian", "brute-force"):
+        return mode
+    _log.warning(
+        f"Invalid fitting_mode '{mode}'. Must be one of "
+        "'coarse-to-fine', 'bayesian', 'brute-force'. Using default."
+    )
+    return None
+
+
+def _spinna_row_targets_and_structures(
+    index: int, row, le_fitting: bool
+) -> tuple:
+    """Resolve ``(structures, targets)`` for a row.
+
+    ``structures`` is None when ``le_fitting`` is True, since LE fitting
+    does not use a structures file.
+    """
+    if le_fitting:
+        return None, _spinna_targets_from_row(row)
+    if "structures_filename" not in row.index or pd.isna(
+        row["structures_filename"]
+    ):
+        raise ValueError(
+            f"Row {index}: structures_filename is required when "
+            "le_fitting != 1."
+        )
+    return io.load_structures(row["structures_filename"])
+
+
+def _spinna_process_row(
+    index: int,
+    row,
+    parameters,
+    result_dir: str,
+    parallel: bool,
+    bootstrap: bool,
+    progress: lib.Progress,
+) -> dict:
+    """Run a single SPINNA analysis row and return the results dict."""
+    _log.info(f"Running SPINNA on row {index+1} out of {len(parameters)}.")
+
+    le_fitting = (
+        "le_fitting" in row.index
+        and pd.notna(row["le_fitting"])
+        and int(row["le_fitting"]) == 1
+    )
+
+    granularity = row["granularity"]
+    NND_bin = row["NND_bin"]
+    NND_maxdist = row["NND_maxdist"]
+    sim_repeats = row["sim_repeats"]
+    save_filename, _ = os.path.splitext(row["save_filename"])
+    save_filename = os.path.join(result_dir, os.path.basename(save_filename))
+
+    random_rot_mode = _spinna_row_rotation_mode(row)
+    nn_plotted = _spinna_row_nn_plotted(row)
+    fitting_mode = _spinna_row_fitting_mode(row)
+
+    structures, targets = _spinna_row_targets_and_structures(
+        index, row, le_fitting
+    )
+
+    label_unc, le, exp_data, n_simulated, dim, infos = (
+        _spinna_load_target_data(
+            row,
+            targets,
+            le_fitting=le_fitting,
+        )
+    )
+    apply_mask, mask_paths, area, volume, z_range = _spinna_resolve_roi(
+        row, dim, targets, infos
+    )
+
+    if le_fitting:
+        return _spinna_process_row_le(
+            row=row,
+            targets=targets,
+            label_unc=label_unc,
+            exp_data=exp_data,
+            n_simulated=n_simulated,
+            dim=dim,
+            granularity=granularity,
+            sim_repeats=sim_repeats,
+            NND_bin=NND_bin,
+            NND_maxdist=NND_maxdist,
+            nn_plotted=nn_plotted,
+            apply_mask=apply_mask,
+            mask_paths=mask_paths,
+            area=area,
+            volume=volume,
+            z_range=z_range,
+            random_rot_mode=random_rot_mode,
+            save_filename=save_filename,
+            parallel=parallel,
+            progress=progress,
+            fitting_mode=fitting_mode,
+        )
+
+    N_structures = generate_N_structures(structures, n_simulated, granularity)
+
+    mixer = _spinna_build_mixer(
+        structures,
+        targets,
+        label_unc,
+        le,
+        random_rot_mode,
+        apply_mask,
+        mask_paths,
+        dim,
+        area,
+        volume,
+        z_range,
+    )
+
+    opt_props, score = SPINNA(
+        mixer=mixer,
+        gt_coords=exp_data,
+        N_sim=sim_repeats,
+    ).fit_stoichiometry(
+        N_structures,
+        fitting_mode=fitting_mode if fitting_mode is not None else "bayesian",
+        save=f"{save_filename}_fit_scores.csv",
+        parallel=parallel,
+        bootstrap=bootstrap,
+        progress=progress,
+    )
+
+    results = _spinna_collect_results(
+        row,
+        targets,
+        structures,
+        mixer,
+        opt_props,
+        score,
+        label_unc,
+        le,
+        random_rot_mode,
+        dim,
+        granularity,
+        N_structures,
+        sim_repeats,
+        apply_mask,
+        mask_paths,
+        area,
+        volume,
+        z_range,
+        n_simulated,
+    )
+
+    with open(f"{save_filename}_fit_summary.txt", "w") as f:
+        for key, value in results.items():
+            f.write(f"{key}: {value}\n")
+    _log.info(f"Results saved to {save_filename}_fit_summary.txt")
+
+    _spinna_plot_nnd(
+        mixer,
+        targets,
+        exp_data,
+        opt_props,
+        n_simulated,
+        sim_repeats,
+        NND_bin,
+        NND_maxdist,
+        nn_plotted,
+        save_filename,
+    )
+
+    return results
+
+
+def _spinna_process_row_le(
+    *,
+    row,
+    targets: list,
+    label_unc: dict,
+    exp_data: dict,
+    n_simulated: dict,
+    dim: int,
+    granularity,
+    sim_repeats: int,
+    NND_bin: float,
+    NND_maxdist: float,
+    nn_plotted: int,
+    apply_mask: bool,
+    mask_paths: dict,
+    area,
+    volume,
+    z_range,
+    random_rot_mode: str | None,
+    save_filename: str,
+    parallel: bool,
+    progress: lib.Progress,
+    fitting_mode: str | None,
+) -> dict:
+    """LE-fitting branch of ``_spinna_process_row``: builds monomer/
+    heterodimer structures via ``spinna.fit_le`` and recovers per-target
+    LE from the fitted structure proportions."""
+    distances = _spinna_parse_distances(row)
+    mask_dict, width, height, depth = _spinna_compute_roi(
+        targets,
+        apply_mask,
+        mask_paths,
+        dim,
+        area,
+        volume,
+        z_range,
+    )
+
+    # snapshot the search-space inputs before calling fit_le —
+    # compare_models mutates label_unc in place
+    label_unc_input = {t: list(v) for t, v in label_unc.items()}
+    distances_input = list(distances)
+
+    (
+        le_values,
+        fitted_label_unc,
+        best_distance,
+        score,
+        best_props,
+        best_mixer,
+    ) = fit_le(
+        target_a=targets[0],
+        target_b=targets[1],
+        exp_data=exp_data,
+        granularity=int(granularity),
+        label_unc=label_unc,
+        distances=distances,
+        N_sim=int(sim_repeats),
+        mask_dict=mask_dict,
+        width=width,
+        height=height,
+        depth=depth,
+        random_rot_mode=random_rot_mode,
+        parallel=parallel,
+        savedir=os.path.dirname(save_filename),
+        progress=progress,
+        fitting_mode=(
+            fitting_mode if fitting_mode is not None else "bayesian"
+        ),
+    )
+
+    structures = best_mixer.structures
+    results = _spinna_collect_results(
+        row,
+        targets,
+        structures,
+        best_mixer,
+        best_props,
+        score,
+        fitted_label_unc,
+        {t: 1.0 for t in targets},
+        random_rot_mode,
+        dim,
+        granularity,
+        {s.title: None for s in structures},
+        sim_repeats,
+        apply_mask,
+        mask_paths,
+        area,
+        volume,
+        z_range,
+        n_simulated,
+        le_fitting=True,
+        label_unc_search=label_unc_input,
+        distances_search=distances_input,
+        best_distance=best_distance,
+        le_values=le_values,
+    )
+
+    with open(f"{save_filename}_fit_summary.txt", "w") as f:
+        for key, value in results.items():
+            f.write(f"{key}: {value}\n")
+    _log.info(f"Results saved to {save_filename}_fit_summary.txt")
+
+    _spinna_plot_nnd(
+        best_mixer,
+        targets,
+        exp_data,
+        best_props,
+        n_simulated,
+        sim_repeats,
+        NND_bin,
+        NND_maxdist,
+        nn_plotted,
+        save_filename,
+    )
+
+    return results
+
+
+def batch_analysis(
+    parameters_filename: str,
+    *,
+    parallel: bool = True,
+    bootstrap: bool = False,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> tuple[str, pd.DataFrame]:
+    """SPINNA batch analysis. Results are automatically saved in
+    a new subfolder named "<parameters file name>__fitting_results" in
+    the folder where the parameters file is located. Parameters should be
+    provided in .csv file. Each row in the file specifies one analysis
+    run. The parameters (columns) are:
+
+    - "structures_filename" : Name of the files with structures saved
+        (.yaml). Required unless ``le_fitting=1``, in which case the
+        monomer/heterodimer structures are built internally and targets
+        are taken from the two ``exp_data_TARGET`` columns.
+    - "exp_data_TARGET" : Name of the file with experimental data
+        (.hdf5). Each target in the structures must have a
+        corresponding column, for example, "exp_data_EGFR".
+    - "le_TARGET" : Labeling efficiency (%) for each target. Each
+        target in the structures must have a corresponding column,
+        for example, "le_EGFR". Ignored when ``le_fitting=1``.
+    - "label_unc_TARGET" : Label uncertainty (nm) for each target. Each
+        target in the structures must have a corresponding column,
+        for example: "label_unc_EGFR". When ``le_fitting=1``, this may
+        be a comma-separated list of candidates (e.g. ``"3,4,5,6"``);
+        a single value disables the per-target search.
+    - "granularity" : Granularity used in parameters search space
+        generation. The higher the value the more combinations of
+        structure counts will be tested.
+    - "sim_repeats" : Number of simulation repeats used for obtaining
+        smoother NND histograms.
+    - "save_filename" : Name of the file where the results will be
+        saved.
+    - "NND_bin" : Bin size (nm) for the nearest neighbor distance (NND)
+        histogram (plotting only).
+    - "NND_maxdist" : Maximum distance (nm) for the nearest neighbor
+        distance (NND) histogram (plotting only).
+
+    Depending on whether a homo- or heterogeneous (masked) distribution
+    is used, the following columns must be present:
+    * For homogeneous distribution:
+
+    - "area" or "volume" : Area (2D simulation) or volume (3D
+        simulation) of the simulated ROI (um^2 or um^3). For 2D rows,
+        "area" is optional: if omitted, the area is read from the
+        experimental data metadata key "Area (um^2)" (written by Picasso
+        when picks/areas are saved).
+    - "z_range" : Applicable only when "volume" is provided. Defines
+        the range of z coordinates (nm) of simulated molecular targets.
+
+    * For heterogeneous distribution:
+    - "mask_filename_TARGET" : Name of the .npy file with the mask saved for
+        each molecular target. Each target in the structures must have
+        a corresponding column, for example, "mask_EGFR".
+
+    Optional columns are:
+
+    - "rotation_mode" : Random rotations mode used in analysis. Values
+        must be one of {"3D", "2D", "None"}. Default: "2D".
+    - "nn_plotted" : Number of nearest neighbors plotted in the NND.
+        Only integer values are accepted. Default: 4.
+    - "fitting_mode" : Optimization method used to fit the structure
+        counts. Values must be one of {"coarse-to-fine", "bayesian",
+        "brute-force"}. Default: "bayesian".
+    - "le_fitting" : 0 if standard SPINNA is ran, 1 if labeling
+        efficiency fitting is to be performed. If the column is not
+        provided, standard SPINNA is ran. When set to 1, the batch
+        calls ``picasso.spinna.fit_le``: monomer A, monomer B and
+        heterodimer(d) structures are built internally for each
+        candidate ``distances`` value, label uncertainty is fit per
+        target from the comma-separated candidates in
+        ``label_unc_TARGET``, and the per-target LE is recovered from
+        the fitted structure proportions. Exactly two ``exp_data_*``
+        columns must be present; the first column maps to ``target_a``.
+        ``-b/--bootstrap`` is ignored on LE-fitting rows. For more
+        details about the LE fitting, see Hellmeier, Strauss, et al.
+        Nature Methods, 2024.
+    - "distances" : Comma-separated list of candidate heterodimer
+        distances in nm (e.g. ``"5,10,15,20"``). A single value fixes
+        the distance. Required when ``le_fitting=1``; ignored
+        otherwise.
+
+    The result files of each row are named after its
+    "save_filename": "<save_filename>_fit_summary.txt" and the NND plots
+    "<save_filename>_NND_<target 1>_<target 2>.png" (and .svg). The
+    results of all rows are saved as "summary_results.csv".
+
+    Parameters
+    ----------
+    parameters_filename : str
+        Path to the parameters file (.csv).
+    parallel : bool, optional
+        If True, the candidates are scored in a pool of worker
+        processes. Default is True.
+    bootstrap : bool, optional
+        If True, bootstrapping is used. Default is False.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. The fit of each row reports the phases
+        of :meth:`SPINNA.fit` (or :func:`fit_le`). Default is None.
+
+    Returns
+    -------
+    result_dir : str
+        Folder with the results.
+    summary : pd.DataFrame
+        Results of all rows, one row each, as saved in
+        "summary_results.csv".
+    """
+    parameters, result_dir = _spinna_validate_parameters(parameters_filename)
+    os.makedirs(result_dir, exist_ok=True)
+
+    summary = []
+    with lib.tracked_progress(progress, "SPINNA batch analysis") as progress:
+        for index, row in parameters.iterrows():
+            results = _spinna_process_row(
+                index,
+                row,
+                parameters,
+                result_dir,
+                parallel,
+                bootstrap,
+                progress,
+            )
+            summary.append(results)
+
+    summary = pd.DataFrame(summary)
+    summary.to_csv(
+        os.path.join(result_dir, "summary_results.csv"),
+        index=False,
+    )
+    return result_dir, summary

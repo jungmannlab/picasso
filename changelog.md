@@ -187,6 +187,8 @@ The [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html)
 - Fixed: `picasso hdf2csv` wrote the row numbers as an extra unnamed first column.
 - `picasso.localize.FIT_METHOD_ALIASES` and `resolve_fit_method` give the fitting method behind a short name of `picasso localize --fit-method` (e.g., "mle-3d"), and `picasso.localize.to_photons` converts camera counts to photons.
 - `picasso.postprocess.frc` raises an error instead of rendering images larger than `max_image_size` pixels on a side (16384 by default), which may not fit into memory.
+- `picasso.spinna.fit_label_uncertainty` fits the label uncertainty of each molecular target, the first step of `compare_models`, and returns the score of every candidate value, e.g., to plot them. `picasso.spinna.targets_from_structures` lists the targets of structures.
+- `picasso.spinna.batch_analysis` runs the batch analysis of a parameters file (`picasso spinna -p`) from Python and returns the folder with the results and the summary of all rows.
 - Fixed: SPINNA's batch analysis (`picasso spinna -p`) read the `rotation_mode` *None* as missing and used *2D*. Also, the summary's column *File location of experimental data* was misspelled, and the experimental data were converted to nm with 130 nm whatever their pixel size.
 - Fixed: the GUIs could crash when quitting (seen on macOS): their windows were left to Python's shutdown, which deletes them in no fixed order.
 - Fixed: a camera configuration (`~/.picasso/config.yaml`) that is not valid stopped every Picasso module and command from starting. Picasso now starts without cameras configured and warns; Localize shows why when it opens.

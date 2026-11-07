@@ -440,7 +440,7 @@ class TestNewerFormatVersion:
     def test_spinna_batch_masks(self, tmp_path):
         path = self._write("SPINNA mask", tmp_path, "2.0")
         with pytest.raises(io.FileFormatError, match="mask format 2.0"):
-            cli._spinna_compute_roi(
+            spinna._spinna_compute_roi(
                 ["A"], True, {"A": path}, 2, None, None, None
             )
 
