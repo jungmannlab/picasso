@@ -13842,10 +13842,17 @@ class TestMultichannelGaussianWorkerRouting:
 class TestChannelRegistrationParametersDialog:
     """The channel-registration group box in the parameters dialog."""
 
+    @staticmethod
+    def _enter_split_fov(window):
+        # several channels to register, without loading movies
+        window.view.split_fov_mode = True
+        window._update_multichannel_widgets()
+
     def test_only_shown_for_the_spherical_gaussian(self):
         window = localize_gui.Window()
         try:
             dialog = window.parameters_dialog
+            self._enter_split_fov(window)
             dialog.fit_model.setCurrentText("2D spherical Gaussian")
             assert dialog.channel_registration_groupbox.isVisibleTo(dialog)
             assert not dialog.spline_groupbox.isVisibleTo(dialog)
@@ -13865,7 +13872,8 @@ class TestChannelRegistrationParametersDialog:
         try:
             dialog = window.parameters_dialog
             # the box lives in the registration group, which only the
-            # spherical Gaussian shows
+            # spherical Gaussian shows (for multichannel data)
+            self._enter_split_fov(window)
             dialog.fit_model.setCurrentText("2D spherical Gaussian")
             assert not dialog.gauss_link_photons_checkbox.isVisibleTo(dialog)
 
@@ -13886,6 +13894,22 @@ class TestChannelRegistrationParametersDialog:
             # decoupled is the default: a Gaussian has no per-channel
             # brightness scale, so linking would assume equal brightness
             assert dialog._gauss_link_photons_enabled() is False
+        finally:
+            window.close()
+
+    def test_hidden_without_multichannel_data(self):
+        window = localize_gui.Window()
+        try:
+            dialog = window.parameters_dialog
+            dialog.fit_model.setCurrentText("2D spherical Gaussian")
+            assert not dialog.channel_registration_groupbox.isVisibleTo(dialog)
+
+            self._enter_split_fov(window)
+            assert dialog.channel_registration_groupbox.isVisibleTo(dialog)
+
+            window.view.split_fov_mode = False
+            window._update_multichannel_widgets()
+            assert not dialog.channel_registration_groupbox.isVisibleTo(dialog)
         finally:
             window.close()
 

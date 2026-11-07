@@ -6433,11 +6433,21 @@ class ParametersDialog(lib.Dialog):
             self.on_fit_optimizer_changed()
         self._update_calib_group_visibility()
 
+    def _has_multichannel_data(self) -> bool:
+        """Whether the window holds several channels: several movies
+        loaded as separate channels, or split-FOV mode."""
+        window = self.window
+        view = getattr(window, "view", None)
+        return len(getattr(window, "channels", ())) > 1 or bool(
+            getattr(view, "split_fov_mode", False)
+        )
+
     def _update_calib_group_visibility(self) -> None:
         """Show only the calibration box relevant to the selected fit model:
         the astigmatism z-calibration for Gaussian models, the spline PSF
         calibration for the experimental-PSF (spline) model, and the channel
-        registration for the model that has a multichannel fit. Guarded so the
+        registration for the model that has a multichannel fit (and only when
+        several channels or split-FOV regions are loaded). Guarded so the
         initial ``on_fit_model_changed`` call (before the boxes exist) is a
         no-op."""
         entry = FIT_MODELS[self.fit_model.currentText()]
@@ -6473,7 +6483,10 @@ class ParametersDialog(lib.Dialog):
             self.fit_region_label.setVisible(spline_psf)
             self.fit_region_spinbox.setVisible(spline_psf)
         if self.channel_registration_groupbox is not None:
-            self.channel_registration_groupbox.setVisible(needs_registration)
+            # only meaningful with several channels to register
+            self.channel_registration_groupbox.setVisible(
+                needs_registration and self._has_multichannel_data()
+            )
         if self.multi_emitter_groupbox is not None:
             self.multi_emitter_groupbox.setVisible(multi_emitter)
         if getattr(self, "gpu_checkbox", None) is not None:
@@ -9655,6 +9668,9 @@ class Window(QtWidgets.QMainWindow):
             fit_combo.blockSignals(False)
         pdialog.fit_mode_label.setVisible(multichannel)
         fit_combo.setVisible(multichannel)
+        # the channel registration box (shown for the multichannel fit
+        # model only)
+        pdialog._update_calib_group_visibility()
 
     def build_spline_calibration(self) -> None:
         """Prompt for the spline PSF calibration parameters and build the
