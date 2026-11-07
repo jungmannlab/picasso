@@ -84,6 +84,8 @@ Many of the functionalities provided by Picasso were published independently, pl
 - sCMOS pixel-dependent noise modeling: Huang et al., Nat. Methods, 2013; 10.1038/nmeth.2488 (https://doi.org/10.1038/nmeth.2488)
 - NeNA: Endesfelder et al., Histochem. Cell Biol., 2014; 10.1007/s00418-014-1192-3 (https://doi.org/10.1007/s00418-014-1192-3)
 - FRC: Nieuwenhuizen et al., Nat. Methods, 2013; 10.1038/nmeth.2448 (https://doi.org/10.1038/nmeth.2448)
+- Decorrelation analysis: Descloux et al., Nat. Methods, 2019; 10.1038/s41592-019-0515-7 (https://doi.org/10.1038/s41592-019-0515-7)
+- Bilinear rendering and pixel size for decorrelation analysis of SMLM data: Descloux et al., Commun. Biol., 2021; 10.1038/s42003-021-02086-1 (https://doi.org/10.1038/s42003-021-02086-1)
 - Theoretical lateral localization precision (lpx / lpy, Gaussian least-squares): Mortensen et al., Nat. Methods, 2010; 10.1038/nmeth.1447 (https://doi.org/10.1038/nmeth.1447)
 - Theoretical axial localization precision (lpz, Gaussian): Kowalewski et al., Nat. Commun., 2026; 10.1038/s41467-026-70198-5 (https://doi.org/10.1038/s41467-026-70198-5)
 - Theoretical lateral localization precision of overlapping emitters (lpx / lpy, multi-emitter fitting): Huang et al., Biomed. Opt. Express, 2011; 10.1364/BOE.2.001377 (https://doi.org/10.1364/BOE.2.001377)

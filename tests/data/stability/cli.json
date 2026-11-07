@@ -59,6 +59,13 @@
  "dbscan": [
   "--radius-z"
  ],
+ "decorrelation": [
+  "--max-image-size",
+  "--n-filters",
+  "--n-radii",
+  "--pixel-size",
+  "-px"
+ ],
  "density": [],
  "design": [],
  "diffusion": [

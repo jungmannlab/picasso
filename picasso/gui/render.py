@@ -6168,6 +6168,14 @@ class InfoDialog(lib.Dialog):
         Shows the mean dark time (frames) in all picks.
     dark_std : QLabel
         Shows the std dark time (frames) in all picks.
+    decorrelation_pixel_size : QDoubleSpinBox
+        Pixel size (nm) of the decorrelation analysis; 0 scans pixel
+        sizes from 2 to 64 nm.
+    decorrelation_resolution : QLabel
+        Shows the decorrelation resolution (nm).
+    decorrelation_result : dict
+        Result of ``postprocess.decorrelation``, empty if not
+        calculated yet.
     fit_precision : QLabel
         Shows median localization precision (nm) of the channel chosen
         in self.fit_precision_channel.
@@ -6250,6 +6258,7 @@ class InfoDialog(lib.Dialog):
         self.nena_result = {}
         self.frc_result = {}
         self.frc_rois_window = None
+        self.decorrelation_result = {}
         self.change_fov = ChangeFOV(self.window)
 
         # Scroll area
@@ -6477,6 +6486,63 @@ class InfoDialog(lib.Dialog):
         )
         review_frc_rois_button.clicked.connect(self.show_frc_rois)
         rois_grid.addWidget(review_frc_rois_button, 4, 1)
+
+        # decorrelation
+        decorrelation_groupbox = lib.CollapsibleGroupBox(
+            "Decorrelation (uses current FOV)"
+        )
+        vbox.addWidget(decorrelation_groupbox)
+        decorrelation_grid = QtWidgets.QGridLayout(
+            decorrelation_groupbox.content
+        )
+        decorrelation_label = QtWidgets.QLabel(
+            "Decorrelation resolution (nm):"
+        )
+        decorrelation_label.setToolTip(
+            "Resolution estimated from all localizations at once by\n"
+            "decorrelation analysis, at the pixel size that gives the\n"
+            "smallest value.\n"
+            "See Descloux et al. Nature Methods, 2019."
+        )
+        decorrelation_grid.addWidget(decorrelation_label, 0, 0)
+        self.decorrelation_resolution = QtWidgets.QLabel("-")
+        decorrelation_grid.addWidget(self.decorrelation_resolution, 0, 1)
+        decorrelation_pixel_label = QtWidgets.QLabel("Pixel size (nm):")
+        decorrelation_pixel_label.setToolTip(
+            "Pixel size at which the localizations are rendered. 'Scan'\n"
+            "renders them at pixel sizes from 2 to 64 nm and reports the\n"
+            "smallest resolution, as advised by Descloux et al., 2021:\n"
+            "large pixels limit the resolution to about twice the pixel\n"
+            "size, small pixels leave gaps between sparse localizations."
+        )
+        decorrelation_grid.addWidget(decorrelation_pixel_label, 1, 0)
+        self.decorrelation_pixel_size = QtWidgets.QDoubleSpinBox()
+        self.decorrelation_pixel_size.setRange(0.0, 1000.0)
+        self.decorrelation_pixel_size.setDecimals(1)
+        self.decorrelation_pixel_size.setSingleStep(1.0)
+        self.decorrelation_pixel_size.setSpecialValueText("Scan")
+        self.decorrelation_pixel_size.setValue(0.0)
+        decorrelation_grid.addWidget(self.decorrelation_pixel_size, 1, 1)
+        calculate_decorrelation_button = QtWidgets.QPushButton(
+            "Calculate decorrelation"
+        )
+        calculate_decorrelation_button.setToolTip(
+            "Calculate the decorrelation resolution of the localizations in"
+            " the current field of view."
+        )
+        calculate_decorrelation_button.clicked.connect(
+            lambda: self.calculate_decorrelation()
+        )
+        decorrelation_grid.addWidget(calculate_decorrelation_button, 2, 0)
+        show_decorrelation_button = QtWidgets.QPushButton(
+            "Show decorrelation plot"
+        )
+        show_decorrelation_button.setToolTip(
+            "Display the decorrelation functions and the resolution at each"
+            " pixel size."
+        )
+        show_decorrelation_button.clicked.connect(self.show_decorrelation_plot)
+        decorrelation_grid.addWidget(show_decorrelation_button, 2, 1)
 
         # FOV
         fov_groupbox = lib.CollapsibleGroupBox("Field of view")
@@ -7005,6 +7071,103 @@ class InfoDialog(lib.Dialog):
         influx = self.influx_rate.value()
         return 1 / (influx * dark)
 
+    def calculate_decorrelation(
+        self, on_done: Callable[[], None] | None = None
+    ) -> None:
+        """Calculate the decorrelation resolution of the localizations
+        of a given channel in the current field of view on a worker
+        thread, see ``postprocess.decorrelation``.
+
+        Parameters
+        ----------
+        on_done : callable, optional
+            Called once the result is shown, since the calculation runs
+            on a worker thread. Default None.
+        """
+        title = "Decorrelation resolution"
+        channel = self.window.view.get_channel(
+            "Calculate decorrelation resolution"
+        )
+        if channel is None:
+            return
+        locs = self.window.view.locs[channel]
+        info = self.window.view.infos[channel]
+        viewport = self.window.view.viewport
+        pixel_size = self.decorrelation_pixel_size.value() or None
+
+        def compute(progress: lib.TaskProgress) -> dict:
+            return postprocess.decorrelation(
+                locs,
+                info,
+                viewport=viewport,
+                pixel_size=pixel_size,
+                progress=progress,
+            )
+
+        def apply(result: dict) -> None:
+            self.decorrelation_result = result
+            resolution = result["resolution"]
+            if np.isfinite(resolution):
+                self.decorrelation_resolution.setText(
+                    f"{resolution:.2f} nm ({result['pixel_size']:.3g} nm"
+                    " pixels)"
+                )
+                if result["pixel_size_limited"]:
+                    QtWidgets.QMessageBox.information(
+                        self,
+                        title,
+                        "The resolution is close to twice the smallest pixel"
+                        f" size rendered ({result['pixel_size']:.3g} nm), so"
+                        " it may be limited by the pixel size. Zoom in to"
+                        " render smaller pixels (images are at most 8,192"
+                        " pixels on a side) or set a smaller pixel size.",
+                    )
+            else:
+                self.decorrelation_resolution.setText("n/a")
+                QtWidgets.QMessageBox.information(
+                    self,
+                    title,
+                    "No decorrelation function has a peak, so no resolution"
+                    " can be given, e.g., because the pixels are too large"
+                    " for the resolution or the field of view holds too few"
+                    " localizations. Try other pixel sizes, a larger field"
+                    " of view or more localizations.",
+                )
+            if on_done is not None:
+                on_done()
+
+        def failed(error: Exception) -> None:
+            if isinstance(error, ValueError):  # e.g., the FOV is too small
+                QtWidgets.QMessageBox.warning(self, title, str(error))
+            else:  # unexpected, report as usual
+                sys.excepthook(type(error), error, error.__traceback__)
+
+        lib.run_task(
+            compute,
+            "Calculating decorrelation resolution",
+            self,
+            apply,
+            on_failed=failed,
+            title=title,
+        )
+
+    def show_decorrelation_plot(self) -> None:
+        """Show the decorrelation plot window, calculating the
+        resolution first if needed."""
+        if not self.decorrelation_result:
+            self.calculate_decorrelation(
+                on_done=self._show_decorrelation_window
+            )
+        else:
+            self._show_decorrelation_window()
+
+    def _show_decorrelation_window(self) -> None:
+        """Plot the decorrelation result in a new window."""
+        # keep a reference to the window to prevent garbage collection
+        self.decorrelation_window = DecorrelationPlotWindow(self)
+        self.decorrelation_window.plot(self.decorrelation_result)
+        self.decorrelation_window.show()
+
     def show_frc_plot(self) -> None:
         """Show FRC plot window."""
         if not self.frc_result:
@@ -7086,6 +7249,27 @@ class FRCPlotWindow(lib.GenericPlotWindow):
         def draw() -> None:
             with self.plot_context():
                 postprocess.plot_frc(frc_result, self.figure)
+
+        draw()
+        self.redraw = draw
+        self.canvas.draw()
+
+
+class DecorrelationPlotWindow(lib.GenericPlotWindow):
+    """Plot the decorrelation resolution, see
+    ``postprocess.plot_decorrelation``."""
+
+    def __init__(self, info_dialog: InfoDialog) -> None:
+        super().__init__("Decorrelation Plot", "render")
+        self.info_dialog = info_dialog
+        self.resize(1000, 500)
+
+    def plot(self, decorrelation_result: dict) -> None:
+        def draw() -> None:
+            with self.plot_context():
+                postprocess.plot_decorrelation(
+                    decorrelation_result, self.figure
+                )
 
         draw()
         self.redraw = draw

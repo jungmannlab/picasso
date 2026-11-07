@@ -26,6 +26,7 @@ import numba
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from matplotlib import ticker
 from scipy import interpolate, special
 from scipy.optimize import curve_fit, minimize_scalar, OptimizeWarning
 from scipy.spatial import KDTree
@@ -71,6 +72,8 @@ __all__ = [
     "frc",
     "frc_rois",
     "plot_frc",
+    "decorrelation",
+    "plot_decorrelation",
     # spatial analysis
     "nn_analysis",
     "pair_correlation",
@@ -3498,6 +3501,464 @@ def _frc(
             resolution = 1 / f_res  # in nm
             break
     return frc_curve, frc_curve_smooth, frequencies, resolution, (im1, im2)
+
+
+#: Pixel sizes (nm) at which ``decorrelation`` renders the
+#: localizations by default: 2 to 64 nm in steps of a factor sqrt(2)
+DECORRELATION_PIXEL_SIZES = tuple(
+    float(size) for size in 2.0 * np.sqrt(2.0) ** np.arange(11)
+)
+#: A resolution below this factor times the smallest pixel size
+#: rendered by ``decorrelation`` may be limited by the pixel size
+#: (about twice the pixel size for pixels that are too large)
+DECORRELATION_LIMIT_FACTOR = 3.0
+#: Pixel size (nm) and threshold of the image whose pixels above the
+#: threshold make up the area covered by the sample (Descloux et al.,
+#: 2021), see ``decorrelation``
+_SAMPLE_AREA_PIXEL_SIZE = 5.0
+_SAMPLE_AREA_THRESHOLD = 0.5
+
+
+def _bilinear_weights(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    x_min: float,
+    y_min: float,
+    pixel_size: float,
+) -> Iterator[tuple[lib.IntArray1D, lib.IntArray1D, lib.FloatArray1D]]:
+    """The column, row and weight with which the points ``(x, y)`` (nm)
+    are spread on each of the four nearest pixel centers of an image
+    whose corner is at ``(x_min, y_min)``: bilinear interpolation."""
+    u = (x - x_min) / pixel_size - 0.5
+    v = (y - y_min) / pixel_size - 0.5
+    column = np.floor(u).astype(np.int64)
+    row = np.floor(v).astype(np.int64)
+    fu = u - column
+    fv = v - row
+    for d_row, w_row in ((0, 1.0 - fv), (1, fv)):
+        for d_column, w_column in ((0, 1.0 - fu), (1, fu)):
+            yield column + d_column, row + d_row, w_row * w_column
+
+
+def _render_bilinear(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    x_min: float,
+    y_min: float,
+    pixel_size: float,
+    shape: tuple[int, int],
+) -> lib.FloatArray2D:
+    """Bilinear histogram of the points ``(x, y)`` (nm) on an image of
+    ``shape`` (rows, columns) whose corner is at ``(x_min, y_min)``:
+    each point is spread on its four nearest pixels (Descloux et al.,
+    2021), which avoids the rounding of a plain histogram."""
+    n_rows, n_columns = shape
+    image = np.zeros(n_rows * n_columns)
+    for column, row, weight in _bilinear_weights(
+        x, y, x_min, y_min, pixel_size
+    ):
+        inside = (
+            (column >= 0) & (column < n_columns) & (row >= 0) & (row < n_rows)
+        )
+        image += np.bincount(
+            row[inside] * n_columns + column[inside],
+            weight[inside],
+            n_rows * n_columns,
+        )
+    return image.reshape(shape)
+
+
+def _sample_area(x: lib.FloatArray1D, y: lib.FloatArray1D) -> float:
+    """Area (nm^2) covered by the points ``(x, y)`` (nm): the pixels of
+    their bilinear histogram with 5 nm pixels that exceed 0.5 (Descloux
+    et al., 2021). Only the occupied pixels are stored."""
+    if not len(x):
+        return 0.0
+    pixel_size = _SAMPLE_AREA_PIXEL_SIZE
+    pixels, weights = [], []
+    # the corner one pixel below the points: all indices are positive
+    corner = (x.min() - pixel_size, y.min() - pixel_size)
+    for column, row, weight in _bilinear_weights(x, y, *corner, pixel_size):
+        pixels.append(row * 2**31 + column)
+        weights.append(weight)
+    occupied, inverse = np.unique(np.concatenate(pixels), return_inverse=True)
+    values = np.bincount(inverse, np.concatenate(weights), len(occupied))
+    n_pixels = int(np.sum(values > _SAMPLE_AREA_THRESHOLD))
+    return n_pixels * pixel_size**2
+
+
+def decorrelation(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    viewport: tuple[tuple[float, float], tuple[float, float]] | None = None,
+    pixel_size: float | list[float] | None = None,
+    n_radii: int = 50,
+    n_filters: int = 10,
+    max_image_size: int | None = 8192,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> dict:
+    """Resolution of localizations by decorrelation analysis (Descloux
+    et al., 2019 and 2021), from one set of localizations and without
+    parameters to tune, unlike the FRC, which splits them in two.
+
+    The localizations are rendered as a bilinear histogram, i.e., each
+    localization is spread on its four nearest pixels, and the
+    resolution of the image is found by decorrelation analysis, see
+    ``imageprocess.decorrelation``. The result depends on the pixel
+    size: pixels that are too large limit the resolution to about twice
+    the pixel size, and pixels that are too small leave gaps between
+    sparse localizations. As advised by Descloux et al. (2021), the
+    resolution is computed at several pixel sizes and the smallest
+    value is reported.
+
+    The estimate also depends on the density of the localizations:
+    below about 1-4 x 10^4 localizations per um^2 of sample, it improves
+    with more localizations (Descloux et al., 2021). The density is
+    reported over the area covered by the sample: the pixels of a
+    bilinear histogram with 5 nm pixels above 0.5, as in that paper. As
+    for the FRC, repeated localizations of the same molecule (e.g.,
+    blinking or rebinding) correlate and may make the resolution
+    appear better than it is.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+    info : list of dicts
+        Metadata of the localizations, used for the field of view if
+        ``viewport`` is None.
+    viewport : tuple or None, optional
+        Region ``((y_min, x_min), (y_max, x_max))`` in nm whose
+        localizations are rendered. If None, the whole field of view is
+        used. Default is None.
+    pixel_size : float, list of floats or None, optional
+        Pixel size or sizes in nm at which the localizations are
+        rendered. If None, ``DECORRELATION_PIXEL_SIZES`` (2 to 64 nm).
+        Pixel sizes that give an image larger than ``max_image_size``
+        or smaller than 32 pixels on a side are skipped. Default is
+        None.
+    n_radii : int, optional
+        Number of radii of the decorrelation functions, see
+        ``imageprocess.decorrelation``. Default is 50.
+    n_filters : int, optional
+        Number of high-pass filters, see
+        ``imageprocess.decorrelation``. Default is 10.
+    max_image_size : int or None, optional
+        Largest side length (pixels) of the rendered images; smaller
+        pixel sizes are skipped, since the memory grows with the square
+        of the side length. None renders any size. Default is 8192.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating decorrelation"
+        over the pixel sizes. Default is None.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with the keys:
+
+        - "resolution": smallest resolution over the pixel sizes in nm,
+          NaN if no pixel size gives one.
+        - "pixel_size": pixel size of that resolution in nm (NaN
+          without a resolution).
+        - "pixel_size_limited": whether the resolution may be limited by
+          the pixel size: it is at the smallest pixel size rendered and
+          below ``DECORRELATION_LIMIT_FACTOR`` (3) times it. Smaller
+          pixels (e.g., a smaller viewport, or a larger
+          ``max_image_size``) may then give a better resolution.
+        - "pixel_sizes": pixel sizes rendered in nm, and "resolutions":
+          the resolution at each in nm (NaN without one).
+        - "results": result of ``imageprocess.decorrelation`` at each
+          pixel size (curves, peaks, etc.).
+        - "skipped_pixel_sizes": pixel sizes skipped for the size of
+          their image, in nm.
+        - "n_locs": number of localizations in the viewport.
+        - "sample_area": area covered by the localizations in nm^2, and
+          "density": localizations per um^2 of it.
+        - "viewport".
+
+    Raises
+    ------
+    ValueError
+        If the viewport is empty, a pixel size is not positive or no
+        pixel size gives an image of 32 to ``max_image_size`` pixels on
+        a side.
+
+    See Also
+    --------
+    plot_decorrelation : Plot the result.
+    frc : Resolution by Fourier ring correlation.
+
+    References
+    ----------
+    Descloux, A., Grussmayer, K. S., Radenovic, A. Parameter-free
+    image resolution estimation based on decorrelation analysis. Nat
+    Methods 16, 918-924 (2019).
+    https://doi.org/10.1038/s41592-019-0515-7
+
+    Descloux, A., Grussmayer, K. S., Radenovic, A. Parameter-free
+    rendering of single-molecule localization microscopy data for
+    parameter-free resolution estimation. Commun Biol 4, 550 (2021).
+    https://doi.org/10.1038/s42003-021-02086-1
+
+    Examples
+    --------
+    >>> result = postprocess.decorrelation(locs, info)
+    >>> print(f"{result['resolution']:.1f} nm")
+    """
+    if viewport is None:
+        width, height = lib.field_of_view(info)
+        viewport = ((0.0, 0.0), (float(height), float(width)))
+    (y_min, x_min), (y_max, x_max) = viewport
+    if not (x_max > x_min and y_max > y_min):
+        raise ValueError(f"The viewport {viewport} is empty.")
+    if pixel_size is None:
+        sizes = np.array(DECORRELATION_PIXEL_SIZES)
+    else:
+        sizes = np.atleast_1d(np.asarray(pixel_size, dtype=np.float64))
+    if not (sizes > 0).all():
+        raise ValueError("Pixel sizes must be positive.")
+    min_size = imageprocess.DECORRELATION_MIN_SIZE
+    used, skipped = [], []
+    for size in sizes:
+        shape = (
+            int(np.ceil((y_max - y_min) / size)),
+            int(np.ceil((x_max - x_min) / size)),
+        )
+        too_large = max_image_size is not None and max(shape) > max_image_size
+        if too_large or min(shape) < min_size:
+            skipped.append(size)
+        else:
+            used.append((float(size), shape))
+    if not used:
+        limits = f"{min_size} to {max_image_size}"
+        if max_image_size is None:
+            limits = f"at least {min_size}"
+        raise ValueError(
+            f"No pixel size gives an image of {limits} pixels on a side "
+            f"for the viewport of {x_max - x_min:,.0f} x "
+            f"{y_max - y_min:,.0f} nm; choose other pixel sizes or "
+            "viewport."
+        )
+    x = locs["x"].to_numpy(dtype=np.float64)
+    y = locs["y"].to_numpy(dtype=np.float64)
+    in_view = (x >= x_min) & (x < x_max) & (y >= y_min) & (y < y_max)
+    x, y = x[in_view], y[in_view]
+
+    results = []
+    phase = "Calculating decorrelation"
+    with lib.tracked_progress(progress, phase, unit="pixel size") as progress:
+        lib.start_phase(progress, phase, len(used), unit="pixel size")
+        progress.set_value(0)
+        for i, (size, shape) in enumerate(used):
+            image = _render_bilinear(x, y, x_min, y_min, size, shape)
+            results.append(
+                imageprocess.decorrelation(
+                    image,
+                    pixel_size=size,
+                    n_radii=n_radii,
+                    n_filters=n_filters,
+                )
+            )
+            progress.set_value(i + 1)
+        progress.set_value(len(used))
+    resolutions = np.array([result["resolution"] for result in results])
+    resolution = best_size = np.nan
+    pixel_size_limited = False
+    if np.isfinite(resolutions).any():
+        best = int(np.nanargmin(resolutions))
+        resolution = float(resolutions[best])
+        best_size = used[best][0]
+        # no smaller pixels were rendered to show the resolution beyond
+        pixel_size_limited = bool(
+            best_size == min(size for size, _ in used)
+            and resolution < DECORRELATION_LIMIT_FACTOR * best_size
+        )
+    area = _sample_area(x, y)
+    return {
+        "resolution": resolution,
+        "pixel_size": best_size,
+        "pixel_size_limited": pixel_size_limited,
+        "pixel_sizes": np.array([size for size, _ in used]),
+        "resolutions": resolutions,
+        "results": results,
+        "skipped_pixel_sizes": np.array(skipped),
+        "n_locs": int(len(x)),
+        "sample_area": area,
+        "density": len(x) / (area / 1e6) if area > 0 else np.nan,
+        "viewport": viewport,
+    }
+
+
+def _best_decorrelation(result: dict) -> dict:
+    """The result of ``imageprocess.decorrelation`` in ``result`` (of
+    ``decorrelation`` or ``imageprocess.decorrelation``) at the pixel
+    size of the reported resolution, or at the first pixel size without
+    one."""
+    if "results" not in result:
+        return result
+    if np.isfinite(result["resolution"]):
+        return result["results"][int(np.nanargmin(result["resolutions"]))]
+    return result["results"][0]
+
+
+def plot_decorrelation(
+    decorrelation_result: dict,
+    fig: plt.Figure | None = None,
+) -> plt.Figure:
+    """Plot the decorrelation functions at the pixel size of the
+    resolution, with their peaks and the cut-off frequency, and, for
+    several pixel sizes, the resolution at each pixel size.
+
+    Parameters
+    ----------
+    decorrelation_result : dict
+        Result of ``decorrelation`` or ``imageprocess.decorrelation``.
+    fig : plt.Figure or None, optional
+        Figure to plot on, cleared first. If None, a new figure is
+        created. Default is None.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    if fig is None:
+        fig = plt.Figure(constrained_layout=True)
+    else:
+        fig.clear()
+    result = decorrelation_result
+    scan = "results" in result and len(result["pixel_sizes"]) > 1
+    in_nm = "results" in result
+    if scan:
+        ax, ax_sizes = fig.subplots(1, 2, gridspec_kw={"width_ratios": [3, 2]})
+    else:
+        ax = fig.add_subplot(111)
+    # colors of the active style, resolved now (lines look "CN" colors
+    # up only when drawn)
+    data_color, cutoff_color = plt.rcParams["axes.prop_cycle"].by_key()[
+        "color"
+    ][:2]
+    best = _best_decorrelation(result)
+    frequencies = best["frequencies"]
+    for i, curve in enumerate(best["curves"][1:]):
+        ax.plot(
+            frequencies,
+            curve,
+            color="0.6",
+            linewidth=0.8,
+            label="High-pass filtered" if i == 0 else None,
+        )
+    ax.plot(
+        frequencies,
+        best["curves"][0],
+        color=data_color,
+        linewidth=1.8,
+        label="Not filtered",
+    )
+    found = np.isfinite(best["peak_radii"])
+    ax.plot(
+        best["peak_radii"][found] / (2 * best["pixel_size"]),
+        best["peak_amplitudes"][found],
+        "o",
+        color=data_color,
+        markersize=4,
+        label="Peaks",
+    )
+    unit = "nm" if in_nm else "units"
+    if np.isfinite(best["cutoff"]):
+        ax.axvline(
+            best["cutoff"] / (2 * best["pixel_size"]),
+            color=cutoff_color,
+            linestyle="--",
+            linewidth=1.2,
+            label=f"Cut-off: {best['resolution']:.1f} {unit}",
+        )
+    ax.set_xlim(0, frequencies[-1])
+    ax.set_ylim(bottom=0)
+    ax.set_xlabel(
+        "Spatial frequency (nm⁻¹)"
+        if in_nm
+        else "Spatial frequency (1 / unit of the pixel size)"
+    )
+    ax.set_ylabel("Decorrelation")
+    ax.set_title(f"Pixel size {best['pixel_size']:.3g} {unit}")
+    ax.legend(loc="best")
+
+    if scan:
+        sizes = result["pixel_sizes"]
+        ax_sizes.plot(
+            sizes,
+            2 * sizes,
+            color="0.5",
+            linestyle=":",
+            label="2 x pixel size",
+        )
+        ax_sizes.plot(
+            sizes, result["resolutions"], "o-", color=data_color, label="Data"
+        )
+        if np.isfinite(result["resolution"]):
+            ax_sizes.plot(
+                result["pixel_size"],
+                result["resolution"],
+                "o",
+                color=cutoff_color,
+                markersize=9,
+                label="Smallest",
+            )
+        ax_sizes.set_xscale("log", base=2)
+        ax_sizes.set_yscale("log", base=2)
+        for axis in (ax_sizes.xaxis, ax_sizes.yaxis):
+            axis.set_major_formatter(ticker.FuncFormatter(_plain_number))
+            axis.set_minor_formatter(ticker.NullFormatter())
+        ax_sizes.set_xlabel("Pixel size (nm)")
+        ax_sizes.set_ylabel("Resolution (nm)")
+        ax_sizes.legend(loc="best")
+    title = "Decorrelation resolution: " + (
+        f"{result['resolution']:.1f} {unit}"
+        if np.isfinite(result["resolution"])
+        else "n/a"
+    )
+    if in_nm and result["pixel_size_limited"]:
+        title += " (limited by the pixel size)"
+    if in_nm:
+        title += (
+            f"\n{result['n_locs']:,} localizations, "
+            f"{result['density']:,.0f} per µm² of sample"
+        )
+    fig.suptitle(title)
+    return fig
+
+
+def _plain_number(value: float, _position: int | None = None) -> str:
+    """Tick label of a logarithmic axis as a plain number, e.g., 16."""
+    return f"{value:g}"
+
+
+def _decorrelation_tables(
+    decorrelation_result: dict,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The result of ``decorrelation`` as two tables: the resolution at
+    each pixel size and the decorrelation functions at the pixel size
+    of the reported resolution (the first column without high-pass
+    filter). Used for saving the result as .csv files."""
+    result = decorrelation_result
+    sizes = pd.DataFrame(
+        {
+            "pixel_size_nm": result["pixel_sizes"],
+            "resolution_nm": result["resolutions"],
+            "cutoff": [r["cutoff"] for r in result["results"]],
+            "amplitude": [r["amplitude"] for r in result["results"]],
+        }
+    )
+    best = _best_decorrelation(result)
+    curves = {"frequency_per_nm": best["frequencies"]}
+    curves["not_filtered"] = best["curves"][0]
+    for sigma, curve in zip(best["filters"], best["curves"][1:]):
+        curves[f"filter_{sigma:.4g}"] = curve
+    return sizes, pd.DataFrame(curves)
 
 
 def pair_correlation(

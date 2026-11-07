@@ -4051,3 +4051,169 @@ class TestKnnDensity:
         locs = self._random(100, 9, z=True)
         with pytest.raises(ValueError, match=match):
             postprocess.knn_density(locs, self.INFO, **kwargs)
+
+
+def _filaments(precision: float, seed: int = 0, size: float = 5000.0):
+    """Localizations (nm) along 40 random straight filaments in a
+    ``size`` x ``size`` field, 0.6 molecules per nm, each localized 8
+    times with ``precision``."""
+    rng = np.random.default_rng(seed)
+    xs, ys = [], []
+    for _ in range(40):
+        x0, y0 = rng.uniform(0, size, 2)
+        angle = rng.uniform(0, np.pi)
+        t = rng.uniform(-0.75 * size, 0.75 * size, int(0.9 * size))
+        x = np.repeat(x0 + t * np.cos(angle), 8)
+        y = np.repeat(y0 + t * np.sin(angle), 8)
+        xs.append(x + rng.normal(0, precision, len(x)))
+        ys.append(y + rng.normal(0, precision, len(y)))
+    x, y = np.concatenate(xs), np.concatenate(ys)
+    inside = (x > 0) & (x < size) & (y > 0) & (y < size)
+    n = int(inside.sum())
+    locs = pd.DataFrame(
+        {
+            "frame": rng.integers(0, 1000, n).astype(np.uint32),
+            "x": x[inside].astype(np.float32),
+            "y": y[inside].astype(np.float32),
+            "lpx": np.full(n, precision, np.float32),
+            "lpy": np.full(n, precision, np.float32),
+        }
+    )
+    info = [{"Width": 50, "Height": 50, "Pixelsize": 100.0, "Frames": 1000}]
+    return locs, info
+
+
+class TestDecorrelation:
+    @pytest.fixture(scope="class")
+    def sharp(self):
+        locs, info = _filaments(4.0)
+        return locs, info, postprocess.decorrelation(locs, info)
+
+    def test_resolution_follows_the_precision_and_the_frc(self, sharp):
+        locs, info, result = sharp
+        blurred_locs, _ = _filaments(12.0)
+        blurred = postprocess.decorrelation(blurred_locs, info)
+        assert blurred["resolution"] / result["resolution"] == pytest.approx(
+            3.0, rel=0.3
+        )
+        for data, precision, res in (
+            (locs, 4.0, result),
+            (blurred_locs, 12.0, blurred),
+        ):
+            frc = postprocess.frc(
+                data, info, viewport=((0, 0), (5000, 5000)), lp=precision
+            )
+            assert res["resolution"] == pytest.approx(
+                frc["resolution"], rel=0.15
+            )
+
+    def test_smallest_resolution_over_the_pixel_sizes(self, sharp):
+        locs, info, result = sharp
+        np.testing.assert_allclose(
+            result["pixel_sizes"], postprocess.DECORRELATION_PIXEL_SIZES
+        )
+        assert result["resolution"] == np.nanmin(result["resolutions"])
+        best = list(result["pixel_sizes"]).index(result["pixel_size"])
+        assert result["resolutions"][best] == result["resolution"]
+        assert len(result["results"]) == len(result["pixel_sizes"])
+        # large pixels: about twice the pixel size (sampling limited)
+        assert result["resolutions"][-1] == pytest.approx(
+            2 * result["pixel_sizes"][-1], rel=0.3
+        )
+        assert result["n_locs"] == len(locs)
+        assert not len(result["skipped_pixel_sizes"])
+        # smaller pixels than the best were rendered
+        assert not result["pixel_size_limited"]
+
+    def test_too_large_pixels_limit_the_resolution(self, sharp):
+        locs, info, _ = sharp
+        result = postprocess.decorrelation(locs, info, pixel_size=16.0)
+        assert result["resolution"] == pytest.approx(32.0, rel=0.3)
+        assert result["pixel_size_limited"]
+        fig = postprocess.plot_decorrelation(result)
+        assert "limited by the pixel size" in fig.get_suptitle()
+
+    def test_one_pixel_size(self, sharp):
+        locs, info, _ = sharp
+        result = postprocess.decorrelation(
+            locs,
+            info,
+            viewport=((0, 0), (2500, 2500)),
+            pixel_size=4.0,
+            n_radii=30,
+            n_filters=5,
+        )
+        np.testing.assert_array_equal(result["pixel_sizes"], [4.0])
+        assert result["results"][0]["curves"].shape == (6, 30)
+        assert result["pixel_size"] == 4.0
+        assert result["n_locs"] < len(locs)
+
+    def test_pixel_sizes_outside_the_image_limits_are_skipped(self, sharp):
+        locs, info, _ = sharp
+        result = postprocess.decorrelation(
+            locs, info, pixel_size=[2.0, 8.0, 200.0], max_image_size=1024
+        )
+        # 5000 nm / 2 nm > 1024 pixels; 5000 nm / 200 nm < 32 pixels
+        np.testing.assert_array_equal(result["pixel_sizes"], [8.0])
+        np.testing.assert_array_equal(
+            result["skipped_pixel_sizes"], [2.0, 200.0]
+        )
+        with pytest.raises(ValueError, match="No pixel size"):
+            postprocess.decorrelation(locs, info, pixel_size=200.0)
+        with pytest.raises(ValueError, match="positive"):
+            postprocess.decorrelation(locs, info, pixel_size=[4.0, -1.0])
+        with pytest.raises(ValueError, match="empty"):
+            postprocess.decorrelation(locs, info, viewport=((0, 0), (0, 1000)))
+
+    def test_bilinear_rendering(self):
+        x = np.array([10.0, 13.0])
+        y = np.array([10.0, 10.0])
+        image = postprocess._render_bilinear(x, y, 0.0, 0.0, 4.0, (8, 8))
+        assert image.sum() == pytest.approx(2.0)
+        # at a pixel center (10 nm = center of pixel 2): one pixel
+        assert image[2, 2] == pytest.approx(1.0 + 0.25)
+        # 13 nm lies 3/4 of the way from pixel 2 to pixel 3
+        assert image[2, 3] == pytest.approx(0.75)
+
+    def test_sample_area_and_density(self):
+        # a dense 1 x 1 um square of localizations
+        grid = np.arange(0.5, 1000.0, 1.0)
+        x, y = (v.ravel() for v in np.meshgrid(grid, grid))
+        assert postprocess._sample_area(x, y) == pytest.approx(1e6, rel=0.03)
+        locs = pd.DataFrame(
+            {"frame": np.zeros(len(x), np.uint32), "x": x, "y": y}
+        )
+        info = [{"Width": 10, "Height": 10, "Pixelsize": 100.0}]
+        result = postprocess.decorrelation(locs, info, pixel_size=16.0)
+        assert result["density"] == pytest.approx(1e6, rel=0.03)
+
+    def test_no_resolution_without_structure(self):
+        rng = np.random.default_rng(0)
+        x, y = rng.uniform(0, 5000, (2, 2000))
+        locs = pd.DataFrame(
+            {"frame": np.zeros(2000, np.uint32), "x": x, "y": y}
+        )
+        info = [{"Width": 50, "Height": 50, "Pixelsize": 100.0}]
+        result = postprocess.decorrelation(locs, info, pixel_size=[16.0])
+        assert np.isnan(result["resolution"])
+        assert np.isnan(result["pixel_size"])
+        fig = postprocess.plot_decorrelation(result)
+        assert "n/a" in fig.get_suptitle()
+
+    def test_plot_and_tables(self, sharp):
+        _, _, result = sharp
+        fig = postprocess.plot_decorrelation(result)
+        assert len(fig.axes) == 2  # curves and resolution by pixel size
+        assert f"{result['resolution']:.1f} nm" in fig.get_suptitle()
+        sizes, curves = postprocess._decorrelation_tables(result)
+        assert list(sizes.columns) == [
+            "pixel_size_nm",
+            "resolution_nm",
+            "cutoff",
+            "amplitude",
+        ]
+        assert len(sizes) == len(result["pixel_sizes"])
+        assert curves.shape == (50, 12)  # frequency, unfiltered, 10 filters
+        # an image result plots on one panel
+        image_result = result["results"][0]
+        assert len(postprocess.plot_decorrelation(image_result).axes) == 1

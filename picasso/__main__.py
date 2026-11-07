@@ -1121,6 +1121,84 @@ def _knn_density(
             print(f"  saved {base + suffix}")
 
 
+def _decorrelation(
+    files: list[str],
+    pixel_sizes: list[float] | None,
+    n_radii: int,
+    n_filters: int,
+    max_image_size: int,
+) -> None:
+    """Decorrelation resolution of the localizations in each of
+    ``files`` over the whole field of view, at ``pixel_sizes`` (nm;
+    None scans the default pixel sizes). Prints the resolution at each
+    pixel size and saves them (``<file>_decorrelation.csv``), the
+    decorrelation functions (``..._curves.csv``) and a plot (``.png``)
+    next to each file. See ``postprocess.decorrelation`` for
+    details."""
+    from glob import glob
+    from itertools import chain
+    import numpy as np
+    from . import io, postprocess
+
+    paths = list(chain(*[sorted(glob(_)) for _ in files]))
+    if not paths:
+        raise SystemExit("No localization files found.")
+    for path in paths:
+        locs, info = io.load_locs(path)
+        print(f"Decorrelation resolution of {path}:")
+        try:
+            result = postprocess.decorrelation(
+                locs,
+                info,
+                pixel_size=pixel_sizes,
+                n_radii=n_radii,
+                n_filters=n_filters,
+                max_image_size=max_image_size or None,
+                progress="console",
+            )
+        except ValueError as e:
+            raise SystemExit(f"{path}: {e}")
+        sizes, curves = postprocess._decorrelation_tables(result)
+        print(
+            sizes.to_string(
+                index=False, float_format=lambda value: f"{value:.4g}"
+            )
+        )
+        skipped = result["skipped_pixel_sizes"]
+        if len(skipped):
+            print(
+                "  skipped pixel sizes (image too large or small): "
+                + ", ".join(f"{size:.3g}" for size in skipped)
+                + " nm"
+            )
+        if np.isfinite(result["resolution"]):
+            print(
+                f"  resolution {result['resolution']:.2f} nm at"
+                f" {result['pixel_size']:.3g} nm pixels"
+            )
+            if result["pixel_size_limited"]:
+                print(
+                    "WARNING: the resolution is close to twice the smallest"
+                    " pixel size rendered, so it may be limited by the pixel"
+                    " size; render smaller pixels with -px or a larger"
+                    " --max-image-size."
+                )
+        else:
+            print("  no resolution: no decorrelation function has a peak")
+        print(
+            f"  {result['n_locs']:,} localizations,"
+            f" {result['density']:,.0f} per um^2 of sample"
+        )
+        base = os.path.splitext(path)[0] + "_decorrelation"
+        sizes.to_csv(base + ".csv", index=False)
+        curves.to_csv(base + "_curves.csv", index=False)
+        figure = postprocess.plot_decorrelation(result)
+        figure.set_size_inches(11, 4.5)
+        figure.savefig(base + ".png", dpi=150)
+        for suffix in (".csv", "_curves.csv", ".png"):
+            print(f"  saved {base + suffix}")
+
+
 def _pick_similar_cli(
     files: list[str],
     picks_path: str | None = None,
@@ -5680,6 +5758,53 @@ def _build_parser() -> (
         ),
     )
 
+    # decorrelation resolution
+    decorrelation_parser = subparsers.add_parser(
+        "decorrelation",
+        help=(
+            "resolution of localizations by decorrelation analysis, over"
+            " the whole field of view"
+        ),
+    )
+    decorrelation_parser.add_argument(
+        "files",
+        nargs="+",
+        help="hdf5 localization files (unix style path patterns)",
+    )
+    decorrelation_parser.add_argument(
+        "-px",
+        "--pixel-size",
+        nargs="+",
+        type=float,
+        default=None,
+        help=(
+            "pixel size or sizes in nm at which the localizations are"
+            " rendered; the smallest resolution is reported (default:"
+            " 2 to 64 nm in steps of a factor sqrt(2))"
+        ),
+    )
+    decorrelation_parser.add_argument(
+        "--n-radii",
+        type=int,
+        default=50,
+        help="number of radii of the decorrelation functions (default=50)",
+    )
+    decorrelation_parser.add_argument(
+        "--n-filters",
+        type=int,
+        default=10,
+        help="number of high-pass filters (default=10)",
+    )
+    decorrelation_parser.add_argument(
+        "--max-image-size",
+        type=int,
+        default=8192,
+        help=(
+            "largest side length of the rendered images in pixels; smaller"
+            " pixel sizes are skipped, 0 for no limit (default=8192)"
+        ),
+    )
+
     # density from the k nearest neighbors
     knn_parser = subparsers.add_parser(
         "knn-density",
@@ -6734,6 +6859,14 @@ def main():  # noqa: C901
                 None if args.z_range is None else tuple(args.z_range),
                 args.observed_z,
                 args.cross_null,
+            )
+        elif args.command == "decorrelation":
+            _decorrelation(
+                args.files,
+                args.pixel_size,
+                args.n_radii,
+                args.n_filters,
+                args.max_image_size,
             )
         elif args.command == "knn-density":
             _knn_density(

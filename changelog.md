@@ -48,6 +48,7 @@ Last change: 07-NOV-2026 CEST
 - Undrifting from picked localizations is fast and memory-efficient for many picks.
 - Faster FRC.
 - FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*).
+- Resolution by decorrelation analysis (Descloux et al., *Nat. Methods* 2019), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-info-decorrelation).
 - Pick similar without seed picks, see the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-pick-by-n-locs-rmsd).
 - `picasso.render` is distributed as a package (`kernels`, `geometry`, `splat`, `scene`, `overlays_qt`, `animation`, `backend`, `gpu`); every former `picasso.render.*` name is still importable from `picasso.render`.
 - 2D/3D grid available for reference, either as the full grid or as axes with ticks and labels only.

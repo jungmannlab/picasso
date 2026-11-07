@@ -42,7 +42,8 @@
  "picasso.imageprocess": [
   "find_fiducials",
   "get_image_shift",
-  "rcc"
+  "rcc",
+  "decorrelation"
  ],
  "picasso.io": [
   "load_locs",
@@ -251,6 +252,8 @@
   "frc",
   "frc_rois",
   "plot_frc",
+  "decorrelation",
+  "plot_decorrelation",
   "nn_analysis",
   "pair_correlation",
   "distance_histogram",

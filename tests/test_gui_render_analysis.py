@@ -664,6 +664,59 @@ def test_frc_rois_reuse_nena(window, answers, qt_offscreen, monkeypatch):
         info_dialog.frc_rois_window.close()
 
 
+def test_decorrelation_resolution_of_the_view(
+    window, answers, qt_offscreen, monkeypatch
+):
+    answers.record_messages()
+    info_dialog = window.info_dialog
+    assert info_dialog.decorrelation_pixel_size.text() == "Scan"
+    info_dialog.decorrelation_pixel_size.setValue(20.0)
+    calls = []
+    decorrelation = gui_render.postprocess.decorrelation
+    monkeypatch.setattr(
+        gui_render.postprocess,
+        "decorrelation",
+        lambda *a, **k: calls.append(k) or decorrelation(*a, **k),
+    )
+    info_dialog.calculate_decorrelation()
+    _wait_for_tasks(qt_offscreen)
+    assert calls[0]["pixel_size"] == 20.0
+    assert calls[0]["viewport"] == window.view.viewport
+    result = info_dialog.decorrelation_result
+    text = info_dialog.decorrelation_resolution.text()
+    if np.isfinite(result["resolution"]):
+        assert text.endswith("nm pixels)")
+        # one pixel size: smaller pixels may resolve more
+        limited = result["pixel_size_limited"]
+        assert bool(answers.messages) == limited
+        if limited:
+            assert "limited by the pixel size" in answers.messages[0]
+    else:  # the reason why there is none
+        assert text == "n/a" and "no resolution" in answers.messages[0]
+
+
+def test_decorrelation_plot(window, answers, qt_offscreen):
+    answers.record_messages()
+    info_dialog = window.info_dialog
+    info_dialog.decorrelation_pixel_size.setValue(16.0)
+    info_dialog.show_decorrelation_plot()  # calculates first
+    _wait_for_tasks(qt_offscreen)
+    plot_window = info_dialog.decorrelation_window
+    assert plot_window.isVisible()
+    assert len(plot_window.figure.axes) == 1  # one pixel size
+    plot_window.close()
+
+
+def test_decorrelation_of_a_too_small_view(window, answers, qt_offscreen):
+    answers.record_messages()
+    window.view.viewport = [(0.0, 0.0), (100.0, 100.0)]  # nm
+    window.info_dialog.decorrelation_pixel_size.setValue(16.0)
+    window.info_dialog.calculate_decorrelation()
+    _wait_for_tasks(qt_offscreen)
+    assert "No pixel size" in answers.messages[0]
+    assert not window.info_dialog.decorrelation_result
+
+
 @pytest.fixture
 def frc_rois(window, answers, qt_offscreen):
     """The review window of FRC in 4 ROIs of 2 um."""

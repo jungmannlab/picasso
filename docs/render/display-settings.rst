@@ -10,7 +10,7 @@ This page describes two dialogs of the ``View`` menu:
   method, scale bar and rendering by property.
 - :ref:`Info <render-show-info>` (:kbd:`Ctrl+I`) reports on the loaded data:
   the current field of view, the localization precision and NeNA, the FRC
-  resolution and statistics of the picks.
+  and decorrelation resolutions and statistics of the picks.
 
 Click the header of a section to collapse or expand it. Picasso remembers
 which sections are open, also in the 3D view's display settings, in
@@ -499,6 +499,66 @@ the FRC resolution:
           n_rois=30, roi_size=5000.0, min_locs=1000,  # roi_size in nm
       )
       print(rois["resolutions"].mean(), rois["resolutions"].std())
+
+.. _render-info-decorrelation:
+
+Decorrelation
+~~~~~~~~~~~~~
+
+Estimates the resolution by decorrelation analysis (`Descloux et al., Nature
+Methods, 2019 <https://doi.org/10.1038/s41592-019-0515-7>`__) from all
+localizations at once, unlike the FRC, which splits them in two:
+
+- ``Calculate decorrelation`` renders the localizations of the **current
+  field of view** as a bilinear histogram (each localization spread on its
+  four nearest pixels) and correlates the image with its Fourier transform
+  normalized to unit amplitude, low-pass filtered at increasing frequencies.
+  The correlation peaks where higher frequencies add more noise than signal;
+  repeating it on high-pass filtered images finds the highest frequency with
+  signal, the cut-off, whose period is the resolution.
+- The result depends on the pixel size: large pixels limit the resolution to
+  about twice the pixel size, small pixels leave gaps between sparse
+  localizations. With ``Pixel size (nm)`` at ``Scan``, the localizations are
+  rendered at pixel sizes from 2 to 64 nm and the smallest resolution is
+  reported (`Descloux et al., Communications Biology, 2021
+  <https://doi.org/10.1038/s42003-021-02086-1>`__), with its pixel size. Pixel
+  sizes that give an image larger than 8,192 pixels on a side are skipped, so
+  zoom in for the smallest pixel sizes. If the resolution is close to twice
+  the smallest pixel size rendered (below three times it), Picasso says that
+  it may be limited by the pixel size: smaller pixels may give a better value.
+- ``Show decorrelation plot`` shows the decorrelation functions at the pixel
+  size of the resolution (without and with high-pass filters, their peaks and
+  the cut-off) and the resolution at each pixel size.
+- The estimate needs enough localizations: Descloux et al. (2021) found it
+  reliable above about 1-4 x 10^4 localizations per µm² of sample; below,
+  it improves with more localizations. The plot reports this density. As for
+  the FRC, repeated localizations of the same molecule are not corrected for,
+  so the value reported may be optimistic.
+
+The same analysis runs from the command line over the whole field of view,
+see :ref:`cmd-decorrelation`.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``decorrelation`` renders the localizations in a viewport (by default the
+   whole field of view) at each pixel size; ``imageprocess.decorrelation``
+   analyzes any image.
+
+   .. code-block:: python
+
+      from picasso import imageprocess, postprocess
+
+      result = postprocess.decorrelation(
+          locs, info, viewport=((0, 0), (8320, 8320))  # nm
+      )
+      print(result["resolution"], result["pixel_size"])  # nm
+      result["resolutions"]  # at each of result["pixel_sizes"]
+      fig = postprocess.plot_decorrelation(result)
+
+      image_result = imageprocess.decorrelation(image, pixel_size=65.0)
+      print(image_result["resolution"])  # nm
 
 
 .. _render-info-fov:

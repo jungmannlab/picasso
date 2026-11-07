@@ -143,6 +143,12 @@ Many of the functionalities provided by Picasso were published independently, pl
    * - FRC
      - Nieuwenhuizen et al., Nat. Methods, 2013
      - `10.1038/nmeth.2448 <https://doi.org/10.1038/nmeth.2448>`__
+   * - Decorrelation analysis
+     - Descloux et al., Nat. Methods, 2019
+     - `10.1038/s41592-019-0515-7 <https://doi.org/10.1038/s41592-019-0515-7>`__
+   * - Bilinear rendering and pixel size for decorrelation analysis of SMLM data
+     - Descloux et al., Commun. Biol., 2021
+     - `10.1038/s42003-021-02086-1 <https://doi.org/10.1038/s42003-021-02086-1>`__
    * - Theoretical lateral localization precision (``lpx`` / ``lpy``, Gaussian least-squares)
      - Mortensen et al., Nat. Methods, 2010
      - `10.1038/nmeth.1447 <https://doi.org/10.1038/nmeth.1447>`__

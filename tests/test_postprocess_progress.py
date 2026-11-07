@@ -360,6 +360,16 @@ CASES = [
         ["Calculating NNDs", "Simulating envelope"],
     ),
     (
+        "decorrelation",
+        lambda l, i, p: postprocess.decorrelation(
+            _molecules(2000, 0),
+            STAT_INFO,
+            pixel_size=[50.0, 100.0],
+            progress=p,
+        ),
+        ["Calculating decorrelation"],
+    ),
+    (
         "knn_density",
         lambda l, i, p: postprocess.knn_density(
             _molecules(500, 0),

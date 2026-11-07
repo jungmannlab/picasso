@@ -576,6 +576,31 @@ def test_pair_statistic_requires_files(tmp_path, monkeypatch):
         _picasso(monkeypatch, "rdf", tmp_path / "missing*.hdf5")
 
 
+def test_decorrelation_saves_tables_and_a_plot(locs_path, monkeypatch, capsys):
+    _picasso(monkeypatch, "decorrelation", locs_path, "-px", 8, 16)
+    base = _out(locs_path, "_decorrelation")
+    sizes = pd.read_csv(base + ".csv")
+    assert list(sizes["pixel_size_nm"]) == [8, 16]
+    assert len(pd.read_csv(base + "_curves.csv")) == 50
+    assert os.path.getsize(base + ".png") > 0
+    out = capsys.readouterr().out
+    assert "localizations" in out and "per um^2 of sample" in out
+    assert "WARNING" not in out
+    # 32 nm pixels limit the resolution of the bundled data
+    _picasso(monkeypatch, "decorrelation", locs_path, "-px", 32)
+    out = capsys.readouterr().out
+    assert "WARNING: the resolution is close to twice" in out
+
+
+def test_decorrelation_rejects_bad_arguments(locs_path, monkeypatch):
+    with pytest.raises(SystemExit, match="No pixel size"):
+        _picasso(monkeypatch, "decorrelation", locs_path, "-px", 1e5)
+    with pytest.raises(SystemExit, match="n_radii"):
+        _picasso(
+            monkeypatch, "decorrelation", locs_path, "-px", 8, "--n-radii", 3
+        )
+
+
 def test_knn_density_saves_tables_and_a_plot(locs_path, monkeypatch, capsys):
     _picasso(
         monkeypatch, "knn-density", locs_path, "-k", 3, "--k-min", 2, "-n", 2

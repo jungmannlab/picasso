@@ -1558,6 +1558,58 @@ For example, two channels with short names:
      - How pairs of channels are simulated: random shifts of the second
        channel (rectangular or circular regions only) or random labels.
 
+.. _cmd-decorrelation:
+
+decorrelation
+-------------
+Resolution of localizations by decorrelation analysis (Descloux et al., Nature
+Methods, 2019, DOI: `10.1038/s41592-019-0515-7
+<https://doi.org/10.1038/s41592-019-0515-7>`__), over the whole field of view.
+The localizations are rendered as a bilinear histogram at each pixel size and
+the smallest resolution is reported (Descloux et al., Communications Biology,
+2021). Pixel sizes that give an image larger than ``--max-image-size`` pixels
+on a side are skipped; a warning says when the resolution may be limited by
+the smallest pixel size rendered, e.g., over a large field of view. See
+:ref:`render-info-decorrelation` for details.
+
+Prints the resolution at each pixel size and saves next to each file ``<file
+name>_decorrelation.csv`` (pixel size, resolution, normalized cut-off
+frequency and peak amplitude of each pixel size), ``<file
+name>_decorrelation_curves.csv`` (the decorrelation functions at the pixel
+size of the resolution) and the plot ``<file name>_decorrelation.png``.
+
+.. code-block:: bash
+
+   picasso decorrelation files [-px pixel_size ...] [--n-radii n] [--n-filters n] [--max-image-size pixels]
+
+For example, at pixel sizes of 4, 8 and 16 nm:
+
+.. code-block:: bash
+
+   picasso decorrelation locs.hdf5 -px 4 8 16
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-px``, ``--pixel-size`` (float ...)
+     - 2 to 64
+     - The pixel size or sizes (nm) at which the localizations are rendered;
+       by default 2 to 64 nm in steps of a factor sqrt(2).
+   * - ``--n-radii`` (int)
+     - ``50``
+     - The number of radii of the decorrelation functions.
+   * - ``--n-filters`` (int)
+     - ``10``
+     - The number of high-pass filters.
+   * - ``--max-image-size`` (int)
+     - ``8192``
+     - The largest side length (pixels) of the rendered images; smaller
+       pixel sizes are skipped. ``0`` for no limit.
+
 .. _cmd-knn-density:
 
 knn-density
