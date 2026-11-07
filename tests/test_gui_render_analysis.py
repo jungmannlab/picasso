@@ -604,12 +604,43 @@ def test_frc_plot(window, answers):
     info_dialog.frc_window.close()
 
 
-def test_frc_plot_without_a_calculation(window2, answers):
-    """Canceling the channel selection leaves nothing to plot."""
-    answers.item(None)
-    window2.info_dialog.show_frc_plot()
-    assert not window2.info_dialog.frc_result
-    assert getattr(window2.info_dialog, "frc_window", None) is None
+def test_frc_plot_without_a_calculation(window, answers, monkeypatch):
+    """Declining a large FOV leaves nothing to plot."""
+    answers.record_messages()
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *a, **k: QtWidgets.QMessageBox.StandardButton.No,
+    )
+    window.view.median_lp = 0.1  # nm: a huge image at this pixel size
+    window.info_dialog.show_frc_plot()
+    assert not window.info_dialog.frc_result
+    assert getattr(window.info_dialog, "frc_window", None) is None
+
+
+def test_resolutions_of_the_selected_channel(window2, answers, qt_offscreen):
+    """No channel is asked for: FRC and decorrelation use the channel
+    selected in the dialog and are shown with it."""
+    answers.record_messages()
+    info_dialog = window2.info_dialog
+    info_dialog.update_fit_precision()
+    combo = info_dialog.precision_channel
+    combo.setCurrentIndex(1)
+    info_dialog.decorrelation_pixel_size.setValue(16.0)
+    info_dialog.calculate_frc_resolution()
+    info_dialog.calculate_decorrelation()
+    _wait_for_tasks(qt_offscreen)
+    frc_text = info_dialog.frc_resolution.text()
+    decorrelation_text = info_dialog.decorrelation_resolution.text()
+    assert "-" not in (frc_text, decorrelation_text)
+    assert "NeNA (nm)" in window2.view.infos[1][-1]
+    combo.setCurrentIndex(0)
+    assert info_dialog.frc_resolution.text() == "-"
+    assert info_dialog.decorrelation_resolution.text() == "-"
+    assert not info_dialog.decorrelation_result
+    combo.setCurrentIndex(1)
+    assert info_dialog.frc_resolution.text() == frc_text
+    assert info_dialog.decorrelation_resolution.text() == decorrelation_text
 
 
 def test_frc_records_nena(window, answers, monkeypatch):
@@ -685,7 +716,9 @@ def test_decorrelation_resolution_of_the_view(
     result = info_dialog.decorrelation_result
     text = info_dialog.decorrelation_resolution.text()
     if np.isfinite(result["resolution"]):
-        assert text.endswith("nm pixels)")
+        assert text.endswith(" nm")
+        used = info_dialog.decorrelation_used_pixel.text()
+        assert used == f"used: {result['pixel_size']:.3g} nm"
         # one pixel size: smaller pixels may resolve more
         limited = result["pixel_size_limited"]
         assert bool(answers.messages) == limited

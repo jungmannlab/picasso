@@ -172,31 +172,36 @@ def test_nena_button(window, qt_offscreen):
     assert info_dialog.nena_label.text().endswith("nm")
 
 
-def test_nena_follows_precision_channel(
-    window, qt_offscreen, tmp_path, monkeypatch
-):
-    """NeNA is shown for the channel selected for the median precision,
-    and calculating it selects the chosen channel there."""
+def test_precision_follows_selected_channel(window, qt_offscreen, tmp_path):
+    """NeNA and FRC are calculated for and shown with the channel
+    selected in the Precision and resolution section."""
     info_dialog = window.info_dialog
     path = str(tmp_path / "locs2.hdf5")
     window.view.add(path, _locs(seed=1), _info(), render_=False)
     info_dialog.update_fit_precision()
-    combo = info_dialog.fit_precision_channel
+    combo = info_dialog.precision_channel
     assert combo.count() == 2
-    combo.setCurrentIndex(0)
-    monkeypatch.setattr(
-        QtWidgets.QInputDialog, "getItem", lambda *a, **k: (path, True)
-    )
+    assert not combo.isHidden()
+    combo.setCurrentIndex(1)
     info_dialog.calculate_nena_lp()
     _wait_for_tasks(qt_offscreen)
     assert combo.currentIndex() == 1
     assert info_dialog.nena_label.text().endswith("nm")
     assert info_dialog.nena_result
+    assert "NeNA (nm)" in window.view.infos[1][-1]
+    assert "NeNA (nm)" not in window.view.infos[0][-1]
+    info_dialog.calculate_frc_resolution()
+    assert info_dialog.frc_result
+    frc_text = info_dialog.frc_resolution.text()
+    assert frc_text != "-"
     combo.setCurrentIndex(0)
     assert info_dialog.nena_label.text() == "-"
     assert info_dialog.lp is None
+    assert info_dialog.frc_resolution.text() == "-"
+    assert not info_dialog.frc_result
     combo.setCurrentIndex(1)
     assert info_dialog.nena_label.text().endswith("nm")
+    assert info_dialog.frc_resolution.text() == frc_text
 
 
 def test_rcc_applies_drift(window, qt_offscreen, monkeypatch):

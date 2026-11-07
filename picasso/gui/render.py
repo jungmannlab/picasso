@@ -6309,21 +6309,20 @@ class InfoDialog(lib.Dialog):
         Shows the estimated percentage of destroyed docking sites, see
         ``postprocess.docking_site_damage``.
     decorrelation_resolution : QLabel
-        Shows the decorrelation resolution (nm).
+        Shows the decorrelation resolution (nm) of the selected channel.
+    decorrelation_used_pixel : QLabel
+        Shows the pixel size (nm) of the decorrelation resolution.
     decorrelation_result : dict
-        Result of ``postprocess.decorrelation``, empty if not
-        calculated yet.
+        Result of ``postprocess.decorrelation`` of the selected channel,
+        empty if not calculated yet.
     fit_precision : QLabel
-        Shows median localization precision (nm) of the channel chosen
-        in self.fit_precision_channel.
-    fit_precision_channel : QComboBox
-        Chooses the channel for self.fit_precision and self.nena_label;
-        hidden with a single channel.
+        Shows median localization precision (nm) of the selected
+        channel.
     frc_plot_window : FRCPlotWindow(QDialog)
         Window displaying the FRC curve.
     frc_result : dict
-        Summary of FRC calculation (FRC curve, frequencies and
-        resolution).
+        Summary of the FRC calculation of the selected channel (FRC
+        curve, frequencies and resolution), empty if not calculated yet.
     influx_rate : FloatEdit(QLineEdit)
         Contains the calculated or input influx rate (1/frames).
     loc_drop : QLabel
@@ -6332,20 +6331,23 @@ class InfoDialog(lib.Dialog):
     locs_label : QLabel
         Shows the number of locs in the current FOV.
     lp : float
-        NeNA localization precision (nm) of the channel chosen in
-        self.fit_precision_channel. None, if not calculated yet.
+        NeNA localization precision (nm) of the selected channel. None,
+        if not calculated yet.
     max_dark_time : QSpinBox
         Contains the maximum gap between localizations (frames) to be
         considered as belonging to the same group of linked locs.
+    precision_channel : QComboBox
+        Chooses the channel whose precisions and resolutions are shown
+        and calculated; hidden with a single channel.
     precision_grid : QGridLayout
-        Contains all the info about the fit precision.
+        Contains the precisions and resolutions.
     nena_button : QPushButton
         Calculates nearest neighbor based analysis fit precision.
     nena_label : QLabel
         Shows self.lp.
     nena_result : dict
-        Summary of the NeNA calculation of the channel chosen in
-        self.fit_precision_channel. Empty, if not calculated yet.
+        Summary of the NeNA calculation of the selected channel. Empty,
+        if not calculated yet.
     n_localization_mean : QLabel
         Shows the mean number of locs in all picks.
     n_localization_std : QLabel
@@ -6499,77 +6501,140 @@ class InfoDialog(lib.Dialog):
         fov_buttons_layout.addWidget(self.load_fov_button)
         self.load_fov_button.clicked.connect(self.change_fov.load_fov)
 
-        # Precision
-        precision_groupbox = lib.CollapsibleGroupBox("Precision")
+        # Precision and resolution: one channel selector for all values
+        precision_groupbox = lib.CollapsibleGroupBox(
+            "Precision and resolution"
+        )
         vbox.addWidget(precision_groupbox)
         self.precision_grid = QtWidgets.QGridLayout(precision_groupbox.content)
-        med_lp_label = QtWidgets.QLabel("Median localization precision:")
-        med_lp_label.setToolTip(
-            "Median localization precision (mean of the medians of lpx\n"
-            "and lpy) of the channel selected below. NeNA precision is\n"
-            "shown for the same channel."
-        )
-        self.precision_grid.addWidget(med_lp_label, 0, 0)
-        self.fit_precision = QtWidgets.QLabel("-")
-        self.precision_grid.addWidget(self.fit_precision, 0, 1)
+        grid = self.precision_grid
+        self.precision_channel_label = QtWidgets.QLabel("Channel:")
+        grid.addWidget(self.precision_channel_label, 0, 0)
         # the channel selector is shown only with several channels
-        self.fit_precision_channel = QtWidgets.QComboBox()
-        self.fit_precision_channel.setToolTip(
-            "Channel whose median localization and NeNA precisions are"
-            " shown."
+        self.precision_channel = QtWidgets.QComboBox()
+        self.precision_channel.setToolTip(
+            "Channel whose precision and resolution are shown and"
+            " calculated."
         )
-        self.fit_precision_channel.currentIndexChanged.connect(
+        self.precision_channel.currentIndexChanged.connect(
             self.update_fit_precision
         )
-        self.fit_precision_channel.setVisible(False)
-        self.precision_grid.addWidget(self.fit_precision_channel, 1, 0, 1, 2)
+        grid.addWidget(self.precision_channel, 0, 1, 1, 3)
+        self.precision_channel_label.setVisible(False)
+        self.precision_channel.setVisible(False)
+        # per-channel results, keyed by (id(locs), len(locs)): the
+        # median precision, (NeNA result, precision), FRC and
+        # decorrelation results
         self._fit_precision_cache = {}
-        # NeNA (result, precision) per channel, keyed like the cache above
         self._nena_cache = {}
+        self._frc_cache = {}
+        self._decorrelation_cache = {}
+
+        med_lp_label = QtWidgets.QLabel("Median loc. precision:")
+        med_lp_label.setToolTip(
+            "Median localization precision: mean of the medians of lpx\n"
+            "and lpy of all localizations of the channel."
+        )
+        grid.addWidget(med_lp_label, 1, 0)
+        self.fit_precision = QtWidgets.QLabel("-")
+        grid.addWidget(self.fit_precision, 1, 1)
+
         nena_label = QtWidgets.QLabel("NeNA precision:")
         nena_label.setToolTip(
-            "Experimental estimate of the average localization precision.\n"
+            "Experimental estimate of the average localization precision\n"
+            "from all localizations of the channel.\n"
             "See Endesfelder et al. Histochemistry and cell biology, 2014."
         )
-        self.precision_grid.addWidget(nena_label, 2, 0)
+        grid.addWidget(nena_label, 2, 0)
         self.nena_label = QtWidgets.QLabel("-")
-        self.precision_grid.addWidget(self.nena_label, 2, 1)
-        self.nena_button = QtWidgets.QPushButton("Calculate NeNA")
-        self.nena_button.setToolTip("Click to calculate NeNA precision.")
+        grid.addWidget(self.nena_label, 2, 1)
+        self.nena_button = QtWidgets.QPushButton("Calculate")
+        self.nena_button.setToolTip("Calculate the NeNA precision.")
         # clicked passes its checked state, which is not an on_done
         self.nena_button.clicked.connect(lambda: self.calculate_nena_lp())
-        self.precision_grid.addWidget(self.nena_button, 3, 0)
-        show_nena_plot_button = QtWidgets.QPushButton("Show NeNA plot")
-        show_nena_plot_button.setToolTip("Display NeNA fit.")
+        grid.addWidget(self.nena_button, 2, 2)
+        show_nena_plot_button = QtWidgets.QPushButton("Plot")
+        show_nena_plot_button.setToolTip("Display the NeNA fit.")
         show_nena_plot_button.clicked.connect(self.show_nena_plot)
-        self.precision_grid.addWidget(show_nena_plot_button, 3, 1)
+        grid.addWidget(show_nena_plot_button, 2, 3)
 
-        # FRC
-        frc_groupbox = lib.CollapsibleGroupBox("FRC (uses current FOV)")
-        vbox.addWidget(frc_groupbox)
-        self.frc_grid = QtWidgets.QGridLayout(frc_groupbox.content)
-        frc_label = QtWidgets.QLabel("FRC resolution (nm):")
+        frc_label = QtWidgets.QLabel("FRC resolution (FOV):")
         frc_label.setToolTip(
-            "Experimental resolution estimate using Fourier Ring "
-            "Correlation.\n"
+            "Experimental resolution estimate using Fourier Ring\n"
+            "Correlation of the localizations in the current field of\n"
+            "view.\n"
             "See Nieuwenhuizen et al. Nature Methods, 2013."
         )
-        self.frc_grid.addWidget(frc_label, 0, 0)
+        grid.addWidget(frc_label, 3, 0)
         self.frc_resolution = QtWidgets.QLabel("-")
-        self.frc_grid.addWidget(self.frc_resolution, 0, 1)
-        self.save_images_check = QtWidgets.QCheckBox("Save rendered images")
-        self.save_images_check.setToolTip(
-            "Save 2 rendered images as .tif files?"
+        grid.addWidget(self.frc_resolution, 3, 1)
+        calculate_frc_button = QtWidgets.QPushButton("Calculate")
+        calculate_frc_button.setToolTip(
+            "Calculate the FRC resolution in the current field of view."
         )
-        self.frc_grid.addWidget(self.save_images_check, 1, 0, 1, 2)
-        calculate_frc_button = QtWidgets.QPushButton("Calculate FRC")
-        calculate_frc_button.setToolTip("Click to calculate FRC resolution.")
         calculate_frc_button.clicked.connect(self.calculate_frc_resolution)
-        self.frc_grid.addWidget(calculate_frc_button, 2, 0)
-        show_frc_button = QtWidgets.QPushButton("Show FRC plot")
-        show_frc_button.setToolTip("Display FRC fit.")
+        grid.addWidget(calculate_frc_button, 3, 2)
+        show_frc_button = QtWidgets.QPushButton("Plot")
+        show_frc_button.setToolTip("Display the FRC curve.")
         show_frc_button.clicked.connect(self.show_frc_plot)
-        self.frc_grid.addWidget(show_frc_button, 2, 1)
+        grid.addWidget(show_frc_button, 3, 3)
+        self.save_images_check = QtWidgets.QCheckBox("Save FRC images")
+        self.save_images_check.setToolTip(
+            "Save the 2 images rendered for the FRC as .tif files."
+        )
+        grid.addWidget(self.save_images_check, 4, 1, 1, 3)
+
+        decorrelation_label = QtWidgets.QLabel("Decorrelation (FOV):")
+        decorrelation_label.setToolTip(
+            "Resolution estimated from all localizations in the current\n"
+            "field of view at once by decorrelation analysis, at the\n"
+            "pixel size that gives the smallest value.\n"
+            "See Descloux et al. Nature Methods, 2019."
+        )
+        grid.addWidget(decorrelation_label, 5, 0)
+        self.decorrelation_resolution = QtWidgets.QLabel("-")
+        grid.addWidget(self.decorrelation_resolution, 5, 1)
+        calculate_decorrelation_button = QtWidgets.QPushButton("Calculate")
+        calculate_decorrelation_button.setToolTip(
+            "Calculate the decorrelation resolution in the current field"
+            " of view."
+        )
+        calculate_decorrelation_button.clicked.connect(
+            lambda: self.calculate_decorrelation()
+        )
+        grid.addWidget(calculate_decorrelation_button, 5, 2)
+        show_decorrelation_button = QtWidgets.QPushButton("Plot")
+        show_decorrelation_button.setToolTip(
+            "Display the decorrelation functions and the resolution at each"
+            " pixel size."
+        )
+        show_decorrelation_button.clicked.connect(self.show_decorrelation_plot)
+        grid.addWidget(show_decorrelation_button, 5, 3)
+        decorrelation_pixel_label = QtWidgets.QLabel("Pixel size (nm):")
+        decorrelation_pixel_label.setToolTip(
+            "Pixel size at which the localizations are rendered for the\n"
+            "decorrelation. 'Scan' renders them at pixel sizes from 2 to\n"
+            "64 nm and reports the smallest resolution, as advised by\n"
+            "Descloux et al., 2021: large pixels limit the resolution to\n"
+            "about twice the pixel size, small pixels leave gaps between\n"
+            "sparse localizations."
+        )
+        decorrelation_pixel_label.setIndent(20)
+        grid.addWidget(decorrelation_pixel_label, 6, 0)
+        self.decorrelation_pixel_size = QtWidgets.QDoubleSpinBox()
+        self.decorrelation_pixel_size.setRange(0.0, 1000.0)
+        self.decorrelation_pixel_size.setDecimals(1)
+        self.decorrelation_pixel_size.setSingleStep(1.0)
+        self.decorrelation_pixel_size.setSpecialValueText("Scan")
+        self.decorrelation_pixel_size.setValue(0.0)
+        grid.addWidget(self.decorrelation_pixel_size, 6, 1)
+        # pixel size of the resolution shown, which a scan chooses
+        self.decorrelation_used_pixel = QtWidgets.QLabel()
+        self.decorrelation_used_pixel.setToolTip(
+            "Pixel size (nm) at which the decorrelation resolution shown"
+            " was found."
+        )
+        grid.addWidget(self.decorrelation_used_pixel, 6, 2, 1, 2)
 
         # FRC in several random ROIs, for the uncertainty; collapsed by
         # default to keep the dialog compact
@@ -6578,7 +6643,7 @@ class InfoDialog(lib.Dialog):
             expanded=False,
             summary="Resolution uncertainty",
         )
-        self.frc_grid.addWidget(self.frc_rois_groupbox, 3, 0, 1, 2)
+        grid.addWidget(self.frc_rois_groupbox, 7, 0, 1, 4)
         rois_grid = QtWidgets.QGridLayout(self.frc_rois_groupbox.content)
         rois_grid.setContentsMargins(0, 0, 0, 0)
         frc_rois_label = QtWidgets.QLabel("FRC resolution, ROIs (nm):")
@@ -6631,63 +6696,6 @@ class InfoDialog(lib.Dialog):
         )
         review_frc_rois_button.clicked.connect(self.show_frc_rois)
         rois_grid.addWidget(review_frc_rois_button, 4, 1)
-
-        # decorrelation
-        decorrelation_groupbox = lib.CollapsibleGroupBox(
-            "Decorrelation (uses current FOV)"
-        )
-        vbox.addWidget(decorrelation_groupbox)
-        decorrelation_grid = QtWidgets.QGridLayout(
-            decorrelation_groupbox.content
-        )
-        decorrelation_label = QtWidgets.QLabel(
-            "Decorrelation resolution (nm):"
-        )
-        decorrelation_label.setToolTip(
-            "Resolution estimated from all localizations at once by\n"
-            "decorrelation analysis, at the pixel size that gives the\n"
-            "smallest value.\n"
-            "See Descloux et al. Nature Methods, 2019."
-        )
-        decorrelation_grid.addWidget(decorrelation_label, 0, 0)
-        self.decorrelation_resolution = QtWidgets.QLabel("-")
-        decorrelation_grid.addWidget(self.decorrelation_resolution, 0, 1)
-        decorrelation_pixel_label = QtWidgets.QLabel("Pixel size (nm):")
-        decorrelation_pixel_label.setToolTip(
-            "Pixel size at which the localizations are rendered. 'Scan'\n"
-            "renders them at pixel sizes from 2 to 64 nm and reports the\n"
-            "smallest resolution, as advised by Descloux et al., 2021:\n"
-            "large pixels limit the resolution to about twice the pixel\n"
-            "size, small pixels leave gaps between sparse localizations."
-        )
-        decorrelation_grid.addWidget(decorrelation_pixel_label, 1, 0)
-        self.decorrelation_pixel_size = QtWidgets.QDoubleSpinBox()
-        self.decorrelation_pixel_size.setRange(0.0, 1000.0)
-        self.decorrelation_pixel_size.setDecimals(1)
-        self.decorrelation_pixel_size.setSingleStep(1.0)
-        self.decorrelation_pixel_size.setSpecialValueText("Scan")
-        self.decorrelation_pixel_size.setValue(0.0)
-        decorrelation_grid.addWidget(self.decorrelation_pixel_size, 1, 1)
-        calculate_decorrelation_button = QtWidgets.QPushButton(
-            "Calculate decorrelation"
-        )
-        calculate_decorrelation_button.setToolTip(
-            "Calculate the decorrelation resolution of the localizations in"
-            " the current field of view."
-        )
-        calculate_decorrelation_button.clicked.connect(
-            lambda: self.calculate_decorrelation()
-        )
-        decorrelation_grid.addWidget(calculate_decorrelation_button, 2, 0)
-        show_decorrelation_button = QtWidgets.QPushButton(
-            "Show decorrelation plot"
-        )
-        show_decorrelation_button.setToolTip(
-            "Display the decorrelation functions and the resolution at each"
-            " pixel size."
-        )
-        show_decorrelation_button.clicked.connect(self.show_decorrelation_plot)
-        decorrelation_grid.addWidget(show_decorrelation_button, 2, 1)
 
         # FOV
         fov_groupbox = lib.CollapsibleGroupBox("Field of view")
@@ -6903,10 +6911,42 @@ class InfoDialog(lib.Dialog):
         hint = self.container.sizeHint()
         lib.adjust_widget_size(self, hint)
 
+    def _sync_channels(self) -> None:
+        """Sync self.precision_channel with the loaded channels, keeping
+        the selected channel across reordering and closing."""
+        view = self.window.view
+        checks = self.window.dataset_dialog.checks
+        names = [
+            checks[i].text() if i < len(checks) else os.path.basename(path)
+            for i, path in enumerate(view.locs_paths)
+        ]
+        combo = self.precision_channel
+        current_names = [combo.itemText(i) for i in range(combo.count())]
+        if names != current_names:
+            current = combo.currentText()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItems(names)
+            if current in names:
+                combo.setCurrentIndex(names.index(current))
+            combo.blockSignals(False)
+        combo.setVisible(len(names) > 1)
+        self.precision_channel_label.setVisible(len(names) > 1)
+
+    def selected_channel(self) -> int | None:
+        """Index of the channel chosen in self.precision_channel, None
+        if no localizations are loaded."""
+        self._sync_channels()
+        channel = self.precision_channel.currentIndex()
+        if channel < 0 or channel >= len(self.window.view.locs):
+            return None
+        return channel
+
     def calculate_frc_resolution(self) -> None:
-        """Calculate FRC resolution in a given channel. NeNA, which sets
-        the bin size, is reused if known (see ``known_nena``)."""
-        channel = self.window.view.get_channel("Calculate FRC resolution")
+        """Calculate FRC resolution of the selected channel in the
+        current field of view. NeNA, which sets the bin size, is reused
+        if known (see ``known_nena``)."""
+        channel = self.selected_channel()
         if channel is not None:
             locs = self.window.view.locs[channel]
             info = self.window.view.infos[channel]
@@ -6957,7 +6997,7 @@ class InfoDialog(lib.Dialog):
                 self._record_nena(locs, info, nena_result, lp)
             # calculate frc
             # the size was confirmed above
-            self.frc_result = postprocess.frc(
+            frc_result = postprocess.frc(
                 locs,
                 info,
                 viewport=self.window.view.viewport,
@@ -6966,15 +7006,15 @@ class InfoDialog(lib.Dialog):
             )
             if path:  # save images
                 base, ext = os.path.splitext(path)
-                image1 = Image.fromarray(self.frc_result["images"][0])
+                image1 = Image.fromarray(frc_result["images"][0])
                 image1.save(f"{base}_1{ext}")
-                image2 = Image.fromarray(self.frc_result["images"][1])
+                image2 = Image.fromarray(frc_result["images"][1])
                 image2.save(f"{base}_2{ext}")
-            res_nm = self.frc_result["resolution"]
-            if res_nm is None:
+            self._frc_cache[(id(locs), len(locs))] = frc_result
+            self.update_fit_precision()
+            if frc_result["resolution"] is None:
                 # The FRC curve never crosses the 1/7 threshold, e.g. when the
                 # viewport holds too few localizations to resolve anything.
-                self.frc_resolution.setText("n/a")
                 QtWidgets.QMessageBox.information(
                     self,
                     "FRC resolution",
@@ -6983,15 +7023,11 @@ class InfoDialog(lib.Dialog):
                     "localizations. Check that your NeNA value seems "
                     "reasonable - FRC pixel size is taken from NeNA",
                 )
-            else:
-                self.frc_resolution.setText(f"{res_nm:.2f} nm")
 
     def calculate_frc_rois(self) -> None:
         """Calculate FRC resolution in random ROIs of the whole image
-        and open the review window."""
-        channel = self.window.view.get_channel(
-            "Calculate FRC resolution in ROIs"
-        )
+        of the selected channel and open the review window."""
+        channel = self.selected_channel()
         if channel is None:
             return
         locs = self.window.view.locs[channel]
@@ -7071,9 +7107,20 @@ class InfoDialog(lib.Dialog):
                 " uncertainty estimate is less reliable.",
             )
 
+    def _frc_rois_shown(self) -> bool:
+        """Whether the FRC ROIs review window holds the localizations of
+        the selected channel."""
+        channel = self.selected_channel()
+        return (
+            channel is not None
+            and self.frc_rois_window is not None
+            and self.frc_rois_window.locs is self.window.view.locs[channel]
+        )
+
     def show_frc_rois(self) -> None:
-        """Show the review window of the FRC ROIs."""
-        if self.frc_rois_window is None:
+        """Show the review window of the FRC ROIs of the selected
+        channel, calculating them first if needed."""
+        if not self._frc_rois_shown():
             self.calculate_frc_rois()
         else:
             self.frc_rois_window.show()
@@ -7081,54 +7128,49 @@ class InfoDialog(lib.Dialog):
 
     def update_fit_precision(self) -> None:
         """Sync the channel selector with the loaded channels and show
-        the median localization and NeNA precisions of the selected
-        channel.
+        the precisions and resolutions of the selected channel.
 
         Medians are cached per localizations object, so redraws do not
         recompute them. NeNA is shown if it was calculated for the
         current localizations of the channel, or if it is the last step
-        in their metadata.
+        in their metadata. FRC and decorrelation resolutions are shown
+        if they were calculated for the current localizations of the
+        channel, in the field of view of their calculation.
         """
         view = self.window.view
-        checks = self.window.dataset_dialog.checks
-        names = [
-            checks[i].text() if i < len(checks) else os.path.basename(path)
-            for i, path in enumerate(view.locs_paths)
-        ]
-        combo = self.fit_precision_channel
-        current_names = [combo.itemText(i) for i in range(combo.count())]
-        if names != current_names:
-            # keep the selected channel across reordering and closing
-            current = combo.currentText()
-            combo.blockSignals(True)
-            combo.clear()
-            combo.addItems(names)
-            if current in names:
-                combo.setCurrentIndex(names.index(current))
-            combo.blockSignals(False)
-        combo.setVisible(len(names) > 1)
-
+        self._sync_channels()
         if view.has_spilled_locs:
             return  # moved to disk while idle: unchanged since shown
-        channel = combo.currentIndex()
-        if channel < 0 or channel >= len(view.locs):
+        channel = self.selected_channel()
+        if channel is None:
             self.fit_precision.setText("-")
             self._show_nena({}, None)
+            self._show_frc({})
+            self._show_decorrelation({})
+            self.frc_rois_resolution.setText("-")
             return
         locs = view.locs[channel]
         key = (id(locs), len(locs))
         # drop entries of channels that are gone or were replaced
         alive = {(id(locs_), len(locs_)) for locs_ in view.locs}
-        self._fit_precision_cache = {
-            k: v for k, v in self._fit_precision_cache.items() if k in alive
-        }
-        self._nena_cache = {
-            k: v for k, v in self._nena_cache.items() if k in alive
-        }
+        for name in (
+            "_fit_precision_cache",
+            "_nena_cache",
+            "_frc_cache",
+            "_decorrelation_cache",
+        ):
+            cache = getattr(self, name)
+            setattr(self, name, {k: v for k, v in cache.items() if k in alive})
         self._show_nena(
             self._nena_cache.get(key, ({}, None))[0],
             self.known_nena(channel),
         )
+        self._show_frc(self._frc_cache.get(key, {}))
+        self._show_decorrelation(self._decorrelation_cache.get(key, {}))
+        if self._frc_rois_shown():
+            self.frc_rois_window.update_summary()
+        else:
+            self.frc_rois_resolution.setText("-")
         if key not in self._fit_precision_cache:
             if len(locs) and {"lpx", "lpy"} <= set(locs.columns):
                 lp = np.mean([np.median(locs["lpx"]), np.median(locs["lpy"])])
@@ -7147,6 +7189,33 @@ class InfoDialog(lib.Dialog):
         self.nena_result = nena_result
         self.lp = lp
         self.nena_label.setText("-" if lp is None else f"{lp:.3} nm")
+
+    def _show_frc(self, frc_result: dict) -> None:
+        """Set the FRC result of the selected channel and display its
+        resolution."""
+        self.frc_result = frc_result
+        if not frc_result:
+            text = "-"
+        elif frc_result["resolution"] is None:
+            text = "n/a"
+        else:
+            text = f"{frc_result['resolution']:.2f} nm"
+        self.frc_resolution.setText(text)
+
+    def _show_decorrelation(self, result: dict) -> None:
+        """Set the decorrelation result of the selected channel and
+        display its resolution."""
+        self.decorrelation_result = result
+        pixel_text = ""
+        if not result:
+            text = "-"
+        elif np.isfinite(result["resolution"]):
+            text = f"{result['resolution']:.2f} nm"
+            pixel_text = f"used: {result['pixel_size']:.3g} nm"
+        else:
+            text = "n/a"
+        self.decorrelation_resolution.setText(text)
+        self.decorrelation_used_pixel.setText(pixel_text)
 
     def known_nena(self, channel: int) -> float | None:
         """NeNA precision (nm) of a channel if it is known for its
@@ -7211,8 +7280,7 @@ class InfoDialog(lib.Dialog):
     def calculate_nena_lp(
         self, on_done: Callable[[], None] | None = None
     ) -> None:
-        """Calculate NeNA precision in a given channel, which is then
-        also selected in self.fit_precision_channel.
+        """Calculate NeNA precision of the selected channel.
 
         Parameters
         ----------
@@ -7220,7 +7288,7 @@ class InfoDialog(lib.Dialog):
             Called once the result is shown, since the calculation runs
             on a worker thread. Default None.
         """
-        channel = self.window.view.get_channel("Calculate NeNA precision")
+        channel = self.selected_channel()
         if channel is None:
             return
         locs = self.window.view.locs[channel]
@@ -7230,11 +7298,6 @@ class InfoDialog(lib.Dialog):
             return postprocess.nena(locs, info, progress=progress)
 
         def apply(result: tuple) -> None:
-            # show the precisions of the channel calculated, wherever
-            # it is now
-            for index, locs_ in enumerate(self.window.view.locs):
-                if locs_ is locs:
-                    self.fit_precision_channel.setCurrentIndex(index)
             self._record_nena(locs, info, *result)  # nm
             if on_done is not None:
                 on_done()
@@ -7258,7 +7321,7 @@ class InfoDialog(lib.Dialog):
         self, on_done: Callable[[], None] | None = None
     ) -> None:
         """Calculate the decorrelation resolution of the localizations
-        of a given channel in the current field of view on a worker
+        of the selected channel in the current field of view on a worker
         thread, see ``postprocess.decorrelation``.
 
         Parameters
@@ -7268,9 +7331,7 @@ class InfoDialog(lib.Dialog):
             on a worker thread. Default None.
         """
         title = "Decorrelation resolution"
-        channel = self.window.view.get_channel(
-            "Calculate decorrelation resolution"
-        )
+        channel = self.selected_channel()
         if channel is None:
             return
         locs = self.window.view.locs[channel]
@@ -7288,13 +7349,9 @@ class InfoDialog(lib.Dialog):
             )
 
         def apply(result: dict) -> None:
-            self.decorrelation_result = result
-            resolution = result["resolution"]
-            if np.isfinite(resolution):
-                self.decorrelation_resolution.setText(
-                    f"{resolution:.2f} nm ({result['pixel_size']:.3g} nm"
-                    " pixels)"
-                )
+            self._decorrelation_cache[(id(locs), len(locs))] = result
+            self.update_fit_precision()
+            if np.isfinite(result["resolution"]):
                 if result["pixel_size_limited"]:
                     QtWidgets.QMessageBox.information(
                         self,
@@ -7306,7 +7363,6 @@ class InfoDialog(lib.Dialog):
                         " pixels on a side) or set a smaller pixel size.",
                     )
             else:
-                self.decorrelation_resolution.setText("n/a")
                 QtWidgets.QMessageBox.information(
                     self,
                     title,
@@ -7479,6 +7535,7 @@ class FRCRoisWindow(QtWidgets.QWidget):
     ) -> None:
         super().__init__()
         self.info_dialog = info_dialog
+        self.locs = locs
         self.result = result
         self.setWindowTitle("FRC in ROIs")
         this_directory = os.path.dirname(os.path.realpath(__file__))
@@ -7618,7 +7675,12 @@ class FRCRoisWindow(QtWidgets.QWidget):
                 "NeNA "
                 f"{self.result['lp']:.2f} nm"
             )
-        self.info_dialog.frc_rois_resolution.setText(text)
+        # the Info dialog shows the ROIs of the selected channel only
+        dialog = self.info_dialog
+        channel = dialog.selected_channel()
+        view_locs = dialog.window.view.locs
+        if channel is not None and view_locs[channel] is self.locs:
+            dialog.frc_rois_resolution.setText(text)
 
     def update_plots(self) -> None:
         """Redraw the ROI overview and the selected ROI's FRC curve."""

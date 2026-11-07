@@ -413,17 +413,26 @@ Display
 
 .. _render-info-precision:
 
-Precision
-~~~~~~~~~
+Precision and resolution
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+With several channels loaded, ``Channel`` chooses the channel whose values
+are shown and calculated. Each channel keeps its own results, so switching
+back shows them again. ``NeNA`` and the median precision use all
+localizations of the channel; ``FRC (FOV)`` and ``Decorrelation (FOV)`` use
+those in the current field of view. Each row's ``Calculate`` computes the
+value and ``Plot`` shows its curve (calculating it first if needed).
 
 .. _render-nena:
 
-``Median localization precision`` shows the mean of the medians of ``lpx``
-and ``lpy`` (in nm). With several channels loaded, the menu below it chooses
-which channel is shown.
+Precision
+^^^^^^^^^
 
-``Calculate NeNA`` estimates the average localization precision via the NeNA
-(nearest neighbor based analysis) approach, and ``Show NeNA plot`` displays
+``Median localization precision`` shows the mean of the medians of ``lpx``
+and ``lpy`` (in nm).
+
+The ``NeNA precision`` row estimates the average localization precision via
+the NeNA (nearest neighbor based analysis) approach, and ``Plot`` displays
 its fit (`Endesfelder et al., Histochemistry and Cell Biology, 2014
 <https://doi.org/10.1007/s00418-014-1192-3>`__). The NeNA value is added to
 the metadata of the channel, so it is saved with the localizations.
@@ -448,19 +457,19 @@ the metadata of the channel, so it is saved with the localizations.
 .. _render-info-frc:
 
 FRC
-~~~
+^^^
 
 Estimates the resolution by Fourier ring correlation (`Nieuwenhuizen et al.,
 Nature Methods, 2013 <https://doi.org/10.1038/nmeth.2448>`__):
 
-- ``Calculate FRC`` splits the localizations of the **current field of view**
+- ``Calculate`` in the ``FRC resolution (FOV)`` row splits the localizations of the **current field of view**
   (cropped to a square) randomly into two halves, renders an image of each
-  with a pixel size set by NeNA, and correlates them. ``FRC resolution (nm)``
-  is where the FRC curve drops below 1/7. Zoom to a region of interest first;
+  with a pixel size set by NeNA, and correlates them. The resolution is where
+  the FRC curve drops below 1/7. Zoom to a region of interest first;
   a large field of view takes long.
-- ``Save rendered images`` also saves the two images as ``_1.tif`` and
+- ``Save FRC images`` also saves the two images as ``_1.tif`` and
   ``_2.tif``.
-- ``Show FRC plot`` shows the FRC curve.
+- ``Plot`` shows the FRC curve.
 - The Q factor correction for repeated localizations of the same molecule
   (blinking, DNA-PAINT rebinding) is not applied, so the value reported may be
   optimistic.
@@ -503,13 +512,13 @@ the FRC resolution:
 .. _render-info-decorrelation:
 
 Decorrelation
-~~~~~~~~~~~~~
+^^^^^^^^^^^^^
 
 Estimates the resolution by decorrelation analysis (`Descloux et al., Nature
 Methods, 2019 <https://doi.org/10.1038/s41592-019-0515-7>`__) from all
 localizations at once, unlike the FRC, which splits them in two:
 
-- ``Calculate decorrelation`` renders the localizations of the **current
+- ``Calculate`` in the ``Decorrelation (FOV)`` row renders the localizations of the **current
   field of view** as a bilinear histogram (each localization spread on its
   four nearest pixels) and correlates the image with its Fourier transform
   normalized to unit amplitude, low-pass filtered at increasing frequencies.
@@ -521,12 +530,12 @@ localizations at once, unlike the FRC, which splits them in two:
   localizations. With ``Pixel size (nm)`` at ``Scan``, the localizations are
   rendered at pixel sizes from 2 to 64 nm and the smallest resolution is
   reported (`Descloux et al., Communications Biology, 2021
-  <https://doi.org/10.1038/s42003-021-02086-1>`__), with its pixel size. Pixel
+  <https://doi.org/10.1038/s42003-021-02086-1>`__); the pixel size used is shown next to ``Pixel size (nm)``. Pixel
   sizes that give an image larger than 8,192 pixels on a side are skipped, so
   zoom in for the smallest pixel sizes. If the resolution is close to twice
   the smallest pixel size rendered (below three times it), Picasso says that
   it may be limited by the pixel size: smaller pixels may give a better value.
-- ``Show decorrelation plot`` shows the decorrelation functions at the pixel
+- ``Plot`` shows the decorrelation functions at the pixel
   size of the resolution (without and with high-pass filters, their peaks and
   the cut-off) and the resolution at each pixel size.
 - The estimate needs enough localizations: Descloux et al. (2021) found it
