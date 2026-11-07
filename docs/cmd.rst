@@ -1832,8 +1832,9 @@ For example, the structures with 400 to 1000 localizations within an RMSD of
    * - ``--min-n-locs`` (int)
      - 1% of the frames
      - Without ``--picks``, the minimum number of localizations of a
-       candidate pick. The background forms many candidates of a few
-       localizations, which can outnumber the structures.
+       candidate pick, at least the minimum of ``--n-locs-range``. The
+       background forms many candidates of a few localizations, which can
+       outnumber the structures and exclude those they overlap.
    * - ``--save-candidates``
      - off
      - Without ``--picks``, also save the candidates with their number of

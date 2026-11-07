@@ -1379,7 +1379,8 @@ def _pick_similar_cli(
     and/or ``rmsd_range``, or within the ranges of each class of
     ``postprocess.structure_classes``, as Render's Tools > Pick by
     localizations and RMSD finds them: candidates with at least
-    ``min_n_locs`` localizations, by default 1% of the frames.
+    ``min_n_locs`` localizations, by default 1% of the frames, and at
+    least the lower bound of ``n_locs_range``.
 
     Returns
     -------
@@ -1419,6 +1420,10 @@ def _pick_similar_cli(
             n_min = max(2, int(0.01 * n_frames))
         else:
             n_min = min_n_locs
+        if n_locs_range is not None:
+            # smaller candidates must not exclude the structures they
+            # overlap, as in postprocess.pick_similar
+            n_min = max(n_min, postprocess._range_min_n_locs(n_locs_range))
         print(
             f"{path}: candidate picks of {pick_size:g} nm with at least "
             f"{n_min} localizations"
@@ -6191,7 +6196,8 @@ def _build_parser() -> (
         default=None,
         help=(
             "without --picks, the minimum number of localizations of a"
-            " candidate pick (default: 1%% of the frames)"
+            " candidate pick (default: 1%% of the frames; at least the"
+            " minimum of --n-locs-range)"
         ),
     )
     pick_similar_parser.add_argument(

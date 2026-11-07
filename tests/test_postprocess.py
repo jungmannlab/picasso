@@ -664,8 +664,9 @@ class TestPickSimilarCandidates:
 
 class TestPickSimilarInRanges:
     def test_the_candidates_in_the_ranges_are_picked(self, locs, info):
+        # scanned with the lower bound of n_locs_range
         candidates = postprocess.pick_similar_candidates(
-            locs, info, pick_size=PICK_SIZE
+            locs, info, pick_size=PICK_SIZE, min_n_locs=50
         )
         n_locs_range = (50, 80)
         rmsd_range = (20.0, None)
@@ -679,6 +680,38 @@ class TestPickSimilarInRanges:
         expected = candidates.query("50 <= n_locs <= 80 and rmsd >= 20")
         assert 0 < len(expected) < len(candidates)
         assert picks == list(zip(expected["x"], expected["y"]))
+
+    def test_smaller_candidates_do_not_exclude_a_structure(self):
+        """A few localizations next to a structure, scanned first, make
+        a candidate that overlaps it; scanned with the lower bound of
+        n_locs_range, the structure is picked."""
+        rng = np.random.default_rng(0)
+        xy = np.concatenate(
+            [
+                rng.normal((1600.0, 1600.0), 10.0, (200, 2)),
+                [(1360.0, 1597.0), (1360.0, 1600.0), (1360.0, 1603.0)],
+            ]
+        )
+        locs = pd.DataFrame(
+            {
+                "frame": np.arange(len(xy), dtype=np.uint32),
+                "x": xy[:, 0].astype(np.float32),
+                "y": xy[:, 1].astype(np.float32),
+            }
+        )
+        info = [
+            {"Frames": 1000, "Width": 32, "Height": 32, "Pixelsize": 100.0}
+        ]
+        candidates = postprocess.pick_similar_candidates(
+            locs, info, pick_size=300.0
+        )
+        # scanned from 2 localizations, the few exclude the structure
+        assert candidates["n_locs"].tolist() == [3]
+        picks = postprocess.pick_similar(
+            locs, info, pick_size=300.0, n_locs_range=(100, None)
+        )
+        assert len(picks) == 1
+        assert picks[0] == pytest.approx(tuple(xy[:200].mean(axis=0)), abs=1)
 
     def test_one_range_is_enough(self, locs, info):
         picks = postprocess.pick_similar(

@@ -562,7 +562,8 @@ def pick_similar(
     Instead of seed picks, the ranges can be given directly
     (``n_locs_range`` and/or ``rmsd_range``, circular picks only): the
     candidates of :func:`pick_similar_candidates` within the ranges are
-    returned.
+    returned, scanned with the lower bound of ``n_locs_range`` as
+    ``min_n_locs``.
 
     A grid of overlapping candidate picks covering the field of view is
     scanned and each candidate is shifted towards the center of mass of
@@ -718,7 +719,11 @@ def pick_similar_candidates(
     min_n_locs : int, optional
         Minimum number of localizations of a candidate. A candidate has
         at least 2 (one localization has no center of mass to converge
-        to), so smaller values have no effect. Default is 2.
+        to), so smaller values have no effect. Candidates with fewer
+        localizations are not kept and do not exclude the candidates
+        they overlap, so set it close to the smallest structure of
+        interest: e.g., candidates of a few background localizations
+        next to a structure can otherwise exclude it. Default is 2.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -964,11 +969,27 @@ def _pick_similar_in_ranges(
         raise ValueError(
             "grid_spacing is only supported for rectangular picks."
         )
-    candidates = pick_similar_candidates(locs, info, pick_size=pick_size)
+    candidates = pick_similar_candidates(
+        locs,
+        info,
+        pick_size=pick_size,
+        min_n_locs=_range_min_n_locs(n_locs_range),
+    )
     keep = _in_range(candidates["n_locs"], n_locs_range) & _in_range(
         candidates["rmsd"], rmsd_range
     )
     return list(zip(candidates["x"][keep], candidates["y"][keep]))
+
+
+def _range_min_n_locs(
+    n_locs_range: tuple[float | None, float | None] | None,
+) -> int:
+    """The minimum number of localizations of the candidates scanned for
+    the picks within ``n_locs_range``: its lower bound (at least 2), so
+    that candidates with fewer localizations, e.g., of the background,
+    do not exclude the ones they overlap."""
+    low = None if n_locs_range is None else n_locs_range[0]
+    return 2 if low is None else max(2, int(np.ceil(low)))
 
 
 def _in_range(
