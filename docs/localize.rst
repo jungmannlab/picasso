@@ -26,6 +26,7 @@ The following PSF models are implemented:
 - **Rotated elliptical Gaussian.** Same as *Elliptical Gaussian*, however, an in-plane rotation angle is also fitted and saved in the ``angle`` column, in degrees.
 - **Experimental PSF (cubic spline).** Fits an experimentally measured PSF; a 3D calibration recovers ``z`` directly; see :doc:`localize/spline`. Supports multichannel fitting as well, see :ref:`localize-multichannel-spline`.
 - **Overlapping emitters (3D-DAOSTORM).** Fits all emitters of a frame at once, so that emitters closer than about 2 PSF σ are localized separately, with a Gaussian PSF whose σ is fixed for the movie or fitted per emitter, in x and y for astigmatic 3D, or with an experimental PSF from a spline calibration. It finds the spots itself, without the identification step; see :doc:`localize/multi-emitter`.
+- **Vectorial PSF (VectorFit).** Fits a vectorial PSF model computed from the optics (numerical aperture, emission wavelength, refractive indices) and user-defined aberrations, with no calibration needed; the 3D model recovers ``z`` directly. Requires the optional VectorFit library, see :doc:`localize/vectorfit`.
 
 In addition, ``Average of ROI`` is available as a non-fitting option that simply sums the intensity of each spot.
 
@@ -216,6 +217,12 @@ Topics
 
       Multi-emitter fitting of dense frames: when to use it, its settings and its output.
 
+   .. grid-item-card:: :octicon:`telescope;1.5em;sd-mr-1` Vectorial PSF (VectorFit)
+      :link: localize/vectorfit
+      :link-type: doc
+
+      The vectorial PSF model and its aberrations, and fitting with VectorFit in 2D or 3D.
+
    .. grid-item-card:: :octicon:`git-compare;1.5em;sd-mr-1` Lateral corrections
       :link: localize/lateral-correction
       :link-type: doc
@@ -237,5 +244,6 @@ Topics
    localize/3d-calibration
    localize/spline
    localize/multi-emitter
+   localize/vectorfit
    localize/lateral-correction
    localize/multichannel

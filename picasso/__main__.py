@@ -2353,6 +2353,93 @@ def _localize_load_3d_calibration(
     return zpath, magnification_factor, z_calibration
 
 
+#: ``--vf-*`` options of the 'vectorfit' fit method and the
+#: ``vectorfit.DEFAULT_PARAMETERS`` key each sets.
+_VECTORFIT_ARGS = {
+    "vf_model": "Fit model",
+    "vf_wavelength": "Wavelength",
+    "vf_na": "NA",
+    "vf_n_medium": "Refractive index medium",
+    "vf_n_coverslip": "Refractive index cover slip",
+    "vf_n_immersion": "Refractive index immersion",
+    "vf_vertical_astigmatism": "Vertical astigmatism",
+    "vf_oblique_astigmatism": "Oblique astigmatism",
+    "vf_horizontal_coma": "Horizontal coma",
+    "vf_vertical_coma": "Vertical coma",
+    "vf_spherical_aberration": "Spherical aberration",
+}
+
+
+def _add_vectorfit_args(parser: argparse.ArgumentParser) -> None:
+    """Add the settings of the 'vectorfit' fit method. Their defaults are
+    left to ``vectorfit.DEFAULT_PARAMETERS``, see
+    ``_vectorfit_parameters_from_args``."""
+    parser.add_argument(
+        "--vf-model",
+        choices=["2D", "3D"],
+        default=None,
+        help="VectorFit: fit model, 3D also fits z (default 2D)",
+    )
+    for flag, text in (
+        ("--vf-wavelength", "emission wavelength in nm (default 680)"),
+        ("--vf-na", "numerical aperture (default 1.5)"),
+        (
+            "--vf-n-medium",
+            "refractive index of the sample medium (default 1.406)",
+        ),
+        (
+            "--vf-n-coverslip",
+            "refractive index of the cover slip (default 1.525)",
+        ),
+        (
+            "--vf-n-immersion",
+            "refractive index of the immersion fluid (default 1.515)",
+        ),
+        (
+            "--vf-vertical-astigmatism",
+            "fixed vertical astigmatism Z_2^2 in nm (default 0)",
+        ),
+        (
+            "--vf-oblique-astigmatism",
+            "fixed oblique astigmatism Z_2^-2 in nm (default 0)",
+        ),
+        (
+            "--vf-horizontal-coma",
+            "fixed horizontal coma Z_3^1 in nm (default 0)",
+        ),
+        ("--vf-vertical-coma", "fixed vertical coma Z_3^-1 in nm (default 0)"),
+        (
+            "--vf-spherical-aberration",
+            "fixed spherical aberration Z_4^0 in nm (default 0)",
+        ),
+    ):
+        parser.add_argument(
+            flag, type=float, default=None, help=f"VectorFit: {text}"
+        )
+    parser.add_argument(
+        "--vf-keep-outliers",
+        action="store_true",
+        help=(
+            "VectorFit: keep the spots VectorFit flags as outliers (not "
+            "converged, low likelihood or off-center) instead of discarding "
+            "them"
+        ),
+    )
+
+
+def _vectorfit_parameters_from_args(args: argparse.Namespace) -> dict:
+    """The VectorFit settings given on the command line; the ones left out
+    take the defaults of ``vectorfit.DEFAULT_PARAMETERS``."""
+    parameters = {
+        key: getattr(args, name)
+        for name, key in _VECTORFIT_ARGS.items()
+        if getattr(args, name, None) is not None
+    }
+    if getattr(args, "vf_keep_outliers", False):
+        parameters["Discard outliers"] = False
+    return parameters
+
+
 def _add_identification_method_args(
     parser: argparse.ArgumentParser, what: str = "spot"
 ) -> None:
@@ -2935,6 +3022,7 @@ def _localize_movie(
             eps=convergence if convergence > 0 else None,
             max_it=max_iterations if max_iterations > 0 else None,
             spline_calibration=spline_calibration,
+            vectorfit_parameters=_vectorfit_parameters_from_args(args),
             camera_calibration=camera_calibration,
             # in 3D, the z fit applies them (see _localize_finish)
             affine_calibration=None if z_params else lateral_transforms,
@@ -3168,6 +3256,7 @@ def _localize_regions(
             eps=convergence if convergence > 0 else None,
             max_it=max_iterations if max_iterations > 0 else None,
             spline_calibration=region_fit["spline_calibrations"],
+            vectorfit_parameters=_vectorfit_parameters_from_args(args),
             camera_calibration=camera_calibration,
             # in 3D, the z fit applies them (see _localize_finish)
             lateral_transforms=None if z_params else lateral_transforms,
@@ -3289,8 +3378,15 @@ def _localize_finish(
     from . import lib
     from .io import save_locs
     from .localize import add_file_to_db
+    from .vectorfit import outliers_discarded
 
     method_name = fitting_method or args.fit_method
+    n_outliers = outliers_discarded(info)
+    if n_outliers is not None:
+        print(
+            f"VectorFit discarded {n_outliers:,} outliers out of "
+            f"{len(locs) + n_outliers:,} spots."
+        )
     if z_params is not None:
         from . import zfit
 
@@ -4679,6 +4775,7 @@ def _build_parser() -> (
             "spline-gpu",
             "spline-mle-gpu",
             "avg",
+            "vectorfit",
         ],
         action="append",
         default=None,
@@ -4687,10 +4784,14 @@ def _build_parser() -> (
             "experimental cubic-spline PSF on the CPU by least squares / "
             "maximum likelihood, 'spline-gpu'/'spline-mle-gpu' do the same "
             "on the GPU (needs a CUDA-capable GPU); all four need "
-            "--spline-calibration. With --regions-separately it may be "
-            "given once per --roi, to fit each region its own way"
+            "--spline-calibration. 'vectorfit' fits a vectorial PSF model "
+            "computed from the optics (see the --vf-* options) with the "
+            "optional VectorFit library (pip install picassosr[vectorfit]). "
+            "With --regions-separately it may be given once per --roi, to "
+            "fit each region its own way"
         ),
     )
+    _add_vectorfit_args(localize_parser)
     localize_parser.add_argument(
         "-sc",
         "--spline-calibration",

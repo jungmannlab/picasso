@@ -128,6 +128,9 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
            - Reading Leica ``.lif`` files.
          * - ``pip install picassosr[ptu]``
            - Reading PicoQuant ``.ptu`` confocal image scans.
+         * - ``pip install picassosr[vectorfit]``
+           - Fitting a vectorial PSF with the VectorFit library (CPU), the
+             *Vectorial PSF (VectorFit)* model of Localize.
          * - ``pip install picassosr[gpu]``
            - GPU-accelerated (``numba.cuda``) code for CUDA toolkit 12.x.
              Needs an NVIDIA (CUDA-capable) GPU.
