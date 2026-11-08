@@ -21,6 +21,7 @@ import pytest
 
 from picasso import __main__ as cli
 from picasso import io, transforms
+from tests.test_io import _minflux_table, _write_pmx
 
 
 def _picasso(monkeypatch, *args) -> None:
@@ -120,6 +121,24 @@ def test_smap_round_trip(locs, locs_path, monkeypatch):
     imported, _ = io.load_locs(_out(locs_path, "_sml_locs.hdf5"))
     assert len(imported) == len(locs)
     assert np.allclose(np.sort(imported["x"]), np.sort(locs["x"]), atol=0.01)
+
+
+@pytest.mark.parametrize(
+    "args", [[], ["--average-traces"], ["--origin", "stage"]]
+)
+def test_minflux2hdf_writes_one_file_per_fluorophore(
+    args, tmp_path, monkeypatch
+):
+    path = tmp_path / "minflux.pmx"
+    _write_pmx(path, _minflux_table(), names={1: "Tom20", 2: "2"})
+    _picasso(monkeypatch, "minflux2hdf", path, *args)
+    first, _ = io.load_locs(str(tmp_path / "minflux_Tom20_locs.hdf5"))
+    second, info = io.load_locs(str(tmp_path / "minflux_fluo2_locs.hdf5"))
+    average = "--average-traces" in args
+    assert (len(first), len(second)) == ((2, 1) if average else (5, 1))
+    assert info[-1]["Average traces"] is average
+    stage = "stage" in args
+    assert ("MINFLUX origin x (nm)" in info[-1]) is not stage
 
 
 # ---------------------------------------------------------------------------

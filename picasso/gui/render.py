@@ -12377,10 +12377,12 @@ def _read_locs_file(
     path: str,
     pixelsize: float | None = None,
     progress: lib.Progress | Literal["console"] | None = None,
+    *,
+    average_traces: bool = False,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Read localizations and metadata from a given path, either Picasso
-    (.hdf5), ThunderSTORM (.csv), SMAP (_sml.mat) or PyME (.h5r, .hdf)
-    format.
+    (.hdf5), ThunderSTORM (.csv), SMAP (_sml.mat), PyME (.h5r, .hdf) or
+    pyMINFLUX (.pmx, pyMINFLUX .csv) format.
 
     Contains no GUI code, so it can run on a background thread, see
     ``LocsLoadWorker``.
@@ -12400,6 +12402,9 @@ def _read_locs_file(
         localizations read (.hdf5 only, which is read in blocks, see
         ``io.load_locs``); raising inside its ``set_value`` aborts the
         read. Default is None.
+    average_traces : bool, optional
+        Whether to read one localization per MINFLUX trace (pyMINFLUX
+        files only, see ``io.import_minflux``). Default is False.
 
     Returns
     -------
@@ -12410,6 +12415,8 @@ def _read_locs_file(
     """
     if path.endswith(".hdf5"):  # standard Picasso localization file
         return io.load_locs(path, pixelsize=pixelsize, progress=progress)
+    elif io.is_minflux_file(path):  # pyMINFLUX .pmx or .csv export
+        return io.import_minflux(path, average_traces=average_traces)
     elif path.endswith(".csv"):  # ThunderSTORM localization file
         return io.import_ts(path, pixelsize)
     elif path.endswith(".mat"):  # SMAP localization file
@@ -12418,7 +12425,8 @@ def _read_locs_file(
         return io.import_pyme(path, pixelsize)
     raise ValueError(
         "Unsupported file format. Please load a .hdf5 (Picasso), "
-        ".csv (ThunderSTORM), _sml.mat (SMAP) or .h5r/.hdf (PyME) file."
+        ".csv (ThunderSTORM), _sml.mat (SMAP), .h5r/.hdf (PyME) or "
+        ".pmx/.csv (pyMINFLUX) file."
     )
 
 
@@ -12442,20 +12450,29 @@ def _read_locs_channels(
     path: str,
     pixelsize: float | None = None,
     progress: lib.Progress | Literal["console"] | None = None,
+    *,
+    average_traces: bool = False,
 ) -> list[tuple[str, pd.DataFrame, list[dict]]]:
     """Read the channel(s) stored in a localization file, see
     ``_read_locs_file``. A PyME file holds one channel per ``probe``
-    value (see ``io.split_pyme_channels``), any other file one channel.
+    value (see ``io.split_pyme_channels``), a pyMINFLUX file one per
+    fluorophore (see ``io.split_minflux_channels``), any other file one
+    channel.
 
     Returns
     -------
     channels : list of tuples
         ``(path, locs, info)`` per channel; the path of a channel split
-        from a PyME file is ``<base>_probe<k><ext>``.
+        from a PyME file is ``<base>_probe<k><ext>``, from a pyMINFLUX
+        file ``<base>_<fluorophore><ext>``.
     """
-    locs, info = _read_locs_file(path, pixelsize, progress=progress)
+    locs, info = _read_locs_file(
+        path, pixelsize, progress=progress, average_traces=average_traces
+    )
     if io.is_pyme_file(path):
         return io.split_pyme_channels(path, locs, info)
+    if io.is_minflux_file(path):
+        return io.split_minflux_channels(path, locs, info)
     return [(path, locs, info)]
 
 
@@ -12502,8 +12519,12 @@ class LocsLoadWorker(QtCore.QObject):
     jobs : list of tuple
         One ``(path, pixelsize)`` tuple per file to load; ``pixelsize``
         is None for files that store it themselves (.hdf5 with a
-        ``Pixelsize`` in the metadata, most PyME files). A PyME file may
-        hold several channels, each emitted via ``loaded``.
+        ``Pixelsize`` in the metadata, most PyME files) and for
+        pyMINFLUX files. A PyME or pyMINFLUX file may hold several
+        channels, each emitted via ``loaded``.
+    average_traces : bool, optional
+        Whether to load one localization per MINFLUX trace from
+        pyMINFLUX files (see ``io.import_minflux``). Default is False.
     """
 
     progress = QtCore.pyqtSignal(int, str)  # index, filename
@@ -12518,9 +12539,15 @@ class LocsLoadWorker(QtCore.QObject):
     warned = QtCore.pyqtSignal(str, str)  # path, warning message(s)
     finished = QtCore.pyqtSignal()
 
-    def __init__(self, jobs: list[tuple[str, float | None]]) -> None:
+    def __init__(
+        self,
+        jobs: list[tuple[str, float | None]],
+        *,
+        average_traces: bool = False,
+    ) -> None:
         super().__init__()
         self.jobs = jobs
+        self.average_traces = average_traces
         self._canceled = False
 
     def cancel(self) -> None:
@@ -12548,7 +12575,10 @@ class LocsLoadWorker(QtCore.QObject):
         io_log.addHandler(records)
         try:
             return _read_locs_channels(
-                path, pixelsize, progress=_LoadProgress(self)
+                path,
+                pixelsize,
+                progress=_LoadProgress(self),
+                average_traces=self.average_traces,
             )
         except _LoadCanceledError:
             raise
@@ -12829,7 +12859,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self._load_thread = None
         self._load_worker = None
         self._load_progress = None
-        self._load_queue = []  # (jobs, on_finished) requested while busy
+        # (jobs, on_finished, average_traces) requested while busy
+        self._load_queue = []
         self._load_callback = None
         self._load_fit_in_view = True
         self._load_index = 0  # file currently being read
@@ -12909,6 +12940,28 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         )
         return pixelsize if ok else None
 
+    def _prompt_minflux_traces(self, paths: list[str]) -> bool | None:
+        """Ask whether pyMINFLUX files are loaded with every MINFLUX
+        localization or one localization per trace (see
+        ``io.import_minflux``). True for one per trace, None if
+        canceled."""
+        items = [
+            "Every localization",
+            "One per trace (photon-weighted mean)",
+        ]
+        names = ", ".join(os.path.basename(path) for path in paths)
+        item, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            "MINFLUX localizations",
+            f"Load the MINFLUX localizations of {names} as:",
+            items,
+            0,
+            False,
+        )
+        if not ok:
+            return None
+        return item == items[1]
+
     def _reconcile_pixelsizes(self) -> None:
         """Warn once if the loaded channels disagree on the camera pixel
         size.
@@ -12973,6 +13026,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         ``LocsLoadWorker``.
         New in v1.0.0: Can read a PyME .h5r/.hdf file, one channel per
         ``probe`` value.
+        New in v1.0.0: Can read a pyMINFLUX .pmx/.csv file, one channel
+        per fluorophore.
 
         Parameters
         ----------
@@ -13123,11 +13178,22 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """
         if not len(paths):
             return
-        # ask for the camera pixel size of files that do not store it
-        # before loading starts, i.e. while still on the GUI thread
+        paths = sorted(paths)
+        # ask how to load pyMINFLUX files (no pixel size needed) and for
+        # the camera pixel size of files that do not store it before
+        # loading starts, i.e. while still on the GUI thread
+        minflux = {path for path in paths if io.is_minflux_file(path)}
+        average_traces = False
+        if minflux:
+            average_traces = self._prompt_minflux_traces(sorted(minflux))
+            if average_traces is None:  # canceled by the user
+                paths = [path for path in paths if path not in minflux]
+                average_traces = False
         jobs = []
-        for path in sorted(paths):
-            if (
+        for path in paths:
+            if path in minflux:
+                pixelsize = None
+            elif (
                 path.endswith((".csv", ".mat"))
                 or (io.is_pyme_file(path) and io.pyme_pixelsize(path) is None)
                 or _legacy_locs_without_pixelsize(path)
@@ -13142,17 +13208,18 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return
         if self._load_thread is not None:
             # a load is running; start this one when that one is done
-            self._load_queue.append((jobs, on_finished))
+            self._load_queue.append((jobs, on_finished, average_traces))
             return
-        self._start_load(jobs, on_finished)
+        self._start_load(jobs, on_finished, average_traces)
 
     def _start_load(
         self,
         jobs: list[tuple[str, float | None]],
         on_finished: Callable | None,
+        average_traces: bool = False,
     ) -> None:
         """Read the given ``(path, pixelsize)`` jobs on a background
-        thread, see ``LocsLoadWorker``."""
+        thread, see ``LocsLoadWorker`` (also for ``average_traces``)."""
         self._load_fit_in_view = len(self.locs) == 0
         self._load_callback = on_finished
         self._load_index = 0
@@ -13176,7 +13243,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self._load_progress = progress
 
         thread = QtCore.QThread(self)
-        worker = LocsLoadWorker(jobs)
+        worker = LocsLoadWorker(jobs, average_traces=average_traces)
         worker.moveToThread(thread)
         self._load_thread = thread
         self._load_worker = worker
@@ -13281,8 +13348,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if callback is not None and n_loaded:
             callback()
         if self._load_queue:  # files requested while this load ran
-            jobs, on_finished = self._load_queue.pop(0)
-            self._start_load(jobs, on_finished)
+            jobs, on_finished, average_traces = self._load_queue.pop(0)
+            self._start_load(jobs, on_finished, average_traces)
 
     def _show_added_channels(self, first: bool) -> None:
         """Render newly added channels.
@@ -15788,8 +15855,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
     def dropEvent(self, event: QtGui.QDropEvent) -> None:
         """When a file is dropped onto the window, if the file ends with
-        ``.hdf5`` (or is a PyME ``.h5r``/``.hdf`` file), try loading
-        localizations. If it ends with ``.txt``, try loading a fov file.
+        ``.hdf5`` (or is a PyME ``.h5r``/``.hdf`` or pyMINFLUX ``.pmx``
+        file), try loading localizations. If it ends with ``.txt``, try loading a fov file.
         If it ends with ``.yaml``, try loading pick regions. If it is a
         single ``.png`` or ``.tif`` image, overlay it (see
         ``ImageOverlayDialog``)."""
@@ -15814,7 +15881,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             loaded_shape = file.get("Shape", None)
             if loaded_shape in lib.PICK_SHAPES + (io._MIXED_PICKS_SHAPE,):
                 self.load_picks(paths[0])
-        if extensions == [".csv"]:  # just one csv dropped, thunderstorm
+        if extensions == [".csv"]:  # one csv: ThunderSTORM or pyMINFLUX
             self.add_multiple(paths)
         elif extensions == [".mat"]:  # just one mat dropped, SMAP
             self.add_multiple(paths)
@@ -15822,7 +15889,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             paths = [
                 path
                 for path, ext in zip(paths, extensions)
-                if ext == ".hdf5" or ext in io.PYME_EXTENSIONS
+                if ext == ".hdf5"
+                or ext in io.PYME_EXTENSIONS
+                or ext in io.MINFLUX_EXTENSIONS
             ]
             self.add_multiple(paths)
 
@@ -22662,8 +22731,9 @@ class Window(QtWidgets.QMainWindow):
 
     def open_file_dialog(self) -> None:
         """Open localizations file(s): Picasso (.hdf5), ThunderSTORM
-        (.csv), SMAP (_sml.mat) or PyME (.h5r, .hdf)."""
-        file_filter = "Localizations (*.hdf5 *.csv *.mat *.h5r *.hdf)"
+        (.csv), SMAP (_sml.mat), PyME (.h5r, .hdf) or pyMINFLUX (.pmx,
+        .csv)."""
+        file_filter = "Localizations (*.hdf5 *.csv *.mat *.h5r *.hdf *.pmx)"
         if self.pwd == []:
             paths, ext = QtWidgets.QFileDialog.getOpenFileNames(
                 self, "Add localizations", filter=file_filter

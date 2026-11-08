@@ -1637,6 +1637,229 @@ def _write_imagej_contiguous_stack(path, data):
         fh.write(np.ascontiguousarray(data[1:]).tobytes())
 
 
+def _minflux_table(z=None):
+    """pyMINFLUX's filtered localization table: three traces (two of
+    fluorophore 1, one of fluorophore 2), not in time order."""
+    table = pd.DataFrame(
+        {
+            "tid": [7, 7, 7, 3, 3, 9],
+            "tim": [2.0, 2.1, 2.2, 1.0, 1.1, 3.0],
+            "x": [100.0, 104.0, 102.0, -20.0, -24.0, 500.0],
+            "y": [200.0, 201.0, 203.0, 50.0, 52.0, 600.0],
+            "z": [0.0002] * 6 if z is None else z,
+            "efo": [1e4, 2e4, 3e4, 4e4, 5e4, 6e4],
+            "cfr": [0.1, 0.2, 0.3, 0.4, 0.5, 0.6],
+            "eco": [100, 300, 100, 50, 150, 80],
+            "dcr": [0.5, 0.6, 0.7, 0.2, 0.3, 0.9],
+            "dwell": [5.0, 6.0, 7.0, 8.0, 9.0, 10.0],
+            "fluo": [1, 1, 1, 1, 1, 2],
+        }
+    )
+    table["tid"] = table["tid"].astype(np.uint32)
+    table["eco"] = table["eco"].astype(np.uint32)
+    table["fluo"] = table["fluo"].astype(np.uint8)
+    return table
+
+
+def _write_pmx(path, table, version="3.0", names=None):
+    """Write a .pmx file the way pyMINFLUX's PMXWriter does."""
+    with h5py.File(str(path), "w") as file:
+        file.attrs["file_version"] = version
+        if version == "3.0":
+            file.attrs["reader_version"] = 2
+        parameters = file.create_group("parameters")
+        parameters.create_dataset("z_scaling_factor", data=0.7)
+        parameters.create_dataset("min_trace_length", data=1)
+        parameters.create_dataset("num_fluorophores", data=2)
+        parameters.create_dataset("is_tracking", data=np.int8(0))
+        if names is not None:
+            parameters.attrs["fluorophore_names"] = json.dumps(
+                {str(key): value for key, value in names.items()}
+            )
+        group = file.create_group("paraview")
+        dataset = group.create_dataset("dataframe", data=table.to_numpy())
+        dataset.attrs["column_names"] = list(table.columns)
+        dataset.attrs["column_types"] = [str(t) for t in table.dtypes]
+        group.create_dataset("dataframe_index", data=np.array(table.index))
+
+
+class TestMinflux:
+    @pytest.mark.parametrize("version", ["1.0", "2.0", "3.0"])
+    def test_import_pmx(self, tmp_path, version):
+        path = tmp_path / "data.pmx"
+        _write_pmx(path, _minflux_table(), version)
+        assert io.is_minflux_file(str(path))
+
+        locs, info = io.import_minflux(str(path))
+        # sorted by time, one frame per localization
+        np.testing.assert_array_equal(locs["frame"], np.arange(6))
+        np.testing.assert_array_equal(locs["tid"], [3, 3, 7, 7, 7, 9])
+        np.testing.assert_allclose(locs["tim"], [1.0, 1.1, 2.0, 2.1, 2.2, 3.0])
+        # 2D: z of a few 1e-4 nm is dropped
+        assert "z" not in locs.columns and "lpz" not in locs.columns
+        # photons are eco, which is not duplicated
+        np.testing.assert_allclose(
+            locs["photons"], [50, 150, 100, 300, 100, 80]
+        )
+        assert "eco" not in locs.columns
+        for column in ("efo", "cfr", "dcr", "dwell", "fluo"):
+            assert column in locs.columns
+        # the precision is the standard deviation of the trace ...
+        np.testing.assert_allclose(
+            locs["lpx"][:5],
+            [np.std([-20, -24], ddof=1)] * 2
+            + [np.std([100, 104, 102], ddof=1)] * 3,
+            rtol=1e-6,
+        )
+        # ... and the median of the traces for single-localization traces
+        median = np.median([np.std([-20, -24], ddof=1), 2.0])
+        assert locs["lpx"][5] == pytest.approx(median)
+
+        assert info[-1]["Frames"] == 6
+        assert info[-1]["Pixelsize"] == 10.0
+        assert info[-1]["MINFLUX metadata"]["File version"] == version
+        assert info[-1]["MINFLUX metadata"]["z_scaling_factor"] == 0.7
+        assert info[-1]["Average traces"] is False
+        # moved next to the origin, by whole nominal pixels: the data
+        # starts 100-110 nm from 0 and the field of view ends 100 nm
+        # after it
+        origin_x = info[-1]["MINFLUX origin x (nm)"]
+        origin_y = info[-1]["MINFLUX origin y (nm)"]
+        assert (origin_x, origin_y) == (-130.0, -50.0)
+        np.testing.assert_allclose(locs["x"][2:5] + origin_x, [100, 104, 102])
+        assert locs["x"].min() == pytest.approx(106.0)
+        assert lib.get_from_metadata(info, lib.CANVAS_OFFSET_KEYS[0]) is None
+        width, height = lib.field_of_view(info)
+        assert width == pytest.approx(740.0)  # 500 - (-130) + 100 + 10
+        assert locs["x"].max() < width and locs["y"].max() < height
+
+    def test_stage_origin(self, tmp_path):
+        path = tmp_path / "data.pmx"
+        _write_pmx(path, _minflux_table())
+        locs, info = io.import_minflux(str(path), origin="stage")
+        assert "MINFLUX origin x (nm)" not in info[-1]
+        # negative x is kept by moving the canvas, so x is shifted by
+        # the offset (whole nominal pixels)
+        offset = lib.get_from_metadata(info, lib.CANVAS_OFFSET_KEYS[0])
+        assert offset == 30.0
+        assert locs["x"].min() == pytest.approx(-24.0 + 30.0)
+        assert locs["y"].min() == pytest.approx(50.0)
+        width, height = lib.field_of_view(info)
+        assert locs["x"].max() < width and locs["y"].max() < height
+        with pytest.raises(ValueError, match="origin"):
+            io.import_minflux(str(path), origin="camera")
+
+    def test_save_load_roundtrip(self, tmp_path):
+        path = tmp_path / "data.pmx"
+        _write_pmx(path, _minflux_table())
+        locs, info = io.import_minflux(str(path))
+        io.save_locs(str(tmp_path / "data_locs.hdf5"), locs, info)
+        out_locs, out_info = io.load_locs(str(tmp_path / "data_locs.hdf5"))
+        assert len(out_locs) == len(locs)
+        np.testing.assert_allclose(out_locs["x"], locs["x"])
+
+    def test_import_3d(self, tmp_path):
+        path = tmp_path / "data.pmx"
+        z = [10.0, 14.0, 12.0, -5.0, -9.0, 40.0]
+        _write_pmx(path, _minflux_table(z))
+        locs, _ = io.import_minflux(str(path))
+        np.testing.assert_allclose(locs["z"], [-5, -9, 10, 14, 12, 40])
+        np.testing.assert_allclose(
+            locs["lpz"][2:5], np.std([10, 14, 12], ddof=1), rtol=1e-6
+        )
+
+    def test_average_traces(self, tmp_path):
+        path = tmp_path / "data.pmx"
+        z = [10.0, 14.0, 12.0, -5.0, -9.0, 40.0]
+        _write_pmx(path, _minflux_table(z))
+        locs, info = io.import_minflux(str(path), average_traces=True)
+        assert info[-1]["Average traces"] is True
+        assert info[-1]["Frames"] == 3
+        # one localization per trace, in order of the start of the trace
+        np.testing.assert_array_equal(locs["tid"], [3, 7, 9])
+        np.testing.assert_array_equal(locs["frame"], [0, 1, 2])
+        np.testing.assert_array_equal(locs["n"], [2, 3, 1])
+        np.testing.assert_array_equal(locs["fluo"], [1, 1, 2])
+        # photon-weighted mean (weights eco)
+        offset = info[-1]["MINFLUX origin x (nm)"]
+        expected_x = np.average([100, 104, 102], weights=[100, 300, 100])
+        assert locs["x"][1] + offset == pytest.approx(expected_x)
+        expected_z = np.average([10, 14, 12], weights=[100, 300, 100])
+        assert locs["z"][1] == pytest.approx(expected_z)
+        np.testing.assert_allclose(locs["photons"], [200, 500, 80])
+        np.testing.assert_allclose(locs["tim"], [1.05, 2.1, 3.0], rtol=1e-6)
+        # standard error of the mean
+        se = np.std([100, 104, 102], ddof=1) / np.sqrt(3)
+        assert locs["lpx"][1] == pytest.approx(se)
+        # median of the other columns
+        assert locs["dcr"][1] == pytest.approx(0.6)
+
+    def test_import_csv(self, tmp_path):
+        path = tmp_path / "export.csv"
+        with open(path, "w") as file:
+            file.write(
+                "# Fluorophore Names:\n# fluo_1=Tom20\n# fluo_2=ATP5B\n"
+            )
+            _minflux_table().to_csv(file, index=False)
+        assert io.is_minflux_file(str(path))
+        locs, info = io.import_minflux(str(path))
+        assert len(locs) == 6
+        assert info[-1]["MINFLUX metadata"] == {"Format": "pyMINFLUX .csv"}
+        assert info[-1]["MINFLUX fluorophores"] == {1: "Tom20", 2: "ATP5B"}
+
+        channels = io.split_minflux_channels(str(path), locs, info)
+        assert [os.path.basename(p) for p, _, _ in channels] == [
+            "export_Tom20.csv",
+            "export_ATP5B.csv",
+        ]
+        assert [len(c) for _, c, _ in channels] == [5, 1]
+        assert all("fluo" not in c.columns for _, c, _ in channels)
+        assert channels[1][2][-1]["MINFLUX fluorophore"] == {
+            "ID": 2,
+            "Name": "ATP5B",
+        }
+
+    def test_thunderstorm_csv_is_not_minflux(self, tmp_path):
+        path = tmp_path / "ts.csv"
+        path.write_text('"frame","x [nm]","y [nm]"\n1,10,20\n')
+        assert not io.is_minflux_file(str(path))
+        assert not io.is_minflux_file(str(tmp_path / "data.hdf5"))
+
+    def test_split_default_names(self, tmp_path):
+        path = tmp_path / "data.pmx"
+        _write_pmx(path, _minflux_table(), names={1: "1", 2: "2"})
+        locs, info = io.import_minflux(str(path))
+        channels = io.split_minflux_channels(str(path), locs, info)
+        assert [os.path.basename(p) for p, _, _ in channels] == [
+            "data_fluo1.pmx",
+            "data_fluo2.pmx",
+        ]
+
+    def test_split_single_fluorophore(self, tmp_path):
+        path = tmp_path / "data.pmx"
+        table = _minflux_table()
+        table["fluo"] = np.uint8(1)
+        _write_pmx(path, table)
+        locs, info = io.import_minflux(str(path))
+        ((out_path, out_locs, out_info),) = io.split_minflux_channels(
+            str(path), locs, info
+        )
+        assert out_path == str(path) and out_info is info
+        assert "fluo" not in out_locs.columns
+
+    def test_unknown_version(self, tmp_path):
+        path = tmp_path / "data.pmx"
+        _write_pmx(path, _minflux_table(), version="9.0")
+        with pytest.raises(io.FileFormatError, match="file_version"):
+            io.import_minflux(str(path))
+
+    def test_missing_columns(self, tmp_path):
+        path = tmp_path / "data.pmx"
+        _write_pmx(path, _minflux_table().drop(columns="tid"))
+        with pytest.raises(io.FileFormatError, match="tid"):
+            io.import_minflux(str(path))
+
+
 class TestTiffLoading:
     def test_load_tif_basic_shape_dtype_frames(self, tmp_path):
         rng = np.random.default_rng(0)

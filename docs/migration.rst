@@ -1477,7 +1477,7 @@ releases; check GUI plugins against each release (see :doc:`versioning`).
 **Commands of plugins** (``register_cli``) cannot take the name of a command
 of Picasso. The commands new in 1.0 (e.g., ``track``, ``diffusion``,
 ``cbc``, ``ripley-h``, ``rdf``, ``nnd``, ``stitch``, ``pyme2hdf``,
-``hdf2pyme`` and ``convert-units``) are refused as plugin commands, and a
+``hdf2pyme``, ``minflux2hdf`` and ``convert-units``) are refused as plugin commands, and a
 plugin command named like an old command name (``pc``, ``nneighbor``,
 ``groupprops``, ...) is never reached, because Picasso renames it before
 running it. Rename such commands.

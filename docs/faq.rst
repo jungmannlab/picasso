@@ -205,9 +205,10 @@ Even then, a single folder or file name may have at most 255 characters.
 How do I open localizations from other software?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Render's ``File > Open`` imports ThunderSTORM ``.csv``, SMAP ``_sml.mat`` and
-PyME ``.h5r`` and ``.hdf`` files, see :ref:`render-open`; on the command line,
-``picasso csv2hdf``, ``smap2hdf`` and ``pyme2hdf`` convert them. To write files
+Render's ``File > Open`` imports ThunderSTORM ``.csv``, SMAP ``_sml.mat``,
+PyME ``.h5r`` and ``.hdf`` and pyMINFLUX (MINFLUX) ``.pmx`` and ``.csv`` files,
+see :ref:`render-open`; on the command line, ``picasso csv2hdf``,
+``smap2hdf``, ``pyme2hdf`` and ``minflux2hdf`` convert them. To write files
 for Picasso from your own code, see :ref:`files-minimum-requirements`: they
 need the columns ``frame``, ``x``, ``y``, ``lpx`` and ``lpy`` (in nm), the
 metadata keys ``Width``, ``Height``, ``Frames`` and ``Pixelsize``, and the

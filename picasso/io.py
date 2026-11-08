@@ -111,6 +111,8 @@ __all__ = [
     "split_pyme_channels",
     "export_pyme",
     "export_pyme_multi",
+    "import_minflux",
+    "split_minflux_channels",
     "export_txt_imagej",
     "export_txt_nis",
     "export_xyz_chimera",
@@ -8730,6 +8732,32 @@ def import_pyme(
     return locs, info
 
 
+def _split_by_column(
+    locs: pd.DataFrame, column: str
+) -> list[tuple[int | None, pd.DataFrame]]:
+    """Localizations per (rounded, integer) value of ``column``, sorted
+    by value, without ``column``.
+
+    Returns
+    -------
+    list of tuples
+        ``(value, locs)`` per value. With at most one value, a single
+        ``(value or None, locs)`` that keeps every localization.
+    """
+    rounded = np.rint(locs[column].to_numpy(dtype=np.float64))
+    values = np.unique(rounded[np.isfinite(rounded)]).astype(np.int64)
+    if len(values) <= 1:
+        value = int(values[0]) if len(values) else None
+        return [(value, locs.drop(columns=column))]
+    return [
+        (
+            int(value),
+            locs[rounded == value].drop(columns=column).reset_index(drop=True),
+        )
+        for value in values
+    ]
+
+
 def split_pyme_channels(
     path: str, locs: pd.DataFrame, info: list[dict]
 ) -> list[tuple[str, pd.DataFrame, list[dict]]]:
@@ -8761,10 +8789,10 @@ def split_pyme_channels(
     """
     if "probe" not in locs.columns:
         return [(path, locs, info)]
-    probes = np.rint(locs["probe"].to_numpy(dtype=np.float64))
-    values = np.unique(probes[np.isfinite(probes)]).astype(np.int64)
-    if len(values) <= 1:
-        return [(path, locs.drop(columns="probe"), info)]
+    parts = _split_by_column(locs, "probe")
+    if len(parts) == 1:
+        return [(path, parts[0][1], info)]
+    values = [value for value, _ in parts]
 
     restored = None
     try:
@@ -8780,9 +8808,7 @@ def split_pyme_channels(
 
     base, ext = os.path.splitext(path)
     channels = []
-    for value in values:
-        channel_locs = locs[probes == value].drop(columns="probe")
-        channel_locs = channel_locs.reset_index(drop=True)
+    for value, channel_locs in parts:
         if restored is not None:
             channel_info = _pyme_restore_info(
                 restored[value], info, int(value)
@@ -9009,3 +9035,557 @@ def export_pyme_multi(
     with tables.open_file(path, "w") as h5file:
         h5file.create_table("/", "Localizations", obj=records, filters=filters)
         _pyme_write_metadata(h5file, metadata)
+
+
+# MINFLUX localization files written by pyMINFLUX
+# (https://github.com/bsse-scf/pyMINFLUX). Its ``.pmx`` file (HDF5) and
+# its ``.csv`` export hold the same filtered table, one row per MINFLUX
+# localization: trace ID ``tid``, time ``tim`` (s), ``x``, ``y``, ``z``
+# (nm, z already corrected with pyMINFLUX's z scaling factor), ``efo``,
+# ``cfr``, ``eco``, ``dcr``, ``dwell``, fluorophore ID ``fluo`` and,
+# depending on the version, ``fbg`` and ``iid``.
+
+#: Extension of pyMINFLUX's native file format (HDF5).
+MINFLUX_EXTENSIONS = (".pmx",)
+
+#: Versions of the ``.pmx`` format that ``import_minflux`` reads.
+_MINFLUX_PMX_VERSIONS = ("1.0", "2.0", "3.0")
+
+#: Columns of pyMINFLUX's localization table that identify its ``.csv``
+#: export (and tell it apart from, e.g., a ThunderSTORM ``.csv``).
+_MINFLUX_CSV_COLUMNS = ("tid", "tim", "x", "y", "efo", "cfr", "eco", "dcr")
+
+#: Columns ``import_minflux`` requires.
+_MINFLUX_REQUIRED_COLUMNS = ("tid", "tim", "x", "y")
+
+#: Largest |z| (nm) of a 2D acquisition; pyMINFLUX takes data with
+#: |z| > 1e-11 m as 3D (2D files can hold z of a few 1e-4 nm).
+_MINFLUX_2D_Z_TOLERANCE = 0.01
+
+#: Localization precision (nm) of traces with a single localization when
+#: no trace of the file has more than one.
+_MINFLUX_DEFAULT_PRECISION = 1.0
+
+#: Nominal camera pixel size (nm) of MINFLUX data, which has no camera;
+#: it only sets the extent of the field of view (``lib.field_of_view``).
+_MINFLUX_PIXELSIZE = 10.0
+
+#: Margin (nm) between the localizations and the edges of the field of
+#: view when ``import_minflux`` moves the data to the origin.
+_MINFLUX_MARGIN = 100.0
+
+#: Values of ``origin`` of ``import_minflux``.
+_MINFLUX_ORIGINS = ("data", "stage")
+
+
+def _minflux_csv_header(path: str) -> list[str] | None:
+    """Column names of a ``.csv`` file: its first line that is neither
+    empty nor a ``#`` comment, split at commas. None if the file cannot
+    be read or has no such line."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as file:
+            for line in file:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    return [
+                        name.strip().strip('"') for name in line.split(",")
+                    ]
+    except OSError:
+        return None
+    return None
+
+
+def is_minflux_file(path: str) -> bool:
+    """Whether ``path`` names a MINFLUX localization file written by
+    pyMINFLUX: its native ``.pmx`` file, or a ``.csv`` file exported by
+    pyMINFLUX (recognized by its columns ``tid``, ``tim``, ``x``, ``y``,
+    ``efo``, ``cfr``, ``eco`` and ``dcr``).
+
+    Parameters
+    ----------
+    path : str
+        Path to a file.
+
+    Returns
+    -------
+    bool
+        True for ``.pmx`` files and pyMINFLUX ``.csv`` files.
+    """
+    ext = os.path.splitext(path)[1].lower()
+    if ext in MINFLUX_EXTENSIONS:
+        return True
+    if ext != ".csv":
+        return False
+    header = _minflux_csv_header(path)
+    return header is not None and set(_MINFLUX_CSV_COLUMNS) <= set(header)
+
+
+def _minflux_read_pmx(
+    path: str,
+) -> tuple[pd.DataFrame, dict, dict[int, str]]:
+    """Read the localization table, the parameters and the fluorophore
+    names of a pyMINFLUX ``.pmx`` file.
+
+    Returns
+    -------
+    table : pd.DataFrame
+        pyMINFLUX's filtered localization table (``/paraview/dataframe``)
+        with its original column types.
+    metadata : dict
+        Format, file version and the datasets of ``/parameters``.
+    names : dict
+        Fluorophore names by fluorophore ID; empty if not stored.
+
+    Raises
+    ------
+    FileFormatError
+        If the file has an unknown ``file_version`` or no localization
+        table.
+    """
+    with h5py.File(path, "r") as file:
+        version = _pyme_metadata_value(file.attrs.get("file_version"))
+        if version not in _MINFLUX_PMX_VERSIONS:
+            raise FileFormatError(
+                f"{path} is not a pyMINFLUX .pmx file of a known version "
+                f"(file_version {version!r}, supported: "
+                f"{', '.join(_MINFLUX_PMX_VERSIONS)})."
+            )
+        if "paraview/dataframe" not in file:
+            raise FileFormatError(
+                f"pyMINFLUX file {path} contains no localizations "
+                "(/paraview/dataframe)."
+            )
+        dataset = file["paraview/dataframe"]
+        columns = [
+            _pyme_metadata_value(name)
+            for name in dataset.attrs["column_names"]
+        ]
+        types = [
+            _pyme_metadata_value(name)
+            for name in dataset.attrs.get("column_types", [])
+        ]
+        values = np.asarray(dataset[()]).reshape(-1, len(columns))
+
+        metadata = {"Format": "pyMINFLUX .pmx", "File version": version}
+        reader_version = file.attrs.get("reader_version")
+        if reader_version is not None:
+            metadata["Reader version"] = _pyme_metadata_value(reader_version)
+        names = {}
+        parameters = file.get("parameters")
+        if isinstance(parameters, h5py.Group):
+            for key, item in parameters.items():
+                if isinstance(item, h5py.Dataset):
+                    value = _pyme_metadata_value(item[()])
+                    if value is not None:
+                        metadata[key] = value
+            names_json = _pyme_metadata_value(
+                parameters.attrs.get("fluorophore_names")
+            )
+            if isinstance(names_json, str):
+                try:
+                    names = {
+                        int(key): str(value)
+                        for key, value in json.loads(names_json).items()
+                    }
+                except (ValueError, AttributeError) as error:
+                    _log.debug(
+                        "Fluorophore names of %s not read: %s", path, error
+                    )
+
+    table = pd.DataFrame(values, columns=columns)
+    for column, dtype in zip(columns, types):
+        try:
+            table[column] = table[column].astype(dtype)
+        except (TypeError, ValueError):  # e.g., NaN in an integer column
+            pass
+    return table, metadata, names
+
+
+def _minflux_read_csv(
+    path: str,
+) -> tuple[pd.DataFrame, dict, dict[int, str]]:
+    """Read the localization table and the fluorophore names (header
+    comments ``# fluo_<id>=<name>``) of a ``.csv`` file exported by
+    pyMINFLUX; see ``_minflux_read_pmx`` for the returned values."""
+    names = {}
+    with open(path, encoding="utf-8", errors="replace") as file:
+        for line in file:
+            if not line.startswith("#"):
+                break
+            match = re.match(
+                r"#\s*fluo_(\d+)\s*=\s*(.*)$", line.rstrip("\r\n")
+            )
+            if match:
+                names[int(match.group(1))] = match.group(2).strip()
+    table = pd.read_csv(path, comment="#")
+    return table, {"Format": "pyMINFLUX .csv"}, names
+
+
+def _minflux_trace_precision(
+    values: np.ndarray, codes: np.ndarray, per_trace: bool
+) -> np.ndarray:
+    """Localization precision from the spread of the localizations of
+    each trace.
+
+    Parameters
+    ----------
+    values : np.ndarray
+        One coordinate (nm) of each localization.
+    codes : np.ndarray
+        Trace index (0, 1, ...) of each localization.
+    per_trace : bool
+        If True, return the standard error of each trace's mean (one
+        value per trace), otherwise the standard deviation of the
+        trace's localizations (one value per localization).
+
+    Returns
+    -------
+    np.ndarray
+        Precision (nm). Traces with a single localization get the median
+        of the other traces' values (``_MINFLUX_DEFAULT_PRECISION`` if
+        no trace has more than one localization).
+    """
+    grouped = pd.Series(values, dtype=np.float64).groupby(codes)
+    precision = grouped.std().to_numpy()  # ddof=1, as pyMINFLUX
+    if per_trace:
+        precision = precision / np.sqrt(grouped.size().to_numpy())
+    finite = np.isfinite(precision)
+    fill = (
+        float(np.median(precision[finite]))
+        if finite.any()
+        else _MINFLUX_DEFAULT_PRECISION
+    )
+    precision = np.where(finite, precision, fill)
+    return precision if per_trace else precision[codes]
+
+
+def _minflux_extra_columns(
+    table: pd.DataFrame, skip: set[str]
+) -> list[tuple[str, str]]:
+    """Numeric columns of a MINFLUX table that are copied as they are,
+    as ``(MINFLUX name, Picasso name)`` pairs."""
+    return [
+        (column, _sanitize_column_name(str(column)))
+        for column in table.columns
+        if column not in skip and table[column].dtype.kind in "biuf"
+    ]
+
+
+def _minflux_localizations(table: pd.DataFrame, is_3d: bool) -> dict:
+    """Picasso columns of every MINFLUX localization, see
+    ``import_minflux``; ``table`` is sorted by time."""
+    codes = pd.factorize(table["tid"], sort=False)[0]
+    n = len(table)
+    data = {
+        "frame": np.arange(n, dtype=np.uint32),
+        "x": table["x"].to_numpy(dtype=np.float32),
+        "y": table["y"].to_numpy(dtype=np.float32),
+    }
+    if is_3d:
+        data["z"] = table["z"].to_numpy(dtype=np.float32)
+    for axis in ("x", "y", "z") if is_3d else ("x", "y"):
+        data[f"lp{axis}"] = _minflux_trace_precision(
+            table[axis].to_numpy(), codes, per_trace=False
+        ).astype(np.float32)
+    if "eco" in table.columns:
+        data["photons"] = table["eco"].to_numpy(dtype=np.float32)
+    for column, name in _minflux_extra_columns(table, {"x", "y", "z", "eco"}):
+        if name in data:
+            continue
+        values = table[column].to_numpy()
+        if values.dtype.kind == "f":
+            values = values.astype(np.float32)
+        data[name] = values
+    return data
+
+
+def _minflux_trace_means(table: pd.DataFrame, is_3d: bool) -> dict:
+    """Picasso columns of one localization per MINFLUX trace, the
+    photon-weighted mean of the trace's localizations, see
+    ``import_minflux``; ``table`` is sorted by time, so the traces come
+    in the order of their first localization."""
+    codes, tids = pd.factorize(table["tid"], sort=False)
+    n_traces = len(tids)
+    counts = np.bincount(codes, minlength=n_traces)
+
+    # weights: eco, or equal weights in traces without photon counts
+    if "eco" in table.columns:
+        weights = np.nan_to_num(table["eco"].to_numpy(dtype=np.float64))
+        weights = np.clip(weights, 0, None)
+    else:
+        weights = np.ones(len(table))
+    totals = np.bincount(codes, weights, minlength=n_traces)
+    no_counts = totals[codes] <= 0
+    weights[no_counts] = 1.0
+    totals = np.bincount(codes, weights, minlength=n_traces)
+
+    def weighted_mean(column: str) -> np.ndarray:
+        values = table[column].to_numpy(dtype=np.float64)
+        return (
+            np.bincount(codes, weights * values, minlength=n_traces) / totals
+        )
+
+    data = {
+        "frame": np.arange(n_traces, dtype=np.uint32),
+        "x": weighted_mean("x").astype(np.float32),
+        "y": weighted_mean("y").astype(np.float32),
+    }
+    if is_3d:
+        data["z"] = weighted_mean("z").astype(np.float32)
+    for axis in ("x", "y", "z") if is_3d else ("x", "y"):
+        data[f"lp{axis}"] = _minflux_trace_precision(
+            table[axis].to_numpy(), codes, per_trace=True
+        ).astype(np.float32)
+    if "eco" in table.columns:
+        data["photons"] = np.bincount(
+            codes, table["eco"].to_numpy(dtype=np.float64), minlength=n_traces
+        ).astype(np.float32)
+    data["tid"] = np.asarray(tids)
+    data["n"] = counts.astype(np.uint32)
+    data["tim"] = (
+        np.bincount(codes, table["tim"].to_numpy(dtype=np.float64)) / counts
+    ).astype(np.float32)
+    if "fluo" in table.columns:
+        # the most frequent fluorophore of each trace (traces should
+        # have one), as pyMINFLUX
+        pairs = pd.DataFrame(
+            {"trace": codes, "fluo": table["fluo"].to_numpy()}
+        )
+        mode = (
+            pairs.value_counts()
+            .reset_index()
+            .sort_values(["trace", "count"], ascending=[True, False])
+            .drop_duplicates("trace")
+            .set_index("trace")["fluo"]
+        )
+        data["fluo"] = mode.reindex(range(n_traces)).to_numpy()
+
+    skip = {"x", "y", "z", "eco", "tid", "tim", "fluo", "iid"}
+    medians = _minflux_extra_columns(table, skip)
+    if medians:
+        grouped = table[[column for column, _ in medians]].groupby(codes)
+        median = grouped.median()
+        for column, name in medians:
+            if name not in data:
+                data[name] = median[column].to_numpy(dtype=np.float32)
+    return data
+
+
+def import_minflux(
+    path: str,
+    *,
+    average_traces: bool = False,
+    pixelsize: float = _MINFLUX_PIXELSIZE,
+    origin: Literal["data", "stage"] = "data",
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Import MINFLUX localizations processed with pyMINFLUX
+    (https://github.com/bsse-scf/pyMINFLUX).
+
+    Reads pyMINFLUX's native ``.pmx`` file (versions 1.0 to 3.0) and the
+    ``.csv`` file it exports, which hold the same filtered table of
+    localizations. MINFLUX localizes one emitter at a time, repeatedly:
+    the localizations of one emitter in one on-event form a trace
+    (``tid``). By default, every localization is imported; with
+    ``average_traces``, one localization per trace.
+
+    Every localization (default), sorted by time:
+
+    - ``frame``: the index of the localization in time (0, 1, ...), as
+      MINFLUX has no camera frames; ``tim`` keeps the time (s).
+    - ``x``, ``y``, ``z``: ``x``, ``y``, ``z`` (nm in both pyMINFLUX and
+      Picasso). ``z`` is omitted for 2D data (z within 0.01 nm of 0).
+    - ``lpx``, ``lpy``, ``lpz``: standard deviation of ``x``, ``y``,
+      ``z`` of the trace's localizations (as pyMINFLUX's ``sx``, ``sy``,
+      ``sz``); traces with a single localization get the median of the
+      other traces.
+    - ``photons``: ``eco`` (photon counts of the localization).
+    - All other numeric columns (``tid``, ``tim``, ``efo``, ``cfr``,
+      ``dcr``, ``dwell``, ``fbg``, ``iid``, ``fluo``) are kept as they
+      are.
+
+    One localization per trace (``average_traces=True``), sorted by the
+    start of the trace:
+
+    - ``frame``: the index of the trace in time.
+    - ``x``, ``y``, ``z``: mean of the trace's localizations weighted by
+      their ``eco`` (as pyMINFLUX's weighted localizations).
+    - ``lpx``, ``lpy``, ``lpz``: standard error of the mean, i.e., the
+      standard deviation of the trace divided by the square root of its
+      number of localizations.
+    - ``photons``: sum of ``eco``; ``n``: number of localizations;
+      ``tim``: mean time (s); ``tid``; ``fluo``: the trace's (most
+      frequent) fluorophore; the other numeric columns (``efo``,
+      ``cfr``, ``dcr``, ...) hold the median of the trace.
+
+    MINFLUX coordinates are absolute (stage) coordinates, often many um
+    away from 0. By default (``origin="data"``), the localizations are
+    moved such that they start 100 nm (rounded to whole nominal pixels)
+    from the origin of the field of view, which Picasso shows from 0 nm;
+    the stage coordinates of Picasso's origin are stored in the metadata
+    (``"MINFLUX origin x (nm)"`` and ``"MINFLUX origin y (nm)"``), i.e.,
+    stage x = x + origin x. The fluorophores of one file stay registered,
+    separate files usually not. With ``origin="stage"``, coordinates are
+    kept as they are (negative ones extend the canvas, see
+    ``lib.fit_canvas``), so separate files of the same sample stay
+    registered. Several fluorophores in one file (``fluo``) can be split
+    with ``split_minflux_channels``.
+
+    Parameters
+    ----------
+    path : str
+        The path to the pyMINFLUX ``.pmx`` or ``.csv`` file.
+    average_traces : bool, optional
+        If True, import one localization per trace instead of every
+        localization. Default is False.
+    pixelsize : float, optional
+        Nominal camera pixel size in nm. MINFLUX has no camera, but
+        Picasso metadata requires a pixel size; it only sets the extent
+        of the field of view (``Width`` and ``Height``). Default is 10.
+    origin : {"data", "stage"}, optional
+        ``"data"`` moves the localizations next to the origin of the
+        field of view, ``"stage"`` keeps the absolute coordinates, see
+        above. Default is ``"data"``.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        The localization data imported from the file.
+    info : list of dicts
+        Minimal metadata information, including the pyMINFLUX parameters
+        (``"MINFLUX metadata"``) and the fluorophore names
+        (``"MINFLUX fluorophores"``, if stored).
+
+    Raises
+    ------
+    FileFormatError
+        If the file is not a pyMINFLUX file of a known version, lacks
+        the columns ``tid``, ``tim``, ``x`` or ``y``, or contains no
+        localizations.
+    ValueError
+        If ``origin`` is neither ``"data"`` nor ``"stage"``.
+    """
+    if origin not in _MINFLUX_ORIGINS:
+        raise ValueError(
+            f"origin must be one of {', '.join(_MINFLUX_ORIGINS)}, "
+            f"not {origin!r}."
+        )
+    _check_path_length(path)
+    if os.path.splitext(path)[1].lower() in MINFLUX_EXTENSIONS:
+        table, metadata, names = _minflux_read_pmx(path)
+    elif is_minflux_file(path):
+        table, metadata, names = _minflux_read_csv(path)
+    else:
+        raise FileFormatError(
+            f"{path} is not a pyMINFLUX localization file (.pmx or "
+            "pyMINFLUX .csv export)."
+        )
+    missing = [c for c in _MINFLUX_REQUIRED_COLUMNS if c not in table.columns]
+    if missing:
+        raise FileFormatError(
+            f"pyMINFLUX file {path} lacks the column(s) {', '.join(missing)}."
+        )
+    finite = np.isfinite(table["x"].to_numpy(dtype=np.float64)) & np.isfinite(
+        table["y"].to_numpy(dtype=np.float64)
+    )
+    table = table[finite]
+    if not len(table):
+        raise FileFormatError(
+            f"pyMINFLUX file {path} contains no localizations."
+        )
+    table = table.sort_values("tim", kind="stable").reset_index(drop=True)
+
+    pixelsize = float(pixelsize)
+    offsets = {}
+    if origin == "data":
+        # whole nominal pixels, so the shift is exact in the metadata
+        for axis in ("x", "y"):
+            values = table[axis].to_numpy(dtype=np.float64)
+            offset = (
+                np.floor((values.min() - _MINFLUX_MARGIN) / pixelsize)
+                * pixelsize
+            )
+            table[axis] = values - offset
+            offsets[axis] = float(offset)
+
+    is_3d = "z" in table.columns and bool(
+        np.nanmax(np.abs(table["z"].to_numpy(dtype=np.float64)))
+        > _MINFLUX_2D_Z_TOLERANCE
+    )
+    if average_traces:
+        data = _minflux_trace_means(table, is_3d)
+    else:
+        data = _minflux_localizations(table, is_3d)
+    locs = pd.DataFrame(data)
+
+    # the same margin on the far side when the data is moved
+    margin = _MINFLUX_MARGIN if origin == "data" else 0.0
+    img_info = lib.step_info("minflux2hdf")
+    img_info["File"] = path
+    img_info["Frames"] = len(locs)
+    img_info["Width"] = _canvas_pixels(data["x"] + margin, pixelsize)
+    img_info["Height"] = _canvas_pixels(data["y"] + margin, pixelsize)
+    img_info["Pixelsize"] = pixelsize
+    img_info["Average traces"] = bool(average_traces)
+    for axis, offset in offsets.items():
+        img_info[f"MINFLUX origin {axis} (nm)"] = offset
+    img_info["MINFLUX metadata"] = metadata
+    if names:
+        img_info["MINFLUX fluorophores"] = names
+    info = [img_info]
+    # localizations at negative (stage) coordinates are kept
+    lib.fit_canvas([locs], [info])
+    return locs, info
+
+
+def split_minflux_channels(
+    path: str, locs: pd.DataFrame, info: list[dict]
+) -> list[tuple[str, pd.DataFrame, list[dict]]]:
+    """Split localizations imported with ``import_minflux`` into one
+    channel per fluorophore (pyMINFLUX's ``fluo`` column).
+
+    Parameters
+    ----------
+    path : str
+        The path to the pyMINFLUX file the localizations were imported
+        from.
+    locs : pd.DataFrame
+        Localizations returned by ``import_minflux``.
+    info : list of dicts
+        Metadata returned by ``import_minflux``.
+
+    Returns
+    -------
+    channels : list of tuples
+        ``(path, locs, info)`` per channel, sorted by fluorophore ID.
+        With a single fluorophore, the input is returned (without a
+        constant ``fluo`` column). Otherwise, each channel's path is
+        ``<base>_<name><ext>``, with the fluorophore's name stored by
+        pyMINFLUX or ``fluo<ID>``; its localizations do not contain the
+        ``fluo`` column and its metadata is a copy of ``info`` with the
+        fluorophore added (``"MINFLUX fluorophore"``).
+    """
+    if "fluo" not in locs.columns:
+        return [(path, locs, info)]
+    parts = _split_by_column(locs, "fluo")
+    if len(parts) == 1:
+        return [(path, parts[0][1], info)]
+
+    names = lib.get_from_metadata(info, "MINFLUX fluorophores") or {}
+    base, ext = os.path.splitext(path)
+    channels = []
+    labels = set()
+    for value, channel_locs in parts:
+        name = names.get(value, names.get(str(value)))
+        if name is None or str(name) == str(value):  # pyMINFLUX's default
+            name = str(value)
+            label = f"fluo{value}"
+        else:
+            name = str(name)
+            label = _sanitize_column_name(name)
+        if label in labels:
+            label = f"{label}_fluo{value}"
+        labels.add(label)
+        channel_info = copy.deepcopy(info)
+        channel_info[-1]["MINFLUX fluorophore"] = {"ID": value, "Name": name}
+        channels.append((f"{base}_{label}{ext}", channel_locs, channel_info))
+    return channels

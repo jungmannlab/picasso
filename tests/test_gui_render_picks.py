@@ -414,6 +414,63 @@ class TestLoaderSplitsPyMEChannels:
         assert window.view.infos[1][0]["Pixelsize"] == PIXELSIZE
 
 
+class TestLoaderSplitsMinfluxChannels:
+    """A pyMINFLUX file holds several fluorophores (``fluo`` column);
+    the loader emits each as its own channel, after asking once whether
+    to load every localization or one per trace."""
+
+    @pytest.mark.parametrize("average", [False, True])
+    def test_worker(self, qt_offscreen, tmp_path, average):
+        from tests.test_io import _minflux_table, _write_pmx
+
+        path = str(tmp_path / "minflux.pmx")
+        _write_pmx(path, _minflux_table(), names={1: "Tom20", 2: "ATP5B"})
+        worker = gui_render.LocsLoadWorker(
+            [(path, None)], average_traces=average
+        )
+        results = []
+        worker.loaded.connect(lambda *args: results.append(args))
+        worker.failed.connect(lambda *args: pytest.fail(str(args)))
+        worker.run()
+        assert [os.path.basename(r[0]) for r in results] == [
+            "minflux_Tom20.pmx",
+            "minflux_ATP5B.pmx",
+        ]
+        assert [len(r[1]) for r in results] == ([2, 1] if average else [5, 1])
+
+    def test_add_multiple_asks_once_without_pixel_size(
+        self, qt_offscreen, tmp_path, monkeypatch
+    ):
+        import time
+
+        from PyQt6 import QtWidgets
+        from tests.test_io import _minflux_table, _write_pmx
+
+        paths = [str(tmp_path / f"{name}.pmx") for name in ("a", "b")]
+        for path in paths:
+            _write_pmx(path, _minflux_table())
+        asked = []
+
+        def get_item(parent, title, label, items, *args, **kwargs):
+            asked.append(label)
+            return items[1], True  # one localization per trace
+
+        monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", get_item)
+        window = gui_render.Window(plugins_loaded=True)
+        window.view.add_multiple(paths)
+        start = time.monotonic()
+        while window.view._load_thread is not None:
+            qt_offscreen.processEvents()
+            time.sleep(0.005)
+            assert time.monotonic() - start < 30
+        qt_offscreen.processEvents()
+        assert len(asked) == 1 and "a.pmx, b.pmx" in asked[0]
+        # two fluorophores per file, one localization per trace
+        assert len(window.view.locs) == 4
+        assert [len(locs) for locs in window.view.locs] == [2, 1, 2, 1]
+        assert window.view.infos[0][-1]["Average traces"] is True
+
+
 class TestCircularPicksUseThePyramid:
     """Circular picks query the render pyramid built at load, so no
     pick-size specific index blocks are built (that indexing sorted

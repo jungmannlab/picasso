@@ -90,6 +90,8 @@
   "split_pyme_channels",
   "export_pyme",
   "export_pyme_multi",
+  "import_minflux",
+  "split_minflux_channels",
   "export_txt_imagej",
   "export_txt_nis",
   "export_xyz_chimera",

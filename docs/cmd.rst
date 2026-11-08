@@ -859,6 +859,25 @@ column) is saved as one file per channel, ``<file>_probe<k>_locs.hdf5``. See
 
    picasso pyme2hdf filepath [-p pixelsize]
 
+.. _cmd-minflux2hdf:
+
+minflux2hdf
+-----------
+Convert MINFLUX localizations processed with `pyMINFLUX
+<https://github.com/bsse-scf/pyMINFLUX>`_ (``.pmx`` or its ``.csv`` export) to
+``.hdf5``. A file with several fluorophores is saved as one file per
+fluorophore, ``<file>_<fluorophore name>_locs.hdf5``. ``--average-traces``
+saves one localization per MINFLUX trace (the photon-weighted mean) instead of
+every localization. The localizations are moved next to the origin of the
+field of view (the shift is stored in the metadata); ``--origin stage`` keeps
+MINFLUX's absolute stage coordinates instead, e.g., to overlay separate
+acquisitions. See :func:`picasso.io.import_minflux` for how the columns are
+converted.
+
+.. code-block:: bash
+
+   picasso minflux2hdf filepath [--average-traces] [--origin {data,stage}]
+
 hdf2pyme
 --------
 Convert hdf5 files to PyME ``.hdf`` files, which can be opened in

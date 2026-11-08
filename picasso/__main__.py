@@ -281,6 +281,45 @@ def _pyme2hdf(path: str, pixelsize: float | None = None) -> None:
     print("Complete.")
 
 
+def _minflux2hdf(
+    path: str, average_traces: bool = False, origin: str = "data"
+) -> None:
+    """Convert MINFLUX localizations processed with pyMINFLUX (.pmx or
+    its .csv export) to HDF5 format. A file with several fluorophores is
+    saved as one file per fluorophore, ``<base>_<fluorophore>_locs.hdf5``.
+
+    Parameters
+    ----------
+    path : str
+        Path (unix style pattern) to the pyMINFLUX .pmx/.csv files.
+    average_traces : bool, optional
+        If True, save one localization per MINFLUX trace (the
+        photon-weighted mean) instead of every localization, see
+        ``picasso.io.import_minflux``. Default is False.
+    origin : {"data", "stage"}, optional
+        ``"data"`` moves the localizations next to the origin of the
+        field of view (the shift is stored in the metadata), ``"stage"``
+        keeps MINFLUX's absolute coordinates. Default is ``"data"``.
+    """
+    from glob import glob
+    from tqdm import tqdm as _tqdm
+
+    paths = glob(path)
+    if paths:
+        import os.path
+        from .io import import_minflux, save_locs, split_minflux_channels
+
+        for path in _tqdm(paths, desc="Converting from pyMINFLUX"):
+            locs, info = import_minflux(
+                path, average_traces=average_traces, origin=origin
+            )
+            channels = split_minflux_channels(path, locs, info)
+            for channel_path, locs, info in channels:
+                base, ext = os.path.splitext(channel_path)
+                save_locs(base + "_locs.hdf5", locs, info)
+    print("Complete.")
+
+
 def _hdf2pyme(path: str) -> None:
     """Convert HDF5 localization files to PyME (python-microscopy)
     .hdf format, one file per input file."""
@@ -6760,6 +6799,31 @@ def _build_parser() -> (
     )
     hdf2pyme_parser.add_argument("files", help="one or multiple hdf5 files")
 
+    minflux2hdf_parser = subparsers.add_parser(
+        "minflux2hdf",
+        help="convert pyMINFLUX .pmx/.csv (MINFLUX) to hdf5 format",
+    )
+    minflux2hdf_parser.add_argument(
+        "files", help="one or multiple pyMINFLUX .pmx/.csv files"
+    )
+    minflux2hdf_parser.add_argument(
+        "--average-traces",
+        action="store_true",
+        help=(
+            "save one localization per MINFLUX trace (photon-weighted"
+            " mean) instead of every localization"
+        ),
+    )
+    minflux2hdf_parser.add_argument(
+        "--origin",
+        choices=("data", "stage"),
+        default="data",
+        help=(
+            "'data' (default) moves the localizations next to the origin of"
+            " the field of view, 'stage' keeps the absolute coordinates"
+        ),
+    )
+
     # files written before Picasso 1.0 (camera pixels) to nm
     convert_units_parser = subparsers.add_parser(
         "convert-units",
@@ -7223,6 +7287,8 @@ def main():  # noqa: C901
             _pyme2hdf(args.files, args.pixelsize)
         elif args.command == "hdf2pyme":
             _hdf2pyme(args.files)
+        elif args.command == "minflux2hdf":
+            _minflux2hdf(args.files, args.average_traces, args.origin)
         elif args.command == "convert-units":
             _convert_units(args.files, args.pixelsize, args.in_place)
     else:

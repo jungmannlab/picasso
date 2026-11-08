@@ -240,6 +240,10 @@
   "-zc",
   "-zg"
  ],
+ "minflux2hdf": [
+  "--average-traces",
+  "--origin"
+ ],
  "nanotron": [],
  "nearest-neighbor": [],
  "nnd": [
