@@ -12382,7 +12382,7 @@ def _read_locs_file(
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Read localizations and metadata from a given path, either Picasso
     (.hdf5), ThunderSTORM (.csv), SMAP (_sml.mat), PyME (.h5r, .hdf) or
-    pyMINFLUX (.pmx, pyMINFLUX .csv) format.
+    MINFLUX (pyMINFLUX .pmx, MINFLUX .csv) format.
 
     Contains no GUI code, so it can run on a background thread, see
     ``LocsLoadWorker``.
@@ -12415,7 +12415,7 @@ def _read_locs_file(
     """
     if path.endswith(".hdf5"):  # standard Picasso localization file
         return io.load_locs(path, pixelsize=pixelsize, progress=progress)
-    elif io.is_minflux_file(path):  # pyMINFLUX .pmx or .csv export
+    elif io.is_minflux_file(path):  # pyMINFLUX .pmx or MINFLUX .csv
         return io.import_minflux(path, average_traces=average_traces)
     elif path.endswith(".csv"):  # ThunderSTORM localization file
         return io.import_ts(path, pixelsize)
@@ -12426,7 +12426,7 @@ def _read_locs_file(
     raise ValueError(
         "Unsupported file format. Please load a .hdf5 (Picasso), "
         ".csv (ThunderSTORM), _sml.mat (SMAP), .h5r/.hdf (PyME) or "
-        ".pmx/.csv (pyMINFLUX) file."
+        ".pmx/.csv (MINFLUX) file."
     )
 
 
@@ -13026,7 +13026,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         ``LocsLoadWorker``.
         New in v1.0.0: Can read a PyME .h5r/.hdf file, one channel per
         ``probe`` value.
-        New in v1.0.0: Can read a pyMINFLUX .pmx/.csv file, one channel
+        New in v1.0.0: Can read a MINFLUX .pmx/.csv file, one channel
         per fluorophore.
 
         Parameters
@@ -15881,7 +15881,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             loaded_shape = file.get("Shape", None)
             if loaded_shape in lib.PICK_SHAPES + (io._MIXED_PICKS_SHAPE,):
                 self.load_picks(paths[0])
-        if extensions == [".csv"]:  # one csv: ThunderSTORM or pyMINFLUX
+        if extensions == [".csv"]:  # one csv: ThunderSTORM or MINFLUX
             self.add_multiple(paths)
         elif extensions == [".mat"]:  # just one mat dropped, SMAP
             self.add_multiple(paths)
@@ -22731,7 +22731,7 @@ class Window(QtWidgets.QMainWindow):
 
     def open_file_dialog(self) -> None:
         """Open localizations file(s): Picasso (.hdf5), ThunderSTORM
-        (.csv), SMAP (_sml.mat), PyME (.h5r, .hdf) or pyMINFLUX (.pmx,
+        (.csv), SMAP (_sml.mat), PyME (.h5r, .hdf) or MINFLUX (.pmx,
         .csv)."""
         file_filter = "Localizations (*.hdf5 *.csv *.mat *.h5r *.hdf *.pmx)"
         if self.pwd == []:

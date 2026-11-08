@@ -864,8 +864,8 @@ column) is saved as one file per channel, ``<file>_probe<k>_locs.hdf5``. See
 minflux2hdf
 -----------
 Convert MINFLUX localizations processed with `pyMINFLUX
-<https://github.com/bsse-scf/pyMINFLUX>`_ (``.pmx`` or its ``.csv`` export) to
-``.hdf5``. A file with several fluorophores is saved as one file per
+<https://github.com/bsse-scf/pyMINFLUX>`_ (``.pmx`` or its ``.csv`` export), or
+another MINFLUX table saved as ``.csv``, to ``.hdf5``. A file with several fluorophores is saved as one file per
 fluorophore, ``<file>_<fluorophore name>_locs.hdf5``. ``--average-traces``
 saves one localization per MINFLUX trace (the photon-weighted mean) instead of
 every localization. The localizations are moved next to the origin of the

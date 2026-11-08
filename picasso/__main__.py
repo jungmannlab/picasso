@@ -284,14 +284,14 @@ def _pyme2hdf(path: str, pixelsize: float | None = None) -> None:
 def _minflux2hdf(
     path: str, average_traces: bool = False, origin: str = "data"
 ) -> None:
-    """Convert MINFLUX localizations processed with pyMINFLUX (.pmx or
-    its .csv export) to HDF5 format. A file with several fluorophores is
+    """Convert MINFLUX localizations (pyMINFLUX .pmx, or a .csv table
+    such as pyMINFLUX's export) to HDF5 format. A file with several fluorophores is
     saved as one file per fluorophore, ``<base>_<fluorophore>_locs.hdf5``.
 
     Parameters
     ----------
     path : str
-        Path (unix style pattern) to the pyMINFLUX .pmx/.csv files.
+        Path (unix style pattern) to the MINFLUX .pmx/.csv files.
     average_traces : bool, optional
         If True, save one localization per MINFLUX trace (the
         photon-weighted mean) instead of every localization, see
@@ -6801,10 +6801,10 @@ def _build_parser() -> (
 
     minflux2hdf_parser = subparsers.add_parser(
         "minflux2hdf",
-        help="convert pyMINFLUX .pmx/.csv (MINFLUX) to hdf5 format",
+        help="convert MINFLUX .pmx/.csv (pyMINFLUX) to hdf5 format",
     )
     minflux2hdf_parser.add_argument(
-        "files", help="one or multiple pyMINFLUX .pmx/.csv files"
+        "files", help="one or multiple MINFLUX .pmx/.csv files"
     )
     minflux2hdf_parser.add_argument(
         "--average-traces",

@@ -9043,7 +9043,9 @@ def export_pyme_multi(
 # localization: trace ID ``tid``, time ``tim`` (s), ``x``, ``y``, ``z``
 # (nm, z already corrected with pyMINFLUX's z scaling factor), ``efo``,
 # ``cfr``, ``eco``, ``dcr``, ``dwell``, fluorophore ID ``fluo`` and,
-# depending on the version, ``fbg`` and ``iid``.
+# depending on the version, ``fbg`` and ``iid``. Other MINFLUX tables
+# saved as ``.csv`` (e.g., converted from Imspector's .mat files) may
+# hold only ``tid``, the time ``t`` (s), ``x``, ``y`` and ``z``.
 
 #: Extension of pyMINFLUX's native file format (HDF5).
 MINFLUX_EXTENSIONS = (".pmx",)
@@ -9052,11 +9054,17 @@ MINFLUX_EXTENSIONS = (".pmx",)
 _MINFLUX_PMX_VERSIONS = ("1.0", "2.0", "3.0")
 
 #: Columns of pyMINFLUX's localization table that identify its ``.csv``
-#: export (and tell it apart from, e.g., a ThunderSTORM ``.csv``).
+#: export.
 _MINFLUX_CSV_COLUMNS = ("tid", "tim", "x", "y", "efo", "cfr", "eco", "dcr")
 
-#: Columns ``import_minflux`` requires.
+#: Columns ``import_minflux`` requires (``tim`` may be named ``t`` in a
+#: ``.csv`` file). In a ``.csv`` file, they identify a MINFLUX table
+#: (and tell it apart from, e.g., a ThunderSTORM ``.csv``).
 _MINFLUX_REQUIRED_COLUMNS = ("tid", "tim", "x", "y")
+
+#: Other names of MINFLUX columns in ``.csv`` files, mapped to
+#: pyMINFLUX's names.
+_MINFLUX_CSV_ALIASES = {"t": "tim"}
 
 #: Largest |z| (nm) of a 2D acquisition; pyMINFLUX takes data with
 #: |z| > 1e-11 m as 3D (2D files can hold z of a few 1e-4 nm).
@@ -9096,10 +9104,10 @@ def _minflux_csv_header(path: str) -> list[str] | None:
 
 
 def is_minflux_file(path: str) -> bool:
-    """Whether ``path`` names a MINFLUX localization file written by
-    pyMINFLUX: its native ``.pmx`` file, or a ``.csv`` file exported by
-    pyMINFLUX (recognized by its columns ``tid``, ``tim``, ``x``, ``y``,
-    ``efo``, ``cfr``, ``eco`` and ``dcr``).
+    """Whether ``path`` names a MINFLUX localization file: pyMINFLUX's
+    native ``.pmx`` file, or a ``.csv`` file with a MINFLUX localization
+    table, e.g., exported by pyMINFLUX (recognized by its columns
+    ``tid``, ``x``, ``y`` and the time, ``tim`` or ``t``).
 
     Parameters
     ----------
@@ -9109,7 +9117,7 @@ def is_minflux_file(path: str) -> bool:
     Returns
     -------
     bool
-        True for ``.pmx`` files and pyMINFLUX ``.csv`` files.
+        True for ``.pmx`` files and MINFLUX ``.csv`` files.
     """
     ext = os.path.splitext(path)[1].lower()
     if ext in MINFLUX_EXTENSIONS:
@@ -9117,7 +9125,10 @@ def is_minflux_file(path: str) -> bool:
     if ext != ".csv":
         return False
     header = _minflux_csv_header(path)
-    return header is not None and set(_MINFLUX_CSV_COLUMNS) <= set(header)
+    if header is None:
+        return False
+    columns = {_MINFLUX_CSV_ALIASES.get(name, name) for name in header}
+    return set(_MINFLUX_REQUIRED_COLUMNS) <= columns
 
 
 def _minflux_read_pmx(
@@ -9205,8 +9216,10 @@ def _minflux_read_csv(
     path: str,
 ) -> tuple[pd.DataFrame, dict, dict[int, str]]:
     """Read the localization table and the fluorophore names (header
-    comments ``# fluo_<id>=<name>``) of a ``.csv`` file exported by
-    pyMINFLUX; see ``_minflux_read_pmx`` for the returned values."""
+    comments ``# fluo_<id>=<name>``) of a MINFLUX ``.csv`` file, e.g.,
+    exported by pyMINFLUX; see ``_minflux_read_pmx`` for the returned
+    values. Columns named as in ``_MINFLUX_CSV_ALIASES`` are renamed
+    unless the file also has pyMINFLUX's name."""
     names = {}
     with open(path, encoding="utf-8", errors="replace") as file:
         for line in file:
@@ -9218,7 +9231,16 @@ def _minflux_read_csv(
             if match:
                 names[int(match.group(1))] = match.group(2).strip()
     table = pd.read_csv(path, comment="#")
-    return table, {"Format": "pyMINFLUX .csv"}, names
+    is_pyminflux = set(_MINFLUX_CSV_COLUMNS) <= set(table.columns)
+    table = table.rename(
+        columns={
+            alias: name
+            for alias, name in _MINFLUX_CSV_ALIASES.items()
+            if alias in table.columns and name not in table.columns
+        }
+    )
+    file_format = "pyMINFLUX .csv" if is_pyminflux else "MINFLUX .csv"
+    return table, {"Format": file_format}, names
 
 
 def _minflux_trace_precision(
@@ -9379,11 +9401,14 @@ def import_minflux(
     origin: Literal["data", "stage"] = "data",
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Import MINFLUX localizations processed with pyMINFLUX
-    (https://github.com/bsse-scf/pyMINFLUX).
+    (https://github.com/bsse-scf/pyMINFLUX) or saved as a ``.csv`` table.
 
     Reads pyMINFLUX's native ``.pmx`` file (versions 1.0 to 3.0) and the
     ``.csv`` file it exports, which hold the same filtered table of
-    localizations. MINFLUX localizes one emitter at a time, repeatedly:
+    localizations. Other ``.csv`` files with a MINFLUX table are read,
+    too: they need the columns ``tid``, ``x``, ``y`` and the time
+    (``tim``, or ``t``, which is renamed to ``tim``); ``z`` and the other
+    columns are optional. MINFLUX localizes one emitter at a time, repeatedly:
     the localizations of one emitter in one on-event form a trace
     (``tid``). By default, every localization is imported; with
     ``average_traces``, one localization per trace.
@@ -9433,7 +9458,7 @@ def import_minflux(
     Parameters
     ----------
     path : str
-        The path to the pyMINFLUX ``.pmx`` or ``.csv`` file.
+        The path to the pyMINFLUX ``.pmx`` or MINFLUX ``.csv`` file.
     average_traces : bool, optional
         If True, import one localization per trace instead of every
         localization. Default is False.
@@ -9458,9 +9483,9 @@ def import_minflux(
     Raises
     ------
     FileFormatError
-        If the file is not a pyMINFLUX file of a known version, lacks
-        the columns ``tid``, ``tim``, ``x`` or ``y``, or contains no
-        localizations.
+        If the file is not a MINFLUX file (or a pyMINFLUX ``.pmx`` of a
+        known version), lacks the columns ``tid``, ``tim``, ``x`` or
+        ``y``, or contains no localizations.
     ValueError
         If ``origin`` is neither ``"data"`` nor ``"stage"``.
     """
@@ -9476,13 +9501,13 @@ def import_minflux(
         table, metadata, names = _minflux_read_csv(path)
     else:
         raise FileFormatError(
-            f"{path} is not a pyMINFLUX localization file (.pmx or "
-            "pyMINFLUX .csv export)."
+            f"{path} is not a MINFLUX localization file (pyMINFLUX .pmx, "
+            "or .csv with the columns tid, tim (or t), x and y)."
         )
     missing = [c for c in _MINFLUX_REQUIRED_COLUMNS if c not in table.columns]
     if missing:
         raise FileFormatError(
-            f"pyMINFLUX file {path} lacks the column(s) {', '.join(missing)}."
+            f"MINFLUX file {path} lacks the column(s) {', '.join(missing)}."
         )
     finite = np.isfinite(table["x"].to_numpy(dtype=np.float64)) & np.isfinite(
         table["y"].to_numpy(dtype=np.float64)
@@ -9490,7 +9515,7 @@ def import_minflux(
     table = table[finite]
     if not len(table):
         raise FileFormatError(
-            f"pyMINFLUX file {path} contains no localizations."
+            f"MINFLUX file {path} contains no localizations."
         )
     table = table.sort_values("tim", kind="stable").reset_index(drop=True)
 

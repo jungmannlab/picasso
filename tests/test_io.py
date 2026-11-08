@@ -1819,6 +1819,34 @@ class TestMinflux:
             "Name": "ATP5B",
         }
 
+    def test_import_minimal_csv(self, tmp_path):
+        # a MINFLUX table with only trace ID, time ``t`` and coordinates,
+        # e.g., converted from Imspector's .mat (pyMINFLUX's test data)
+        path = tmp_path / "minflux3d.csv"
+        table = _minflux_table(z=[-40.0, -42.0, -41.0, 10.0, 12.0, 0.0])
+        table = table[["tid", "tim", "x", "y", "z"]].rename(
+            columns={"tim": "t"}
+        )
+        table.to_csv(path, index=False)
+        assert io.is_minflux_file(str(path))
+        locs, info = io.import_minflux(str(path))
+        assert len(locs) == 6
+        assert list(locs["tim"]) == pytest.approx(
+            [1.0, 1.1, 2.0, 2.1, 2.2, 3.0]
+        )
+        assert "t" not in locs.columns and "photons" not in locs.columns
+        assert {"z", "lpz"} <= set(locs.columns)
+        assert info[-1]["MINFLUX metadata"] == {"Format": "MINFLUX .csv"}
+        means, _ = io.import_minflux(str(path), average_traces=True)
+        assert list(means["n"]) == [2, 3, 1]
+        # unweighted means without photon counts: -22 and 102 nm
+        assert means["x"][1] - means["x"][0] == pytest.approx(124.0)
+
+    def test_csv_without_trace_id_is_not_minflux(self, tmp_path):
+        path = tmp_path / "xy.csv"
+        path.write_text("t,x,y\n0.1,10,20\n")
+        assert not io.is_minflux_file(str(path))
+
     def test_thunderstorm_csv_is_not_minflux(self, tmp_path):
         path = tmp_path / "ts.csv"
         path.write_text('"frame","x [nm]","y [nm]"\n1,10,20\n')

@@ -4,7 +4,17 @@ Last change: 08-NOV-2026 CEST
 
 ## 1.0.0
 
-**TODO**: Describe the general overview - fast render, documentation etc. Highlight that there's a lot of backward incompatible changes for `picassosr` users. Accessibility? Standardized API - progress, pick diameter, what else?
+Picasso 1.0 is the largest update since Picasso was first published. The highlights:
+
+- **Fast, interactive Render.** Render was largely rewritten: it renders on several CPU cores at once or on the graphics card (any vendor via `wgpu`, no CUDA needed) and in the background, so panning, zooming and rotating stay smooth even for large multiplexed datasets. It also has linked windows, undo and redo, picks of mixed sizes and shapes and new analyses: spatial statistics, coordinate-based colocalization, resolution by decorrelation, single-particle tracking and stitching of tiles.
+- **New documentation**, rewritten from scratch: a quick start, a user guide for every window, an FAQ, a [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html) and a searchable Python API reference. See [picassosr.readthedocs.io](https://picassosr.readthedocs.io/en/latest).
+- **Nanometers everywhere.** Camera pixels are no longer a unit in Picasso: every length is in nm, in the files, the windows, the command line and the Python functions. Files written by earlier versions are automatically converted to the new setup.
+- **New localization methods:** fitting of overlapping emitters (3D-DAOSTORM), wavelet spot identification, an automatic minimum net gradient, the magnification factor calculator and a goodness-of-fit column (`reduced_chi_square`).
+- **A new look and accessibility:** light and dark themes, toolbars and icons in every window; a high-contrast mode, screen reader support, colorblind-safe channel colors and a color vision preview.
+- **Stability from 1.0 on:** Picasso follows semantic versioning for its public API, command line, file formats and plugin hooks, and deprecated names keep working for at least two minor releases. See the [documentation](https://picassosr.readthedocs.io/en/latest/versioning.html).
+- **Self-updating installers:** from 1.0 on, the one-click installers update with one click (*Install Now*).
+
+**⚠️ Many changes are backward incompatible, mainly for users of the Python package (`picassosr`).** To make the API consistent before the stability promise starts, 1.0 changes a lot at once: lengths are in nm; functions on localizations take `f(locs, info, ...)` and return the new metadata, too, etc. **Files written by Picasso 1.0 are in nm and earlier versions read them as camera pixels: whoever opens your new files needs Picasso 1.0 or later.** The [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html) maps every old setting, command and function to its replacement; *Backward incompatible changes* below lists them in short.
 
 ### General
 - **Nanometers everywhere, and your files keep working.** Camera pixels are no longer a unit in Picasso: coordinates, precisions, spot widths, pick positions and sizes, drift, distances and blur widths are in nm, in memory, in every file and in every dialog, command line option and function argument (`z` was in nm already). Every file written by an earlier version opens in 1.0 as before. See the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#files-legacy) and, for scripts and command lines, the [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html).
