@@ -11,10 +11,13 @@ Graphical user interface for filtering localization lists.
 
 from __future__ import annotations
 
+import contextlib
+import copy
+import dataclasses
 import logging
 import os.path
 import sys
-from collections.abc import Iterator, Mapping
+from collections.abc import Generator, Iterable, Iterator, Mapping
 
 import numpy as np
 import pandas as pd
@@ -27,6 +30,7 @@ from matplotlib.backends.backend_qt5agg import (
     FigureCanvasQTAgg,
     NavigationToolbar2QT,
 )
+from matplotlib.backend_tools import Cursors
 from matplotlib.widgets import SpanSelector, RectangleSelector
 
 from .. import (
@@ -50,7 +54,55 @@ plt.style.use("ggplot")
 
 ROW_HEIGHT = 30
 
+#: Number of steps that can be undone in the Filter window.
+UNDO_LIMIT = 10
+
 _log = logging.getLogger(__name__)
+
+
+@dataclasses.dataclass(frozen=True)
+class _FilterState:
+    """What a step in the Filter window changes, to undo or redo it,
+    see ``Window.undo``.
+
+    Attributes
+    ----------
+    rows : np.ndarray or None
+        The rows shown, see ``_pack_rows``; None if all are shown.
+    filter_log : dict
+        Copy of ``Window.filter_log``.
+    columns : tuple of str
+        The columns of the localizations, in order.
+    label : str
+        The step that changed this state, shown in the tooltips of Undo
+        and Redo.
+    """
+
+    rows: np.ndarray | None
+    filter_log: dict
+    columns: tuple[str, ...]
+    label: str = ""
+
+
+def _pack_rows(idx: np.ndarray | None, n: int) -> np.ndarray | None:
+    """Store the sorted indices ``idx`` of the rows shown out of ``n``
+    in the smaller of two forms: the indices themselves, or one bit per
+    row (``np.packbits``, uint8, which an index array never is)."""
+    if idx is None or idx.nbytes <= (n + 7) // 8:
+        return idx
+    mask = np.zeros(n, dtype=bool)
+    mask[idx] = True
+    return np.packbits(mask)
+
+
+def _unpack_rows(
+    rows: np.ndarray | None, n: int, dtype: np.dtype
+) -> np.ndarray | None:
+    """The indices of the rows stored by ``_pack_rows``."""
+    if rows is None or rows.dtype != np.uint8:
+        return rows
+    mask = np.unpackbits(rows, count=n)
+    return np.flatnonzero(mask).astype(dtype, copy=False)
 
 
 class TableModel(QtCore.QAbstractTableModel):
@@ -185,6 +237,9 @@ class PlotWindow(QtWidgets.QWidget):
         Main window.
     figure : plt.Figure
         Matplotlib figure.
+    selectors : list
+        The span and rectangle selectors of the plot, see
+        ``cancel_selection``.
 
     Parameters
     ----------
@@ -197,6 +252,7 @@ class PlotWindow(QtWidgets.QWidget):
         self.main_window = main_window
         self.figure = plt.Figure(constrained_layout=True)
         self.canvas = FigureCanvasQTAgg(self.figure)
+        self.selectors = []
         self.plot()
         vbox = QtWidgets.QVBoxLayout()
         self.setLayout(vbox)
@@ -218,9 +274,30 @@ class PlotWindow(QtWidgets.QWidget):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
 
+        # in the window, as the canvas does not take the keyboard focus
+        cancel = QtGui.QShortcut(
+            QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape), self
+        )
+        cancel.activated.connect(self.cancel_selection)
+
     def refresh(self) -> None:
         self.plot()
         self.update()
+
+    def cancel_selection(self) -> None:
+        """Stop drawing the selection, without filtering (Esc).
+
+        Matplotlib's own Esc only hides the selection, which the next
+        mouse move draws again and the release applies.
+        """
+        for selector in self.selectors:
+            if selector._eventpress is None:  # not being drawn
+                continue
+            # without the press, the selector ignores the moves and the
+            # release
+            selector._eventpress = None
+            selector.clear()
+            self.canvas.set_cursor(Cursors.POINTER)
 
     def plot(self) -> None:
         pass
@@ -280,6 +357,7 @@ class HistWindow(PlotWindow):
         if data.dtype.kind == "f":
             data = data[np.isfinite(data)]
         self.figure.clear()
+        self.selectors = []
         style.style_figure(self.figure)
         axes = self.figure.add_subplot(111)
         style.style_axes(axes)
@@ -305,6 +383,7 @@ class HistWindow(PlotWindow):
             useblit=True,
             props=style.selection,
         )
+        self.selectors = [self.span]
         self.canvas.draw()
 
     def on_span_select(self, xmin: float, xmax: float) -> None:
@@ -355,6 +434,7 @@ class Hist2DWindow(PlotWindow):
         style = self.main_window.plot_style
         x, y = self.main_window.get_columns([self.field_x, self.field_y])
         self.figure.clear()
+        self.selectors = []
         style.style_figure(self.figure)
         self.span_x = self.span_y = None
         if len(x) == 0:
@@ -471,6 +551,11 @@ class Hist2DWindow(PlotWindow):
                 useblit=True,
                 props=style.selection,
             )
+        self.selectors = [
+            selector
+            for selector in (self.selector, self.span_x, self.span_y)
+            if selector is not None
+        ]
         self.canvas.draw()
 
     def on_span_select_x(self, xmin: float, xmax: float) -> None:
@@ -911,8 +996,12 @@ class Window(QtWidgets.QMainWindow):
         rows.
     pwd : str
         Current working directory.
+    redo_action : QtGui.QAction
+        Redoes the last step undone.
     table_view : TableView
         Table view for displaying data.
+    undo_action : QtGui.QAction
+        Undoes the last filter or removal of columns, see ``undo``.
     """
 
     DOCS_URL = docs_url("filter.html")
@@ -973,6 +1062,13 @@ class Window(QtWidgets.QMainWindow):
         plot_settings_action.triggered.connect(self.show_plot_settings)
 
         filter_menu = menu_bar.addMenu("Filter")
+        self.undo_action = filter_menu.addAction("Undo")
+        self.undo_action.setShortcut(QtGui.QKeySequence.StandardKey.Undo)
+        self.undo_action.triggered.connect(self.undo)
+        self.redo_action = filter_menu.addAction("Redo")
+        self.redo_action.setShortcut(QtGui.QKeySequence.StandardKey.Redo)
+        self.redo_action.triggered.connect(self.redo)
+        filter_menu.addSeparator()
         filter_action = filter_menu.addAction("Filter numerically...")
         filter_action.setShortcut("Ctrl+F")
         filter_action.triggered.connect(self.filter_num.show)
@@ -1005,6 +1101,12 @@ class Window(QtWidgets.QMainWindow):
         self._spilled = None  # io.SpilledFrame while moved to disk
         self.locs_full = None
         self.filtered_idx = None
+        # _FilterState before each step, the last one at the end
+        self._undo_stack = []
+        self._redo_stack = []
+        # columns removed by a step that can be undone, by name
+        self._removed_columns = {}
+        self._undo_depth = 0  # nesting of _undo_step
 
         # load user settings (working directory)
         settings = io.load_user_settings()
@@ -1047,11 +1149,15 @@ class Window(QtWidgets.QMainWindow):
                     "From metadata",
                 ),
                 None,
+                (self.undo_action, "undo"),
+                (self.redo_action, "redo"),
+                None,
                 (plot_settings_action, "plot-settings", "Plot settings"),
             ],
         )
         # in the menus only, not on the toolbar
         remove_columns_action.setIcon(theme.icon("remove-columns"))
+        self._update_undo_actions()
 
     @property
     def locs(self) -> pd.DataFrame:
@@ -1133,6 +1239,7 @@ class Window(QtWidgets.QMainWindow):
             self._locs_full = None
             self.filtered_idx = None
             self.table_model.set_data(pd.DataFrame(), 0)
+            self._clear_undo()
             raise io.SpillError(
                 f"The localizations moved to disk while Filter was idle"
                 f" could not be read back ({error}). Please open the file"
@@ -1209,11 +1316,12 @@ class Window(QtWidgets.QMainWindow):
             keep = (col > xmin) & (col < xmax)
         if col.dtype.kind == "f":
             keep &= np.isfinite(col)
-        self._keep(keep)
-        self.log_filter(field, xmin, xmax)
-        self._log_step(
-            expression.range_expression(field, xmin, xmax, inclusive)
-        )
+        with self._undo_step():
+            self._keep(keep)
+            self.log_filter(field, xmin, xmax)
+            self._log_step(
+                expression.range_expression(field, xmin, xmax, inclusive)
+            )
         self.refresh()
 
     def apply_range2d(
@@ -1232,11 +1340,12 @@ class Window(QtWidgets.QMainWindow):
             keep &= np.isfinite(cx)
         if cy.dtype.kind == "f":
             keep &= np.isfinite(cy)
-        self._keep(keep)
-        self.log_filter(field_x, xmin, xmax)
-        self.log_filter(field_y, ymin, ymax)
-        self._log_step(expression.range_expression(field_x, xmin, xmax))
-        self._log_step(expression.range_expression(field_y, ymin, ymax))
+        with self._undo_step():
+            self._keep(keep)
+            self.log_filter(field_x, xmin, xmax)
+            self.log_filter(field_y, ymin, ymax)
+            self._log_step(expression.range_expression(field_x, xmin, xmax))
+            self._log_step(expression.range_expression(field_y, ymin, ymax))
         self.refresh()
 
     def apply_expression(self, condition: str) -> None:
@@ -1256,10 +1365,11 @@ class Window(QtWidgets.QMainWindow):
             _ShownColumns(self),
             expression.variables_from_info(self.info),
         )
-        self._keep(keep)
-        if (column_range := expression.parse_range(condition)) is not None:
-            self.log_filter(*column_range)
-        self._log_step(condition.strip())
+        with self._undo_step():
+            self._keep(keep)
+            if (column_range := expression.parse_range(condition)) is not None:
+                self.log_filter(*column_range)
+            self._log_step(condition.strip())
         self.refresh()
 
     def _keep(self, keep: lib.BoolArray1D) -> None:
@@ -1274,6 +1384,158 @@ class Window(QtWidgets.QMainWindow):
     def _log_step(self, condition: str) -> None:
         """Record a filter condition, in the order applied."""
         self.filter_log.setdefault(lib.FILTER_STEPS_KEY, []).append(condition)
+
+    def _state(self, label: str = "") -> _FilterState:
+        """The current state, to return to with ``undo`` or ``redo``."""
+        return _FilterState(
+            _pack_rows(self.filtered_idx, len(self.locs_full)),
+            copy.deepcopy(self.filter_log),
+            tuple(self.locs_full.columns),
+            label,
+        )
+
+    @contextlib.contextmanager
+    def _undo_step(self) -> Generator[None, None, None]:
+        """Record the changes made inside as one step that ``undo``
+        takes back.
+
+        Steps inside another step, e.g., the filters replayed from
+        metadata, belong to the outermost one. Nothing is recorded if
+        nothing changed, e.g., when an invalid condition raised an
+        error.
+        """
+        if self._undo_depth:
+            yield
+            return
+        idx = self.filtered_idx
+        before = self._state()
+        self._undo_depth += 1
+        try:
+            yield
+        finally:
+            self._undo_depth -= 1
+            if self.has_locs and (
+                self.filtered_idx is not idx
+                or self.filter_log != before.filter_log
+                or tuple(self.locs_full.columns) != before.columns
+            ):
+                label = self._step_label(before)
+                self._push_undo(dataclasses.replace(before, label=label))
+
+    def _step_label(self, before: _FilterState) -> str:
+        """Describe the step since ``before``: the filter conditions
+        added and the columns removed."""
+        steps = self.filter_log.get(lib.FILTER_STEPS_KEY, [])
+        n_before = len(before.filter_log.get(lib.FILTER_STEPS_KEY, []))
+        columns = set(self.locs_full.columns)
+        removed = [name for name in before.columns if name not in columns]
+        parts = []
+        if steps[n_before:]:
+            parts.append(" and ".join(steps[n_before:]))
+        if removed:
+            parts.append("remove " + ", ".join(removed))
+        label = "; ".join(parts)
+        return label if len(label) <= 60 else label[:59] + "…"
+
+    def _push_undo(self, state: _FilterState) -> None:
+        """Record the state before a step, which drops the steps
+        undone."""
+        self._undo_stack.append(state)
+        del self._undo_stack[:-UNDO_LIMIT]
+        self._redo_stack.clear()
+        # the removed columns that no state has any more
+        kept = {
+            name
+            for other in self._undo_stack + self._redo_stack
+            for name in other.columns
+        }
+        for name in set(self._removed_columns) - kept:
+            del self._removed_columns[name]
+        self._update_undo_actions()
+
+    def undo(self) -> None:
+        """Undo the last filter or removal of columns."""
+        if not self._undo_stack:
+            return
+        state = self._undo_stack.pop()
+        self._redo_stack.append(self._state(state.label))
+        self._apply_state(state)
+
+    def redo(self) -> None:
+        """Redo the last step undone."""
+        if not self._redo_stack:
+            return
+        state = self._redo_stack.pop()
+        self._undo_stack.append(self._state(state.label))
+        self._apply_state(state)
+
+    def _apply_state(self, state: _FilterState) -> None:
+        """Show the rows and columns of ``state`` and take its filter
+        log."""
+        self._restore_columns(state.columns)
+        n = len(self.locs_full)
+        self.filtered_idx = _unpack_rows(state.rows, n, self._idx_dtype(n))
+        self.filter_log = copy.deepcopy(state.filter_log)
+        self.filter_expression.check()  # drop the result of the last filter
+        self.refresh()
+        self._update_undo_actions()
+
+    def _clear_undo(self) -> None:
+        """Forget the steps to undo and redo, e.g., for a new file."""
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._removed_columns.clear()
+        self._update_undo_actions()
+
+    def _update_undo_actions(self) -> None:
+        """Enable Undo and Redo if there is a step to take back, named
+        in their tooltips."""
+        for action, stack, text in (
+            (self.undo_action, self._undo_stack, "Undo"),
+            (self.redo_action, self._redo_stack, "Redo"),
+        ):
+            action.setEnabled(bool(stack))
+            if stack and stack[-1].label:
+                text = f"{text}: {stack[-1].label}"
+            shortcut = action.shortcut().toString(
+                QtGui.QKeySequence.SequenceFormat.NativeText
+            )
+            action.setToolTip(f"{text} ({shortcut})" if shortcut else text)
+
+    def _drop_columns(self, names: Iterable[str]) -> None:
+        """Remove columns from the localizations, kept for ``undo``, and
+        close their histograms."""
+        for name in names:
+            self._removed_columns[name] = self.locs_full.pop(name)
+            places = [(self.hist_windows, name)]
+            for field_x, by_y in self.hist2d_windows.items():
+                for field_y in by_y:
+                    if name in (field_x, field_y):
+                        places.append((by_y, field_y))
+            for windows, field in places:
+                if windows[field]:
+                    windows[field].close()
+                windows[field] = None
+        self.filter_num.on_locs_loaded()
+        self.filter_expression.on_locs_loaded()
+
+    def _restore_columns(self, columns: tuple[str, ...]) -> None:
+        """Bring back the removed ``columns`` in their places and remove
+        the columns not in ``columns``."""
+        extra = [
+            name for name in self.locs_full.columns if name not in columns
+        ]
+        if extra:
+            self._drop_columns(extra)
+        if len(self.locs_full.columns) == len(columns):
+            return
+        for position, name in enumerate(columns):
+            if name not in self.locs_full.columns:
+                self.locs_full.insert(
+                    position, name, self._removed_columns.pop(name)
+                )
+        self.filter_num.on_locs_loaded()
+        self.filter_expression.on_locs_loaded()
 
     def refresh(self) -> None:
         """Refresh the table view and any open histogram windows."""
@@ -1344,6 +1606,7 @@ class Window(QtWidgets.QMainWindow):
                 self.hist2d_windows[column][column_y] = None
             self.filter_log[column] = None
         self.filter_log[lib.FILTER_STEPS_KEY] = []
+        self._clear_undo()
         self.filter_num.on_locs_loaded()
         self.filter_expression.on_locs_loaded()
         self.refresh()
@@ -1472,14 +1735,10 @@ class Window(QtWidgets.QMainWindow):
         to_remove, ok = lib.RemoveColumnsDialog.getParams(self, columns)
         if not ok or len(to_remove) == 0:
             return
-        self.locs_full.drop(columns=to_remove, inplace=True)
+        with self._undo_step():
+            self._drop_columns(to_remove)
+            self.filter_log.setdefault("Removed columns", []).extend(to_remove)
         self.refresh()
-        if "Removed columns" in self.filter_log:
-            self.filter_log["Removed columns"].extend(to_remove)
-        else:
-            self.filter_log["Removed columns"] = to_remove
-        self.filter_num.on_locs_loaded()
-        self.filter_expression.on_locs_loaded()
 
     def _build_filter_summary(self, steps, to_remove, missing) -> str:
         lines = []
@@ -1571,26 +1830,25 @@ class Window(QtWidgets.QMainWindow):
         if reply != QtWidgets.QMessageBox.StandardButton.Yes:
             return
 
-        for step in steps:
-            try:
-                self.apply_expression(step)
-            except expression.ExpressionError as e:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    title,
-                    f"Could not apply\n  {step}\n{e}\n\n"
-                    "The steps before it were applied; the rest were not.",
+        # one step to undo
+        with self._undo_step():
+            for step in steps:
+                try:
+                    self.apply_expression(step)
+                except expression.ExpressionError as e:
+                    QtWidgets.QMessageBox.warning(
+                        self,
+                        title,
+                        f"Could not apply\n  {step}\n{e}\n\n"
+                        "The steps before it were applied; the rest were not.",
+                    )
+                    return
+            if to_remove:
+                self._drop_columns(to_remove)
+                self.filter_log.setdefault("Removed columns", []).extend(
+                    to_remove
                 )
-                return
-        if to_remove:
-            self.locs_full.drop(columns=list(to_remove), inplace=True)
-            if "Removed columns" in self.filter_log:
-                self.filter_log["Removed columns"].extend(to_remove)
-            else:
-                self.filter_log["Removed columns"] = list(to_remove)
-            self.filter_num.on_locs_loaded()
-            self.filter_expression.on_locs_loaded()
-            self.refresh()
+                self.refresh()
 
     def export_csv_dialog(self) -> None:
         if self.no_locs_warning("Export as CSV"):
@@ -1623,13 +1881,12 @@ class Window(QtWidgets.QMainWindow):
         )
         if not path:
             return
-        filter_info = {
-            key: value
-            for key, value in self.filter_log.items()
-            if key != lib.FILTER_STEPS_KEY or value
-        }
-        filter_info.update(lib.step_info("Filter"))
-        info = self.info + [filter_info]
+        # the entry expression.filter_locs and lib.apply_filter_steps write
+        entry = expression.filter_entry(
+            self.filter_log.get(lib.FILTER_STEPS_KEY, []),
+            removed_columns=self.filter_log.get("Removed columns", ()),
+        )
+        info = lib.append_metadata(self.info, entry)
         if is_locs:
             io.save_locs(path, self.materialize_filtered(), info)
         else:

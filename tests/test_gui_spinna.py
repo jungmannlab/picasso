@@ -1190,6 +1190,28 @@ def test_fit_le_shows_the_labeling_efficiencies(
     assert len(loaded_ab.nnd_hist_data_sim) == 4  # A-A, A-B, B-A, B-B
 
 
+def test_fit_le_with_bootstrap_shows_the_uncertainties(
+    loaded_ab, dialogs, monkeypatch, out
+):
+    loaded_ab.bootstrap_check.setChecked(True)
+    generate(monkeypatch, loaded_ab)
+    answer(monkeypatch, gui_spinna.FitLEDialog, Accepted)
+    dialogs.save.append(str(out / "fit_le_summary.txt"))
+
+    loaded_ab.fit_le()
+
+    text = loaded_ab.fit_results_display.text()
+    assert text.startswith("LE A: ") and text.count("% +/- ") == 2
+    summary = (out / "fit_le_summary.txt").read_text()
+    for target in "AB":
+        line = next(
+            line
+            for line in summary.splitlines()
+            if line.startswith(f"Fitted labeling efficiency (%) ({target})")
+        )
+        assert " +/- " in line
+
+
 @pytest.mark.parametrize("mode", ["Coarse to fine", "Bayesian"])
 def test_other_fitting_modes_find_proportions(
     loaded, dialogs, monkeypatch, mode

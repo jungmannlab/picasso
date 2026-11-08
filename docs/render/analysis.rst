@@ -666,9 +666,11 @@ To use it, open ``Postprocess > Spatial statistics > Ripley's H function...``:
 1. Choose the ``Channel`` (with several channels loaded). Leave ``Partner
    channel`` at ``None (one channel)``; choose a second channel for the cross
    function between two channels, see :ref:`render-cross-functions`.
-2. Choose the ``Regions``: the ``Picks`` (any pick shape; ``H`` is computed
-   in each pick and averaged over the picks with at least two localizations),
-   the ``Current view`` or the ``Whole field of view``.
+2. Choose the ``Regions``: the ``Picks`` (any pick shape, also mixed; ``H``
+   is computed in each pick and averaged over the picks with at least two
+   localizations), the ``Current view`` or the ``Whole field of view``. To
+   analyze each cell, pick the cells from a mask with ``Add as polygon picks``
+   in :ref:`render-mask-image`.
 3. Set ``Max. radius (nm)``, which should be well below the size of the
    regions, and the number of ``Radius steps`` up to it.
 4. Set the number of ``Simulations``. Each region is filled with as many
@@ -1015,3 +1017,115 @@ and simulated, of every pair.
 
       fig = postprocess.plot_nnd_distributions(result)
       fig.savefig("nnd.png")
+
+.. _render-knn-density:
+
+Density From k Nearest Neighbors
+--------------------------------
+
+Fits the density of the molecules of one channel to the distances to their
+nearest neighbors, and tests whether the molecules are randomly distributed.
+For molecules placed uniformly at random (complete spatial randomness, CSR),
+the distance from a molecule to its k-th nearest neighbor (k = 1 for the
+nearest, 2 for the second nearest, etc.) follows a known distribution that
+depends only on the density (`Thompson, Ecology, 1956
+<https://doi.org/10.2307/1933159>`__). The density is fitted to the distances
+of each order k separately and to several orders together (pooled), by
+maximum likelihood.
+
+The fitted density reflects the density around the molecules, without the
+area of the regions. It may thus differ from the number of molecules divided
+by the area, e.g., if the regions include areas without molecules. How it
+changes with k shows how the molecules are distributed:
+
+* For randomly distributed molecules, all orders give the same density and
+  the measured distances follow the fitted distributions.
+* For clustered molecules, the nearest neighbors are closer than at random,
+  so the density fitted to k = 1 is the highest and it decreases with k. It
+  drops where k reaches beyond the molecules of a cluster, e.g., at k = 5 for
+  clusters of 5 molecules.
+
+As for Ripley's H function, it should be computed on molecules, see the note
+in :ref:`render-ripley-h`.
+
+Neighbors outside a region are not seen, which makes the distances of
+molecules near its edge too long and the density too low, more so in small
+regions. With the edge correction, a distance longer than that from the
+molecule to the edge of the region is not used as measured: the fit uses only
+that the neighbor lies beyond the edge (a censored distance, as in the
+Kaplan-Meier estimate of `Baddeley and Gill, Ann Stat, 1997
+<https://doi.org/10.1214/aos/1034276629>`__).
+
+To use it, open ``Postprocess > Spatial statistics > Density from k nearest
+neighbors...``:
+
+1. Choose the ``Channel`` (with several channels loaded).
+2. Choose the ``Regions``: the ``Picks`` (any pick shape, also mixed), the
+   ``Current view`` or the ``Whole field of view``. The neighbors of each
+   molecule are searched in its region, and the distances of all regions are
+   fitted together.
+3. Set the highest order of the ``Neighbors (k)`` and the order the pooled
+   density starts from (``Pooled from k``); e.g., 2 leaves out the nearest
+   neighbors, which are affected the most by molecules counted twice.
+4. ``Min. distance (nm)`` leaves out shorter distances and fits the
+   distributions to the longer ones, e.g., to ignore molecules counted twice.
+5. Set the number of ``Simulations``. Each region is filled with as many
+   uniformly random points as it holds molecules, and the densities are
+   fitted to them the same way. The p-value of each order is the fraction
+   of the simulations (counting the data as one) whose distances deviate from
+   the fitted distribution at least as much as the measured ones, by the
+   largest difference between the cumulative distributions
+   (Kolmogorov-Smirnov distance). A p-value below e.g. 0.05 means the
+   molecules are not randomly distributed; the smallest possible p-value is
+   ``1 / (simulations + 1)``, i.e., 0.01 for 99 simulations. The spread of
+   the densities fitted to the simulations gives their standard errors. 0
+   skips the simulations.
+6. ``Edge correction`` is on by default.
+7. Tick ``3D (x, y and z)`` to measure the distances in 3D (only for
+   channels with z); the densities are then per volume, and the regions
+   extend over the z range as in :ref:`render-ripley-h-3d`. The simulated
+   points are spread uniformly in z.
+8. Click ``OK``.
+
+The plot shows on the left the distribution of the distances of each order
+(solid, with the edge correction) and the distribution for random molecules
+at the fitted density (dashed), with the p-values in the legend, and on the
+right the fitted densities by k with their standard errors, the pooled density
+and the number of molecules per area. ``Save data`` saves the distributions by
+distance (``k<k>_per_nm`` and ``k<k>_csr_per_nm`` in each bin) and, as
+``<name>_densities.csv``, the density of each order, the pooled density and
+the number of molecules per area (per um^2, in 3D per um^3), with the
+standard errors, Kolmogorov-Smirnov distances, p-values and numbers of
+measured and censored distances.
+
+The same analysis runs from the command line, see :ref:`cmd-knn-density`.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``knn_density`` takes the molecules of one channel and the regions like
+   ``ripley_h`` and returns the densities in molecules per nm^2 (per nm^3 in
+   3D), see :func:`picasso.postprocess.knn_density`.
+   ``knn_csr_pdf`` and ``knn_csr_cdf`` give the distributions of the
+   distances for random molecules.
+
+   .. code-block:: python
+
+      from picasso import io, postprocess
+
+      locs, info = io.load_locs("molecules.hdf5")
+
+      result = postprocess.knn_density(
+          locs,
+          info,  # whole field of view
+          k_max=5,
+          n_simulations=99,
+      )
+      result["densities"] * 1e6  # density of each order k (per um^2)
+      result["density"] * 1e6  # pooled over k = 1-5 (per um^2)
+      result["count_density"] * 1e6  # molecules per area (per um^2)
+      result["p_values"]  # of each order k
+
+      fig = postprocess.plot_knn_density(result)
+      fig.savefig("knn_density.png")

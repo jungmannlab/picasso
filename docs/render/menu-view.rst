@@ -277,6 +277,22 @@ Shortcut: :kbd:`Ctrl+W` or :kbd:`Home`
 
 Fits the reconstructed image to be fully displayed in the window.
 
+.. _render-save-load-fov:
+
+Save/Load FOV
+-------------
+
+.. rst-class:: shortcut
+
+Shortcut: :kbd:`Ctrl+Shift+B` (save) and :kbd:`Ctrl+B` (load)
+
+``Save FOV...`` saves the current field of view as a ``.txt`` file
+(``<name>_fov.txt`` next to the first channel's file is suggested) and
+``Load FOV...`` shows the field of view of such a file, e.g., to come back to
+a region or to show the same region of several datasets. These are the
+``Save FOV`` and ``Load FOV`` buttons of ``View > Show info...``, see
+:ref:`render-info-display` for the file format.
+
 .. _render-slice:
 
 Slice (3D)
@@ -372,7 +388,8 @@ Chooses which attributes the linked windows share:
   :ref:`Per-channel contrast <render-channel-contrast>`; a channel takes the contrast of the channel
   of the same file in the other windows), colormap, render by property, scale
   bar, grid, minimap, background and legend,
-- pick shape and size, and the picks themselves,
+- the shape and size of new picks, and the picks themselves (each with its
+  own shape and size),
 - slicing (the slice position is matched in nm).
 
 Channel colors and visibility are never shared.

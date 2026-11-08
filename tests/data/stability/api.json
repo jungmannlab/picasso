@@ -8,6 +8,12 @@
   "average",
   "AveragePool"
  ],
+ "picasso.axial_scaling": [
+  "magnification_factor",
+  "actual_depth",
+  "near_surface_factor",
+  "near_surface_depth"
+ ],
  "picasso.clusterer": [
   "cluster",
   "dbscan",
@@ -36,7 +42,8 @@
  "picasso.imageprocess": [
   "find_fiducials",
   "get_image_shift",
-  "rcc"
+  "rcc",
+  "decorrelation"
  ],
  "picasso.io": [
   "load_locs",
@@ -83,6 +90,8 @@
   "split_pyme_channels",
   "export_pyme",
   "export_pyme_multi",
+  "import_minflux",
+  "split_minflux_channels",
   "export_txt_imagej",
   "export_txt_nis",
   "export_xyz_chimera",
@@ -127,6 +136,7 @@
   "sync_groups",
   "unfold_localizations_square",
   "PICK_SHAPES",
+  "pick_shapes_and_sizes",
   "pick_areas",
   "locs_at",
   "locs_in_rectangle",
@@ -150,17 +160,23 @@
  ],
  "picasso.localize": [
   "FIT_METHODS",
+  "FIT_METHOD_ALIASES",
+  "resolve_fit_method",
   "IDENTIFY_METHODS",
   "IdentificationParameters",
   "NetGradient",
+  "MultiEmitterParameters",
   "localize",
   "localize_frames",
+  "localize_multi_emitter",
   "identify",
   "identify_in_frame",
   "identify_by_frame_number",
+  "estimate_min_net_gradient",
   "clip_rois",
   "add_roi_id",
   "get_spots",
+  "to_photons",
   "fit",
   "fit_spots_gauss",
   "gauss_schedule",
@@ -201,7 +217,13 @@
   "mask_locs",
   "generate_image",
   "mask_image",
-  "binary_mask"
+  "binary_mask",
+  "label_components",
+  "keep_components",
+  "fill_holes",
+  "erode",
+  "dilate",
+  "mask_to_polygons"
  ],
  "picasso.nanotron": [
   "predict_structure",
@@ -215,12 +237,20 @@
  "picasso.postprocess": [
   "picked_locs",
   "pick_similar",
+  "pick_similar_candidates",
+  "structure_classes",
   "remove_locs_in_picks",
   "pick_properties",
   "link",
   "compute_dark_times",
   "dark_times",
   "select_binding_event_cores",
+  "dye_performance",
+  "signal_to_background",
+  "docking_site_damage",
+  "plot_docking_site_damage",
+  "localization_rate_drop",
+  "plot_localization_rate",
   "combine_locs_in_picks",
   "groupprops",
   "undrift",
@@ -231,11 +261,14 @@
   "align",
   "align_rcc",
   "align_from_picked",
+  "align_from_points",
   "nena",
   "plot_nena",
   "frc",
   "frc_rois",
   "plot_frc",
+  "decorrelation",
+  "plot_decorrelation",
   "nn_analysis",
   "pair_correlation",
   "distance_histogram",
@@ -248,11 +281,16 @@
   "rdf",
   "plot_rdf",
   "nnd_distributions",
-  "plot_nnd_distributions"
+  "plot_nnd_distributions",
+  "knn_density",
+  "plot_knn_density",
+  "knn_csr_pdf",
+  "knn_csr_cdf"
  ],
  "picasso.registration": [
   "calibrate_channel_registration_from_beads",
-  "calibrate_channel_registration_from_signal"
+  "calibrate_channel_registration_from_signal",
+  "register_to_template"
  ],
  "picasso.render": [
   "render",
@@ -289,6 +327,7 @@
   "draw_picks",
   "draw_points",
   "draw_scalebar",
+  "SCALEBAR_POSITIONS",
   "optimal_scalebar_length",
   "draw_legend",
   "GridOverlay",
@@ -321,7 +360,8 @@
   "convert_movie",
   "noisy_p",
   "check_type",
-  "save_movie"
+  "save_movie",
+  "ground_truth_locs"
  ],
  "picasso.spinna": [
   "Structure",
@@ -334,8 +374,11 @@
   "get_NN_dist_simulated",
   "NND_score",
   "plot_NN",
+  "targets_from_structures",
+  "fit_label_uncertainty",
   "compare_models",
-  "fit_le"
+  "fit_le",
+  "batch_analysis"
  ],
  "picasso.spline": [
   "calibrate_spline",
@@ -381,6 +424,7 @@
   "MODELS",
   "Transform",
   "TranslationTransform",
+  "RigidTransform",
   "AffineTransform",
   "ProjectiveTransform",
   "PolynomialTransform",

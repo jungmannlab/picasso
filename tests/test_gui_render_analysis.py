@@ -604,12 +604,150 @@ def test_frc_plot(window, answers):
     info_dialog.frc_window.close()
 
 
-def test_frc_plot_without_a_calculation(window2, answers):
-    """Canceling the channel selection leaves nothing to plot."""
-    answers.item(None)
-    window2.info_dialog.show_frc_plot()
-    assert not window2.info_dialog.frc_result
-    assert getattr(window2.info_dialog, "frc_window", None) is None
+def test_frc_plot_without_a_calculation(window, answers, monkeypatch):
+    """Declining a large FOV leaves nothing to plot."""
+    answers.record_messages()
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "question",
+        lambda *a, **k: QtWidgets.QMessageBox.StandardButton.No,
+    )
+    window.view.median_lp = 0.1  # nm: a huge image at this pixel size
+    window.info_dialog.show_frc_plot()
+    assert not window.info_dialog.frc_result
+    assert getattr(window.info_dialog, "frc_window", None) is None
+
+
+def test_resolutions_of_the_selected_channel(window2, answers, qt_offscreen):
+    """No channel is asked for: FRC and decorrelation use the channel
+    selected in the dialog and are shown with it."""
+    answers.record_messages()
+    info_dialog = window2.info_dialog
+    info_dialog.update_fit_precision()
+    combo = info_dialog.precision_channel
+    combo.setCurrentIndex(1)
+    info_dialog.decorrelation_pixel_size.setValue(16.0)
+    info_dialog.calculate_frc_resolution()
+    info_dialog.calculate_decorrelation()
+    _wait_for_tasks(qt_offscreen)
+    frc_text = info_dialog.frc_resolution.text()
+    decorrelation_text = info_dialog.decorrelation_resolution.text()
+    assert "-" not in (frc_text, decorrelation_text)
+    assert "NeNA (nm)" in window2.view.infos[1][-1]
+    combo.setCurrentIndex(0)
+    assert info_dialog.frc_resolution.text() == "-"
+    assert info_dialog.decorrelation_resolution.text() == "-"
+    assert not info_dialog.decorrelation_result
+    combo.setCurrentIndex(1)
+    assert info_dialog.frc_resolution.text() == frc_text
+    assert info_dialog.decorrelation_resolution.text() == decorrelation_text
+
+
+def test_frc_records_nena(window, answers, monkeypatch):
+    """FRC calculates NeNA once; it is then shown and reused."""
+    answers.record_messages()
+    info_dialog = window.info_dialog
+    calls = []
+    nena = gui_render.postprocess.nena
+    monkeypatch.setattr(
+        gui_render.postprocess,
+        "nena",
+        lambda *a, **k: calls.append(1) or nena(*a, **k),
+    )
+    info_dialog.calculate_frc_resolution()
+    assert len(calls) == 1
+    assert "NeNA (nm)" in window.view.infos[0][-1]
+    assert info_dialog.nena_label.text().endswith("nm")
+    info_dialog.calculate_frc_resolution()
+    assert len(calls) == 1
+
+
+def test_frc_uses_nena_from_metadata(window, answers, monkeypatch):
+    answers.record_messages()
+    window.view.infos[0].append({"Step": "Render : NeNA", "NeNA (nm)": 8.0})
+    lps = []
+    frc = gui_render.postprocess.frc
+    monkeypatch.setattr(
+        gui_render.postprocess,
+        "frc",
+        lambda *a, **k: lps.append(k["lp"]) or frc(*a, **k),
+    )
+    window.info_dialog.calculate_frc_resolution()
+    assert lps == [8.0]
+
+
+def test_frc_rois_reuse_nena(window, answers, qt_offscreen, monkeypatch):
+    answers.record_messages()
+    info_dialog = window.info_dialog
+    info_dialog.frc_min_locs.setValue(100)
+    window.view.infos[0].append({"Step": "Render : NeNA", "NeNA (nm)": 8.0})
+    lps = []
+    frc_rois = gui_render.postprocess.frc_rois
+    monkeypatch.setattr(
+        gui_render.postprocess,
+        "frc_rois",
+        lambda *a, **k: lps.append(k["lp"]) or frc_rois(*a, **k),
+    )
+    info_dialog.calculate_frc_rois()
+    _wait_for_tasks(qt_offscreen)
+    assert lps == [8.0]
+    if info_dialog.frc_rois_window is not None:
+        info_dialog.frc_rois_window.close()
+
+
+def test_decorrelation_resolution_of_the_view(
+    window, answers, qt_offscreen, monkeypatch
+):
+    answers.record_messages()
+    info_dialog = window.info_dialog
+    assert info_dialog.decorrelation_pixel_size.text() == "Scan"
+    info_dialog.decorrelation_pixel_size.setValue(20.0)
+    calls = []
+    decorrelation = gui_render.postprocess.decorrelation
+    monkeypatch.setattr(
+        gui_render.postprocess,
+        "decorrelation",
+        lambda *a, **k: calls.append(k) or decorrelation(*a, **k),
+    )
+    info_dialog.calculate_decorrelation()
+    _wait_for_tasks(qt_offscreen)
+    assert calls[0]["pixel_size"] == 20.0
+    assert calls[0]["viewport"] == window.view.viewport
+    result = info_dialog.decorrelation_result
+    text = info_dialog.decorrelation_resolution.text()
+    if np.isfinite(result["resolution"]):
+        assert text.endswith(" nm")
+        used = info_dialog.decorrelation_used_pixel.text()
+        assert used == f"used: {result['pixel_size']:.3g} nm"
+        # one pixel size: smaller pixels may resolve more
+        limited = result["pixel_size_limited"]
+        assert bool(answers.messages) == limited
+        if limited:
+            assert "limited by the pixel size" in answers.messages[0]
+    else:  # the reason why there is none
+        assert text == "n/a" and "no resolution" in answers.messages[0]
+
+
+def test_decorrelation_plot(window, answers, qt_offscreen):
+    answers.record_messages()
+    info_dialog = window.info_dialog
+    info_dialog.decorrelation_pixel_size.setValue(16.0)
+    info_dialog.show_decorrelation_plot()  # calculates first
+    _wait_for_tasks(qt_offscreen)
+    plot_window = info_dialog.decorrelation_window
+    assert plot_window.isVisible()
+    assert len(plot_window.figure.axes) == 1  # one pixel size
+    plot_window.close()
+
+
+def test_decorrelation_of_a_too_small_view(window, answers, qt_offscreen):
+    answers.record_messages()
+    window.view.viewport = [(0.0, 0.0), (100.0, 100.0)]  # nm
+    window.info_dialog.decorrelation_pixel_size.setValue(16.0)
+    window.info_dialog.calculate_decorrelation()
+    _wait_for_tasks(qt_offscreen)
+    assert "No pixel size" in answers.messages[0]
+    assert not window.info_dialog.decorrelation_result
 
 
 @pytest.fixture

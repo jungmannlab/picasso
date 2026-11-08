@@ -2288,14 +2288,13 @@ class TestRefineMultichannelTransformsFromSignal:
 
 class TestCliWiring:
     def test_fit_method_map(self):
-        from picasso import __main__ as cli
-
+        aliases = localize.FIT_METHOD_ALIASES
         # bare names are the CPU fit, "-gpu" the Gpufit one - the convention
         # the Gaussian methods already follow
-        assert cli._FIT_METHOD_MAP["spline"] == "spline"
-        assert cli._FIT_METHOD_MAP["spline-mle"] == "spline-mle"
-        assert cli._FIT_METHOD_MAP["spline-gpu"] == "spline-gpu"
-        assert cli._FIT_METHOD_MAP["spline-mle-gpu"] == "spline-mle-gpu"
+        assert aliases["spline"] == "spline"
+        assert aliases["spline-mle"] == "spline-mle"
+        assert aliases["spline-gpu"] == "spline-gpu"
+        assert aliases["spline-mle-gpu"] == "spline-mle-gpu"
 
     def test_only_the_gpu_codes_require_a_gpu(self):
         """The CPU codes must not trip the GPU precheck, and every "-gpu" one
@@ -2305,12 +2304,12 @@ class TestCliWiring:
         from picasso import __main__ as cli
 
         src = inspect.getsource(cli._localize)
-        assert '_FIT_METHOD_MAP[args.fit_method].endswith("-gpu")' in src
+        assert 'resolve_fit_method(args.fit_method)[0].endswith("-gpu")' in src
         # aliases that hide the suffix still resolve to a GPU code ...
-        assert cli._FIT_METHOD_MAP["lq-gpu-3d"].endswith("-gpu")
+        assert localize.resolve_fit_method("lq-gpu-3d")[0].endswith("-gpu")
         # ... and no CPU alias does
         for alias in ("spline", "spline-mle", "lq", "mle", "lq-3d", "avg"):
-            assert not cli._FIT_METHOD_MAP[alias].endswith("-gpu")
+            assert not localize.resolve_fit_method(alias)[0].endswith("-gpu")
 
     def test_spline_calibrate_handler_exists(self):
         from picasso import __main__ as cli

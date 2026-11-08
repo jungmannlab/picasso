@@ -568,7 +568,158 @@ class TestAddRoiId:
 
 
 # ---------------------------------------------------------------------------
-# _to_photons
+# estimate_min_net_gradient
+# ---------------------------------------------------------------------------
+
+
+def _noisy_spot_movie(n_frames, n_spots, amplitude=600.0, seed=0):
+    """Frames of Poisson background (mean 200) with ``n_spots`` Gaussian
+    spots each, away from the edges."""
+    rng = np.random.default_rng(seed)
+    shape = (64, 64)
+    frames = []
+    for _ in range(n_frames):
+        spots = [
+            (x, y, amplitude) for x, y in rng.uniform(6, 58, size=(n_spots, 2))
+        ]
+        mean = _spots_frame(shape, spots, background=200.0)
+        frames.append(rng.poisson(mean).astype(np.uint16))
+    return np.stack(frames)
+
+
+class TestEstimateMinNetGradient:
+    def test_background_peak_and_width(self):
+        """A Gaussian background (sd 200 around 1000) and a flat tail
+        of spots: the peak is found at the mean, the width is sqrt(2)
+        times the standard deviation, and the estimate is 5 widths
+        above the peak."""
+        rng = np.random.default_rng(1)
+        net_gradients = np.concatenate(
+            [rng.normal(1000, 200, 200_000), rng.uniform(2000, 20000, 5000)]
+        )
+        result = localize._background_peak_threshold(
+            net_gradients, -3000.0, 5.0
+        )
+        bin_width = result["bin_edges"][1] - result["bin_edges"][0]
+        assert result["background"] == pytest.approx(1000, abs=bin_width)
+        assert result["background_width"] == pytest.approx(
+            np.sqrt(2) * 200, abs=2 * bin_width
+        )
+        assert result["min_net_gradient"] == pytest.approx(
+            result["background"] + 5 * result["background_width"],
+            abs=bin_width,
+        )
+
+    def test_estimate_separates_spots_from_noise(self):
+        n_spots = 8
+        movie = _noisy_spot_movie(40, n_spots)
+        result = localize.estimate_min_net_gradient(movie, box=7)
+        method = localize.NetGradient(result["min_net_gradient"])
+        found = [
+            len(localize.identify_by_frame_number(movie, method, 7, f))
+            for f in range(len(movie))
+        ]
+        # the spots (some may overlap) and hardly any noise
+        assert np.mean(found) == pytest.approx(n_spots, abs=1)
+        noise = _noisy_spot_movie(10, 0, seed=2)
+        found = [
+            len(localize.identify_by_frame_number(noise, method, 7, f))
+            for f in range(len(noise))
+        ]
+        assert sum(found) <= 2
+
+    def test_frames_are_sampled_as_in_picasso_workflow(self):
+        movie = _noisy_spot_movie(30, 2)
+        result = localize.estimate_min_net_gradient(movie, box=7, frames=8)
+        # every int(30 / 7) = 4th frame from the first on
+        np.testing.assert_array_equal(result["frames"], np.arange(0, 30, 4))
+        result = localize.estimate_min_net_gradient(
+            movie, box=7, frames=[3, 5, 8]
+        )
+        np.testing.assert_array_equal(result["frames"], [3, 5, 8])
+        # a shorter movie is used whole
+        result = localize.estimate_min_net_gradient(movie[:5], box=7)
+        np.testing.assert_array_equal(result["frames"], np.arange(5))
+
+    def test_frames_are_sampled_within_the_frame_bounds(self):
+        movie = _noisy_spot_movie(30, 2)
+        result = localize.estimate_min_net_gradient(
+            movie, box=7, frames=4, frame_bounds=(10, 19)
+        )
+        # every int(10 / 3) = 3rd of the frames 10 to 19
+        np.testing.assert_array_equal(result["frames"], [10, 13, 16, 19])
+        result = localize.estimate_min_net_gradient(
+            movie, box=7, frame_bounds=[(0, 2), (27, None)]
+        )
+        np.testing.assert_array_equal(result["frames"], [0, 1, 2, 27, 28, 29])
+
+    def test_only_the_rois_are_searched(self):
+        """Spots in the left half of the frames only: the net gradients
+        histogrammed for the right half (up to their 99.95% quantile)
+        stay at the background."""
+        rng = np.random.default_rng(0)
+        frames = []
+        for _ in range(10):
+            spots = zip(rng.uniform(6, 24, 8), rng.uniform(6, 58, 8))
+            mean = _spots_frame(
+                (64, 64), [(x, y, 600.0) for x, y in spots], background=200.0
+            )
+            frames.append(rng.poisson(mean).astype(np.uint16))
+        movie = np.stack(frames)
+        left = localize.estimate_min_net_gradient(
+            movie, box=7, roi=((0, 0), (64, 32))
+        )
+        right = localize.estimate_min_net_gradient(
+            movie, box=7, roi=[((0, 32), (64, 64))]
+        )
+        assert right["bin_edges"][-1] < 0.1 * left["bin_edges"][-1]
+
+    def test_without_local_maxima_raises(self):
+        movie = _noisy_spot_movie(3, 0)
+        with pytest.raises(ValueError, match="No local maxima"):
+            localize.estimate_min_net_gradient(
+                movie, box=7, start_net_gradient=1e9
+            )
+
+
+# ---------------------------------------------------------------------------
+# resolve_fit_method
+# ---------------------------------------------------------------------------
+
+
+class TestResolveFitMethod:
+    def test_every_alias_is_a_fitting_method(self):
+        for name, method in localize.FIT_METHOD_ALIASES.items():
+            assert localize.resolve_fit_method(name)[0] == method
+            assert method in localize.FIT_METHODS
+
+    def test_astigmatic_3d(self):
+        assert localize.resolve_fit_method("lq-gpu-3d") == (
+            "gausslq-gpu",
+            True,
+        )
+        assert localize.resolve_fit_method("mle") == ("gaussmle", False)
+        # spline fits find z themselves
+        assert localize.resolve_fit_method("spline") == ("spline", False)
+
+    def test_unknown_name_raises(self):
+        with pytest.raises(ValueError, match="Unknown fitting method"):
+            localize.resolve_fit_method("gaussmle")
+
+    def test_cli_choices_are_the_aliases(self):
+        from picasso import __main__ as cli
+
+        _, subparsers = cli._build_parser()
+        fit_method = next(
+            a
+            for a in subparsers.choices["localize"]._actions
+            if a.dest == "fit_method"
+        )
+        assert list(fit_method.choices) == list(localize.FIT_METHOD_ALIASES)
+
+
+# ---------------------------------------------------------------------------
+# to_photons
 # ---------------------------------------------------------------------------
 
 
@@ -577,37 +728,37 @@ class TestToPhotons:
 
     def test_identity_camera_returns_input(self):
         spots = np.arange(2 * BOX * BOX, dtype=np.float32).reshape(2, BOX, BOX)
-        out = localize._to_photons(spots, CAMERA_INFO)
+        out = localize.to_photons(spots, CAMERA_INFO)
         np.testing.assert_allclose(out, spots)
 
     def test_baseline_subtracts(self):
         spots = np.full((2, BOX, BOX), 500.0, dtype=np.float32)
         cam = {"Baseline": 100, "Sensitivity": 1, "Gain": 1}
-        out = localize._to_photons(spots, cam)
+        out = localize.to_photons(spots, cam)
         np.testing.assert_allclose(out, 400.0)
 
     def test_sensitivity_multiplies(self):
         spots = np.full((2, BOX, BOX), 50.0, dtype=np.float32)
         cam = {"Baseline": 0, "Sensitivity": 3, "Gain": 1}
-        out = localize._to_photons(spots, cam)
+        out = localize.to_photons(spots, cam)
         np.testing.assert_allclose(out, 150.0)
 
     def test_gain_divides(self):
         spots = np.full((2, BOX, BOX), 60.0, dtype=np.float32)
         cam = {"Baseline": 0, "Sensitivity": 1, "Gain": 3}
-        out = localize._to_photons(spots, cam)
+        out = localize.to_photons(spots, cam)
         np.testing.assert_allclose(out, 20.0)
 
     def test_combined_transform(self):
         spots = np.full((1, BOX, BOX), 1000.0, dtype=np.float32)
         cam = {"Baseline": 100, "Sensitivity": 2, "Gain": 4}
-        out = localize._to_photons(spots, cam)
+        out = localize.to_photons(spots, cam)
         # (1000 - 100) * 2 / 4 = 450
         np.testing.assert_allclose(out, 450.0)
 
     def test_output_is_float32(self):
         spots = np.ones((1, BOX, BOX), dtype=np.uint16) * 100
-        out = localize._to_photons(spots, CAMERA_INFO)
+        out = localize.to_photons(spots, CAMERA_INFO)
         assert out.dtype == np.float32
 
 
@@ -5194,9 +5345,13 @@ class TestGuiConvergenceDefaults:
     and the fit runs another."""
 
     def test_every_iterating_method_has_defaults(self):
-        """Every ``fit`` code except "avg" iterates and must be listed."""
+        """Every ``fit`` code except "avg" iterates and must be listed. The
+        multi-emitter model is not a ``fit`` method: its schedule is its
+        own, and it shows no convergence boxes."""
         codes = set()
         for entry in localize_gui.FIT_MODELS.values():
+            if entry.get("multi_emitter"):
+                continue
             optimizers = entry["optimizers"]
             if optimizers is None:
                 codes.add(entry["code"])
@@ -5239,9 +5394,13 @@ class TestGuiConvergenceDefaults:
     def test_every_fitted_model_can_use_the_gpu(self):
         """Every PSF model in the dialog runs on both devices now, so ticking
         "Use GPU" must move *all* of them onto the GPU - a code left out of
-        ``_GPU_CAPABLE_CODES`` would silently keep fitting on the CPU. Only
-        "Average of ROI", which does not fit, is exempt."""
+        ``_GPU_CAPABLE_CODES`` would silently keep fitting on the CPU.
+        "Average of ROI", which does not fit, is exempt, and so is the
+        multi-emitter model, which runs on the CPU only (its checkbox is
+        disabled, see ``test_gui_localize_multi_emitter``)."""
         for entry in localize_gui.FIT_MODELS.values():
+            if entry.get("multi_emitter"):
+                continue
             for code in (entry["optimizers"] or {}).values():
                 assert code in localize_gui._GPU_CAPABLE_CODES
                 assert (
@@ -7156,7 +7315,7 @@ class TestFitSplineSplitFov:
             roi=calib["regions"][0],
             frame_bounds=(focus - 1, focus + 1),
         )
-        locs, _ = localize.fit_spline_split_fov(
+        locs, info = localize.fit_spline_split_fov(
             movie,
             camera_info=CAMERA_INFO_WITH_PIXELSIZE,
             identifications=ids,
@@ -7164,6 +7323,13 @@ class TestFitSplineSplitFov:
             calibration=calib,
         )
         assert len(locs) > 0
+        # the settings the fit ran with
+        entry = info[-1]
+        assert entry["Fit box size"] == BOX
+        assert entry["ROI residuals applied"] is True
+        assert entry["Axial seeds"] >= 1
+        assert entry["Max iterations"] > 0
+        assert entry["Fit method"].endswith("-gpu") == localize.CUDA_AVAILABLE
         # localizations are in the reference region's coordinates (nm)
         assert np.all(locs["x"] >= 0) and np.all(locs["x"] < 48 * PIXELSIZE)
         assert np.all(locs["y"] >= 0) and np.all(locs["y"] < 48 * PIXELSIZE)
@@ -10323,8 +10489,8 @@ class TestPhotonConversionWithMaps:
         info = {"Baseline": 100.0, "Sensitivity": 0.47, "Gain": 1}
         flat = np.full_like(spots, 100.0)
         np.testing.assert_allclose(
-            localize._to_photons(spots, info, offset=flat),
-            localize._to_photons(spots, info),
+            localize.to_photons(spots, info, offset=flat),
+            localize.to_photons(spots, info),
             rtol=0,
             atol=0,
         )
@@ -10335,8 +10501,8 @@ class TestPhotonConversionWithMaps:
         info = {"Baseline": 100.0, "Sensitivity": 0.5, "Gain": 1}
         gain = np.full_like(spots, 2.0)  # sensitivity = 1 / 2.0 = 0.5
         np.testing.assert_allclose(
-            localize._to_photons(spots, info, gain_patch=gain),
-            localize._to_photons(spots, info),
+            localize.to_photons(spots, info, gain_patch=gain),
+            localize.to_photons(spots, info),
             rtol=1e-6,
         )
 
@@ -11904,6 +12070,8 @@ class TestIdentifyMultichannelSum:
         assert info[-1]["Identification Mode"] == "sum"
         assert info[-1]["Sum Regions"] is None
         assert info[-1]["Sum Reference Channel"] == 0
+        assert info[-1]["Sum Interpolation Order"] == 1
+        assert info[-1]["Sum In Photons"] is True
         assert np.allclose(
             affine_matrix(info[-1]["Sum Channel Transforms"][1]),
             affine_matrix(transform),
@@ -13674,10 +13842,17 @@ class TestMultichannelGaussianWorkerRouting:
 class TestChannelRegistrationParametersDialog:
     """The channel-registration group box in the parameters dialog."""
 
+    @staticmethod
+    def _enter_split_fov(window):
+        # several channels to register, without loading movies
+        window.view.split_fov_mode = True
+        window._update_multichannel_widgets()
+
     def test_only_shown_for_the_spherical_gaussian(self):
         window = localize_gui.Window()
         try:
             dialog = window.parameters_dialog
+            self._enter_split_fov(window)
             dialog.fit_model.setCurrentText("2D spherical Gaussian")
             assert dialog.channel_registration_groupbox.isVisibleTo(dialog)
             assert not dialog.spline_groupbox.isVisibleTo(dialog)
@@ -13697,7 +13872,8 @@ class TestChannelRegistrationParametersDialog:
         try:
             dialog = window.parameters_dialog
             # the box lives in the registration group, which only the
-            # spherical Gaussian shows
+            # spherical Gaussian shows (for multichannel data)
+            self._enter_split_fov(window)
             dialog.fit_model.setCurrentText("2D spherical Gaussian")
             assert not dialog.gauss_link_photons_checkbox.isVisibleTo(dialog)
 
@@ -13718,6 +13894,22 @@ class TestChannelRegistrationParametersDialog:
             # decoupled is the default: a Gaussian has no per-channel
             # brightness scale, so linking would assume equal brightness
             assert dialog._gauss_link_photons_enabled() is False
+        finally:
+            window.close()
+
+    def test_hidden_without_multichannel_data(self):
+        window = localize_gui.Window()
+        try:
+            dialog = window.parameters_dialog
+            dialog.fit_model.setCurrentText("2D spherical Gaussian")
+            assert not dialog.channel_registration_groupbox.isVisibleTo(dialog)
+
+            self._enter_split_fov(window)
+            assert dialog.channel_registration_groupbox.isVisibleTo(dialog)
+
+            window.view.split_fov_mode = False
+            window._update_multichannel_widgets()
+            assert not dialog.channel_registration_groupbox.isVisibleTo(dialog)
         finally:
             window.close()
 
@@ -14269,6 +14461,33 @@ class TestFitGaussSplitFov:
         assert abs(np.nanmean(error_y)) < 0.06
         # and they are in the reference region's coordinates
         assert locs["x"].max() < 64 * PIXELSIZE
+
+    def test_metadata_record_the_fit_settings(self):
+        movie, camera_info, ids, _, _ = self._dataset()
+        _, info = localize.fit_gauss_split_fov(
+            movie,
+            camera_info=camera_info,
+            identifications=ids,
+            box=self.BOX,
+            channel_registration=self._registration(),
+            regions=self.REGIONS,
+            mle=True,
+            use_gpu=False,
+            parallel=False,
+        )
+        entry = info[-1]
+        assert entry["Fit method"] == "gaussmle-spherical"
+        assert entry["Fit box size"] == self.BOX
+        # the schedule the fit ran with, also when the default was asked for
+        tolerance, max_iterations = localize.gauss_schedule(
+            True, False, None, None
+        )
+        assert entry["Convergence criterion"] == tolerance
+        assert entry["Max iterations"] == max_iterations
+        assert entry["Confined to reference region"] is True
+        assert entry["Reference region"] == 0
+        # one camera images both regions
+        assert "Camera information per channel" not in entry
 
     def test_the_regions_can_be_redrawn(self):
         """The registration is ROI-agnostic, so a split that sits elsewhere is
@@ -14916,6 +15135,28 @@ class TestFitSplitFovIndependent:
         assert second[-1]["Fit method"] == "gausslq"
         assert second[-1]["Fit mode"] == localize.FIT_MODE_INDEPENDENT
         assert second[-1]["Region coordinates"] == "region"
+
+    def test_lateral_corrections_are_applied_and_recorded(
+        self, picasso_movie_factory
+    ):
+        shift = [[1.0, 0.0, 5.0], [0.0, 1.0, -2.0], [0.0, 0.0, 1.0]]
+        corrections = [
+            {"Type": "chromatic", "Transform": affine(shift).to_dict()}
+        ]
+        _, _, plain = self._fit(picasso_movie_factory)
+        _, _, corrected = self._fit(
+            picasso_movie_factory, lateral_transforms=corrections
+        )
+        for (locs, _), (out, info) in zip(plain, corrected):
+            np.testing.assert_allclose(out["x"], locs["x"] + 5.0, rtol=1e-6)
+            np.testing.assert_allclose(out["y"], locs["y"] - 2.0, rtol=1e-6)
+            # an entry of their own, after the fit's
+            assert info[-1]["Step"] == "Affine correction"
+            assert info[-1]["Lateral corrections applied"] == [
+                "chromatic, affine"
+            ]
+            assert info[-2]["Fit mode"] == localize.FIT_MODE_INDEPENDENT
+            assert "Fit mode" not in info[-1]
 
     def test_the_fit_metadata_comes_back_without_a_movie_info(
         self, picasso_movie_factory

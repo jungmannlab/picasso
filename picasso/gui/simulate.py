@@ -18,6 +18,7 @@ import time
 from typing import Literal
 
 import numpy as np
+import pandas as pd
 import matplotlib.patches as patches
 import matplotlib.pyplot as plt
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -58,6 +59,9 @@ def fitFuncStd(
 CURRENTROUND = 0
 
 ADVANCEDMODE = 0  # 1 is with calibration of noise model
+# The simulated emitters are saved next to each movie under its name with
+# this suffix, see ``simulate.ground_truth_locs``.
+GROUND_TRUTH_SUFFIX = "_ground_truth.hdf5"
 # CAMERA
 IMAGESIZE_DEFAULT = 32
 ITIME_DEFAULT = 100
@@ -499,8 +503,8 @@ class Window(QtWidgets.QMainWindow):
             laserpower = QtWidgets.QLabel("Laser power")
         psf = QtWidgets.QLabel("PSF")
         psf.setToolTip(
-            "Point Spread Function (PSF) width (Gaussian \u03c3) in camera "
-            "pixels."
+            "Point Spread Function (PSF) \u03c3 (standard deviation of the "
+            "Gaussian) in camera pixels."
         )
         psf_fwhm = QtWidgets.QLabel("PSF (FWHM)")
         psf_fwhm.setToolTip(
@@ -1581,6 +1585,17 @@ class Window(QtWidgets.QMainWindow):
 
         return movie
 
+    def _save_ground_truth(
+        self, fileName: str, ground_truth: pd.DataFrame, info: dict
+    ) -> None:
+        """Save the simulated emitters next to the movie, as a
+        localization file (see ``simulate.ground_truth_locs``)."""
+        path = os.path.splitext(fileName)[0] + GROUND_TRUTH_SUFFIX
+        entry = lib.step_info(
+            "Simulate ground truth", Movie=os.path.basename(fileName)
+        )
+        io.save_locs(path, ground_truth, lib.append_metadata(info, entry))
+
     def _process_multiround_movie(
         self,
         movie: np.ndarray,
@@ -1590,13 +1605,20 @@ class Window(QtWidgets.QMainWindow):
         conrounds: int,
         t0: float,
         params: dict,
+        ground_truth: pd.DataFrame,
     ) -> None:
         """Handle movie accumulation and saving in multi-round mode."""
         if self.currentround == 1:
             self.movie = movie
+            self.ground_truth = ground_truth
         else:
             movie = movie + self.movie
             self.movie = movie
+            # the rounds add up to one movie, so their emitters do too
+            ground_truth = pd.concat(
+                [self.ground_truth, ground_truth], ignore_index=True
+            ).sort_values("frame", kind="stable", ignore_index=True)
+            self.ground_truth = ground_truth
 
         self.statusBar().showMessage(
             "Converting to image ... complete. Current round: "
@@ -1611,6 +1633,7 @@ class Window(QtWidgets.QMainWindow):
             movie = simulate.check_type(movie)
             self.statusBar().showMessage("Saving movie ...")
             simulate.save_movie(fileName, movie, info)
+            self._save_ground_truth(fileName, ground_truth, info)
             if self.exportkinetics.isChecked():
                 kinfo_path = (
                     os.path.splitext(fileName)[0]
@@ -1652,6 +1675,7 @@ class Window(QtWidgets.QMainWindow):
         timetrace: dict,
         t0: float,
         params: dict,
+        ground_truth: pd.DataFrame,
     ) -> None:
         """Handle movie finalization and saving in single-round mode."""
         movie = simulate.noisy_p(movie, params["background"])
@@ -1660,6 +1684,7 @@ class Window(QtWidgets.QMainWindow):
         self.statusBar().showMessage("Converting to image ... complete.")
         self.statusBar().showMessage("Saving movie ...")
         simulate.save_movie(fileName, movie, info)
+        self._save_ground_truth(fileName, ground_truth, info)
         if self.exportkinetics.isChecked():
             kinfo_path = os.path.splitext(fileName)[0] + "_kinetics.yaml"
             io.save_info(kinfo_path, [timetrace])
@@ -1822,14 +1847,28 @@ class Window(QtWidgets.QMainWindow):
             movie = self._render_movie_frames(
                 photondist, partstruct, params, mode3Dstate
             )
+            ground_truth = simulate.ground_truth_locs(
+                partstruct,
+                photondist,
+                height=params["imagesize"],
+                pixelsize=params["pixelsize"],
+                is_3d=bool(mode3Dstate),
+            )
 
             if conrounds != 1:
                 self._process_multiround_movie(
-                    movie, fileName, info, timetrace, conrounds, t0, params
+                    movie,
+                    fileName,
+                    info,
+                    timetrace,
+                    conrounds,
+                    t0,
+                    params,
+                    ground_truth,
                 )
             else:
                 self._process_singleround_movie(
-                    movie, fileName, info, timetrace, t0, params
+                    movie, fileName, info, timetrace, t0, params, ground_truth
                 )
         notifications.notify_finished(time.time() - t0)
 

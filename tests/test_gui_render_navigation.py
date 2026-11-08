@@ -10,9 +10,10 @@ or Esc), and the Zoom tool's triple click / Home key fit.
 from __future__ import annotations
 
 import pytest
-from PyQt6 import QtCore, QtGui
+from PyQt6 import QtCore, QtGui, QtWidgets
 
 from picasso import render
+from picasso.gui import render as render_gui
 
 from tests.test_gui_render_async import window  # noqa: F401 (fixture)
 from tests.test_gui_rotation_navigation import (
@@ -195,3 +196,57 @@ def test_home_fits_the_image_to_the_window(view):
     assert QtGui.QKeySequence("Ctrl+W") in action.shortcuts()
     action.trigger()
     assert _viewport(view) == pytest.approx(fitted)
+
+
+def _flat(view):
+    return [v for corner in view.viewport for v in corner]
+
+
+def _action(window, text):
+    return next(
+        a
+        for a in window.findChildren(QtCore.QObject)
+        if hasattr(a, "shortcuts") and a.text() == text
+    )
+
+
+def test_save_and_load_fov_txt_from_the_view_menu(view, tmp_path, monkeypatch):
+    window = view.window
+    save = _action(window, "Save FOV...")
+    load = _action(window, "Load FOV...")
+    assert save.shortcut() == QtGui.QKeySequence("Ctrl+Shift+B")
+    assert load.shortcut() == QtGui.QKeySequence("Ctrl+B")
+    path = str(tmp_path / "fov.txt")
+    monkeypatch.setattr(
+        render_gui.lib,
+        "get_save_filename_ext_dialog",
+        lambda *a, **k: (path, ".txt"),
+    )
+    monkeypatch.setattr(
+        QtWidgets.QFileDialog,
+        "getOpenFileName",
+        staticmethod(lambda *a, **k: (path, "*.txt")),
+    )
+    view.zoom_in()
+    start = _flat(view)
+    save.trigger()
+    y_min, x_min, y_max, x_max = start
+    assert render_gui.load_fov_file(path).tolist() == pytest.approx(
+        [x_min, y_min, x_max - x_min, y_max - y_min], abs=0.01
+    )
+    # move away and come back
+    view.zoom_in()
+    view.to_left()
+    assert _flat(view) != pytest.approx(start, abs=0.01)
+    load.trigger()
+    assert _flat(view) == pytest.approx(start, abs=0.01)
+
+
+def test_fov_shortcuts_are_unique(view):
+    shortcuts = [
+        s.toString()
+        for a in view.window.findChildren(QtGui.QAction)
+        for s in a.shortcuts()
+    ]
+    for key in ("Ctrl+B", "Ctrl+Shift+B"):
+        assert shortcuts.count(key) == 1

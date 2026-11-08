@@ -21,6 +21,7 @@ Identification and fitting of single-molecule spots
 
    - The quickest way is the two-handle slider at the bottom of the window, below the frame slider. It can be hidden with ``contrast_slider: false`` in the ``Localize`` section of the user settings (see :ref:`user-settings-file`).
    - Alternatively, select ``View`` > ``Contrast`` to type in the black and white points, or to re-enable ``Auto``, which re-scales every frame to its own minimum and maximum.
+   - ``View`` > ``Show scale bar`` shows a scale bar about 1/8 of the view wide. ``View`` > ``Scale bar settings...`` sets whether its length is printed and its appearance which are shared with the scale bars of SPINNA.
 
 3. **Open the** ``Parameters`` **dialog** (select ``Analyze`` > ``Parameters``) to adjust spot identification and fit parameters.
 
@@ -29,9 +30,10 @@ Identification and fitting of single-molecule spots
    .. _localize-box-size:
 
    - Set the ``Box side length`` to the rounded integer value of 6 × σ + 1, where σ is the standard deviation of the PSF. In an optimized microscope setup, σ is below one pixel (roughly 0.9 pixels) and the respective ``Box side length`` should be set to 7.
-   - The box must contain the entire single-emitter image, since the fit only sees the pixels inside it. A cut-off spot biases the fitted photons, PSF width and localization precision.
+   - The box must contain the entire single-emitter image, since the fit only sees the pixels inside it. A cut-off spot biases the fitted photons, PSF σ and localization precision.
    - The value of ``Min. net gradient`` specifies a minimum threshold above which spots should be considered for fitting. The net gradient sums, over the box, how steeply the intensity rises towards the spot's center. It is proportional to the spot's brightness above the background (in camera counts) and also grows with sharper spots and larger boxes.
    - By checking ``Preview``, the spots identified with the current settings will be marked in the displayed frame. Adjust ``Min. net gradient`` to a value at which only spots are detected (no background).
+   - ``Estimate``, next to ``Min. net gradient``, sets a starting value from the background of the movie; see :ref:`localize-estimate-min-net-gradient`.
    - Alternatively, select ``B-spline wavelet`` as the ``Method`` to identify spots by wavelet segmentation, with a threshold in units of the noise instead of the net gradient; see :ref:`localize-wavelet`.
 
 5. (Optional) Tick ``Temporal median filter`` in the ``Identification`` group to subtract a rolling per-pixel background before spots are identified; see :ref:`localize-temporal-median-filter`.
@@ -108,6 +110,48 @@ Hovering the mouse cursor over a fit marker or over an identification box shows 
           progress="console",
       )
       io.save_locs("movie_locs.hdf5", locs, locs_info)
+
+
+.. _localize-estimate-min-net-gradient:
+
+Estimating the min. net gradient
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+``Estimate``, next to ``Min. net gradient``, sets the threshold from the background of the movie:
+
+1. The local maxima of 40 frames, evenly spaced over the movie, are identified with a min. net gradient of -3000, low enough to include the maxima of the background, without a spot.
+2. Their net gradients form a peak at the background. Its width is measured on its lower side, which the spots do not reach.
+3. ``Min. net gradient`` is set 5 widths above that peak.
+
+The estimate searches what the identification searches: the movie after the identification filters, within the ROIs and the frames set in ``Frames (min,max)``. With several channels, it searches the displayed one (or the channel sum, when identifying on it). In split-FOV mode (``Regions = channels``), the selected region's threshold is estimated from that region alone; with no region selected, every region's threshold is set from all of them.
+
+The estimate is a starting point: check it with ``Preview`` and adjust it if needed.
+
+On the command line, ``picasso localize --gradient auto`` estimates it for each movie; see :ref:`cmd-localize-auto-gradient`.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``estimate_min_net_gradient`` returns the estimate together with the
+   background peak, its width, the frames used and the histogram of the
+   net gradients. ``frames``, ``roi`` and ``frame_bounds`` set what it
+   searches.
+
+   .. code-block:: python
+
+      from picasso import io, localize
+
+      movie, info = io.load_movie("movie.tif")
+      result = localize.estimate_min_net_gradient(movie, box=7)
+      print(result["min_net_gradient"], result["background"])
+
+      parameters = localize.IdentificationParameters(
+          method=localize.NetGradient(result["min_net_gradient"]), box=7
+      )
+      identifications, ids_info = localize.identify(
+          movie, info, parameters=parameters
+      )
 
 
 .. _localize-remembered-parameters:

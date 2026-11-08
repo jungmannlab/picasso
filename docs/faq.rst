@@ -205,9 +205,10 @@ Even then, a single folder or file name may have at most 255 characters.
 How do I open localizations from other software?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Render's ``File > Open`` imports ThunderSTORM ``.csv``, SMAP ``_sml.mat`` and
-PyME ``.h5r`` and ``.hdf`` files, see :ref:`render-open`; on the command line,
-``picasso csv2hdf``, ``smap2hdf`` and ``pyme2hdf`` convert them. To write files
+Render's ``File > Open`` imports ThunderSTORM ``.csv``, SMAP ``_sml.mat``,
+PyME ``.h5r`` and ``.hdf`` and pyMINFLUX (MINFLUX) ``.pmx`` and ``.csv`` files,
+see :ref:`render-open`; on the command line, ``picasso csv2hdf``,
+``smap2hdf``, ``pyme2hdf`` and ``minflux2hdf`` convert them. To write files
 for Picasso from your own code, see :ref:`files-minimum-requirements`: they
 need the columns ``frame``, ``x``, ``y``, ``lpx`` and ``lpy`` (in nm), the
 metadata keys ``Width``, ``Height``, ``Frames`` and ``Pixelsize``, and the
@@ -244,8 +245,9 @@ Which movie formats can Localize open?
 
 TIFF stacks of any kind (plain ``.tif`` and ``.tiff``, OME-TIFF, NDTiffStack,
 BigTIFF, also files larger than 4 GB), ``.nd2``, ``.ims``, ``.stk``, ``.lsm``
-and ``.raw``; ``.czi`` and ``.lif`` with ``pip install "picassosr[czi]"`` and
-``"picassosr[lif]"`` (Python 3.12 or later; included in the one-click
+and ``.raw``; ``.czi``, ``.lif`` and PicoQuant ``.ptu`` confocal scans with
+``pip install "picassosr[czi]"``, ``"picassosr[lif]"`` and
+``"picassosr[ptu]"`` (Python 3.12 or later; included in the one-click
 installers). TIFF files do not need to be renamed to ``.ome.tif`` or converted
 to ``.raw``. The frames must be grayscale, one per page. For a movie split into
 several μManager files, open the first one. See :ref:`localize-file-formats`.
@@ -327,7 +329,9 @@ Record a z-stack of beads, calibrate it in Localize and load the calibration
 for your measurements, see :ref:`localize-3d-calibration` and
 :ref:`localize-fitting-z`. The ``Magnification factor`` (0.79 by default)
 corrects ``z`` for the refractive-index mismatch between the immersion medium
-and the sample. For multichannel and biplane data, see :doc:`localize/spline`.
+and the sample; ``Calculate...`` next to it estimates it for your objective
+and sample, see :ref:`localize-magnification-factor`. For multichannel and
+biplane data, see :doc:`localize/spline`.
 
 Localize keeps the computer busy
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

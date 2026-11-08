@@ -99,7 +99,8 @@ Spot identification
 Fitting
    The fit method and the calibration files that some methods require (a
    spline PSF calibration for the spline fits, a magnification factor and a 3D
-   calibration for the astigmatism fits).
+   calibration for the astigmatism fits), or ``--multi-emitter`` with its
+   settings, which fits overlapping emitters without identifying first.
 Camera
    Baseline, sensitivity, gain and pixel size in nm.
 What is analyzed
@@ -152,6 +153,34 @@ it, ``picasso localize`` stops and asks for ``--pixelsize``. The value used is
 printed and saved as ``Pixelsize`` in the metadata. ``spline-calibrate``
 resolves it the same way; ``lateral-calibrate`` requires ``--pixelsize``.
 
+PicoQuant scans (.ptu)
+~~~~~~~~~~~~~~~~~~~~~~
+For ``.ptu`` confocal scans (see :ref:`PicoQuant .ptu files <localize-ptu>`),
+``--frame-sum-window`` and ``--frame-sum-stride`` sum scan frames into one
+frame, and each ``--microtime-gate START END`` (ns) gives every detector one
+channel per gate. Each channel is localized into its own
+``<movie>_<channel>_locs.hdf5``; the camera options keep their defaults.
+
+.. code-block:: bash
+
+   picasso localize scan.ptu --frame-sum-window 20 --microtime-gate 0 25 --microtime-gate 25 50
+
+.. _cmd-localize-auto-gradient:
+
+Estimating the minimum net gradient
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``--gradient auto`` (``-g auto``) estimates the minimum net gradient of each
+movie from its background, as ``Estimate`` in the ``Parameters`` dialog does
+(see :ref:`localize-estimate-min-net-gradient`). The estimate searches the
+movie after the pre-filters, within ``--roi`` and ``--frame-bounds``. It is
+printed and saved as ``Min. Net Gradient`` in the metadata. With one
+``--gradient`` per ``--roi``, each ``auto`` is estimated in its own region:
+
+.. code-block:: bash
+
+   picasso localize movie.tif -g auto
+   picasso localize movie.tif --roi 0 0 512 256 --roi 0 256 512 512 -g auto -g auto -rs
+
 Pre-filters
 ~~~~~~~~~~~
 ``--temporal-median``
@@ -187,6 +216,54 @@ The localizations have no ``net_gradient`` column. See
 .. code-block:: bash
 
    picasso localize movie.tif -b 7 -im wavelet --wavelet-threshold 1
+
+Overlapping emitters
+~~~~~~~~~~~~~~~~~~~~
+``--multi-emitter`` (``-me``) fits all emitters of a frame at once, so that
+emitters closer than about 2 PSF σ are localized separately, instead
+of one emitter per identified box (3D-DAOSTORM, `Babcock et al., Optical
+Nanoscopy, 2012 <https://doi.org/10.1186/2192-2853-1-6>`__). It finds the
+spots itself, so the identification options are ignored, and it fits by
+maximum likelihood on the CPU; ``--fit-method`` and ``--regions-separately``
+cannot be combined with it, the 3D calibration only with ``--psf-model
+elliptical`` and the spline calibration only with ``--psf-model spline``.
+See :ref:`localize-multi-emitter`.
+
+``--psf-model``
+   The PSF of each emitter: a 2D Gaussian whose σ is ``fixed``, the same for
+   every emitter (the default), ``spherical``, one fitted σ per emitter, or
+   ``elliptical``, a fitted σ in x and one in y per emitter, from which
+   ``--z-calibration`` (with ``--magnification-factor``) gives z; or
+   ``spline``, the PSF of one ``--spline-calibration``, which gives z
+   directly for a 3D calibration (`Babcock & Zhuang, Scientific Reports,
+   2017 <https://doi.org/10.1038/s41598-017-00622-w>`__).
+``--snr-threshold``
+   The peak threshold and the minimum significance of an emitter, in units of
+   the signal-to-noise ratio (default 15).
+``--psf-sigma``
+   The PSF σ (standard deviation) in nm: fixed in the fit, or the start of a
+   fitted one. Estimated from the movie by default.
+``--max-cycles``, ``--peak-radius``, ``--background-sigma``
+   The cycles of finding, fitting and subtracting per frame (20), the radius
+   within which a new peak must be the maximum (5 camera pixels) and the width
+   of the background low pass (8 camera pixels).
+``--peak-search-z``
+   For ``--psf-model spline`` with a 3D calibration: the z (nm) at which the
+   PSF filters the residual to find peaks (default 0); a new emitter starts at
+   the z where it is brightest.
+``--fit-region-size``
+   For ``--psf-model spline``: the side length (camera pixels) of the disc each
+   emitter is fitted in, cropped from the calibration, at most its box less 2.
+   By default from the calibration's PSF σ: 8 σ, or 12 σ for a 3D calibration.
+``--seed-identification``
+   Start each frame from the spots the identification options find, instead
+   of the first cycle's peaks.
+
+.. code-block:: bash
+
+   picasso localize movie.tif --multi-emitter -px 130 --snr-threshold 8
+   picasso localize movie.tif --multi-emitter -px 130 --psf-model elliptical -zc 3d_calib.yaml -mf 0.79
+   picasso localize movie.tif --multi-emitter -px 130 --psf-model spline -sc spline_calib.hdf5
 
 Analyzing several movies as one
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -387,7 +464,7 @@ described in `Camera settings`_.
    * - ``-rm``, ``--registration-model``
      - ``affine``
      - How the channels of a multichannel calibration are registered to the
-       reference: ``translation``, ``affine``, ``projective``,
+       reference: ``translation``, ``rigid``, ``affine``, ``projective``,
        ``polynomial2`` or ``polynomial3`` (see
        :ref:`localize-lateral-transform-models`). Ignored for one channel.
    * - ``-pr``, ``--photon-ratios`` (str)
@@ -465,8 +542,9 @@ The beads are identified with the same arguments as in ``picasso localize``
      - ``astigmatism`` or ``chromatic``: what the correction is for.
    * - ``-m``, ``--model``
      - ``affine``
-     - ``translation``, ``affine``, ``projective``, ``polynomial2`` or
-       ``polynomial3``, needing at least 1, 3, 4, 6 or 10 bead pairs (see
+     - ``translation``, ``rigid``, ``affine``, ``projective``,
+       ``polynomial2`` or ``polynomial3``, needing at least 1, 2, 3, 4, 6 or
+       10 bead pairs (see
        :ref:`localize-lateral-transform-models`).
    * - ``-c``, ``--calibration`` (str)
      - none
@@ -780,6 +858,25 @@ column) is saved as one file per channel, ``<file>_probe<k>_locs.hdf5``. See
 .. code-block:: bash
 
    picasso pyme2hdf filepath [-p pixelsize]
+
+.. _cmd-minflux2hdf:
+
+minflux2hdf
+-----------
+Convert MINFLUX localizations processed with `pyMINFLUX
+<https://github.com/bsse-scf/pyMINFLUX>`_ (``.pmx`` or its ``.csv`` export), or
+another MINFLUX table saved as ``.csv``, to ``.hdf5``. A file with several fluorophores is saved as one file per
+fluorophore, ``<file>_<fluorophore name>_locs.hdf5``. ``--average-traces``
+saves one localization per MINFLUX trace (the photon-weighted mean) instead of
+every localization. The localizations are moved next to the origin of the
+field of view (the shift is stored in the metadata); ``--origin stage`` keeps
+MINFLUX's absolute stage coordinates instead, e.g., to overlay separate
+acquisitions. See :func:`picasso.io.import_minflux` for how the columns are
+converted.
+
+.. code-block:: bash
+
+   picasso minflux2hdf filepath [--average-traces] [--origin {data,stage}]
 
 hdf2pyme
 --------
@@ -1208,17 +1305,49 @@ Compute the dark time for grouped localizations.
 
 align
 -----
-Align one localization file to another via RCC, 2D only (two or more files). The
-RCC is repeated until the shifts converge, as in Render. Pass ``-d/--display``
-to plot the mean shift per iteration. All localizations are kept by
-default; pass ``-r/--remove-non-overlapping`` to remove the localizations
-outside the region where all aligned files overlap (see
-:ref:`render-align-non-overlapping`).
+Align one localization file to another (two or more files), 2D only, via RCC
+or via the displacements between the localizations (``-m points``, see
+:ref:`render-align-channels`), which also prints the shift of each file with
+its uncertainty. The RCC is repeated until the shifts converge, as in Render.
+Pass ``-d/--display`` to plot the mean shift per RCC iteration. All
+localizations are kept by default; pass ``-r/--remove-non-overlapping`` to
+remove the localizations outside the region where all aligned files overlap
+(see :ref:`render-align-non-overlapping`). The aligned files are saved as
+``<file name>_align.hdf5``.
 
 .. code-block:: bash
 
-   picasso align file1 file2 [...]
+   picasso align file1 file2 [...] [-m rcc|points] [--max-shift nm] [-d] [-r]
+
+For example:
+
+.. code-block:: bash
+
    picasso align file1 file2 --remove-non-overlapping
+   picasso align file1 file2 -m points --max-shift 300
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-m``, ``--method`` (``rcc`` or ``points``)
+     - ``rcc``
+     - How the shifts are found: the cross-correlation of the rendered images
+       or the peak of the displacements between the localizations.
+   * - ``--max-shift`` (float)
+     - ``500``
+     - The largest shift (nm) between two files searched for by ``-m
+       points``.
+   * - ``-d``, ``--display``
+     - off
+     - Plot the mean shift per RCC iteration.
+   * - ``-r``, ``--remove-non-overlapping``
+     - off
+     - Remove the localizations outside the region where all aligned files
+       overlap.
 
 group-properties
 ----------------
@@ -1479,6 +1608,257 @@ For example, two channels with short names:
      - ``shift``
      - How pairs of channels are simulated: random shifts of the second
        channel (rectangular or circular regions only) or random labels.
+
+.. _cmd-decorrelation:
+
+decorrelation
+-------------
+Resolution of localizations by decorrelation analysis (Descloux et al., Nature
+Methods, 2019, DOI: `10.1038/s41592-019-0515-7
+<https://doi.org/10.1038/s41592-019-0515-7>`__), over the whole field of view.
+The localizations are rendered as a bilinear histogram at each pixel size and
+the smallest resolution is reported (Descloux et al., Communications Biology,
+2021). Pixel sizes that give an image larger than ``--max-image-size`` pixels
+on a side are skipped; a warning says when the resolution may be limited by
+the smallest pixel size rendered, e.g., over a large field of view. See
+:ref:`render-info-decorrelation` for details.
+
+Prints the resolution at each pixel size and saves next to each file ``<file
+name>_decorrelation.csv`` (pixel size, resolution, normalized cut-off
+frequency and peak amplitude of each pixel size), ``<file
+name>_decorrelation_curves.csv`` (the decorrelation functions at the pixel
+size of the resolution) and the plot ``<file name>_decorrelation.png``.
+
+.. code-block:: bash
+
+   picasso decorrelation files [-px pixel_size ...] [--n-radii n] [--n-filters n] [--max-image-size pixels]
+
+For example, at pixel sizes of 4, 8 and 16 nm:
+
+.. code-block:: bash
+
+   picasso decorrelation locs.hdf5 -px 4 8 16
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-px``, ``--pixel-size`` (float ...)
+     - 2 to 64
+     - The pixel size or sizes (nm) at which the localizations are rendered;
+       by default 2 to 64 nm in steps of a factor sqrt(2).
+   * - ``--n-radii`` (int)
+     - ``50``
+     - The number of radii of the decorrelation functions.
+   * - ``--n-filters`` (int)
+     - ``10``
+     - The number of high-pass filters.
+   * - ``--max-image-size`` (int)
+     - ``8192``
+     - The largest side length (pixels) of the rendered images; smaller
+       pixel sizes are skipped. ``0`` for no limit.
+
+.. _cmd-dye-performance:
+
+dye-performance
+---------------
+Performance of a DNA-PAINT dye at picked docking sites (Steen et al., Nature
+Methods, 2024, DOI: `10.1038/s41592-024-02374-8
+<https://doi.org/10.1038/s41592-024-02374-8>`__): the signal-to-background
+ratio (SBR) of the localizations in the centers of binding events, the drop of
+the number of localizations from the first to the last 20% of the frames and
+the percentage of destroyed docking sites. Each docking site is a pick of
+``--picks`` or, without picks, a group of the localizations, e.g., in picked
+localizations saved in Render. See :ref:`render-info-dye-performance` for
+details.
+
+Prints the three values and saves next to each file ``<file
+name>_dye_performance.csv`` (the values, the fitted mean ``mu`` of the ratios
+r, the cut-off and the parameters), ``<file name>_dye_performance_sites.csv``
+(for each site: number of localizations, frames after its last localization,
+mean dark time and r) and the plots ``<file name>_dye_performance.png``.
+
+.. code-block:: bash
+
+   picasso dye-performance files [-p picks.yaml] [-t max_dark_time] [--cutoff c] [--fraction f]
+
+For example, for the docking sites picked in ``sites_picks.yaml``:
+
+.. code-block:: bash
+
+   picasso dye-performance locs.hdf5 -p sites_picks.yaml
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-p``, ``--picks`` (path)
+     - none
+     - A picks file (.yaml) with one docking site per pick. Without it, each
+       group of the localizations is a docking site.
+   * - ``-t``, ``--max-dark-time`` (int)
+     - ``0``
+     - The largest number of frames without a localization within a binding
+       event; ``0`` links only localizations in consecutive frames, as Steen
+       et al.
+   * - ``--cutoff`` (float)
+     - ``4``
+     - The cut-off of the ratio r (frames after the last localization over
+       the mean dark time) for destroyed sites, in units of its fitted mean.
+   * - ``--fraction`` (float)
+     - ``0.2``
+     - The fraction of the frames at the beginning and at the end compared
+       for the localization drop.
+
+.. _cmd-knn-density:
+
+knn-density
+-----------
+Density of molecules fitted to the distances to their k nearest neighbors
+(Thompson, Ecology, 1956, DOI: `10.2307/1933159
+<https://doi.org/10.2307/1933159>`__), for each order k separately and pooled,
+and whether the molecules are randomly distributed: for random molecules, all
+orders give the same density, for clustered ones, it decreases with k. The
+p-value of each order compares the distances with the fitted distribution
+against random simulations in the same regions. Computed in 2D or, with
+``--3d``, in 3D, in the picks given with ``-p`` or in the whole field of view,
+with the distances beyond the region boundary corrected for. The files should
+contain molecules, see `ripley-h`_. See :ref:`render-knn-density` for details.
+
+Prints the densities and saves next to each file ``<file
+name>_knn_density.csv`` (the distributions of the distances of each order,
+measured and for random molecules at the fitted density), ``<file
+name>_knn_density_densities.csv`` (the density of each order, pooled and the
+number of molecules per area, per um^2 or, in 3D, per um^3, with the standard
+errors, p-values and numbers of distances) and the plot ``<file
+name>_knn_density.png``.
+
+.. code-block:: bash
+
+   picasso knn-density files [-p picks] [-k k_max] [--k-min k_min] [--r-min r_min] [-n simulations] [--no-edge-correction] [--3d] [--z-range zmin zmax]
+
+For example, in the picks saved in Render, leaving out distances below 10 nm:
+
+.. code-block:: bash
+
+   picasso knn-density molecules.hdf5 -p picks.yaml --r-min 10
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-p``, ``--picks`` (str)
+     - whole field of view
+     - Picks (.yaml) saved in Render; the regions of interest in which the
+       neighbors are searched.
+   * - ``-k``, ``--k-max`` (int)
+     - ``5``
+     - The highest order of the neighbors.
+   * - ``--k-min`` (int)
+     - ``1``
+     - The lowest order of the pooled density, e.g., ``2`` to leave out the
+       nearest neighbors.
+   * - ``--r-min`` (float)
+     - ``0``
+     - The shortest distance to a neighbor used (nm); shorter ones are left
+       out, e.g., molecules counted twice.
+   * - ``-n``, ``--simulations`` (int)
+     - ``99``
+     - The number of random simulations for the p-values and standard errors,
+       ``0`` to skip them.
+   * - ``--no-edge-correction``
+     - off
+     - Use the distances as measured, also those longer than the distance to
+       the region boundary.
+   * - ``--3d``
+     - off
+     - Measure the distances in 3D (x, y and z); requires z. The densities
+       are then per volume.
+   * - ``--z-range`` (float float)
+     - z of each region
+     - The z range (nm) over which the regions extend in 3D.
+
+.. _cmd-pick-similar:
+
+pick-similar
+------------
+Picks similar structures in one or more localization files and saves the picks
+next to each file as ``<file name>_pick_similar.yaml``, which Render loads with
+``File > Load picks``. Give exactly one of:
+
+``-p``, ``--picks``
+   Seed picks saved in Render: the picks similar to them in the number of
+   localizations and the RMSD are found, as with
+   :ref:`Pick similar <render-pick-similar>`. The file holds the seed picks
+   followed by the new ones.
+``--n-locs-range``, ``--rmsd-range``
+   Without seed picks: the candidate circular picks of diameter ``-d`` whose
+   number of localizations and/or RMSD lie within the ranges, as
+   :ref:`render-pick-by-n-locs-rmsd` finds them.
+``--classes``
+   Without seed picks: the classes of structures among the candidates, by
+   their number of localizations and RMSD. The classes are printed, and the
+   picks within the ranges of each are saved to
+   ``<file name>_pick_similar_class<number>.yaml``.
+
+.. code-block:: bash
+
+   picasso pick-similar files (-p picks [-s std_range] | -d pick_size (--n-locs-range min max | --rmsd-range min max | --classes)) [--min-n-locs n] [--save-candidates]
+
+For example, the structures with 400 to 1000 localizations within an RMSD of
+35 to 50 nm, in picks of 150 nm:
+
+.. code-block:: bash
+
+   picasso pick-similar locs.hdf5 -d 150 --n-locs-range 400 1000 --rmsd-range 35 50
+
+.. list-table::
+   :header-rows: 1
+   :widths: 25 15 60
+
+   * - Option
+     - Default
+     - Description
+   * - ``-p``, ``--picks`` (str)
+     -
+     - Seed picks (.yaml) saved in Render: circles, squares, rectangles or
+       boxes.
+   * - ``-s``, ``--std-range`` (float)
+     - ``2``
+     - With ``--picks``, the range around the mean of the seed picks, in
+       standard deviations.
+   * - ``-d``, ``--pick-size`` (float)
+     -
+     - Without ``--picks``, the diameter (nm) of the circular picks.
+   * - ``--n-locs-range`` (float float)
+     - no limit
+     - The minimum and maximum number of localizations of the picks.
+   * - ``--rmsd-range`` (float float)
+     - no limit
+     - The minimum and maximum RMSD (nm) of the picks.
+   * - ``--classes``
+     - off
+     - Find the classes and save the picks of each to its own file.
+   * - ``--min-n-locs`` (int)
+     - 1% of the frames
+     - Without ``--picks``, the minimum number of localizations of a
+       candidate pick, at least the minimum of ``--n-locs-range``. The
+       background forms many candidates of a few localizations, which can
+       outnumber the structures and exclude those they overlap.
+   * - ``--save-candidates``
+     - off
+     - Without ``--picks``, also save the candidates with their number of
+       localizations and RMSD (and class, numbered from 1, 0 for none) to
+       ``<file name>_pick_similar_candidates.csv``.
 
 .. _cmd-plugins:
 

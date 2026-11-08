@@ -13,7 +13,7 @@ their shortcuts or from a terminal with ``picasso <module>`` (for example
 
 .. tip::
 
-   We provide an example dataset showing 20 nm grid DNA origami. It's a cropped movie from `Strauss and Jungmann. Nature Methods, 2020 <https://doi.org/10.1038/s41592-020-0869-x>`_ (Fig 2b, R6). You can practice all the steps listed below on this experimental dataset. Download the file from this `link <https://zenodo.org/records/23318677>`_. Use ``EM Gain = 1``, ``Sensitivity = 0.53``, ``Baseline = 100`` and ``Pixel size = 130``.
+   We provide an example dataset showing 20 nm grid DNA origami. It's a cropped movie from `Strauss and Jungmann. Nature Methods, 2020 <https://doi.org/10.1038/s41592-020-0869-x>`_ (Fig 2b, R6). You can practice all the steps listed below on this experimental dataset. Download ``example_movie.tif`` from this `Zenodo record <https://doi.org/10.5281/zenodo.23669134>`_ (the record holds other files as well; only ``example_movie.tif`` is needed here). Use ``EM Gain = 1``, ``Sensitivity = 0.53``, ``Baseline = 100`` and ``Pixel size = 130``.
 
 .. rubric:: Key words used on this page
 
@@ -300,9 +300,10 @@ then uses it for every measurement.
 1. In ``Analyze > Parameters...``, click ``Load calibration`` in the 3D group
    and select the ``_3d_calib.yaml`` file. ``Fit Z`` is ticked automatically.
 2. Keep the ``Magnification factor`` at its default of 0.79 unless you know
-   the value for your sample. It corrects z for the different refractive
-   indices of the immersion oil and the sample (`Huang et al., Science, 2008
-   <https://doi.org/10.1126/science.1153529>`__).
+   the value for your sample, or estimate it with ``Calculate...`` next to it
+   (see :ref:`localize-magnification-factor`). It corrects z for the
+   different refractive indices of the immersion oil and the sample (`Huang
+   et al., Science, 2008 <https://doi.org/10.1126/science.1153529>`__).
 3. Keep the model ``2D elliptical Gaussian`` and localize as usual. The
    localizations get an extra ``z`` column, in nm.
 
@@ -393,8 +394,8 @@ structure is smeared along the path of the drift.
 3. Save the corrected localizations with ``File > Save localizations...``
    (``<file>_render.hdf5``). Use this file for all further analysis.
 
-The drift is also saved as a ``.txt`` file, and ``Postprocess > Undo drift``
-reverts the correction.
+The drift is also saved as a ``.txt`` file, and ``File > Undo``
+(:kbd:`Ctrl+Z`) reverts the correction.
 
 More: :doc:`/render/drift`, including a second correction round using
 structures in the image as markers, which can refine the result further.
@@ -407,7 +408,9 @@ DNA origami, or single binding sites, for closer inspection and further analysis
 
 1. Select ``Tools > Pick``. The cursor becomes a circle.
 2. In ``Tools > Tools settings...``, set the ``Diameter (nm)`` of the circle
-   so that it covers what you want to pick (the default is 100 nm).
+   so that it covers what you want to pick (the default is 100 nm). Set it
+   before clicking: each pick keeps the diameter it was drawn with, and
+   ``Apply to all`` gives the existing picks the new value.
 3. Left-click on the structures you want to pick. A right click inside a pick
    removes it.
 4. (Optional) ``Tools > Pick similar`` picks all other structures that look

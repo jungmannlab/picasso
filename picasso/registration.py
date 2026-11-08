@@ -44,6 +44,11 @@ That shared part is public API rather than module-private:
 :func:`frames_in_bounds`          the frame indices a bound allows
 ================================  =============================================
 
+Apart from the channels, :func:`register_to_template` registers a set of
+points onto a template without known correspondences (e.g., the docking
+sites resolved in a DNA origami onto its design), with a rigid transform
+that may reflect. It works in any unit, unlike the channel registration.
+
 :authors: Rafal Kowalewski
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
 """
@@ -56,6 +61,7 @@ from itertools import combinations
 from typing import Callable, Literal
 
 import numpy as np
+from scipy.optimize import linear_sum_assignment
 from scipy.spatial import KDTree
 
 from . import io, lib, localize
@@ -67,6 +73,7 @@ from . import transforms as tform
 __all__ = [
     "calibrate_channel_registration_from_beads",
     "calibrate_channel_registration_from_signal",
+    "register_to_template",
 ]
 
 #: ``model`` of the standalone channel-registration calibration, so it can be
@@ -111,12 +118,12 @@ def _icp_model(model: str) -> str:
     """The model the ICP machinery works in for a registration finally fitted
     with ``model``.
 
-    An affine, except for a translation: that is the one model *below* an
-    affine, so falling back to an affine would loosen the fit rather than
-    steady it, and the affine's 3-point minimum would reject pairings a
-    translation handles.
+    An affine, except for a translation or a rigid transform: those are
+    the models *below* an affine, so falling back to an affine would loosen
+    the fit rather than steady it, and the affine's 3-point minimum would
+    reject pairings they handle.
     """
-    return "translation" if model == "translation" else "affine"
+    return model if model in ("translation", "rigid") else "affine"
 
 
 def _icp_min_pairs(model: str) -> int:
@@ -138,11 +145,11 @@ def fit_registration(
     """Fit one ICP iteration's transform.
 
     Intermediate iterations (``final=False``) always fit an affine - a
-    translation, when that is what was asked for - however flexible ``model``
-    is: the early pairing is deliberately loose and contains cross-molecule
-    mismatches, and a flexible model bends to accommodate them,
-    locking in the wrong correspondence field on the next pass - a failure an
-    affine cannot have. Only the final iteration, which pairs at the tightest
+    translation or a rigid transform, when that is what was asked for -
+    however flexible ``model`` is: the early pairing is deliberately loose
+    and contains cross-molecule mismatches, and a flexible model bends to
+    accommodate them, locking in the wrong correspondence field on the next
+    pass - a failure an affine cannot have. Only the final iteration, which pairs at the tightest
     radius, fits the model the user asked for.
 
     Parameters
@@ -1723,3 +1730,328 @@ def calibrate_channel_registration_from_signal(
     if path:
         io.save_any_calibration(path, calibration)
     return calibration
+
+
+# ---------------------------------------------------------------------------
+# Registration onto a template
+# ---------------------------------------------------------------------------
+
+#: The reflection of the mirrored orientations, ``y -> -y``, as in
+#: ``transforms.RigidTransform``.
+_MIRROR_Y = np.diag([1.0, -1.0])
+
+
+def register_to_template(
+    points,
+    template,
+    *,
+    mirror: bool = True,
+    gate: float | None = None,
+    angle_step: float = 2.0,
+    n_seeds: int = 4,
+    max_iter: int = 20,
+) -> dict:
+    """Register points onto a template without known correspondences:
+    the rigid transform (a rotation and a shift, optionally with a
+    reflection) that maps as many points as possible onto distinct
+    template points.
+
+    For example, the docking sites resolved in a DNA origami onto the
+    sites of its design, in any orientation, with sites missing (not
+    incorporated) or extra (unspecific binding).
+
+    The orientation is searched first: the points are rotated in steps of
+    ``angle_step`` (and mirrored, if ``mirror``), and each orientation is
+    scored by the optimal one-to-one matching of the points to the
+    template points within ``gate``
+    (``scipy.optimize.linear_sum_assignment``): the most matched pairs,
+    then the smallest root mean square distance (RMSE) of the pairs. Each
+    orientation is shifted two ways, of which the better scores: its
+    center of mass onto the template's, and by the shift most
+    point-template pairs agree on (the densest differences of their
+    coordinates), which missing or extra points do not move. The
+    ``n_seeds`` best orientations are refined by iterative closest points
+    (ICP) with the rigid fit of the matched pairs (see
+    ``transforms.estimate``), and the best refinement is returned. A
+    symmetric template (e.g., a grid) maps onto itself in several
+    orientations, which register equally well; the first found is
+    returned.
+
+    The method was written by Heinrich Grabmayr for picasso-workflow
+    (https://github.com/jungmannlab/picasso-workflow). Here, the matching
+    takes the most pairs within the gate, rather than gating the pairs of
+    a matching that ignores it, the orientations are also shifted by the
+    shift the pairs agree on rather than only by the centers of mass, and
+    the transform maps onto the template as given rather than onto the
+    template centered at the origin.
+
+    Parameters
+    ----------
+    points : array
+        ``(n, 2)`` coordinates of the points to register.
+    template : array
+        ``(m, 2)`` coordinates of the template points (at least 2), in
+        the same unit.
+    mirror : bool, optional
+        Whether the mirrored orientations are searched as well. Default
+        is True.
+    gate : float, optional
+        Largest distance of a matched pair, in the unit of the
+        coordinates. Default is None: half the median distance of the
+        template points to their nearest neighbor.
+    angle_step : float, optional
+        Step of the orientations searched, in degrees. Default is 2.0.
+    n_seeds : int, optional
+        Number of the best orientations refined by ICP. Default is 4.
+    max_iter : int, optional
+        Maximum number of ICP iterations per orientation. Default is 20.
+
+    Returns
+    -------
+    result : dict
+        "transform" (``transforms.RigidTransform`` mapping ``points``
+        onto ``template``, None if no pair matched), "point_indices" and
+        "template_indices" (the matched pairs, in the order of the
+        points), "n_matched" and "rmse" (of the matched pairs after the
+        transform, NaN if none matched).
+
+    Raises
+    ------
+    ValueError
+        If the coordinates are not ``(n, 2)``, the template has fewer
+        than 2 points, or ``gate`` or ``angle_step`` are not positive.
+
+    Examples
+    --------
+    A 3 x 4 grid of sites 20 nm apart, rotated and shifted, with one site
+    missing:
+
+    >>> template = np.array(
+    ...     [(x, y) for x in range(0, 80, 20) for y in range(0, 60, 20)],
+    ...     dtype=float,
+    ... )
+    >>> moved = transforms.RigidTransform.from_params(35.0, (500.0, 300.0))
+    >>> result = registration.register_to_template(
+    ...     moved.apply(template[1:]), template
+    ... )
+    >>> result["n_matched"], round(result["rmse"], 3)
+    (11, 0.0)
+    """
+    points = _as_point_array(points, "points")
+    template = _as_point_array(template, "template")
+    if len(template) < 2:
+        raise ValueError(
+            "The template needs at least 2 points to fix a rotation, got "
+            f"{len(template)}."
+        )
+    if not angle_step > 0:
+        raise ValueError(f"angle_step must be positive, got {angle_step}.")
+    if gate is None:
+        gate = 0.5 * _median_nn_distance(template)
+    if not gate > 0:
+        raise ValueError(
+            f"gate must be positive, got {gate} (the default is 0 for a "
+            "template whose points coincide)."
+        )
+    best = None
+    if len(points) >= 2:
+        orientations = _template_orientations(
+            points, template, mirror, gate, angle_step
+        )
+        for mirrored, matrix in orientations[: max(1, int(n_seeds))]:
+            src = points @ _MIRROR_Y if mirrored else points
+            matrix, rows, cols, distances = _icp_rigid(
+                src, template, matrix, gate, max_iter
+            )
+            key = (len(rows), -_rms(distances))
+            if best is None or key > best[0]:
+                best = (key, mirrored, matrix, rows, cols, distances)
+    if best is None or best[0][0] == 0:
+        empty = np.empty(0, dtype=np.int64)
+        return {
+            "transform": None,
+            "point_indices": empty,
+            "template_indices": empty.copy(),
+            "n_matched": 0,
+            "rmse": np.nan,
+        }
+    _, mirrored, matrix, rows, cols, distances = best
+    if mirrored:
+        # the fit maps the mirrored points: reflect them first
+        matrix = matrix @ np.diag([1.0, -1.0, 1.0])
+    return {
+        "transform": tform.RigidTransform(matrix=matrix),
+        "point_indices": rows.astype(np.int64),
+        "template_indices": cols.astype(np.int64),
+        "n_matched": int(len(rows)),
+        "rmse": _rms(distances),
+    }
+
+
+def _as_point_array(xy, name: str) -> np.ndarray:
+    """``xy`` as a ``(n, 2)`` float array, or a ValueError."""
+    xy = np.asarray(xy, dtype=np.float64)
+    if xy.ndim != 2 or xy.shape[1] != 2:
+        raise ValueError(
+            f"{name} must be (n, 2) coordinates, got shape {xy.shape}."
+        )
+    return xy
+
+
+def _median_nn_distance(xy: np.ndarray) -> float:
+    """Median distance of the points to their nearest neighbor."""
+    distances, _ = KDTree(xy).query(xy, k=2)
+    return float(np.median(distances[:, 1]))
+
+
+def _rms(distances: np.ndarray) -> float:
+    """Root mean square of ``distances``; infinite if empty."""
+    if not len(distances):
+        return np.inf
+    return float(np.sqrt(np.mean(distances**2)))
+
+
+def _rigid_matrix(rotation: np.ndarray, shift: np.ndarray) -> np.ndarray:
+    """The ``(3, 3)`` homogeneous matrix of a rotation and a shift."""
+    matrix = np.eye(3)
+    matrix[:2, :2] = rotation
+    matrix[:2, 2] = shift
+    return matrix
+
+
+def _match_within_gate(
+    xy: np.ndarray, template: np.ndarray, gate: float
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """The optimal one-to-one matching of ``xy`` to ``template`` with the
+    most pairs closer than ``gate``, then the smallest total distance:
+    ``(rows, cols, distances)`` of those pairs, ordered by ``rows``."""
+    cost = np.hypot(
+        xy[:, None, 0] - template[None, :, 0],
+        xy[:, None, 1] - template[None, :, 1],
+    )
+    within = cost <= gate
+    if not within.any():
+        empty = np.empty(0, dtype=np.int64)
+        return empty, empty.copy(), np.empty(0)
+    # a pair beyond the gate costs more than all pairs within it together,
+    # so the matching first takes as many pairs within the gate as it can
+    penalty = (min(cost.shape) + 1) * gate + 1.0
+    rows, cols = linear_sum_assignment(np.where(within, cost, penalty))
+    keep = within[rows, cols]
+    return rows[keep], cols[keep], cost[rows[keep], cols[keep]]
+
+
+def _template_orientations(
+    points: np.ndarray,
+    template: np.ndarray,
+    mirror: bool,
+    gate: float,
+    angle_step: float,
+) -> list[tuple[bool, np.ndarray]]:
+    """The orientations of ``points`` searched by ``register_to_template``,
+    best first: ``(mirrored, matrix)`` with the rigid matrix that maps the
+    (mirrored) points, centered on the template, onto it."""
+    center = template.mean(axis=0)
+    scored = []
+    for mirrored in (False, True) if mirror else (False,):
+        src = points @ _MIRROR_Y if mirrored else points
+        src_center = src.mean(axis=0)
+        for angle in np.radians(np.arange(0.0, 360.0, angle_step)):
+            rotation = np.array(
+                [
+                    [np.cos(angle), -np.sin(angle)],
+                    [np.sin(angle), np.cos(angle)],
+                ]
+            )
+            rotated = src @ rotation.T
+            # the shift that moves the center of mass onto the template's,
+            # and the one most point-template pairs agree on, which missing
+            # or extra points do not move
+            centered = center - rotation @ src_center
+            for shift in (centered, _voted_shift(rotated, template, gate)):
+                rows, _, distances = _match_within_gate(
+                    rotated + shift, template, gate
+                )
+                key = (len(rows), -_rms(distances))
+                scored.append((key, mirrored, _rigid_matrix(rotation, shift)))
+    # stable: equally good orientations keep their order
+    scored.sort(key=lambda item: item[0], reverse=True)
+    return [(mirrored, matrix) for _, mirrored, matrix in scored]
+
+
+def _voted_shift(
+    xy: np.ndarray, template: np.ndarray, gate: float
+) -> np.ndarray:
+    """The shift of ``xy`` that most point-template pairs agree on.
+
+    The differences of all pairs are binned in bins of ``gate``; the 2 x 2
+    block of bins that holds most of them (2 gates wide) is where the
+    differences of the matching pairs gather, and its median is the
+    shift."""
+    differences = (template[None, :, :] - xy[:, None, :]).reshape(-1, 2)
+    bins = np.floor((differences - differences.min(axis=0)) / gate)
+    bins = bins.astype(np.int64)
+    stride = int(bins[:, 1].max()) + 2
+    keys = bins[:, 0] * stride + bins[:, 1]
+    occupied, counts = np.unique(keys, return_counts=True)
+
+    def count(key):
+        index = np.minimum(np.searchsorted(occupied, key), len(occupied) - 1)
+        return np.where(occupied[index] == key, counts[index], 0)
+
+    # each occupied bin as the lower corner of a 2 x 2 block
+    blocks = (
+        counts
+        + count(occupied + 1)
+        + count(occupied + stride)
+        + count(occupied + stride + 1)
+    )
+    corner = occupied[np.argmax(blocks)]
+    in_block = (
+        (keys == corner)
+        | (keys == corner + 1)
+        | (keys == corner + stride)
+        | (keys == corner + stride + 1)
+    )
+    return np.median(differences[in_block], axis=0)
+
+
+def _icp_rigid(
+    src: np.ndarray,
+    template: np.ndarray,
+    matrix: np.ndarray,
+    gate: float,
+    max_iter: int,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Refine the rigid ``matrix`` mapping ``src`` onto ``template`` by
+    iterative closest points, as long as the matching improves:
+    ``(matrix, rows, cols, distances)`` of the best one."""
+
+    def match(matrix):
+        moved = src @ matrix[:2, :2].T + matrix[:2, 2]
+        return _match_within_gate(moved, template, gate)
+
+    rows, cols, distances = match(matrix)
+    for _ in range(max_iter):
+        if len(rows) < 2:
+            break
+        try:
+            fitted, _ = fit_registration(
+                src[rows], template[cols], "rigid", final=False
+            )
+        except ValueError:  # coincident points fix no rotation
+            break
+        new_rows, new_cols, new_distances = match(fitted.matrix)
+        if (len(new_rows), -_rms(new_distances)) < (
+            len(rows),
+            -_rms(distances),
+        ):
+            break
+        converged = np.array_equal(new_rows, rows) and np.array_equal(
+            new_cols, cols
+        )
+        matrix = fitted.matrix
+        rows, cols, distances = new_rows, new_cols, new_distances
+        if converged:
+            break
+    return matrix, rows, cols, distances

@@ -12,6 +12,7 @@ Graphical user interface for localizing single molecules.
 from __future__ import annotations
 
 import glob
+import math
 import os.path
 import re
 import sys
@@ -27,6 +28,7 @@ import pandas as pd
 import imageio
 from .. import (
     aim,
+    axial_scaling,
     CONFIG,
     imageprocess,
     io,
@@ -37,6 +39,7 @@ from .. import (
     notifications,
     postprocess,
     registration,
+    render,
     scmos,
     spline,
     vectorfit,
@@ -49,14 +52,54 @@ from .. import (
 # aliased: `transforms` is used as a local name for lists of channel
 # transforms throughout this module
 from .. import transforms as transforms_mod
-from ..fitting import precision, splinefit
+from ..fitting import precision, residualfit, splinefit
 from .app import run_gui
 from . import theme
 from . import toolbars
+from .scalebar_settings import ScaleBarOptions
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 CUDA_AVAILABLE = localize.CUDA_AVAILABLE
 CMAP_GRAYSCALE = [QtGui.qRgb(_, _, _) for _ in range(256)]
+
+
+def _bar_toggle_button(text: str, tooltip: str) -> QtWidgets.QToolButton:
+    """A small checkable button for the bar below the movie (next to the
+    contrast slider), colored from the palette so that it follows the
+    theme."""
+    button = QtWidgets.QToolButton()
+    button.setText(text)
+    button.setToolTip(tooltip)
+    button.setCheckable(True)
+    font = button.font()
+    font.setPointSizeF(font.pointSizeF() * 0.8)
+    button.setFont(font)
+    button.setStyleSheet(
+        """
+        QToolButton {
+            border: 1px solid palette(mid);
+            border-radius: 3px;
+            padding: 0px 4px;
+            background: transparent;
+        }
+        QToolButton:checked {
+            border-color: palette(highlight);
+            background: palette(highlight);
+            color: palette(highlighted-text);
+        }
+        QToolButton:disabled {
+            border-color: palette(midlight);
+            color: palette(mid);
+        }
+        QToolButton:checked:disabled {
+            background: palette(midlight);
+        }
+        """
+    )
+    button.setFixedHeight(max(15, button.fontMetrics().height() + 2))
+    return button
+
+
 # Frames sampled to size the contrast slider's track. Kept small: with
 # the temporal median on, reading one frame reads a whole window.
 CONTRAST_SLIDER_SAMPLES = 10
@@ -146,6 +189,7 @@ IMAGE_FILTER = (
     ";;Zeiss LSM (*.lsm)"
     ";;Zeiss CZI (*.czi)"
     ";;Leica LIF (*.lif)"
+    ";;PicoQuant PTU (*.ptu)"
     ";;ImaRIS IMS (*.ims)"
     ";;Nd2 files (*.nd2)"
     ";;STK files (*.stk)"
@@ -195,6 +239,7 @@ _SUM_REGISTRATION_MAX_FRAMES = 200
 # a separate field, so the combo carries one value - see picasso.transforms.
 _TRANSFORM_MODELS = [
     ("Translation (2 DOF, >= 1 pair)", "translation"),
+    ("Rigid (3 DOF, >= 2 pairs)", "rigid"),
     ("Affine (6 DOF, >= 3 pairs)", "affine"),
     ("Projective (8 DOF, >= 4 pairs)", "projective"),
     ("Polynomial, degree 2 (>= 6 pairs)", "polynomial2"),
@@ -206,6 +251,8 @@ _TRANSFORM_MODEL_TOOLTIP = (
     "  Translation: a shift in x and y and nothing else - for frames that\n"
     "    are known to differ only by an offset. Any rotation or scale then\n"
     "    shows up in the residual instead of being absorbed.\n"
+    "  Rigid: a rotation and a shift - for frames that differ in neither\n"
+    "    scale nor shear.\n"
     "  Affine: translation, rotation, scale and shear - the default, and\n"
     "    what a well-aligned splitter does to first order.\n"
     "  Projective: adds the perspective/keystone term a tilted dichroic or\n"
@@ -325,6 +372,20 @@ GAUSS_LINK_PHOTONS_TIP = (
     "CHECKED: one photon count and background shared by every channel."
 )
 
+# The fit model that fits overlapping emitters, frame by frame; it finds
+# the spots itself, so it needs no identification.
+MULTI_EMITTER_MODEL = "Overlapping emitters (3D-DAOSTORM)"
+# its code in ``FIT_MODELS``
+MULTI_EMITTER_CODE = "multi-emitter"
+# its PSF models (``localize.MultiEmitterParameters.psf_model``), by the
+# names the Parameters dialog shows
+MULTI_EMITTER_PSF_MODELS = {
+    "Fixed sigma": "fixed",
+    "Fitted sigma": "spherical",
+    "Fitted sx and sy (astigmatic 3D)": "elliptical",
+    "Experimental PSF (cubic spline)": "spline",
+}
+
 # Fitting models offered in the GUI, decoupled from the optimizer. Each
 # model maps its optimizer labels to the internal ``fit`` codes;
 # models without an optimizer (e.g. averaging) declare a fixed ``code``
@@ -346,6 +407,12 @@ FIT_MODELS = {
             "MLE": "gaussmle-spherical",
         },
         "needs_channel_registration": True,
+    },
+    # not a ``localize.fit`` method: it finds the spots itself and runs
+    # ``localize.localize_multi_emitter`` (see Window.fit)
+    MULTI_EMITTER_MODEL: {
+        "optimizers": {"MLE": MULTI_EMITTER_CODE},
+        "multi_emitter": True,
     },
     "Experimental PSF (cubic spline)": {
         "optimizers": {
@@ -380,6 +447,13 @@ MODEL_TOOLTIP = (
     "Useful for tilted/anisotropic PSFs.\n\n"
     "2D spherical Gaussian:\n"
     "Gaussian with one common width for x and y.\n\n"
+    "Overlapping emitters (3D-DAOSTORM):\n"
+    "Fits all emitters of a frame at once, so that emitters closer than\n"
+    "about 2 PSF sigma are localized separately. Finds the spots itself\n"
+    "(no identification), with a Gaussian PSF whose sigma is fixed for\n"
+    "the movie or fitted per emitter, or a spline PSF (PSF model). For\n"
+    "2D data with emitters in focus, e.g., DNA-PAINT at high imager\n"
+    "concentration, and 3D data. MLE on the CPU.\n\n"
     "Experimental PSF (cubic spline):\n"
     "Fits a cubic spline interpolation of a measured 3D PSF\n"
     "(requires a spline calibration file).\n"
@@ -492,6 +566,42 @@ def _filtered_identification_movie(
     else:
         gaussian = None
     return movie, [temporal, gaussian]
+
+
+def _compile_multi_emitter_fit() -> None:
+    """Compile the multi-emitter fit, or load it from numba's cache.
+
+    A fresh install compiles it for about ten seconds, which the first
+    preview would spend with the window frozen; run on a thread when the
+    model is first selected, this happens in the background instead. A
+    preview started meanwhile waits for numba's compiler lock rather than
+    compiling a second time."""
+    rng = np.random.default_rng(0)
+    frame = rng.poisson(20, (24, 24)).astype(np.float64)
+    frame[10:13, 10:13] += 200
+    sigma = 1.0
+    pad = residualfit.padding(sigma)
+    padded = np.pad(frame, pad, mode="symmetric")
+    mask = np.ones(padded.shape, dtype=bool)
+    empty = np.empty(0, dtype=np.int64)
+    residualfit.analyze_frame(
+        padded,
+        np.zeros((1, 1)),
+        False,
+        mask,
+        empty,
+        empty,
+        sigma,
+        # one compilation serves every PSF model
+        residualfit.PSF_MODELS["fixed"],
+        6.0,
+        2,
+        5.0,
+        8.0,
+        residualfit.NO_SPLINE,
+    )
+    residualfit.find_peaks(padded, mask, sigma, 6.0, 5.0, 8.0)
+    residualfit.fit_free_sigma(frame[None, 8:15, 8:15])
 
 
 def _outliers_note(info: list[dict]) -> str:
@@ -648,9 +758,8 @@ def _region_fit_summary(params: dict) -> list[tuple[str, str]]:
     ]
 
 
-def _sanitize_filename(name: str) -> str:
-    """Turn a channel name into a filename-safe suffix."""
-    return re.sub(r"[^A-Za-z0-9._-]+", "_", str(name)).strip("_") or "channel"
+# a channel name as a filename-safe suffix, shared with the command line
+_sanitize_filename = io._sanitize_filename
 
 
 def _format_mng(minimum_ng: float | list) -> str:
@@ -872,10 +981,15 @@ class MovieLoadWorker(QtCore.QObject):
         prompt_for_path,
         load_all: bool = False,
         concat: bool = False,
+        ptu_options: dict | None = None,
     ) -> None:
         super().__init__()
         self.paths = paths
         self._prompt_for_path = prompt_for_path
+        # loader keywords of photon-counting movies (.ptu): frame sums and
+        # microtime gates (``PTUOptionsDialog.options``); None keeps every
+        # scan frame and photon.
+        self.ptu_options = ptu_options
         # When True, each path is read with ``io.load_movie_all`` (every
         # channel of one multichannel file); otherwise ``io.load_movie``
         # loads one channel per file.
@@ -939,9 +1053,12 @@ class MovieLoadWorker(QtCore.QObject):
                 return []
             movie, info = result
             return [(movie, info, path)]
-        elif self.load_all:
+        options = {}
+        if self.ptu_options is not None and path.lower().endswith(".ptu"):
+            options = dict(self.ptu_options)
+        if self.load_all:
             result = io.load_movie_all(
-                path, prompt_info=prompt, progress=report
+                path, prompt_info=prompt, progress=report, **options
             )
             if result is None:
                 return []
@@ -951,7 +1068,9 @@ class MovieLoadWorker(QtCore.QObject):
                 for movie, info in zip(file_movies, file_infos)
             ]
         else:
-            result = io.load_movie(path, prompt_info=prompt, progress=report)
+            result = io.load_movie(
+                path, prompt_info=prompt, progress=report, **options
+            )
             if result is None:
                 return []
             movie, info = result
@@ -1351,14 +1470,22 @@ class View(QtWidgets.QGraphicsView):
         self.window.zoom(scale, anchor=event.position().toPoint())
 
     def on_scroll(self) -> None:
-        """Redraw the frame if scale bar is shown."""
-        # draw_frame() rebuilds the scene, which can change the scrollbar
-        # values and re-fire valueChanged; skip while a draw is in progress
-        # to avoid unbounded re-entrant recursion.
-        if self.window._drawing_frame:
-            return
-        if self.window.scalebar_action.isChecked():
-            self.window.draw_frame()
+        """Repaint the scale bar and the lifetime color bar, if shown:
+        they stay in place while the frame scrolls."""
+        if (
+            self.window.scalebar_action.isChecked()
+            or self.window.lifetime_shown()
+        ):
+            self.viewport().update()
+
+    def drawForeground(
+        self, painter: QtGui.QPainter, rect: QtCore.QRectF
+    ) -> None:
+        """Paint the scale bar and the lifetime color bar, if shown, over
+        the frame."""
+        super().drawForeground(painter, rect)
+        self.window.paint_scalebar(painter)
+        self.window.paint_lifetime_legend(painter)
 
 
 class Scene(QtWidgets.QGraphicsScene):
@@ -1415,8 +1542,16 @@ def format_hover_tooltip(row: pd.Series) -> str:
     return "\n".join(lines)
 
 
+#: Color of the marker of an emitter fitted together with neighbors
+#: (sky blue of the Okabe-Ito palette, which stays apart from the green of
+#: the single-emitter marker for every form of color blindness).
+OVERLAPPING_MARKER_COLOR = QtGui.QColor(86, 180, 233)
+
+
 class FitMarker(QtWidgets.QGraphicsItemGroup):
-    """Marker showing fitted position."""
+    """Marker showing fitted position: a green x, or, for an emitter of a
+    multi-emitter fit with neighbors (``overlapping``), a sky blue +, so
+    that the color is not the only cue."""
 
     def __init__(
         self,
@@ -1424,14 +1559,21 @@ class FitMarker(QtWidgets.QGraphicsItemGroup):
         y: float,
         size: float,
         parent: QtWidgets.QWidget | None = None,
+        overlapping: bool = False,
     ) -> None:
         super().__init__(parent)
         L = size / 2
-        line1 = QtWidgets.QGraphicsLineItem(x - L, y - L, x + L, y + L)
-        line1.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0)))
+        if overlapping:
+            color = OVERLAPPING_MARKER_COLOR
+            line1 = QtWidgets.QGraphicsLineItem(x - L, y, x + L, y)
+            line2 = QtWidgets.QGraphicsLineItem(x, y - L, x, y + L)
+        else:
+            color = QtGui.QColor(0, 255, 0)
+            line1 = QtWidgets.QGraphicsLineItem(x - L, y - L, x + L, y + L)
+            line2 = QtWidgets.QGraphicsLineItem(x - L, y + L, x + L, y - L)
+        line1.setPen(QtGui.QPen(color))
         self.addToGroup(line1)
-        line2 = QtWidgets.QGraphicsLineItem(x - L, y + L, x + L, y - L)
-        line2.setPen(QtGui.QPen(QtGui.QColor(0, 255, 0)))
+        line2.setPen(QtGui.QPen(color))
         self.addToGroup(line2)
 
 
@@ -1975,6 +2117,763 @@ class PromptChannelDialog(lib.Dialog):
         return channel, result == QtWidgets.QDialog.DialogCode.Accepted
 
 
+class PTUOptionsDialog(lib.Dialog):
+    """Dialog asking how a photon-counting movie (PicoQuant .ptu confocal
+    scan) is opened, see ``io.load_movie``: how many scan frames are
+    summed into one frame, and the microtime gates that split each
+    detector into channels (e.g., one per laser of pulsed interleaved
+    excitation). The decay histogram of the file shows where the photons
+    arrive; dragging over it adds a gate. The choices are remembered in
+    the user settings."""
+
+    SETTINGS_KEY = "PTU options"
+    WINDOW_TOOLTIP = (
+        "Number of consecutive scan frames summed into one frame.\n"
+        "Confocal scan frames are often too dim to localize one by one;"
+        "\n1 keeps every scan frame."
+    )
+    STRIDE_TOOLTIP = (
+        "Number of scan frames between the starts of two sums.\n"
+        "Equal to 'Frames to sum': the sums do not overlap and every "
+        "photon is used once.\n1: a sliding window, i.e., every scan "
+        "frame starts a new sum, so a binding event\nis localized in "
+        "several overlapping frames."
+    )
+    GATES_TOOLTIP = (
+        "Microtime gates: ranges of photon arrival times after the sync\n"
+        "(laser) pulse, in ns. Each detector gives one channel per gate,\n"
+        "holding only the photons within it, e.g., one gate per laser of\n"
+        "pulsed interleaved excitation (PIE). Without gates every photon\n"
+        "counts and each detector is one channel.\n"
+        "Drag over the decay histogram to add a gate."
+    )
+
+    def __init__(
+        self, window: QtWidgets.QWidget, path: str | None = None
+    ) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Open PicoQuant scan")
+        vbox = QtWidgets.QVBoxLayout(self)
+
+        frames_box = QtWidgets.QGroupBox("Frames")
+        grid = QtWidgets.QGridLayout(frames_box)
+        window_label = QtWidgets.QLabel("Frames to sum:")
+        window_label.setToolTip(self.WINDOW_TOOLTIP)
+        grid.addWidget(window_label, 0, 0)
+        self.frame_window = QtWidgets.QSpinBox()
+        self.frame_window.setRange(1, 1000000)
+        self.frame_window.setToolTip(self.WINDOW_TOOLTIP)
+        grid.addWidget(self.frame_window, 0, 1)
+        stride_label = QtWidgets.QLabel("Stride:")
+        stride_label.setToolTip(self.STRIDE_TOOLTIP)
+        grid.addWidget(stride_label, 1, 0)
+        self.frame_stride = QtWidgets.QSpinBox()
+        self.frame_stride.setRange(1, 1)
+        self.frame_stride.setToolTip(self.STRIDE_TOOLTIP)
+        grid.addWidget(self.frame_stride, 1, 1)
+        vbox.addWidget(frames_box)
+
+        gates_box = QtWidgets.QGroupBox("Microtime gates")
+        gates_box.setToolTip(self.GATES_TOOLTIP)
+        gates_layout = QtWidgets.QVBoxLayout(gates_box)
+        self._histograms = None
+        self.canvas = None
+        if path is not None:
+            self._add_decay_plot(gates_layout, path)
+        self.gate_table = QtWidgets.QTableWidget(0, 2)
+        self.gate_table.setHorizontalHeaderLabels(["Start (ns)", "End (ns)"])
+        self.gate_table.horizontalHeader().setSectionResizeMode(
+            QtWidgets.QHeaderView.ResizeMode.Stretch
+        )
+        self.gate_table.setToolTip(self.GATES_TOOLTIP)
+        self.gate_table.setMinimumHeight(110)
+        gates_layout.addWidget(self.gate_table)
+        gate_buttons = QtWidgets.QHBoxLayout()
+        add_button = QtWidgets.QPushButton("Add gate")
+        add_button.setAutoDefault(False)
+        add_button.clicked.connect(lambda: self.add_gate())
+        gate_buttons.addWidget(add_button)
+        remove_button = QtWidgets.QPushButton("Remove gate")
+        remove_button.setAutoDefault(False)
+        remove_button.clicked.connect(self.remove_gate)
+        gate_buttons.addWidget(remove_button)
+        gate_buttons.addStretch(1)
+        gates_layout.addLayout(gate_buttons)
+        vbox.addWidget(gates_box)
+
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        vbox.addWidget(self.buttons)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        self._previous_window = 1
+        self.frame_window.valueChanged.connect(self.on_window_changed)
+        self._load_settings()
+        self.draw()
+
+    def _add_decay_plot(self, layout: QtWidgets.QLayout, path: str) -> None:
+        """Show the decay histogram of every detector of ``path``; a note
+        replaces it if the file cannot be read."""
+        try:
+            self._histograms = io._ptu_decay_histograms(path)
+        except Exception as error:  # noqa: BLE001 - shown in the dialog
+            note = QtWidgets.QLabel(f"No decay histogram: {error}")
+            note.setWordWrap(True)
+            layout.addWidget(note)
+            return
+        # imported here, so Localize only loads matplotlib's Qt backend
+        # when the dialog shows a plot
+        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+        from matplotlib.figure import Figure
+        from matplotlib.widgets import SpanSelector
+
+        from . import plot_style
+
+        self.plot_style = plot_style.current()
+        with self.plot_style.context():
+            self.figure = Figure(figsize=(5.5, 2.6), layout="constrained")
+            self.axes = self.figure.add_subplot()
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas.setMinimumHeight(200)
+        layout.addWidget(self.canvas)
+        self.span = SpanSelector(
+            self.axes,
+            self.on_span_select,
+            "horizontal",
+            useblit=True,
+            props=self.plot_style.selection,
+        )
+
+    def on_span_select(self, xmin: float, xmax: float) -> None:
+        """Add the range dragged over the decay histogram as a gate."""
+        if xmax - xmin > 0:
+            self.add_gate(round(max(0.0, xmin), 2), round(xmax, 2))
+
+    def _gate_spinbox(self, value: float) -> QtWidgets.QDoubleSpinBox:
+        spinbox = QtWidgets.QDoubleSpinBox()
+        spinbox.setRange(0, 1e6)
+        spinbox.setDecimals(2)
+        spinbox.setSingleStep(0.5)
+        spinbox.setValue(value)
+        spinbox.valueChanged.connect(self.draw)
+        return spinbox
+
+    def add_gate(
+        self, start: float | None = None, end: float | None = None
+    ) -> None:
+        """Append a gate; without limits it starts where the last one
+        ends and reaches the end of the decay (10 ns without a decay
+        histogram)."""
+        gates = self.gates()
+        if start is None:
+            start = gates[-1][1] if gates else 0.0
+        if end is None:
+            if self._histograms is not None:
+                counts = self._histograms["counts"]
+                end = counts.shape[1] * self._histograms["bin_ns"]
+            else:
+                end = start + 10.0
+            end = max(end, start + 1.0)
+        row = self.gate_table.rowCount()
+        self.gate_table.insertRow(row)
+        self.gate_table.setCellWidget(row, 0, self._gate_spinbox(start))
+        self.gate_table.setCellWidget(row, 1, self._gate_spinbox(end))
+        self.draw()
+
+    def remove_gate(self) -> None:
+        """Remove the selected gates, else the last one."""
+        rows = sorted(
+            {index.row() for index in self.gate_table.selectedIndexes()},
+            reverse=True,
+        )
+        if not rows and self.gate_table.rowCount():
+            rows = [self.gate_table.rowCount() - 1]
+        for row in rows:
+            self.gate_table.removeRow(row)
+        self.draw()
+
+    def gates(self) -> list[tuple[float, float]]:
+        """The gates in the table as ``(start, end)`` in ns."""
+        return [
+            (
+                self.gate_table.cellWidget(row, 0).value(),
+                self.gate_table.cellWidget(row, 1).value(),
+            )
+            for row in range(self.gate_table.rowCount())
+        ]
+
+    def draw(self) -> None:
+        """Draw the decay histograms with the gates shaded."""
+        if self.canvas is None:
+            return
+        style = self.plot_style
+        axes = self.axes
+        axes.clear()
+        histograms = self._histograms
+        colors = style.series_colors
+        with style.context():
+            for i, (name, counts) in enumerate(
+                zip(histograms["names"], histograms["counts"])
+            ):
+                times = (np.arange(len(counts)) + 0.5) * histograms["bin_ns"]
+                axes.plot(
+                    times,
+                    np.where(counts > 0, counts, np.nan),
+                    color=colors[i % len(colors)],
+                    label=name,
+                    linewidth=1.0,
+                )
+            for i, (start, end) in enumerate(self.gates()):
+                axes.axvspan(start, end, alpha=0.2, color="0.5", lw=0)
+                axes.text(
+                    (start + end) / 2,
+                    0.98,
+                    f"gate {i + 1}",
+                    transform=axes.get_xaxis_transform(),
+                    ha="center",
+                    va="top",
+                    color=style.theme_colors["text"],
+                    fontsize=style.tick_size,
+                )
+            axes.set_yscale("log")
+            if len(histograms["names"]) > 1:
+                axes.legend(loc="upper right")
+        style.style_figure(self.figure)
+        style.style_axes(axes)
+        style.label(axes, "Microtime (ns)", "Counts")
+        self.canvas.draw_idle()
+
+    def on_window_changed(self, value: int) -> None:
+        """Keep the stride within the window; a stride equal to the
+        previous window (sums that do not overlap) follows it."""
+        follow = self.frame_stride.value() == self._previous_window
+        self.frame_stride.setMaximum(value)
+        if follow:
+            self.frame_stride.setValue(value)
+        self._previous_window = value
+
+    def _load_settings(self) -> None:
+        """Fill the inputs in with the remembered ones, else 1, 1 and no
+        gates."""
+        stored = io.load_user_settings()["Localize"].get(self.SETTINGS_KEY)
+        window, stride, gates = 1, 1, []
+        if isinstance(stored, dict):
+            try:
+                window = max(1, int(stored.get("window", 1)))
+                stride = min(window, max(1, int(stored.get("stride", window))))
+                gates = [
+                    (float(start), float(end))
+                    for start, end in stored.get("gates") or []
+                ]
+            except (TypeError, ValueError):
+                window, stride, gates = 1, 1, []
+        self.frame_window.setValue(window)
+        self.frame_stride.setMaximum(window)
+        self.frame_stride.setValue(stride)
+        self._previous_window = window
+        for start, end in gates:
+            self.add_gate(start, end)
+
+    def _save_settings(self) -> None:
+        """Remember the inputs in the user settings."""
+        settings = io.load_user_settings()
+        settings["Localize"][self.SETTINGS_KEY] = {
+            "window": self.frame_window.value(),
+            "stride": self.frame_stride.value(),
+            "gates": [[start, end] for start, end in self.gates()],
+        }
+        io.save_user_settings(settings)
+
+    def accept(self) -> None:
+        """Refuse gates that end before they start."""
+        for i, (start, end) in enumerate(self.gates()):
+            if start >= end:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Microtime gates",
+                    f"Gate {i + 1} ends ({end:g} ns) before it starts "
+                    f"({start:g} ns).",
+                )
+                return
+        super().accept()
+
+    def options(self) -> dict:
+        """The keywords of ``io.load_movie`` chosen in the dialog."""
+        return {
+            "frame_sum_window": self.frame_window.value(),
+            "frame_sum_stride": self.frame_stride.value(),
+            "microtime_gates": self.gates() or None,
+        }
+
+    @staticmethod
+    def getOptions(
+        parent: QtWidgets.QWidget | None = None, path: str | None = None
+    ) -> tuple[dict, bool]:
+        """Show the dialog for the PTU file ``path``; return the loader
+        keywords and whether the dialog was accepted."""
+        dialog = PTUOptionsDialog(parent, path)
+        accepted = dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted
+        if accepted:
+            dialog._save_settings()
+        return dialog.options(), accepted
+
+
+#: Default colormap of the lifetime display; any matplotlib colormap can
+#: be chosen in ``LifetimeDialog``.
+LIFETIME_COLORMAP = "rainbow"
+#: Scan frames whose decay places the lifetime window.
+LIFETIME_DECAY_SCAN_FRAMES = 50
+#: Frames whose photon delays the lifetime display keeps in memory.
+LIFETIME_CACHE_FRAMES = 16
+
+
+def _lifetime_image(
+    photons: np.ndarray,
+    delays: np.ndarray,
+    binning: int = 1,
+    min_photons: float = 1,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Lifetime of every pixel for the lifetime display: the mean delay
+    of its photons, see ``io.PTUMovie._delay_sums``.
+
+    Parameters
+    ----------
+    photons, delays : np.ndarray
+        ``(Y, X)`` photons of every pixel and the sums of their delays
+        (ns).
+    binning : int, optional
+        Side of the square of pixels, centered on a pixel, whose photons
+        give its lifetime. Default 1, i.e., its own photons only.
+    min_photons : float, optional
+        Fewest photons a lifetime is based on. Default 1.
+
+    Returns
+    -------
+    lifetimes : np.ndarray
+        ``(Y, X)`` float32 mean photon delays in ns, NaN where there are
+        fewer than ``min_photons`` photons.
+    photons : np.ndarray
+        ``(Y, X)`` photons the lifetimes are based on.
+    """
+    photons = np.asarray(photons, dtype=np.float64)
+    delays = np.asarray(delays, dtype=np.float64)
+    binning = int(binning)
+    if binning > 1:
+        from scipy import ndimage
+
+        area = binning * binning
+        # sums of whole photons, rounded so that the threshold below is
+        # not missed by a rounding error of the filter
+        photons = np.rint(
+            ndimage.uniform_filter(photons, binning, mode="constant") * area
+        )
+        delays = (
+            ndimage.uniform_filter(delays, binning, mode="constant") * area
+        )
+    valid = photons >= max(float(min_photons), 1.0)
+    lifetimes = np.full(photons.shape, np.nan, dtype=np.float32)
+    lifetimes[valid] = delays[valid] / photons[valid]
+    return lifetimes, photons
+
+
+def _lifetime_lut(colormap: str) -> np.ndarray:
+    """``(256, 3)`` uint8 RGB colors of a matplotlib colormap (of
+    ``LIFETIME_COLORMAP`` if there is none of that name)."""
+    from matplotlib import colormaps
+
+    cmap = colormaps.get(colormap) or colormaps[LIFETIME_COLORMAP]
+    colors = cmap(np.linspace(0, 1, 256))[:, :3]
+    return np.round(colors * 255).astype(np.uint8)
+
+
+def _lifetime_rgb(
+    lifetimes: np.ndarray,
+    brightness: np.ndarray,
+    lut: np.ndarray,
+    shortest: float,
+    longest: float,
+) -> np.ndarray:
+    """Color image of the lifetime display: the color of a pixel shows
+    its lifetime (``shortest`` to ``longest`` ns over the colors of
+    ``lut``), its brightness the intensity shown (``brightness``, uint8
+    after the contrast); pixels without a lifetime (NaN) are gray.
+
+    Returns
+    -------
+    rgb : np.ndarray
+        ``(Y, X, 3)`` C-contiguous uint8 image.
+    """
+    valid = np.isfinite(lifetimes)
+    span = max(float(longest) - float(shortest), 1e-9)
+    index = np.zeros(lifetimes.shape, dtype=np.intp)
+    index[valid] = np.clip(
+        (lifetimes[valid] - float(shortest)) / span * 255 + 0.5, 0, 255
+    )
+    rgb = lut[index].astype(np.uint16)
+    rgb[~valid] = 255
+    rgb *= np.asarray(brightness, dtype=np.uint16)[..., None]
+    rgb += 127
+    rgb //= 255
+    return np.ascontiguousarray(rgb, dtype=np.uint8)
+
+
+def _lifetime_range(
+    lifetimes: np.ndarray, photons: np.ndarray
+) -> tuple[float, float] | None:
+    """The range of the lifetime colors covering most photons: the
+    photon-weighted 2nd and 98th percentiles of the lifetimes, rounded
+    out to 0.1 ns; None if no pixel has a lifetime."""
+    valid = np.isfinite(lifetimes)
+    if not valid.any():
+        return None
+    values = lifetimes[valid].astype(np.float64)
+    order = np.argsort(values)
+    values = values[order]
+    cumulative = np.cumsum(photons[valid][order])
+    cumulative /= cumulative[-1]
+    lo = values[np.searchsorted(cumulative, 0.02)]
+    hi = values[np.searchsorted(cumulative, 0.98)]
+    lo = math.floor(lo * 10) / 10
+    hi = max(math.ceil(hi * 10) / 10, lo + 0.1)
+    return round(lo, 1), round(hi, 1)
+
+
+class LifetimeDialog(lib.Dialog):
+    """Settings of the lifetime display of photon-counting movies (View >
+    Show lifetime): which photons give the lifetime of a pixel and how
+    lifetimes are colored.
+
+    A pixel's lifetime is the mean delay of its photons after the start
+    of a time window placed after the maximum of the decay. For a
+    single-exponential decay that has died away within the window this is
+    the fluorescence lifetime; a short window shortens long lifetimes,
+    while background photons and the instrument response bias it too. The
+    decay of the first scan frames of the movie shown is plotted with the
+    window shaded; dragging over it sets the window. The settings are
+    remembered in the user settings."""
+
+    SETTINGS_KEY = "Lifetime display"
+    START_TOOLTIP = (
+        "Start of the time window, in ns after the maximum of the decay.\n"
+        "Starting a little after the maximum leaves out most of the\n"
+        "instrument response (e.g., scattered laser light)."
+    )
+    LENGTH_TOOLTIP = (
+        "Length of the time window in ns. Later photons are left out,\n"
+        "e.g., background between the laser pulses; a window shorter\n"
+        "than a few lifetimes shortens long lifetimes."
+    )
+    BINNING_TOOLTIP = (
+        "Side of the square of pixels whose photons give the lifetime of\n"
+        "the pixel at its center. 1: each pixel's own photons only."
+    )
+    MIN_PHOTONS_TOOLTIP = (
+        "Fewest photons a lifetime is based on; pixels with fewer are\n"
+        "shown in gray. The relative error of a mean of N photon delays\n"
+        "is about 1/sqrt(N)."
+    )
+    RANGE_TOOLTIP = (
+        "Lifetimes shown with the first and the last color of the\n"
+        "colormap; shorter and longer ones take these colors too."
+    )
+
+    def __init__(self, window: QtWidgets.QMainWindow) -> None:
+        super().__init__(window)
+        self.window = window
+        self.setWindowTitle("Lifetime display")
+        self.setModal(False)
+        # set while the inputs are changed programmatically
+        self._silent = False
+        # whether the color range was set (by hand, Auto or the settings)
+        self.range_known = False
+        # (times, counts, maximum) of the decay plotted, all in ns, or
+        # why it could not be read
+        self._decay = None
+        self._decay_error = None
+        self.canvas = None
+        vbox = QtWidgets.QVBoxLayout(self)
+
+        photons_box = QtWidgets.QGroupBox("Photons")
+        self.photons_layout = QtWidgets.QVBoxLayout(photons_box)
+        grid = QtWidgets.QGridLayout()
+        self.start_spinbox = self._double_spinbox(-50, 1000, 0.1)
+        self.length_spinbox = self._double_spinbox(0.05, 10000, 1.0)
+        self.binning_spinbox = QtWidgets.QSpinBox()
+        self.binning_spinbox.setRange(1, 25)
+        self.min_photons_spinbox = QtWidgets.QSpinBox()
+        self.min_photons_spinbox.setRange(1, 1000000)
+        for row, (text, widget, tooltip) in enumerate(
+            [
+                (
+                    "Start after the maximum (ns):",
+                    self.start_spinbox,
+                    self.START_TOOLTIP,
+                ),
+                (
+                    "Window length (ns):",
+                    self.length_spinbox,
+                    self.LENGTH_TOOLTIP,
+                ),
+                (
+                    "Binning (pixels):",
+                    self.binning_spinbox,
+                    self.BINNING_TOOLTIP,
+                ),
+                (
+                    "Min. photons:",
+                    self.min_photons_spinbox,
+                    self.MIN_PHOTONS_TOOLTIP,
+                ),
+            ]
+        ):
+            label = QtWidgets.QLabel(text)
+            label.setToolTip(tooltip)
+            widget.setToolTip(tooltip)
+            grid.addWidget(label, row, 0)
+            grid.addWidget(widget, row, 1)
+        self.photons_layout.addLayout(grid)
+        vbox.addWidget(photons_box)
+
+        colors_box = QtWidgets.QGroupBox("Colors")
+        grid = QtWidgets.QGridLayout(colors_box)
+        self.shortest_spinbox = self._double_spinbox(0, 1000, 0.1)
+        self.longest_spinbox = self._double_spinbox(0, 1000, 0.1)
+        for row, (text, widget) in enumerate(
+            [
+                ("Shortest lifetime (ns):", self.shortest_spinbox),
+                ("Longest lifetime (ns):", self.longest_spinbox),
+            ]
+        ):
+            label = QtWidgets.QLabel(text)
+            label.setToolTip(self.RANGE_TOOLTIP)
+            widget.setToolTip(self.RANGE_TOOLTIP)
+            grid.addWidget(label, row, 0)
+            grid.addWidget(widget, row, 1)
+        self.auto_button = QtWidgets.QPushButton("Auto")
+        self.auto_button.setAutoDefault(False)
+        self.auto_button.setToolTip(
+            "Set the range to the lifetimes of most photons of the frame "
+            "shown\n(2nd to 98th percentile)."
+        )
+        self.auto_button.clicked.connect(self.window.auto_lifetime_range)
+        grid.addWidget(self.auto_button, 0, 2, 2, 1)
+        grid.addWidget(QtWidgets.QLabel("Colormap:"), 2, 0)
+        self.colormap_combo = QtWidgets.QComboBox()
+        from matplotlib import pyplot as plt
+
+        self.colormap_combo.addItems(plt.colormaps())
+        grid.addWidget(self.colormap_combo, 2, 1, 1, 2)
+        vbox.addWidget(colors_box)
+
+        self._load_settings()
+        for spinbox in (
+            self.start_spinbox,
+            self.length_spinbox,
+            self.binning_spinbox,
+            self.min_photons_spinbox,
+        ):
+            spinbox.valueChanged.connect(self.on_changed)
+        for spinbox in (self.shortest_spinbox, self.longest_spinbox):
+            spinbox.valueChanged.connect(self.on_range_changed)
+        self.colormap_combo.currentTextChanged.connect(self.on_changed)
+
+    @staticmethod
+    def _double_spinbox(
+        minimum: float, maximum: float, step: float
+    ) -> QtWidgets.QDoubleSpinBox:
+        spinbox = QtWidgets.QDoubleSpinBox()
+        spinbox.setRange(minimum, maximum)
+        spinbox.setDecimals(2)
+        spinbox.setSingleStep(step)
+        spinbox.setKeyboardTracking(False)
+        return spinbox
+
+    def settings(self) -> dict:
+        """The inputs, as remembered in the user settings."""
+        settings = {
+            "start": self.start_spinbox.value(),
+            "length": self.length_spinbox.value(),
+            "binning": self.binning_spinbox.value(),
+            "min_photons": self.min_photons_spinbox.value(),
+            "colormap": self.colormap_combo.currentText(),
+        }
+        if self.range_known:
+            settings["shortest"] = self.shortest_spinbox.value()
+            settings["longest"] = self.longest_spinbox.value()
+        return settings
+
+    def _load_settings(self) -> None:
+        """Fill the inputs in with the remembered ones, else the window
+        from the maximum to 10 ns after it, no binning, at least 5
+        photons, the rainbow colormap and 0.5-4 ns (replaced by Auto when
+        the lifetimes are first shown)."""
+        values = {
+            "start": 0.0,
+            "length": 10.0,
+            "binning": 1,
+            "min_photons": 5,
+            "colormap": LIFETIME_COLORMAP,
+            "shortest": 0.5,
+            "longest": 4.0,
+        }
+        stored = io.load_user_settings()["Localize"].get(self.SETTINGS_KEY)
+        if isinstance(stored, dict):
+            for key, default in values.items():
+                if key not in stored:
+                    continue
+                try:
+                    values[key] = type(default)(stored[key])
+                except (TypeError, ValueError):
+                    continue
+            self.range_known = "shortest" in stored and "longest" in stored
+        self._silent = True
+        try:
+            self.start_spinbox.setValue(values["start"])
+            self.length_spinbox.setValue(values["length"])
+            self.binning_spinbox.setValue(values["binning"])
+            self.min_photons_spinbox.setValue(values["min_photons"])
+            index = self.colormap_combo.findText(values["colormap"])
+            if index < 0:
+                index = self.colormap_combo.findText(LIFETIME_COLORMAP)
+            self.colormap_combo.setCurrentIndex(index)
+            self.shortest_spinbox.setValue(values["shortest"])
+            self.longest_spinbox.setValue(values["longest"])
+        finally:
+            self._silent = False
+
+    def set_range(self, shortest: float, longest: float) -> None:
+        """Set the lifetimes of the first and the last color without
+        redrawing."""
+        self._silent = True
+        try:
+            self.shortest_spinbox.setValue(shortest)
+            self.longest_spinbox.setValue(longest)
+        finally:
+            self._silent = False
+        self.range_known = True
+
+    def on_changed(self, *_) -> None:
+        if self._silent:
+            return
+        self.window.on_lifetime_settings_changed()
+        self.draw_decay()
+
+    def on_range_changed(self, *_) -> None:
+        if self._silent:
+            return
+        self.range_known = True
+        self.window.on_lifetime_settings_changed()
+
+    def showEvent(self, event: QtGui.QShowEvent) -> None:
+        super().showEvent(event)
+        self.update_decay()
+
+    def update_decay(self) -> None:
+        """Plot the decay of the movie shown, if the dialog is open."""
+        if not self.isVisible():
+            return
+        try:
+            self._decay = self.window.lifetime_decay()
+            self._decay_error = None
+        except Exception as error:  # noqa: BLE001 - shown in the plot
+            self._decay = None
+            self._decay_error = str(error)
+        if self.canvas is None:
+            self._add_decay_plot()
+        self.draw_decay()
+
+    def _add_decay_plot(self) -> None:
+        # imported here, so Localize only loads matplotlib's Qt backend
+        # when the dialog is opened
+        from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
+        from matplotlib.figure import Figure
+        from matplotlib.widgets import SpanSelector
+
+        from . import plot_style
+
+        self.plot_style = plot_style.current()
+        with self.plot_style.context():
+            self.figure = Figure(figsize=(5, 2.4), layout="constrained")
+            self.axes = self.figure.add_subplot()
+        self.canvas = FigureCanvasQTAgg(self.figure)
+        self.canvas.setMinimumHeight(180)
+        self.canvas.setToolTip("Drag over the decay to set the time window.")
+        self.photons_layout.insertWidget(0, self.canvas)
+        self.span = SpanSelector(
+            self.axes,
+            self.on_span_select,
+            "horizontal",
+            useblit=True,
+            props=self.plot_style.selection,
+        )
+
+    def on_span_select(self, xmin: float, xmax: float) -> None:
+        """Set the window to the range dragged over the decay."""
+        if self._decay is None or xmax <= xmin:
+            return
+        maximum = self._decay[2]
+        self._silent = True
+        try:
+            self.start_spinbox.setValue(round(xmin - maximum, 2))
+            self.length_spinbox.setValue(round(xmax - xmin, 2))
+        finally:
+            self._silent = False
+        self.on_changed()
+
+    def draw_decay(self) -> None:
+        """Draw the decay with its maximum marked and the window
+        shaded."""
+        if self.canvas is None:
+            return
+        style = self.plot_style
+        axes = self.axes
+        axes.clear()
+        with style.context():
+            if self._decay is None:
+                axes.text(
+                    0.5,
+                    0.5,
+                    (
+                        f"No decay: {self._decay_error}"
+                        if self._decay_error
+                        else "No photon-counting movie shown"
+                    ),
+                    wrap=True,
+                    transform=axes.transAxes,
+                    ha="center",
+                    va="center",
+                    color=style.theme_colors["text"],
+                )
+            else:
+                times, counts, maximum = self._decay
+                axes.plot(
+                    times,
+                    np.where(counts > 0, counts, np.nan),
+                    color=style.series_colors[0],
+                    linewidth=1.0,
+                )
+                axes.axvline(
+                    maximum,
+                    color=style.theme_colors["text"],
+                    linestyle="--",
+                    linewidth=0.8,
+                )
+                window = self.window.lifetime_window_ns()
+                if window is not None:
+                    axes.axvspan(*window, alpha=0.2, color="0.5", lw=0)
+                if np.any(counts > 0):
+                    axes.set_yscale("log")
+        style.style_figure(self.figure)
+        style.style_axes(axes)
+        style.label(axes, "Microtime (ns)", "Counts")
+        self.canvas.draw_idle()
+
+
 class ConcatenateMoviesDialog(lib.Dialog):
     """Dialog for reviewing and ordering the TIFF files that are opened
     as one concatenated movie.
@@ -2166,6 +3065,293 @@ def _z_binning_widgets(
     step.valueChanged.connect(update_readout)
     update_readout()
     return z_binning
+
+
+#: The papers behind ``MagnificationFactorDialog`` (``picasso.axial_scaling``).
+MAGNIFICATION_REFERENCES = (
+    "Loginov, S.V., Boltje, D.B., Hensgens, M.N.F. et al.\n"
+    "Depth-dependent scaling of axial distances in light microscopy.\n"
+    "Optica 11, 553-568 (2024).\n\n"
+    "Lyakin, D.V., Maksimova, L.A., Sdobnov, A.Y. et al. The influence\n"
+    "of the numerical aperture of a beam probing an object on the\n"
+    "determination of the thickness of a layered object in confocal\n"
+    "microscopy. Opt. Spectrosc. 123, 487-494 (2017)"
+)
+
+MAGNIFICATION_FACTOR_TIP = (
+    "Factor used to correct for z-position aberration due to\n"
+    "refractive index mismatch, see Huang B, et al. Science. 2008.\n"
+    "'Calculate...' estimates it from the objective, the refractive\n"
+    "indices and the emission wavelength."
+)
+
+
+def _magnification_factor_widgets(
+    grid: QtWidgets.QGridLayout, row: int, parent: QtWidgets.QWidget
+) -> QtWidgets.QDoubleSpinBox:
+    """Add the magnification factor spin box of the 3D dialogs to ``grid``
+    at ``row``, with a button that calculates the factor
+    (``MagnificationFactorDialog``), and return the spin box."""
+    label = QtWidgets.QLabel("Magnification factor:")
+    label.setToolTip(MAGNIFICATION_FACTOR_TIP)
+    grid.addWidget(label, row, 0)
+    magnification_factor = QtWidgets.QDoubleSpinBox()
+    magnification_factor.setRange(0, 1e6)
+    magnification_factor.setDecimals(4)
+    magnification_factor.setValue(0.79)
+    calculate = QtWidgets.QPushButton("Calculate...")
+    calculate.setToolTip(
+        "Estimate the magnification factor from the objective, the\n"
+        "refractive indices and the emission wavelength.\n\n"
+        + MAGNIFICATION_REFERENCES
+    )
+    calculate.setAutoDefault(False)
+
+    def calculate_factor() -> None:
+        factor, accepted = MagnificationFactorDialog.getFactor(parent)
+        if accepted:
+            magnification_factor.setValue(factor)
+
+    calculate.clicked.connect(calculate_factor)
+    hbox = QtWidgets.QHBoxLayout()
+    hbox.addWidget(magnification_factor, 1)
+    hbox.addWidget(calculate)
+    grid.addLayout(hbox, row, 1)
+    return magnification_factor
+
+
+class MagnificationFactorDialog(lib.Dialog):
+    """Dialog that estimates the magnification factor of z under a
+    refractive-index mismatch from the objective, the refractive indices,
+    the emission wavelength and the depth of the focal plane (see
+    ``picasso.axial_scaling``). Its inputs are remembered in the user
+    settings when it is accepted."""
+
+    URL = docs_url(
+        "localize/3d-calibration.html#localize-magnification-factor"
+    )
+    #: User settings key (in "Localize") of the remembered inputs.
+    SETTINGS_KEY = "magnification_calculator"
+    DEFAULTS = {
+        "na": 1.49,
+        "n_immersion": 1.518,
+        "n_sample": 1.33,
+        "wavelength": 560.0,
+        "depth": 0.0,
+        "near_surface": axial_scaling.NEAR_SURFACE_MIDPOINT,
+    }
+
+    def __init__(self, parent: QtWidgets.QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Magnification Factor")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        vbox.addLayout(grid)
+
+        def add_spinbox(
+            row: int,
+            text: str,
+            tip: str,
+            range_: tuple[float, float],
+            decimals: int,
+            step: float,
+        ) -> QtWidgets.QDoubleSpinBox:
+            label = QtWidgets.QLabel(text)
+            label.setToolTip(tip)
+            grid.addWidget(label, row, 0)
+            spinbox = QtWidgets.QDoubleSpinBox()
+            spinbox.setRange(*range_)
+            spinbox.setDecimals(decimals)
+            spinbox.setSingleStep(step)
+            spinbox.setToolTip(tip)
+            grid.addWidget(spinbox, row, 1)
+            return spinbox
+
+        self.na = add_spinbox(
+            0,
+            "Numerical aperture:",
+            "Numerical aperture of the objective.",
+            (0.01, 2.0),
+            3,
+            0.01,
+        )
+        self.n_immersion = add_spinbox(
+            1,
+            "Refractive index of immersion:",
+            "Refractive index of the immersion medium of the objective,\n"
+            "e.g., 1.518 for oil, 1.0 for air.",
+            (1.0, 2.5),
+            4,
+            0.001,
+        )
+        self.n_sample = add_spinbox(
+            2,
+            "Refractive index of sample:",
+            "Refractive index of the sample, e.g., 1.33 for water.",
+            (1.0, 2.5),
+            4,
+            0.001,
+        )
+        self.wavelength = add_spinbox(
+            3,
+            "Emission wavelength (nm):",
+            "Emission wavelength of the dye (in vacuum). It sets how deep\n"
+            "the near-surface value holds.",
+            (200.0, 2000.0),
+            0,
+            10.0,
+        )
+        self.depth = add_spinbox(
+            4,
+            "Focal plane depth (nm):",
+            "How far the focus was moved into the sample from the\n"
+            "coverslip (the movement of the stage or the objective).\n"
+            "0 for imaging at the coverslip, e.g., TIRF or HILO.",
+            (0.0, 1e6),
+            0,
+            100.0,
+        )
+        near_surface_tip = (
+            "How the factor near the coverslip, where it does not depend\n"
+            "on the depth, is estimated:\n"
+            "Midpoint ray: from the ray in the middle of the axial wave\n"
+            "numbers (Lyakin et al., Opt. Spectrosc. 2017), as Loginov\n"
+            "et al. (Optica 2024) re-scale data. Much lower for objectives\n"
+            "whose numerical aperture is close to the refractive index of\n"
+            "the immersion (TIRF); does not exist when that ray is totally\n"
+            "internally reflected at the coverslip.\n"
+            "Full aperture: from constructive interference over the whole"
+            " aperture.\n\n" + MAGNIFICATION_REFERENCES
+        )
+        near_surface_label = QtWidgets.QLabel("Near-surface value:")
+        near_surface_label.setToolTip(near_surface_tip)
+        grid.addWidget(near_surface_label, 5, 0)
+        self.near_surface = QtWidgets.QComboBox()
+        self.near_surface.addItem(
+            "Midpoint ray", userData=axial_scaling.NEAR_SURFACE_MIDPOINT
+        )
+        self.near_surface.addItem(
+            "Full aperture", userData=axial_scaling.NEAR_SURFACE_FULL_APERTURE
+        )
+        self.near_surface.setToolTip(near_surface_tip)
+        grid.addWidget(self.near_surface, 5, 1)
+
+        self.result = QtWidgets.QLabel()
+        self.result.setWordWrap(True)
+        self.result.setTextInteractionFlags(
+            QtCore.Qt.TextInteractionFlag.TextSelectableByMouse
+        )
+        vbox.addWidget(self.result)
+
+        buttons_row = QtWidgets.QHBoxLayout()
+        buttons_row.addWidget(lib.HelpButton(self.URL))
+        self.buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        buttons_row.addWidget(self.buttons)
+        vbox.addLayout(buttons_row)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+
+        self._load_settings()
+        for spinbox in (
+            self.na,
+            self.n_immersion,
+            self.n_sample,
+            self.wavelength,
+            self.depth,
+        ):
+            spinbox.valueChanged.connect(self.update_result)
+        self.near_surface.currentIndexChanged.connect(self.update_result)
+        self.update_result()
+
+    def _load_settings(self) -> None:
+        """Fill the inputs in with the remembered ones, else the defaults."""
+        stored = io.load_user_settings()["Localize"].get(self.SETTINGS_KEY)
+        values = dict(self.DEFAULTS)
+        if isinstance(stored, dict):
+            values.update(stored)
+        for name in ("na", "n_immersion", "n_sample", "wavelength", "depth"):
+            try:
+                value = float(values[name])
+            except (TypeError, ValueError):
+                value = self.DEFAULTS[name]
+            getattr(self, name).setValue(value)
+        index = self.near_surface.findData(values["near_surface"])
+        self.near_surface.setCurrentIndex(max(index, 0))
+
+    def _save_settings(self) -> None:
+        """Remember the inputs in the user settings."""
+        settings = io.load_user_settings()
+        settings["Localize"][self.SETTINGS_KEY] = {
+            "na": self.na.value(),
+            "n_immersion": self.n_immersion.value(),
+            "n_sample": self.n_sample.value(),
+            "wavelength": self.wavelength.value(),
+            "depth": self.depth.value(),
+            "near_surface": self.near_surface.currentData(),
+        }
+        io.save_user_settings(settings)
+
+    def update_result(self) -> None:
+        """Calculate the factor for the current inputs and describe it;
+        OK is disabled if it cannot be calculated."""
+        optics = {
+            "na": self.na.value(),
+            "n_immersion": self.n_immersion.value(),
+            "n_sample": self.n_sample.value(),
+            "wavelength": self.wavelength.value(),
+            "near_surface": self.near_surface.currentData(),
+        }
+        depth = self.depth.value()
+        ok = self.buttons.button(QtWidgets.QDialogButtonBox.StandardButton.Ok)
+        try:
+            self.factor = axial_scaling.magnification_factor(depth, **optics)
+            limit = axial_scaling.near_surface_depth(**optics)
+        except ValueError as error:
+            self.factor = None
+            self.result.setText(str(error))
+            ok.setEnabled(False)
+            return
+        ok.setEnabled(True)
+        text = f"Magnification factor: <b>{self.factor:.4f}</b><br>"
+        if math.isinf(limit):
+            text += "Equal refractive indices: z needs no correction."
+        elif depth <= limit:
+            text += (
+                "Near-surface value, the same for focal plane depths up "
+                f"to {limit:.0f} nm."
+            )
+        else:
+            near = axial_scaling.magnification_factor(0.0, **optics)
+            paraxial = optics["n_sample"] / optics["n_immersion"]
+            text += (
+                f"Depth-dependent: the near-surface value ({near:.4f}) "
+                f"holds up to {limit:.0f} nm; deeper, the factor "
+                f"approaches {paraxial:.4f}."
+            )
+        self.result.setText(text)
+
+    def accept(self) -> None:
+        """Remember the inputs, then close."""
+        self._save_settings()
+        super().accept()
+
+    @staticmethod
+    def getFactor(
+        parent: QtWidgets.QWidget | None = None,
+    ) -> tuple[float, bool]:
+        """Show the dialog and return the calculated magnification factor
+        and whether the dialog was accepted."""
+        dialog = MagnificationFactorDialog(parent)
+        result = dialog.exec()
+        accepted = result == QtWidgets.QDialog.DialogCode.Accepted
+        if not accepted or dialog.factor is None:
+            return 0.0, False
+        return dialog.factor, True
 
 
 class Calibrate3DDialog(lib.Dialog):
@@ -2607,17 +3793,9 @@ class CalibrateSplineDialog(lib.Dialog):
         grid.addWidget(self.model, 4, 1)
 
         # Magnification factor (applied to the fitted z, as in astigmatism)
-        magnification_label = QtWidgets.QLabel("Magnification factor:")
-        magnification_label.setToolTip(
-            "Factor used to correct for z-position aberration due to\n"
-            "refractive index mismatch, see Huang B, et al. Science. 2008."
+        self.magnification_factor = _magnification_factor_widgets(
+            grid, 5, self
         )
-        grid.addWidget(magnification_label, 5, 0)
-        self.magnification_factor = QtWidgets.QDoubleSpinBox()
-        self.magnification_factor.setRange(0, 1e6)
-        self.magnification_factor.setDecimals(4)
-        self.magnification_factor.setValue(0.79)
-        grid.addWidget(self.magnification_factor, 5, 1)
 
         # Optional z-bias correction (astigmatism)
         self.correct_z_bias = QtWidgets.QCheckBox(
@@ -3754,6 +4932,9 @@ class ParametersDialog(lib.Dialog):
     max_it : QtWidgets.QSpinBox
         Spin box for selecting the max. number of iterations. Only used
         for MLE fitting.
+    mng_estimate_button : QtWidgets.QPushButton
+        Button that estimates the minimum net gradient from the movie
+        and puts it on ``mng_spinbox``.
     mng_min_spinbox : QtWidgets.QSpinBox
         Spin box for selecting the minimum net gradient (lower bound).
     mng_max_spinbox : QtWidgets.QSpinBox
@@ -3798,6 +4979,9 @@ class ParametersDialog(lib.Dialog):
     WAVELET_URL = docs_url("localize/identification.html#localize-wavelet")
     ROI_URL = docs_url("localize/identification.html#localize-rois")
     SPLINE_URL = docs_url("localize/spline.html#localize-spline")
+    MULTI_EMITTER_URL = docs_url(
+        "localize/multi-emitter.html#localize-multi-emitter"
+    )
     TEMPORAL_MEDIAN_URL = docs_url(
         "localize/identification.html#localize-temporal-median-filter"
     )
@@ -3836,6 +5020,10 @@ class ParametersDialog(lib.Dialog):
         self.spline_groupbox = None
         self.vectorfit_groupbox = None
         self.channel_registration_groupbox = None
+        self.multi_emitter_groupbox = None
+        # the identification settings the multi-emitter fit does not use;
+        # set up further below
+        self.identification_settings = None
         # last resolved fit code, so the convergence defaults are only
         # reapplied when the method actually changes
         self._last_fit_code = None
@@ -3862,10 +5050,16 @@ class ParametersDialog(lib.Dialog):
         identification_grid = QtWidgets.QGridLayout(
             identification_groupbox.content
         )
+        # The box, the method and the filters, which the multi-emitter fit
+        # does not use: one widget, so that they hide together.
+        self.identification_settings = QtWidgets.QWidget()
+        settings_grid = QtWidgets.QGridLayout(self.identification_settings)
+        settings_grid.setContentsMargins(0, 0, 0, 0)
+        identification_grid.addWidget(self.identification_settings, 0, 0, 1, 2)
 
         # Box Size
         first_row = QtWidgets.QHBoxLayout()
-        identification_grid.addLayout(first_row, 0, 0, 1, 2)
+        settings_grid.addLayout(first_row, 0, 0, 1, 2)
         first_row.addWidget(lib.HelpButton(self.IDENT_URL))
         boxsize_label = QtWidgets.QLabel("Box side length:")
         boxsize_label.setToolTip(
@@ -3880,7 +5074,7 @@ class ParametersDialog(lib.Dialog):
 
         # identification method: net gradient or wavelet segmentation
         method_row = QtWidgets.QHBoxLayout()
-        identification_grid.addLayout(method_row, 1, 0, 1, 2)
+        settings_grid.addLayout(method_row, 1, 0, 1, 2)
         method_tip = (
             "How spots are found.\n\n"
             "Net gradient: local maxima whose net gradient (a measure of\n"
@@ -3909,7 +5103,7 @@ class ParametersDialog(lib.Dialog):
         self.mng_widget = QtWidgets.QWidget()
         mng_grid = QtWidgets.QGridLayout(self.mng_widget)
         mng_grid.setContentsMargins(0, 0, 0, 0)
-        identification_grid.addWidget(self.mng_widget, 2, 0, 1, 2)
+        settings_grid.addWidget(self.mng_widget, 2, 0, 1, 2)
 
         # Min. Net Gradient
         mng_label = QtWidgets.QLabel("Min. net gradient:")
@@ -3922,7 +5116,22 @@ class ParametersDialog(lib.Dialog):
         self.mng_spinbox.setValue(DEFAULT_PARAMETERS["Min. Net Gradient"])
         self.mng_spinbox.setKeyboardTracking(False)
         self.mng_spinbox.valueChanged.connect(self.on_mng_spinbox_changed)
-        mng_grid.addWidget(self.mng_spinbox, 0, 1)
+        mng_row = QtWidgets.QHBoxLayout()
+        mng_row.addWidget(self.mng_spinbox, 1)
+        # see localize.estimate_min_net_gradient
+        self.mng_estimate_button = QtWidgets.QPushButton("Estimate")
+        self.mng_estimate_button.setToolTip(
+            "Estimate the min. net gradient from the background of the\n"
+            "movie: the local maxima of 40 frames are identified with a\n"
+            "min. net gradient of -3000, and the threshold is set 5 widths\n"
+            "above the peak their net gradients form without a spot.\n\n"
+            "Searches what the identification searches: the filtered\n"
+            "movie, the ROIs (in split-FOV mode the selected region, or\n"
+            "every region when none is selected) and the frame range."
+        )
+        self.mng_estimate_button.clicked.connect(self.on_estimate_mng_clicked)
+        mng_row.addWidget(self.mng_estimate_button)
+        mng_grid.addLayout(mng_row, 0, 1)
 
         # Slider
         self.mng_slider = QtWidgets.QSlider()
@@ -3973,7 +5182,7 @@ class ParametersDialog(lib.Dialog):
         self.wavelet_widget = QtWidgets.QWidget()
         wavelet_grid = QtWidgets.QGridLayout(self.wavelet_widget)
         wavelet_grid.setContentsMargins(0, 0, 0, 0)
-        identification_grid.addWidget(self.wavelet_widget, 3, 0, 1, 2)
+        settings_grid.addWidget(self.wavelet_widget, 3, 0, 1, 2)
         threshold_tip = (
             "Threshold on the second wavelet plane, in units of the\n"
             "standard deviation of the noise. Izeddin et al. use 0.5 to 2\n"
@@ -4092,7 +5301,7 @@ class ParametersDialog(lib.Dialog):
         self.temporal_median_spinbox.valueChanged.connect(self.on_box_changed)
         tm_row.addWidget(self.temporal_median_spinbox)
         tm_row.addStretch(1)
-        identification_grid.addLayout(tm_row, 4, 0, 1, 2)
+        settings_grid.addLayout(tm_row, 4, 0, 1, 2)
 
         # spatial Gaussian smoothing (identification only). Sits right below
         # the temporal median filter, in the order the two are applied.
@@ -4132,7 +5341,7 @@ class ParametersDialog(lib.Dialog):
         )
         gauss_row.addWidget(self.gaussian_filter_spinbox)
         gauss_row.addStretch(1)
-        identification_grid.addLayout(gauss_row, 5, 0, 1, 2)
+        settings_grid.addLayout(gauss_row, 5, 0, 1, 2)
 
         # preview identifications + cross-channel link color overlay
         preview_row = QtWidgets.QHBoxLayout()
@@ -4618,6 +5827,200 @@ class ParametersDialog(lib.Dialog):
         # model.
         self.on_fit_model_changed()
 
+        # Overlapping emitters; shown while that fit model is selected
+        self.multi_emitter_groupbox = me_groupbox = lib.CollapsibleGroupBox(
+            "Overlapping emitters"
+        )
+        me_groupbox.setToolTip(
+            "Fits all emitters of a frame at once: in cycles, peaks are\n"
+            "found where the fit leaves photons unexplained, fitted with\n"
+            "every other emitter in place, and subtracted. Of two emitters\n"
+            "closer than 1 PSF sigma, only the brighter is kept.\n\n"
+            "Babcock, H., Sigal, Y. M. & Zhuang, X. A high-density 3D\n"
+            "localization algorithm for stochastic optical reconstruction\n"
+            "microscopy. Optical Nanoscopy 1, 6 (2012), ported from its\n"
+            "implementation in storm-analysis (Zhuang Lab).\n\n"
+            "The spline PSF: Babcock, H. P. & Zhuang, X. Analyzing single\n"
+            "molecule localization microscopy data using cubic splines.\n"
+            "Sci. Rep., 2017, implemented from the paper."
+        )
+        vbox.addWidget(me_groupbox)
+        me_grid = QtWidgets.QGridLayout(me_groupbox.content)
+        me_grid.addWidget(lib.HelpButton(self.MULTI_EMITTER_URL), 0, 2)
+        psf_model_label = QtWidgets.QLabel("PSF model:")
+        psf_model_tip = (
+            "The PSF of each emitter:\n"
+            "Fixed sigma: a Gaussian with the same sigma for every\n"
+            "emitter, the PSF sigma below. Resolves close pairs best.\n"
+            "Fitted sigma: one sigma per emitter, the same in x and y,\n"
+            "e.g., for emitters not all in focus.\n"
+            "Fitted sx and sy: a sigma in x and one in y per emitter, for\n"
+            "astigmatic 3D data; z is read from them with the 3D\n"
+            "calibration loaded under '3D via Astigmatism'.\n"
+            "A fitted sigma starts at, and stays within 0.5 to 5 times,\n"
+            "the PSF sigma below. A free sigma can take a close pair for\n"
+            "one wide emitter.\n"
+            "Experimental PSF (cubic spline): the PSF of the spline\n"
+            "calibration loaded under 'Experimental PSF (spline)', which\n"
+            "gives z directly for a 3D calibration (Babcock & Zhuang,\n"
+            "Sci. Rep. 2017)."
+        )
+        psf_model_label.setToolTip(psf_model_tip)
+        me_grid.addWidget(psf_model_label, 0, 0)
+        self.psf_model_combo = QtWidgets.QComboBox()
+        self.psf_model_combo.addItems(list(MULTI_EMITTER_PSF_MODELS))
+        self.psf_model_combo.setToolTip(psf_model_tip)
+        self.psf_model_combo.currentIndexChanged.connect(
+            self.on_psf_model_changed
+        )
+        me_grid.addWidget(self.psf_model_combo, 0, 1)
+        snr_label = QtWidgets.QLabel("SNR threshold:")
+        snr_tip = (
+            "Peaks are found where the fit's residual, smoothed with the\n"
+            "PSF, exceeds this many times its noise, and an emitter is\n"
+            "kept only if its significance exceeds it too. The noise is\n"
+            "that of photon counting; EMCCD data are noisier by the excess\n"
+            "noise factor, so raise it for them."
+        )
+        snr_label.setToolTip(snr_tip)
+        me_grid.addWidget(snr_label, 1, 0)
+        self.snr_threshold_spinbox = QtWidgets.QDoubleSpinBox()
+        self.snr_threshold_spinbox.setRange(0.5, 1000.0)
+        self.snr_threshold_spinbox.setDecimals(1)
+        self.snr_threshold_spinbox.setSingleStep(0.5)
+        self.snr_threshold_spinbox.setValue(residualfit.THRESHOLD)
+        # the preview fits once the value is typed, not per keystroke
+        self.snr_threshold_spinbox.setKeyboardTracking(False)
+        self.snr_threshold_spinbox.setToolTip(snr_tip)
+        self.snr_threshold_spinbox.valueChanged.connect(
+            self.on_multi_emitter_changed
+        )
+        me_grid.addWidget(self.snr_threshold_spinbox, 1, 1)
+        self.psf_sigma_label = sigma_label = QtWidgets.QLabel(
+            "PSF sigma (nm):"
+        )
+        sigma_tip = (
+            "Standard deviation of the PSF: fixed in the fit, or the start\n"
+            "of a fitted one; peaks are found with it. Estimated from the\n"
+            "movie unless unticked: the median sigma of isolated emitters\n"
+            "fitted with a free sigma. The last estimate is shown and used\n"
+            "by the preview."
+        )
+        sigma_label.setToolTip(sigma_tip)
+        me_grid.addWidget(sigma_label, 2, 0)
+        self.psf_sigma_spinbox = QtWidgets.QDoubleSpinBox()
+        self.psf_sigma_spinbox.setRange(10.0, 2000.0)
+        self.psf_sigma_spinbox.setDecimals(1)
+        # 0.9 camera pixels of 130 nm
+        self.psf_sigma_spinbox.setValue(117.0)
+        self.psf_sigma_spinbox.setKeyboardTracking(False)
+        self.psf_sigma_spinbox.setToolTip(sigma_tip)
+        self.psf_sigma_spinbox.valueChanged.connect(
+            self.on_multi_emitter_changed
+        )
+        me_grid.addWidget(self.psf_sigma_spinbox, 2, 1)
+        self.psf_sigma_estimate_checkbox = QtWidgets.QCheckBox("Estimate")
+        self.psf_sigma_estimate_checkbox.setToolTip(sigma_tip)
+        self.psf_sigma_estimate_checkbox.setChecked(True)
+        self.psf_sigma_estimate_checkbox.stateChanged.connect(
+            self.on_psf_sigma_estimate_changed
+        )
+        me_grid.addWidget(self.psf_sigma_estimate_checkbox, 2, 2)
+        cycles_label = QtWidgets.QLabel("Max. cycles:")
+        cycles_tip = (
+            "Most cycles of finding, fitting and subtracting per frame."
+        )
+        cycles_label.setToolTip(cycles_tip)
+        me_grid.addWidget(cycles_label, 3, 0)
+        self.max_cycles_spinbox = QtWidgets.QSpinBox()
+        self.max_cycles_spinbox.setRange(1, 1000)
+        self.max_cycles_spinbox.setValue(residualfit.N_CYCLES)
+        self.max_cycles_spinbox.setToolTip(cycles_tip)
+        self.max_cycles_spinbox.setKeyboardTracking(False)
+        self.max_cycles_spinbox.valueChanged.connect(
+            self.on_multi_emitter_changed
+        )
+        me_grid.addWidget(self.max_cycles_spinbox, 3, 1)
+        radius_label = QtWidgets.QLabel("Peak search radius:")
+        radius_tip = (
+            "Radius (camera pixels) within which a new peak must be the\n"
+            "maximum of the residual."
+        )
+        radius_label.setToolTip(radius_tip)
+        me_grid.addWidget(radius_label, 4, 0)
+        self.peak_radius_spinbox = QtWidgets.QDoubleSpinBox()
+        self.peak_radius_spinbox.setRange(1.0, 50.0)
+        self.peak_radius_spinbox.setDecimals(1)
+        self.peak_radius_spinbox.setValue(residualfit.PEAK_RADIUS)
+        self.peak_radius_spinbox.setKeyboardTracking(False)
+        self.peak_radius_spinbox.setToolTip(radius_tip)
+        self.peak_radius_spinbox.valueChanged.connect(
+            self.on_multi_emitter_changed
+        )
+        me_grid.addWidget(self.peak_radius_spinbox, 4, 1)
+        background_label = QtWidgets.QLabel("Background filter sigma:")
+        background_tip = (
+            "Sigma (camera pixels) of the Gaussian low pass that estimates\n"
+            "the background from the frame minus the fit."
+        )
+        background_label.setToolTip(background_tip)
+        me_grid.addWidget(background_label, 5, 0)
+        self.background_sigma_spinbox = QtWidgets.QDoubleSpinBox()
+        self.background_sigma_spinbox.setRange(1.0, 100.0)
+        self.background_sigma_spinbox.setDecimals(1)
+        self.background_sigma_spinbox.setValue(residualfit.BACKGROUND_SIGMA)
+        self.background_sigma_spinbox.setKeyboardTracking(False)
+        self.background_sigma_spinbox.setToolTip(background_tip)
+        self.background_sigma_spinbox.valueChanged.connect(
+            self.on_multi_emitter_changed
+        )
+        me_grid.addWidget(self.background_sigma_spinbox, 5, 1)
+        self.peak_search_z_label = QtWidgets.QLabel("Peak search z (nm):")
+        search_z_tip = (
+            "z at which the spline PSF filters the residual to find peaks,\n"
+            "separated by commas; a new emitter starts at the z where it\n"
+            "is brightest. More than one helps only for PSFs that change\n"
+            "shape with z beyond a blur, e.g., the double helix."
+        )
+        self.peak_search_z_label.setToolTip(search_z_tip)
+        me_grid.addWidget(self.peak_search_z_label, 6, 0)
+        self.peak_search_z_edit = QtWidgets.QLineEdit("0")
+        # numbers separated by commas, with optional whitespace
+        number = r"\s*-?\d+(\.\d*)?\s*"
+        self.peak_search_z_edit.setValidator(
+            QtGui.QRegularExpressionValidator(
+                QtCore.QRegularExpression(f"{number}(,{number})*")
+            )
+        )
+        self.peak_search_z_edit.setToolTip(search_z_tip)
+        self.peak_search_z_edit.editingFinished.connect(
+            self.on_multi_emitter_changed
+        )
+        me_grid.addWidget(self.peak_search_z_edit, 6, 1)
+        self.fit_region_label = QtWidgets.QLabel("Fit region:")
+        fit_region_tip = (
+            "Side length of the disc each emitter is fitted in, cropped\n"
+            "from the spline calibration as the box of the single-emitter\n"
+            "fit is: at most the calibration box less 2. Auto takes it\n"
+            "from the calibration's PSF sigma: 8 sigma, 12 sigma for a 3D\n"
+            "calibration."
+        )
+        self.fit_region_label.setToolTip(fit_region_tip)
+        me_grid.addWidget(self.fit_region_label, 7, 0)
+        self.fit_region_spinbox = QtWidgets.QSpinBox()
+        # 2 reads as "Auto"; a region has at least 3 pixels
+        self.fit_region_spinbox.setRange(2, 99)
+        self.fit_region_spinbox.setSuffix(" px")
+        self.fit_region_spinbox.setSpecialValueText("Auto")
+        self.fit_region_spinbox.setValue(2)
+        self.fit_region_spinbox.setKeyboardTracking(False)
+        self.fit_region_spinbox.setToolTip(fit_region_tip)
+        self.fit_region_spinbox.valueChanged.connect(
+            self.on_multi_emitter_changed
+        )
+        me_grid.addWidget(self.fit_region_spinbox, 7, 1)
+        self.on_psf_sigma_estimate_changed()
+
         # 3D via astigmatism (Gaussian models); shown for non-spline fits
         self.z_groupbox = z_groupbox = lib.CollapsibleGroupBox(
             "3D via Astigmatism"
@@ -4645,17 +6048,9 @@ class ParametersDialog(lib.Dialog):
             QtWidgets.QSizePolicy.Policy.Fixed,
         )
         z_grid.addWidget(self.z_calib_label, 0, 0)
-        magnification_label = QtWidgets.QLabel("Magnification factor:")
-        magnification_label.setToolTip(
-            "Factor used to correct for z-position aberration due to\n"
-            "refractive index mismatch, see Huang B, et al. Science. 2008."
+        self.magnification_factor = _magnification_factor_widgets(
+            z_grid, 1, self
         )
-        z_grid.addWidget(magnification_label, 1, 0)
-        self.magnification_factor = QtWidgets.QDoubleSpinBox()
-        self.magnification_factor.setRange(0, 1e6)
-        self.magnification_factor.setDecimals(4)
-        self.magnification_factor.setValue(0.79)
-        z_grid.addWidget(self.magnification_factor, 1, 1)
 
         # The astigmatism z fit runs on whichever device the fit box's
         # 'Use GPU' checkbox selects
@@ -5170,21 +6565,35 @@ class ParametersDialog(lib.Dialog):
     def on_fit_model_changed(self) -> None:
         """Repopulate the optimizer combobox for the selected model and
         show/hide the optimizer controls. Models without an optimizer
-        (e.g. averaging) hide the optimizer row and its parameters."""
+        (e.g. averaging) hide the optimizer row and its parameters. The
+        dialog grows or shrinks with the settings shown. The frame is
+        redrawn, since the multi-emitter fit shows neither the
+        identifications nor, with its preview, the localizations."""
+        lib.resize_with_contents(self, self.scroll_area, self._show_fit_model)
+        # this dialog is created before the window's movie attribute
+        if getattr(self.window, "movie", None) is not None:
+            self.window.draw_frame()
+
+    def _show_fit_model(self) -> None:
+        """Show the optimizers and settings of the selected fit model,
+        see ``on_fit_model_changed``."""
         model = self.fit_model.currentText()
+        if FIT_MODELS[model].get("multi_emitter") and not getattr(
+            ParametersDialog, "_multi_emitter_compiling", False
+        ):
+            # once per session, see _compile_multi_emitter_fit
+            ParametersDialog._multi_emitter_compiling = True
+            threading.Thread(
+                target=_compile_multi_emitter_fit, daemon=True
+            ).start()
         optimizers = FIT_MODELS[model]["optimizers"]
         if optimizers is None:
             self.optimizer_label.hide()
             self.fit_optimizer.hide()
-            # a method without an optimizer choice may still iterate
-            self.fit_stack.setVisible(
-                FIT_MODELS[model]["code"] in _CONVERGENCE_CODES
-            )
             self._apply_convergence_defaults()
         else:
             self.optimizer_label.show()
             self.fit_optimizer.show()
-            self.fit_stack.show()
             self.fit_optimizer.blockSignals(True)
             self.fit_optimizer.clear()
             self.fit_optimizer.addItems(list(optimizers.keys()))
@@ -5193,25 +6602,161 @@ class ParametersDialog(lib.Dialog):
             self.on_fit_optimizer_changed()
         self._update_calib_group_visibility()
 
+    def _has_multichannel_data(self) -> bool:
+        """Whether the window holds several channels: several movies
+        loaded as separate channels, or split-FOV mode."""
+        window = self.window
+        view = getattr(window, "view", None)
+        return len(getattr(window, "channels", ())) > 1 or bool(
+            getattr(view, "split_fov_mode", False)
+        )
+
     def _update_calib_group_visibility(self) -> None:
         """Show only the calibration box relevant to the selected fit model:
         the astigmatism z-calibration for Gaussian models, the spline PSF
         calibration for the experimental-PSF (spline) model, the optics for
-        the vectorial PSF model and the channel registration for the model
-        that has a multichannel fit. Guarded so the initial
-        ``on_fit_model_changed`` call (before the boxes exist) is a no-op."""
+        the vectorial PSF model, and the channel registration for the model
+        that has a multichannel fit (and only when several channels or
+        split-FOV regions are loaded). Guarded so the initial
+        ``on_fit_model_changed`` call (before the boxes exist) is a
+        no-op."""
         entry = FIT_MODELS[self.fit_model.currentText()]
         needs_spline = entry.get("needs_spline_calibration", False)
         needs_vectorfit = entry.get("needs_vectorfit_parameters", False)
         needs_registration = entry.get("needs_channel_registration", False)
+        multi_emitter = entry.get("multi_emitter", False)
         if self.z_groupbox is not None:
-            self.z_groupbox.setVisible(not (needs_spline or needs_vectorfit))
+            # the multi-emitter fit gives z only with sigmas in x and y
+            astigmatic = (
+                not multi_emitter
+                or self.multi_emitter_psf_model() == "elliptical"
+            )
+            self.z_groupbox.setVisible(
+                not (needs_spline or needs_vectorfit) and astigmatic
+            )
+        spline_psf = (
+            multi_emitter and self.multi_emitter_psf_model() == "spline"
+        )
         if self.spline_groupbox is not None:
-            self.spline_groupbox.setVisible(needs_spline)
+            self.spline_groupbox.setVisible(needs_spline or spline_psf)
         if self.vectorfit_groupbox is not None:
             self.vectorfit_groupbox.setVisible(needs_vectorfit)
+        if getattr(self, "peak_search_z_edit", None) is not None:
+            # the spline takes its PSF from the calibration, and searches
+            # in z with a 3D one
+            for widget in (
+                self.psf_sigma_label,
+                self.psf_sigma_spinbox,
+                self.psf_sigma_estimate_checkbox,
+            ):
+                widget.setVisible(not spline_psf)
+            search_z = spline_psf and (
+                (self.spline_calibration or {}).get("model") == "spline-3d"
+            )
+            self.peak_search_z_label.setVisible(search_z)
+            self.peak_search_z_edit.setVisible(search_z)
+            self.fit_region_label.setVisible(spline_psf)
+            self.fit_region_spinbox.setVisible(spline_psf)
         if self.channel_registration_groupbox is not None:
-            self.channel_registration_groupbox.setVisible(needs_registration)
+            # only meaningful with several channels to register
+            self.channel_registration_groupbox.setVisible(
+                needs_registration and self._has_multichannel_data()
+            )
+        if self.multi_emitter_groupbox is not None:
+            self.multi_emitter_groupbox.setVisible(multi_emitter)
+        if getattr(self, "gpu_checkbox", None) is not None:
+            # the multi-emitter fit runs on the CPU, its z fit on a GPU
+            # whenever there is one (see MultiEmitterFitWorker)
+            self.gpu_checkbox.setVisible(CUDA_AVAILABLE and not multi_emitter)
+        if self.identification_settings is not None:
+            # it finds the spots itself
+            self.identification_settings.setVisible(not multi_emitter)
+        # The multichannel rows keep their space while hidden (see
+        # _retain_size_when_hidden), but the multi-emitter fit takes one
+        # channel, so it does not reserve it.
+        for widget in (
+            getattr(self, "identify_mode_label", None),
+            getattr(self, "identify_mode_combo", None),
+            getattr(self, "fit_mode_label", None),
+            getattr(self, "fit_mode_combo", None),
+        ):
+            if widget is not None:
+                policy = widget.sizePolicy()
+                policy.setRetainSizeWhenHidden(not multi_emitter)
+                widget.setSizePolicy(policy)
+
+    def multi_emitter_psf_model(self) -> str:
+        """The PSF model of the multi-emitter fit selected on the dialog
+        (see ``localize.MultiEmitterParameters.psf_model``)."""
+        combo = getattr(self, "psf_model_combo", None)
+        if combo is None:  # while the dialog is built
+            return "fixed"
+        return MULTI_EMITTER_PSF_MODELS[combo.currentText()]
+
+    def on_psf_model_changed(self) -> None:
+        """Show '3D via Astigmatism' for the fit that gives z, the spline
+        calibration and its settings for the spline instead of the PSF
+        sigma, and refresh the preview. The dialog grows or shrinks with
+        it."""
+        lib.resize_with_contents(
+            self, self.scroll_area, self._update_calib_group_visibility
+        )
+        self.on_multi_emitter_changed()
+
+    def is_multi_emitter(self) -> bool:
+        """Whether the selected fit model is the multi-emitter fit."""
+        return bool(
+            FIT_MODELS[self.fit_model.currentText()].get("multi_emitter")
+        )
+
+    def multi_emitter_parameters(
+        self, estimate: bool | None = None
+    ) -> localize.MultiEmitterParameters:
+        """The multi-emitter settings on the dialog. The PSF sigma is left
+        to the estimate while "Estimate" is ticked, unless ``estimate`` is
+        False (the preview, which uses the sigma shown)."""
+        if estimate is None:
+            estimate = self.psf_sigma_estimate_checkbox.isChecked()
+        psf_model = self.multi_emitter_psf_model()
+        fit_region_size = None
+        if psf_model == "spline":
+            # its PSF comes from the calibration
+            estimate = True
+            if self.fit_region_spinbox.value() > 2:  # not "Auto"
+                fit_region_size = self.fit_region_spinbox.value()
+        return localize.MultiEmitterParameters(
+            psf_model=psf_model,
+            snr_threshold=self.snr_threshold_spinbox.value(),
+            psf_sigma=None if estimate else self.psf_sigma_spinbox.value(),
+            max_cycles=self.max_cycles_spinbox.value(),
+            peak_radius=self.peak_radius_spinbox.value(),
+            background_sigma=self.background_sigma_spinbox.value(),
+            peak_search_z=self.peak_search_z(),
+            fit_region_size=fit_region_size,
+        )
+
+    def peak_search_z(self) -> tuple[float, ...]:
+        """The z (nm) of the spline's peak search, typed as a list
+        separated by commas; 0 where nothing usable is typed."""
+        values = []
+        for part in self.peak_search_z_edit.text().split(","):
+            try:
+                values.append(float(part))
+            except ValueError:
+                pass
+        return tuple(values) or (0.0,)
+
+    def on_psf_sigma_estimate_changed(self) -> None:
+        """The PSF sigma is typed in only when it is not estimated."""
+        self.psf_sigma_spinbox.setEnabled(
+            not self.psf_sigma_estimate_checkbox.isChecked()
+        )
+
+    def on_multi_emitter_changed(self) -> None:
+        """Refresh the preview, which fits the current frame with the new
+        settings."""
+        if self.preview_checkbox.isChecked() and self.is_multi_emitter():
+            self.window.draw_frame()
 
     def vectorfit_parameters(self) -> dict:
         """The VectorFit settings on the dialog, keyed as
@@ -5250,7 +6795,11 @@ class ParametersDialog(lib.Dialog):
         code = self.current_fit_code()
         if not code:
             return
-        self.fit_stack.setCurrentIndex(1 if code in _CONVERGENCE_CODES else 0)
+        iterates = code in _CONVERGENCE_CODES
+        self.fit_stack.setCurrentIndex(1 if iterates else 0)
+        # the stack is as tall as its tallest page: hidden, the empty page
+        # leaves no gap
+        self.fit_stack.setVisible(iterates)
         self.convergence_criterion.setMinimum(
             _CONVERGENCE_MINIMUMS.get(code, _CONVERGENCE_MINIMUM)
         )
@@ -5777,6 +7326,11 @@ class ParametersDialog(lib.Dialog):
             self.spline_calib_label.setText("-- no calibration loaded --")
             self.spline_calib_label.setToolTip("")
         self._update_link_photons_visibility()
+        if getattr(self, "peak_search_z_edit", None) is not None:
+            # the peak search in z needs a 3D calibration
+            lib.resize_with_contents(
+                self, self.scroll_area, self._update_calib_group_visibility
+            )
         # The channel sum may have been registered from the calibration that
         # has just been replaced. Dropping it re-registers it from the new one
         # on the next draw, which is also what brings the summed view up when
@@ -6255,6 +7809,11 @@ class ParametersDialog(lib.Dialog):
             self.mng_max_spinbox.setValue(value)
         self.mng_slider.setValue(value)
 
+    def on_estimate_mng_clicked(self) -> None:
+        """Estimate the min. net gradient, see
+        ``Window.estimate_min_net_gradient``."""
+        self.window.estimate_min_net_gradient()
+
     def on_mng_slider_changed(self, value: int) -> None:
         """Handle change to the min. net gradient slider."""
         self.mng_spinbox.setValue(value)
@@ -6519,6 +8078,16 @@ class ParametersDialog(lib.Dialog):
                     if em_combo.itemText(index) == wavelength:
                         em_combo.setCurrentIndex(index)
                         break
+
+    def set_photon_counting(self) -> None:
+        """Set the photon conversion of a photon-counting movie (e.g., a
+        PicoQuant .ptu scan), whose pixel values are photons already: no
+        baseline, sensitivity 1 and no EM gain. sCMOS noise maps describe
+        a camera and are cleared."""
+        self.update_camera_calib(None)
+        self.set_photon_scalar("baseline", 0.0)
+        self.set_photon_scalar("sensitivity", 1.0)
+        self.set_photon_scalar("gain", 1)
 
     def set_camera_parameters(self, info: dict) -> None:
         """Set the camera parameters based on the provided camera
@@ -6814,8 +8383,18 @@ class Window(QtWidgets.QMainWindow):
         icon = QtGui.QIcon(icon_path)
         self.setWindowIcon(icon)
         self.resize(768, 768)
+        # lifetime display: photon delays of the latest frames, keyed by
+        # (movie, frame, microtime range), and the decay of each movie
+        self._lifetime_cache = {}
+        self._lifetime_decays = {}
         self.parameters_dialog = ParametersDialog(self)
         self.contrast_dialog = ContrastDialog(self)
+        self.lifetime_dialog = LifetimeDialog(self)
+        # the look of the scale bar is shared with SPINNA
+        self.scalebar_options = ScaleBarOptions(
+            "Localize", "Print scale bar length", True, parent=self
+        )
+        self.scalebar_options.changed.connect(self._update_scalebar)
         self.columns_dialog = LocColumnSelectionDialog(self)
         self.metadata_dialog = lib.MetadataDialog(self)
         self.user_settings_dialog = lib.UserSettingsDialog(self)
@@ -6877,39 +8456,8 @@ class Window(QtWidgets.QMainWindow):
         # Auto toggle at the slider's side, a second view onto the contrast
         # dialog's Auto checkbox. Connected both ways; ``setChecked`` with
         # an unchanged state emits nothing, so the pair does not loop.
-        self.contrast_auto_button = QtWidgets.QToolButton()
-        self.contrast_auto_button.setText("Auto")
-        self.contrast_auto_button.setToolTip(
-            "Set the contrast automatically for each frame?"
-        )
-        self.contrast_auto_button.setCheckable(True)
-        font = self.contrast_auto_button.font()
-        font.setPointSizeF(font.pointSizeF() * 0.8)
-        self.contrast_auto_button.setFont(font)
-        self.contrast_auto_button.setStyleSheet(
-            """
-            QToolButton {
-                border: 1px solid palette(mid);
-                border-radius: 3px;
-                padding: 0px 4px;
-                background: transparent;
-            }
-            QToolButton:checked {
-                border-color: palette(highlight);
-                background: palette(highlight);
-                color: palette(highlighted-text);
-            }
-            QToolButton:disabled {
-                border-color: palette(midlight);
-                color: palette(mid);
-            }
-            QToolButton:checked:disabled {
-                background: palette(midlight);
-            }
-            """
-        )
-        self.contrast_auto_button.setFixedHeight(
-            max(15, self.contrast_auto_button.fontMetrics().height() + 2)
+        self.contrast_auto_button = _bar_toggle_button(
+            "Auto", "Set the contrast automatically for each frame?"
         )
         self.contrast_auto_button.setChecked(
             self.contrast_dialog.auto_checkbox.isChecked()
@@ -6929,6 +8477,16 @@ class Window(QtWidgets.QMainWindow):
         contrast_layout.setSpacing(4)
         contrast_layout.addWidget(self.contrast_slider)
         contrast_layout.addWidget(self.contrast_auto_button)
+        # display switch of photon-counting movies, a second view onto
+        # View > Show lifetime (shown for such movies only)
+        self.lifetime_button = _bar_toggle_button(
+            "Lifetime",
+            "Color the pixels by the lifetime of their photons?\n"
+            "Settings: View > Lifetime display...",
+        )
+        self.lifetime_button.setVisible(False)
+        self.lifetime_button.toggled.connect(self.set_lifetime_shown)
+        contrast_layout.addWidget(self.lifetime_button)
         # Channel selector (hidden unless several channels are loaded).
         self.channel_combo = QtWidgets.QComboBox()
         self.channel_combo.setToolTip("Channel of the movie shown below.")
@@ -6949,7 +8507,7 @@ class Window(QtWidgets.QMainWindow):
         self.status_bar_frame_indicator = QtWidgets.QLabel()
         self.status_bar.addPermanentWidget(self.status_bar_frame_indicator)
 
-        # re-entrancy guard for draw_frame (see on_scroll)
+        # re-entrancy guard for draw_frame
         self._drawing_frame = False
         # Holds the curr movie as a numpy memmap in the format
         # (frame, y, x)
@@ -7059,6 +8617,9 @@ class Window(QtWidgets.QMainWindow):
         self._load_phase_busy = True
         # label of the running fit's current phase (see ``on_fit_phase``)
         self._fit_phase = ""
+        # the estimated PSF sigma of a running multi-emitter fit, shown
+        # before its progress (see ``on_multi_emitter_psf_sigma``)
+        self._fit_status_prefix = ""
         # Canceled loads, winding down on their own (see
         # ``_on_load_canceled``); kept referenced until their thread ends.
         self._detached_loads = []
@@ -7175,6 +8736,37 @@ class Window(QtWidgets.QMainWindow):
             index = self.parameters_dialog.fit_mode_combo.findText(fit_mode)
             if index >= 0:
                 self.parameters_dialog.fit_mode_combo.setCurrentIndex(index)
+        self._load_multi_emitter_settings(
+            settings["Localize"].get("multi_emitter")
+        )
+
+    def _load_multi_emitter_settings(self, saved: dict | None) -> None:
+        """Put the saved multi-emitter settings on the dialog; values that
+        are missing or invalid keep the defaults."""
+        if not isinstance(saved, dict):
+            return
+        dialog = self.parameters_dialog
+        for key, spinbox in (
+            ("snr_threshold", dialog.snr_threshold_spinbox),
+            ("psf_sigma", dialog.psf_sigma_spinbox),
+            ("max_cycles", dialog.max_cycles_spinbox),
+            ("peak_radius", dialog.peak_radius_spinbox),
+            ("background_sigma", dialog.background_sigma_spinbox),
+            ("fit_region_size", dialog.fit_region_spinbox),
+        ):
+            value = saved.get(key)
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                spinbox.setValue(value)
+        estimate = saved.get("estimate_psf_sigma")
+        if isinstance(estimate, bool):
+            dialog.psf_sigma_estimate_checkbox.setChecked(estimate)
+        search_z = saved.get("peak_search_z")
+        if isinstance(search_z, str):
+            dialog.peak_search_z_edit.setText(search_z)
+        model = saved.get("psf_model")
+        for name, value in MULTI_EMITTER_PSF_MODELS.items():
+            if value == model:
+                dialog.psf_model_combo.setCurrentText(name)
 
     def load_user_settings(self) -> None:
         """Load user settings based on the last-used parameters."""
@@ -7195,6 +8787,9 @@ class Window(QtWidgets.QMainWindow):
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Close the application, save user settings."""
         settings = io.load_user_settings()
+        settings["Localize"][
+            LifetimeDialog.SETTINGS_KEY
+        ] = self.lifetime_dialog.settings()
         if self.movie_path != []:
             settings["Localize"]["PWD"] = os.path.dirname(self.movie_path)
             settings["Localize"][
@@ -7233,6 +8828,21 @@ class Window(QtWidgets.QMainWindow):
         settings["Localize"][
             "fit_mode"
         ] = self.parameters_dialog.fit_mode_combo.currentText()
+        dialog = self.parameters_dialog
+        settings["Localize"]["multi_emitter"] = {
+            "psf_model": dialog.multi_emitter_psf_model(),
+            "snr_threshold": dialog.snr_threshold_spinbox.value(),
+            "psf_sigma": dialog.psf_sigma_spinbox.value(),
+            "estimate_psf_sigma": (
+                dialog.psf_sigma_estimate_checkbox.isChecked()
+            ),
+            "max_cycles": dialog.max_cycles_spinbox.value(),
+            "peak_radius": dialog.peak_radius_spinbox.value(),
+            "background_sigma": dialog.background_sigma_spinbox.value(),
+            "peak_search_z": dialog.peak_search_z_edit.text(),
+            # 2 is "Auto"
+            "fit_region_size": dialog.fit_region_spinbox.value(),
+        }
         settings["Localize"]["Columns to save"] = {
             column: checkbox.isChecked()
             for column, checkbox in (
@@ -7434,11 +9044,27 @@ class Window(QtWidgets.QMainWindow):
         # in the menu only, not on the toolbar
         constract_action.setIcon(theme.icon("contrast"))
         view_menu.addAction(constract_action)
+        # photon-counting movies only (enabled in update_lifetime_controls)
+        self.lifetime_action = view_menu.addAction("Show lifetime")
+        self.lifetime_action.setCheckable(True)
+        self.lifetime_action.setEnabled(False)
+        self.lifetime_action.toggled.connect(self.set_lifetime_shown)
+        self.lifetime_settings_action = view_menu.addAction(
+            "Lifetime display..."
+        )
+        self.lifetime_settings_action.setEnabled(False)
+        self.lifetime_settings_action.triggered.connect(
+            self.lifetime_dialog.show
+        )
         self.scalebar_action = view_menu.addAction("Show scale bar")
         self.scalebar_action.setCheckable(True)
         self.scalebar_action.setChecked(False)
-        self.scalebar_action.triggered.connect(self.draw_frame)
+        self.scalebar_action.triggered.connect(self._update_scalebar)
         view_menu.addAction(self.scalebar_action)
+        scalebar_settings_action = view_menu.addAction("Scale bar settings...")
+        scalebar_settings_action.triggered.connect(
+            lambda: self.scalebar_options.show_dialog(self)
+        )
 
         """ Analyze """
         analyze_menu = menu_bar.addMenu("Analyze")
@@ -8242,6 +9868,9 @@ class Window(QtWidgets.QMainWindow):
             fit_combo.blockSignals(False)
         pdialog.fit_mode_label.setVisible(multichannel)
         fit_combo.setVisible(multichannel)
+        # the channel registration box (shown for the multichannel fit
+        # model only)
+        pdialog._update_calib_group_visibility()
 
     def build_spline_calibration(self) -> None:
         """Prompt for the spline PSF calibration parameters and build the
@@ -8537,8 +10166,9 @@ class Window(QtWidgets.QMainWindow):
 
     def _prompt_for_path(self, path: str):
         """Return the metadata prompt callback appropriate for ``path``."""
-        if path.lower().endswith((".ims", ".czi", ".lif")):
-            # Multi-channel .ims/.czi/.lif files prompt for a channel.
+        if path.lower().endswith((".ims", ".czi", ".lif", ".ptu")):
+            # Multi-channel .ims/.czi/.lif files (and .ptu files recorded
+            # with several detectors) prompt for a channel.
             return self.prompt_channel
         elif path.lower().endswith(io.TIFF_EXTENSIONS + (".stk", ".nd2")):
             # For these formats the metadata may fail to parse; prompt the
@@ -8557,7 +10187,7 @@ class Window(QtWidgets.QMainWindow):
             self,
             "Open multichannel file",
             directory=dir,
-            filter="Multichannel files (*.ims *.czi *.lif *.nd2)",
+            filter="Multichannel files (*.ims *.czi *.lif *.nd2 *.ptu)",
         )
         if path:
             self.pwd = path
@@ -8612,6 +10242,16 @@ class Window(QtWidgets.QMainWindow):
             # (A canceled one is detached immediately, see
             # ``_on_load_canceled``, so it never blocks a new load.)
             return
+        # Photon-counting scans (.ptu): ask how many scan frames to sum
+        # (single scan frames are often too dim to localize) and for
+        # microtime gates, once for all files of this load, showing the
+        # decay histogram of the first one.
+        ptu_options = None
+        ptu_paths = [p for p in paths if p.lower().endswith(".ptu")]
+        if not concat and ptu_paths:
+            ptu_options, ok = PTUOptionsDialog.getOptions(self, ptu_paths[0])
+            if not ok:
+                return
 
         self._load_t0 = time.time()
         self._load_multi_file = multi_file
@@ -8640,7 +10280,11 @@ class Window(QtWidgets.QMainWindow):
 
         thread = QtCore.QThread(self)
         worker = MovieLoadWorker(
-            paths, prompt_for_path, load_all=load_all, concat=concat
+            paths,
+            prompt_for_path,
+            load_all=load_all,
+            concat=concat,
+            ptu_options=ptu_options,
         )
         worker.moveToThread(thread)
         self._load_thread = thread
@@ -8967,6 +10611,9 @@ class Window(QtWidgets.QMainWindow):
         # the preview's link colors cache the other channels' detections and
         # filter stacks, and these are other channels now
         self.drop_preview_link_cache()
+        # as do the lifetime display's photon delays and decays
+        self._lifetime_cache.clear()
+        self._lifetime_decays.clear()
         # Build channels and seed each channel's parameter/contrast
         # snapshot from the current dialog state, applying any camera /
         # pixel-size hints from that channel's metadata. Guarded so the
@@ -8983,6 +10630,8 @@ class Window(QtWidgets.QMainWindow):
             for movie, info, path, name in zip(movies, infos, paths, names):
                 channel = Channel(movie=movie, info=info, path=path, name=name)
                 self.parameters_dialog.set_camera_parameters(info[0])
+                if info[0].get("Photon Counting"):
+                    self.parameters_dialog.set_photon_counting()
                 if "Pixelsize" in info[0]:
                     self.parameters_dialog.pixelsize.setValue(
                         float(info[0]["Pixelsize"])
@@ -9119,6 +10768,7 @@ class Window(QtWidgets.QMainWindow):
         self.frame_slider.blockSignals(False)
         frame_number = min(max(0, frame_number), max(0, last_frame))
         self.curr_frame_number = frame_number
+        self.update_lifetime_controls()
         # before set_frame: this channel's intensities can differ from the
         # previous one's, and set_frame's auto contrast then lands on a
         # track that already fits
@@ -9466,6 +11116,8 @@ class Window(QtWidgets.QMainWindow):
             lib.show_load_error(self, path, error)
             return
         if shape != "Circle":
+            if not isinstance(shape, str):
+                shape = "picks of different shapes"
             QtWidgets.QMessageBox.warning(
                 self,
                 "Unsupported shape",
@@ -9697,7 +11349,7 @@ class Window(QtWidgets.QMainWindow):
 
     def prompt_channel(self, channels: list[str]) -> str | None:
         """Prompt for channel selection for multi-channel movies
-        (IMARIS .ims, Zeiss .czi, Leica .lif)."""
+        (IMARIS .ims, Zeiss .czi, Leica .lif, PicoQuant .ptu)."""
         channel, ok = PromptChannelDialog.getMovieSpecs(self, channels)
         if ok:
             return channel
@@ -9866,8 +11518,8 @@ class Window(QtWidgets.QMainWindow):
         contrast, add identifications and fit markers, if applicable."""
         if self.movie is None:
             return
-        # rebuilding the scene can change scrollbar values and re-fire
-        # valueChanged -> on_scroll -> draw_frame; guard against unbounded
+        # rebuilding the scene can change scrollbar values and fire
+        # signals that draw the frame again; guard against unbounded
         # re-entrant recursion.
         if self._drawing_frame:
             return
@@ -9924,7 +11576,11 @@ class Window(QtWidgets.QMainWindow):
         instead."""
         if self.draw_affine_pairing():
             return
-        if self.ready_for_fit:
+        if self.parameters_dialog.is_multi_emitter():
+            # it finds the spots itself, so identifications are not shown
+            if self.parameters_dialog.preview_checkbox.isChecked():
+                self.draw_multi_emitter_preview()
+        elif self.ready_for_fit:
             box = (self.last_identification_info or {}).get(
                 "Box Size", self.parameters["Box Size"]
             )
@@ -9974,14 +11630,27 @@ class Window(QtWidgets.QMainWindow):
             frame = self.identification_movie()[self.curr_frame_number]
             frame = self.contrast_dialog.to_uint8(frame)
             height, width = frame.shape
-            image = QtGui.QImage(
-                frame.data,
-                width,
-                height,
-                width,
-                QtGui.QImage.Format.Format_Indexed8,
-            )
-            image.setColorTable(CMAP_GRAYSCALE)
+            rgb = None
+            if self.lifetime_shown():
+                rgb = self._lifetime_frame(frame)
+            if rgb is None:
+                image = QtGui.QImage(
+                    frame.data,
+                    width,
+                    height,
+                    width,
+                    QtGui.QImage.Format.Format_Indexed8,
+                )
+                image.setColorTable(CMAP_GRAYSCALE)
+            else:
+                image = QtGui.QImage(
+                    rgb.data,
+                    width,
+                    height,
+                    3 * width,
+                    QtGui.QImage.Format.Format_RGB888,
+                )
+            # copies the pixels, so the arrays may go
             pixmap = QtGui.QPixmap.fromImage(image)
             self.scene = Scene(self)
             self.scene.addPixmap(pixmap)
@@ -10000,6 +11669,13 @@ class Window(QtWidgets.QMainWindow):
             )
             self._draw_frame_spots()
             locs_frame = self._current_frame_locs()
+            dialog = self.parameters_dialog
+            if (
+                dialog.is_multi_emitter()
+                and dialog.preview_checkbox.isChecked()
+            ):
+                # the preview shows its own fit only
+                locs_frame = None
             if locs_frame is not None:
                 # the coordinates are in nm, the scene is the camera image
                 pixelsize = self.parameters_dialog.pixelsize.value()
@@ -10008,10 +11684,10 @@ class Window(QtWidgets.QMainWindow):
                         loc["x"] / pixelsize + 0.5,
                         loc["y"] / pixelsize + 0.5,
                         1,
+                        overlapping=loc.get("n_emitters", 1) > 1,
                     )
                     marker.setToolTip(format_hover_tooltip(loc))
                     self.scene.addItem(marker)
-            self.draw_scalebar()
 
     def set_affine_pairing(self, qc: dict) -> None:
         """Keep the bead pairing of an affine calibration so it can be drawn
@@ -10122,6 +11798,71 @@ class Window(QtWidgets.QMainWindow):
             item.setToolTip(
                 format_hover_tooltip(identification if loc is None else loc)
             )
+
+    def draw_multi_emitter_preview(self) -> None:
+        """Fit the current frame with the multi-emitter settings and draw
+        the emitters, with the PSF sigma shown on the dialog."""
+        dialog = self.parameters_dialog
+        camera_info = self.camera_info
+        parameters = dialog.multi_emitter_parameters(estimate=False)
+        sigma = dialog.psf_sigma_spinbox.value() / camera_info["Pixelsize"]
+        spline = residualfit.NO_SPLINE
+        if parameters.psf_model == "spline":
+            if not dialog.spline_calibration:
+                self.status_bar.showMessage(
+                    "Preview: load a spline calibration first."
+                )
+                return
+            try:
+                spline, sigma = localize._multi_emitter_spline(
+                    dialog.spline_calibration, parameters
+                )
+            except ValueError as e:
+                self.status_bar.showMessage(f"Preview: {e}")
+                return
+        frame = np.asarray(self.movie[self.curr_frame_number])
+        pad = residualfit.padding(sigma, parameters.psf_model, spline)
+        mask = localize._peak_mask(
+            frame.shape,
+            pad,
+            _copied_rois(self.view.rois),
+            getattr(self.movie, "filled_window", None),
+        )
+        calibration = dialog.camera_calibration or {}
+        offset = calibration.get("offset")
+        gain = calibration.get("gain")
+        variance = None
+        if calibration:
+            variance = np.asarray(
+                localize._variance_to_photons(
+                    calibration["variance"], camera_info, gain
+                ),
+                dtype=np.float64,
+            )
+        QtWidgets.QApplication.setOverrideCursor(
+            QtCore.Qt.CursorShape.WaitCursor
+        )
+        try:
+            result = localize._multi_emitter_frame(
+                frame,
+                None,
+                camera_info,
+                offset,
+                gain,
+                variance,
+                mask,
+                sigma,
+                parameters,
+                spline,
+            )
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+        for x, y, n in zip(result.x - pad, result.y - pad, result.n_emitters):
+            marker = FitMarker(x + 0.5, y + 0.5, 1, overlapping=n > 1)
+            self.scene.addItem(marker)
+        self.status_bar.showMessage(
+            f"Preview: {len(result.x):,} emitters in this frame."
+        )
 
     def draw_preview_identifications(
         self, identifications_frame: pd.DataFrame, box: int
@@ -10952,96 +12693,306 @@ class Window(QtWidgets.QMainWindow):
             for j in range(len(cur_xy))
         ]
 
-    def draw_scalebar(self) -> None:
-        """Draw a scale bar if the option is checked."""
-        if not self.scalebar_action.isChecked():
-            return
+    def _update_scalebar(self, *args) -> None:
+        """Repaint the view with or without the scale bar."""
+        self.view.viewport().update()
 
-        scene_pixelsize = self.parameters_dialog.pixelsize.value()
-
-        # length (nm) - set optimal size (~1/8 of image width)
+    def scalebar_viewport(
+        self,
+    ) -> tuple[tuple[float, float], tuple[float, float]] | None:
+        """The part of the frame shown in the view, ``((y_min, x_min),
+        (y_max, x_max))`` in nm, or None before the view is laid out."""
         rect = self.view.viewport().rect()
-        visible_scene_rect = self.view.mapToScene(rect).boundingRect()
-        width = visible_scene_rect.width()
-        # the view may not be laid out yet (e.g. slow/network loads), in
-        # which case ``width`` is 0 and there is nothing to draw
-        if width <= 0:
-            return
-        width_nm = width * scene_pixelsize
-        optimal_scalebar = width_nm / 8
+        visible = self.view.mapToScene(rect).boundingRect()
+        if visible.width() <= 0 or visible.height() <= 0:
+            return None
+        pixelsize = self.parameters_dialog.pixelsize.value()
+        return (
+            (visible.top() * pixelsize, visible.left() * pixelsize),
+            (visible.bottom() * pixelsize, visible.right() * pixelsize),
+        )
 
-        # approximate to the nearest thousands, hundreds, tens or ones
-        if optimal_scalebar > 10_000:
-            scalebar = 10_000
-        elif optimal_scalebar > 1_000:
-            scalebar = int(1_000 * round(optimal_scalebar / 1_000))
-        elif optimal_scalebar > 100:
-            scalebar = int(100 * round(optimal_scalebar / 100))
-        elif optimal_scalebar > 10:
-            scalebar = int(10 * round(optimal_scalebar / 10))
+    def scalebar_length(self) -> int | None:
+        """Length (nm) of the scale bar: approx. 1/8 of the width shown
+        in the view, rounded; None if no scale bar is shown, e.g., if
+        it is hidden or would be shorter than a screen pixel."""
+        if self.movie is None or not self.scalebar_action.isChecked():
+            return None
+        viewport = self.scalebar_viewport()
+        if viewport is None:
+            return None
+        width_nm = render.viewport_width(viewport)
+        length = render.optimal_scalebar_length(width_nm)
+        length_px = length / width_nm * self.view.viewport().width()
+        if length <= 0 or length_px < 1:
+            return None
+        return length
+
+    def paint_scalebar(self, painter: QtGui.QPainter) -> None:
+        """Paint the scale bar, if shown, over the view in screen pixels,
+        see ``scalebar_options``.
+
+        Parameters
+        ----------
+        painter : QPainter
+            Painter of the view's viewport.
+        """
+        length = self.scalebar_length()
+        if length is None:
+            return
+        painter.save()
+        painter.resetTransform()  # screen pixels, not the frame's
+        render._paint_scalebar(
+            painter,
+            self.view.viewport().width(),
+            self.view.viewport().height(),
+            self.scalebar_viewport(),
+            length,
+            **self.scalebar_options.draw_kwargs(),
+        )
+        painter.restore()
+
+    def lifetime_available(self) -> bool:
+        """Whether the movie shown can be displayed as lifetimes: a
+        photon-counting movie read with the microtimes of its photons
+        (``io.PTUMovie``), shown on its own rather than as the sum of the
+        channels."""
+        if not isinstance(getattr(self, "movie", None), io.PTUMovie):
+            return False
+        return not (
+            self.channel_sum_view() is not None
+            and self.identify_mode() in IDENTIFY_SUM_MODES
+        )
+
+    def lifetime_shown(self) -> bool:
+        """Whether the frames are displayed as lifetimes."""
+        return self.lifetime_action.isChecked() and self.lifetime_available()
+
+    def set_lifetime_shown(self, shown: bool) -> None:
+        """Switch between the intensity and the lifetime display (View >
+        Show lifetime, or the Lifetime button below the movie). The first
+        time, the color range is set to the lifetimes of the frame shown
+        unless one is remembered."""
+        shown = bool(shown)
+        for widget in (self.lifetime_action, self.lifetime_button):
+            widget.blockSignals(True)
+            widget.setChecked(shown)
+            widget.blockSignals(False)
+        if shown and not self.lifetime_dialog.range_known:
+            self.auto_lifetime_range(redraw=False)
+        self.draw_frame()
+        self.view.viewport().update()
+
+    def update_lifetime_controls(self) -> None:
+        """Offer the lifetime display for photon-counting movies only."""
+        available = self.lifetime_available()
+        self.lifetime_action.setEnabled(available)
+        self.lifetime_settings_action.setEnabled(available)
+        self.lifetime_button.setVisible(available)
+        self.lifetime_dialog.update_decay()
+
+    def _movie_decay(self, movie: io.PTUMovie) -> tuple[np.ndarray, int]:
+        """Decay of the first ``LIFETIME_DECAY_SCAN_FRAMES`` scan frames of
+        ``movie`` (within its microtime gate) and the microtime bin of its
+        maximum, read once per movie."""
+        key = id(movie)
+        if key not in self._lifetime_decays:
+            decay = movie._decay(
+                0, min(LIFETIME_DECAY_SCAN_FRAMES, movie.scan_frames)
+            )
+            maximum = movie._microtime_range[0] + int(np.argmax(decay))
+            self._lifetime_decays[key] = (decay, maximum)
+        return self._lifetime_decays[key]
+
+    def lifetime_decay(self) -> tuple[np.ndarray, np.ndarray, float] | None:
+        """``(times, counts, maximum)`` of the decay of the movie shown
+        (times in ns at the bin centers, the maximum at the start of its
+        bin), or None without a photon-counting movie."""
+        if not self.lifetime_available():
+            return None
+        movie = self.movie
+        counts, maximum = self._movie_decay(movie)
+        width = movie._tcspc_resolution * 1e9
+        first = movie._microtime_range[0]
+        times = (first + np.arange(len(counts)) + 0.5) * width
+        return times, counts, maximum * width
+
+    def lifetime_bins(self) -> tuple[int, int]:
+        """First and last-plus-one microtime bin of the lifetime window of
+        the movie shown, see ``LifetimeDialog``, within its microtime gate.
+
+        Raises
+        ------
+        ValueError
+            If the window holds no microtimes of the movie.
+        """
+        movie = self.movie
+        _, maximum = self._movie_decay(movie)
+        width = movie._tcspc_resolution * 1e9
+        dialog = self.lifetime_dialog
+        start = maximum + int(round(dialog.start_spinbox.value() / width))
+        length = int(round(dialog.length_spinbox.value() / width))
+        stop = start + max(1, length)
+        gate_lo, gate_hi = movie._microtime_range
+        start, stop = max(start, gate_lo), min(stop, gate_hi)
+        if start >= stop:
+            raise ValueError(
+                "the time window lies outside the photons' microtimes, "
+                f"{gate_lo * width:.3g}-{gate_hi * width:.3g} ns"
+            )
+        return start, stop
+
+    def lifetime_window_ns(self) -> tuple[float, float] | None:
+        """Start and end of the lifetime window of the movie shown in ns,
+        or None if there is none."""
+        if not self.lifetime_available():
+            return None
+        try:
+            start, stop = self.lifetime_bins()
+        except Exception:  # noqa: BLE001 - no window
+            return None
+        width = self.movie._tcspc_resolution * 1e9
+        return start * width, stop * width
+
+    def lifetimes(
+        self, index: int | None = None
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """``(lifetimes, photons)`` of frame ``index`` (default: the frame
+        shown) of the movie shown, see ``_lifetime_image``. The photon
+        delays of the latest ``LIFETIME_CACHE_FRAMES`` frames are kept, so
+        redrawing (e.g., when panning) does not read them again."""
+        if index is None:
+            index = self.curr_frame_number
+        movie = self.movie
+        start, stop = self.lifetime_bins()
+        key = (id(movie), int(index), start, stop)
+        sums = self._lifetime_cache.pop(key, None)
+        if sums is None:
+            sums = movie._delay_sums(int(index), (start, stop))
+        self._lifetime_cache[key] = sums  # the most recent one last
+        while len(self._lifetime_cache) > LIFETIME_CACHE_FRAMES:
+            del self._lifetime_cache[next(iter(self._lifetime_cache))]
+        dialog = self.lifetime_dialog
+        return _lifetime_image(
+            *sums,
+            binning=dialog.binning_spinbox.value(),
+            min_photons=dialog.min_photons_spinbox.value(),
+        )
+
+    def _lifetime_colors(self) -> np.ndarray:
+        """Colors (``_lifetime_lut``) of the colormap chosen."""
+        name = self.lifetime_dialog.colormap_combo.currentText()
+        cached = getattr(self, "_lifetime_lut_cache", None)
+        if cached is None or cached[0] != name:
+            self._lifetime_lut_cache = (name, _lifetime_lut(name))
+        return self._lifetime_lut_cache[1]
+
+    def _lifetime_frame(self, brightness: np.ndarray) -> np.ndarray | None:
+        """The frame shown as lifetimes (``_lifetime_rgb``), its brightness
+        from the intensity shown (uint8, after the contrast). None if the
+        lifetimes cannot be computed; the reason is shown over the view
+        (``paint_lifetime_legend``)."""
+        try:
+            lifetimes, _ = self.lifetimes()
+        except Exception as error:  # noqa: BLE001 - shown over the view
+            self._lifetime_error = str(error)
+            return None
+        self._lifetime_error = None
+        dialog = self.lifetime_dialog
+        return _lifetime_rgb(
+            lifetimes,
+            brightness,
+            self._lifetime_colors(),
+            dialog.shortest_spinbox.value(),
+            dialog.longest_spinbox.value(),
+        )
+
+    def auto_lifetime_range(self, *_, redraw: bool = True) -> None:
+        """Set the range of the lifetime colors to the lifetimes of most
+        photons of the frame shown, see ``_lifetime_range``; unchanged if
+        no pixel has a lifetime."""
+        if not self.lifetime_available():
+            return
+        try:
+            lifetimes, photons = self.lifetimes()
+        except Exception:  # noqa: BLE001 - the display shows the reason
+            return
+        found = _lifetime_range(lifetimes, photons)
+        if found is None:
+            return
+        self.lifetime_dialog.set_range(*found)
+        if redraw:
+            self.on_lifetime_settings_changed()
+
+    def on_lifetime_settings_changed(self) -> None:
+        """Redraw after a change of the lifetime display settings."""
+        if self.lifetime_shown():
+            self.draw_frame()
+            self.view.viewport().update()
+
+    def paint_lifetime_legend(self, painter: QtGui.QPainter) -> None:
+        """Paint the color bar of the lifetime display, if shown, at the
+        top right of the frame (of the part of it in view) in screen
+        pixels; or why no lifetimes are shown.
+
+        Parameters
+        ----------
+        painter : QPainter
+            Painter of the view's viewport.
+        """
+        if not self.lifetime_shown():
+            return
+        viewport = self.view.viewport().rect()
+        frame = self.view.mapFromScene(self.scene.sceneRect()).boundingRect()
+        area = viewport.intersected(frame)
+        if area.isEmpty():
+            area = viewport
+
+        def top_left(width: int) -> QtCore.QPoint:
+            # 8 pixels in from the corner, but within the view
+            x = max(viewport.left(), area.right() + 1 - width - 8)
+            return QtCore.QPoint(x, area.top() + 8)
+
+        background = QtGui.QColor(0, 0, 0, 160)
+        painter.save()
+        painter.resetTransform()  # screen pixels, not the frame's
+        error = getattr(self, "_lifetime_error", None)
+        if error:
+            font = QtGui.QFont()
+            font.setPixelSize(11)
+            painter.setFont(font)
+            flags = QtCore.Qt.TextFlag.TextWordWrap
+            text = f"No lifetimes: {error}"
+            rect = QtGui.QFontMetrics(font).boundingRect(
+                QtCore.QRect(0, 0, max(100, area.width() // 2), 1000),
+                flags,
+                text,
+            )
+            rect.moveTopLeft(top_left(rect.width() + 12) + QtCore.QPoint(6, 6))
+            painter.fillRect(rect.adjusted(-6, -6, 6, 6), background)
+            painter.setPen(QtGui.QColor("white"))
+            painter.drawText(rect, flags, text)
         else:
-            scalebar = int(round(optimal_scalebar))
-
-        # position against the viewport (the drawable area) rather than
-        # the whole view, so the bar is not covered by the scrollbar
-        # gutters (opaque on Windows, overlaid on macOS)
-        viewport_width = self.view.viewport().width()
-        viewport_height = self.view.viewport().height()
-        length_displaypxl = int(
-            round(viewport_width * (scalebar / scene_pixelsize) / width)
-        )
-        # when zoomed in far enough the scale bar rounds down to 0 nm /
-        # 0 display pixels; skip drawing to avoid a division by zero below
-        if scalebar <= 0 or length_displaypxl <= 0:
-            return
-        height_displaypxl = 10
-
-        # draw a rectangle
-        x = viewport_width - length_displaypxl - 40
-        y = viewport_height - height_displaypxl - 20
-        pen = QtGui.QPen(QtCore.Qt.PenStyle.NoPen)
-        brush = QtGui.QBrush(QtGui.QColor("white"))
-        polygon = self.view.mapToScene(
-            x,
-            y,
-            length_displaypxl,
-            height_displaypxl,
-        )
-        x_scene = polygon.boundingRect().x()
-        y_scene = polygon.boundingRect().y()
-        length_scene = polygon.boundingRect().width()
-        height_scene = polygon.boundingRect().height()
-        self.scene.addRect(
-            x_scene,
-            y_scene,
-            length_scene,
-            height_scene,
-            pen,
-            brush,
-        )
-
-        # add scale bar text
-        font = QtGui.QFont()
-        font.setPointSize(20)
-        text_item = self.scene.addText(f"{scalebar} nm", font)
-        text_item.setDefaultTextColor(QtGui.QColor("white"))
-        # scene units per device pixel (uniform zoom, but keep x/y
-        # separate to be safe)
-        scene_per_px_x = length_scene / length_displaypxl
-        scene_per_px_y = height_scene / height_displaypxl
-        # position the text centered above the scale bar, with a fixed
-        # device-pixel gap so the spacing looks the same at every zoom
-        text_rect = text_item.boundingRect()
-        text_width = text_rect.width() * scene_per_px_x
-        text_height = text_rect.height() * scene_per_px_y
-        gap = 8 * scene_per_px_y
-        text_x = x_scene + (length_scene - text_width) / 2
-        text_y = y_scene - gap - text_height
-        text_item.setPos(text_x, text_y)
-        text_item.setFlag(
-            QtWidgets.QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations,  # noqa: E501
-            True,
-        )
+            dialog = self.lifetime_dialog
+            layout = render._colorbar_layout(
+                self._lifetime_colors()[::4] / 255,
+                dialog.shortest_spinbox.value(),
+                dialog.longest_spinbox.value(),
+                label="Lifetime (ns)",
+                vertical=False,
+                bar_length=150,
+                bar_width=10,
+                n_ticks=3,
+                background=background,
+                text_fontsize=11,
+                margin=6,
+                tick_length=4,
+                tick_spacer=2,
+                format_tick=lambda value: f"{round(value, 2):g}",
+            )
+            painter.translate(top_left(layout["width"]))
+            render._paint_colorbar(painter, layout)
+        painter.restore()
 
     def region_mngs(self) -> list[int]:
         """Per-region minimum net gradients in split-FOV mode, kept in step
@@ -11068,6 +13019,69 @@ class Window(QtWidgets.QMainWindow):
         mngs += [int(default)] * (len(view.rois) - len(mngs))
         view.roi_mngs = mngs
         return mngs
+
+    def estimate_min_net_gradient(self) -> None:
+        """Estimate the min. net gradient from the background of the movie
+        (see ``localize.estimate_min_net_gradient``) and put it on the
+        Parameters dialog's spin box.
+
+        The estimate searches what the identification searches: the
+        identification movie (filtered, or the channel sum), within the
+        ROIs and the frame range. In split-FOV mode a selected region is
+        searched alone, since the spin box then holds that region's own
+        threshold; with none selected, the value goes to every region, so
+        every region is searched. The spin box stores the value wherever a
+        typed one would go (see ``ParametersDialog.on_mng_slider_changed``).
+        """
+        title = "Estimate min. net gradient"
+        if self.movie is None:
+            QtWidgets.QMessageBox.information(self, title, "No movie loaded.")
+            return
+        movie = self.identification_movie()
+        rois = self.identification_rois()
+        index = self.view.selected_roi
+        if (
+            self.view.split_fov_mode
+            and self.identify_mode() not in IDENTIFY_SUM_MODES
+            and index is not None
+            and index < len(rois)
+        ):
+            rois = [rois[index]]
+        box = self.parameters_dialog.box_spinbox.value()
+        frame_bounds = self.frame_range
+
+        def compute(progress: lib.TaskProgress) -> dict:
+            return localize.estimate_min_net_gradient(
+                movie,
+                box=box,
+                roi=rois,
+                frame_bounds=frame_bounds,
+                progress=progress,
+            )
+
+        def apply(result: dict) -> None:
+            value = max(int(round(result["min_net_gradient"])), 0)
+            self.parameters_dialog.mng_spinbox.setValue(value)
+            self.status_bar.showMessage(
+                f"Min. net gradient estimated: {value:,} (background peak "
+                f"{result['background']:,.0f}, width "
+                f"{result['background_width']:,.0f}; "
+                f"{len(result['frames'])} frames)."
+            )
+
+        def failed(error: Exception) -> None:
+            if isinstance(error, ValueError):
+                QtWidgets.QMessageBox.warning(self, title, str(error))
+            else:  # unexpected, report as usual
+                sys.excepthook(type(error), error, error.__traceback__)
+
+        lib.run_task(
+            compute,
+            "Estimating the min. net gradient",
+            self,
+            apply,
+            on_failed=failed,
+        )
 
     def _shared_identification_method(self) -> localize.IdentificationMethod:
         """The identification method of the Parameters dialog with its
@@ -11679,6 +13693,14 @@ class Window(QtWidgets.QMainWindow):
         if self.movie is None:
             QtWidgets.QMessageBox.warning(
                 self, "Identify", "Load a movie before identifying."
+            )
+            return
+        if self.parameters_dialog.is_multi_emitter() and not (
+            fit_afterwards or calibrate_z or calibrate_spline
+        ):
+            self.status_bar.showMessage(
+                f"'{MULTI_EMITTER_MODEL}' finds the spots itself: run Fit "
+                "or Localize (Identify & Fit)."
             )
             return
         # The calibrations are built from bead stacks, one channel at a time,
@@ -12554,6 +14576,9 @@ class Window(QtWidgets.QMainWindow):
                 "Load a movie before fitting.",
             )
             return
+        if self.parameters_dialog.is_multi_emitter() and not calibrate_z:
+            self._start_multi_emitter_fit()
+            return
         if not self._ready_for_fit_anywhere():
             QtWidgets.QMessageBox.warning(
                 self,
@@ -12619,10 +14644,86 @@ class Window(QtWidgets.QMainWindow):
         self.fit_worker.finished.connect(self.on_fit_finished)
         self._start_fit_worker(self.fit_worker)
 
+    def _start_multi_emitter_fit(self) -> None:
+        """Fit overlapping emitters in the whole movie, frame by frame (see
+        ``localize.localize_multi_emitter``): no identification needed."""
+        if len(self.channels) > 1 or self.view.split_fov_mode:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Fit",
+                f"'{MULTI_EMITTER_MODEL}' fits one channel; it cannot fit "
+                "several channels or the regions of a split field of view "
+                "yet. Load one channel, or choose another model.",
+            )
+            return
+        dialog = self.parameters_dialog
+        parameters = dialog.multi_emitter_parameters()
+        calibration_3d = None
+        if (
+            parameters.psf_model == "elliptical"
+            and dialog.fit_z_checkbox.isChecked()
+            and dialog.z_calibration
+        ):
+            calibration_3d = dict(dialog.z_calibration)
+            calibration_3d["Magnification factor"] = (
+                dialog.magnification_factor.value()
+            )
+        spline_calibration = None
+        if parameters.psf_model == "spline":
+            if not dialog.spline_calibration:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Fit",
+                    "Load a spline PSF calibration first (Experimental "
+                    "PSF (spline) > Load calibration), or build one via "
+                    "3D > Calibrate spline PSF.",
+                )
+                return
+            spline_calibration = dialog.spline_calibration
+        self.status_bar.showMessage("Preparing the multi-emitter fit...")
+        worker = MultiEmitterFitWorker(
+            self.movie,
+            io.strip_mm_metadata(self.info),
+            self.camera_info,
+            parameters,
+            _copied_rois(self.view.rois),
+            self.frame_range,
+            dialog.camera_calibration or None,
+            self._extra_lateral_transforms(
+                calibration_3d or spline_calibration
+            ),
+            calibration_3d,
+            spline_calibration,
+        )
+        self.fit_worker = worker
+        self._fit_status_prefix = ""
+        worker.psfSigmaFound.connect(self.on_multi_emitter_psf_sigma)
+        worker.finished.connect(self.on_fit_finished)
+        self._start_fit_worker(worker)
+
+    def on_multi_emitter_psf_sigma(self, sigma: float) -> None:
+        """Show the PSF sigma the multi-emitter fit uses as soon as it is
+        known: in the Parameters dialog, whose preview then uses it, and,
+        if it was estimated, in the status bar while the frames are
+        fitted.
+
+        Parameters
+        ----------
+        sigma : float
+            The PSF sigma (nm).
+        """
+        dialog = self.parameters_dialog
+        dialog.psf_sigma_spinbox.blockSignals(True)
+        dialog.psf_sigma_spinbox.setValue(sigma)
+        dialog.psf_sigma_spinbox.blockSignals(False)
+        if dialog.psf_sigma_estimate_checkbox.isChecked():
+            self._fit_status_prefix = f"Estimated PSF sigma: {sigma:.1f} nm. "
+
     def _single_channel_fit_worker(
         self,
         identifications: pd.DataFrame | None = None,
         calibrate_z: bool = False,
+        info: list[dict] | None = None,
     ) -> FitWorker | None:
         """A ``FitWorker`` for the active channel, from the settings now on
         the Parameters dialog.
@@ -12643,6 +14744,10 @@ class Window(QtWidgets.QMainWindow):
             it.
         calibrate_z : bool, optional
             Whether the fit feeds a z-calibration. Default False.
+        info : list of dict or None, optional
+            The metadata the fit adds its entry to. None (the default)
+            uses the active channel's identification metadata; a
+            split-FOV region passes them adapted to the region.
         """
         dialog = self.parameters_dialog
         model = dialog.fit_model.currentText()
@@ -12713,7 +14818,7 @@ class Window(QtWidgets.QMainWindow):
             fit_z = False
         return FitWorker(
             self.movie,
-            self.identifications_info,
+            self.identifications_info if info is None else info,
             self.camera_info,
             (
                 self.identifications
@@ -12912,8 +15017,11 @@ class Window(QtWidgets.QMainWindow):
         if not len(identifications):
             self._skip_in_batch(label, "no identifications in it")
             return
+        # the region's size, as fit_split_fov_independent records it
+        info = self.identifications_info
         worker = self._single_channel_fit_worker(
-            identifications=identifications
+            identifications=identifications,
+            info=localize.region_movie_info(info, region) if info else None,
         )
         if worker is None:  # the dialog has said why
             self._abort_independent_fit()
@@ -12960,7 +15068,7 @@ class Window(QtWidgets.QMainWindow):
         )
         self.locs_display = locs
         self.info = localize.region_movie_info(state["info"], region)
-        self.extra_info = localize.region_movie_info(info, region)
+        self.extra_info = info
         self.draw_frame()
         # the same tail as a single fit: the astigmatism z-fit (when it is
         # asked for), then saving and the optional drift correction, which
@@ -13826,6 +15934,8 @@ class Window(QtWidgets.QMainWindow):
             message = f"Multichannel {model} fit - {message}"
         if total > 0:
             message += f" {curr:,} / {total:,}"
+        if isinstance(worker, MultiEmitterFitWorker):
+            message = self._fit_status_prefix + message
         self.status_bar.showMessage(message + " ...")
 
     def on_fit_finished(
@@ -14014,6 +16124,8 @@ class Window(QtWidgets.QMainWindow):
         parts of one field, and each is saved to its own file already."""
         if self.locs is None or self.view.split_fov_mode:
             return
+        if localize.ROI_ID_COLUMN in self.locs.columns:
+            return  # named by the fit (the multi-emitter fit does)
         rois = (self.last_identification_info or {}).get("ROI")
         self.locs = localize.add_roi_id(
             self.locs, rois, pixelsize=self.parameters_dialog.pixelsize.value()
@@ -14260,6 +16372,26 @@ class Window(QtWidgets.QMainWindow):
                 QtCore.Qt.AspectRatioMode.KeepAspectRatio,
             )
             painter.end()
+            length = self.scalebar_length()
+            if length is not None:
+                # as on screen, with the text sizes exports always had
+                pixelsize = self.parameters_dialog.pixelsize.value()
+                with theme.unscaled_text():
+                    qimage = render.draw_scalebar(
+                        image=qimage,
+                        viewport=(
+                            (
+                                scene_rect.top() * pixelsize,
+                                scene_rect.left() * pixelsize,
+                            ),
+                            (
+                                scene_rect.bottom() * pixelsize,
+                                scene_rect.right() * pixelsize,
+                            ),
+                        ),
+                        scalebar_length_nm=length,
+                        **self.scalebar_options.draw_kwargs(),
+                    )
             qimage.save(path)
         self.view.setMinimumSize(1, 1)
 
@@ -14351,6 +16483,9 @@ class Window(QtWidgets.QMainWindow):
                 "Select it under Fit Settings in the Parameters dialog and "
                 "run the calibration again.",
             )
+            return
+        if self.parameters_dialog.is_multi_emitter():
+            self.fit()
             return
         self.parameters_dialog.gpu_checkbox.setDisabled(True)
         if (
@@ -14621,6 +16756,84 @@ class FitWorker(QtCore.QThread):
             return
         dt = time.time() - t0
         self.finished.emit(locs, info, dt, self.fit_z, self.calibrate_z)
+
+
+class MultiEmitterFitWorker(QtCore.QThread):
+    """Fit overlapping emitters in a whole movie, frame by frame (see
+    ``localize.localize_multi_emitter``), and report the progress. Its
+    signals are those of ``FitWorker``, so the window finishes both
+    alike."""
+
+    phaseStarted = QtCore.pyqtSignal(str, int)
+    progressMade = QtCore.pyqtSignal(int, int)
+    # the PSF sigma (nm) the fit uses, once estimated or given
+    psfSigmaFound = QtCore.pyqtSignal(float)
+    # localizations, their metadata, elapsed time, and that neither a z fit
+    # nor a z calibration follows
+    finished = QtCore.pyqtSignal(pd.DataFrame, object, float, bool, bool)
+    aborted = QtCore.pyqtSignal()
+    failed = QtCore.pyqtSignal(str)
+
+    def __init__(
+        self,
+        movie,
+        info: list[dict],
+        camera_info: dict,
+        parameters: localize.MultiEmitterParameters,
+        rois: list,
+        frame_bounds: list | None,
+        camera_calibration: dict | None,
+        lateral_transforms: list | None,
+        calibration_3d: dict | None = None,
+        spline_calibration: dict | None = None,
+    ) -> None:
+        super().__init__()
+        self.movie = movie
+        self.info = info
+        self.camera_info = camera_info
+        self.parameters = parameters
+        self.rois = rois
+        self.frame_bounds = frame_bounds
+        self.camera_calibration = camera_calibration
+        self.lateral_transforms = lateral_transforms or []
+        # astigmatic z from the fitted sigmas, see localize_multi_emitter
+        self.calibration_3d = calibration_3d
+        # the PSF of the "spline" model
+        self.spline_calibration = spline_calibration
+
+    def run(self) -> None:
+        t0 = time.time()
+        try:
+            locs, info = localize.localize_multi_emitter(
+                self.movie,
+                self.info,
+                camera_info=self.camera_info,
+                parameters=self.parameters,
+                roi=self.rois or None,
+                frame_bounds=self.frame_bounds,
+                camera_calibration=self.camera_calibration,
+                calibration_3d=self.calibration_3d,
+                spline_calibration=self.spline_calibration,
+                lateral_transforms=self.lateral_transforms or None,
+                parallel=True,
+                # the emitters are fitted on the CPU, their z on a GPU
+                # if there is one
+                fit_z_gpu=self.calibration_3d is not None and CUDA_AVAILABLE,
+                progress=_SignalProgress(
+                    on_value=self.progressMade.emit,
+                    on_phase=self.phaseStarted.emit,
+                ),
+                abort_callback=self.isInterruptionRequested,
+                psf_sigma_callback=self.psfSigmaFound.emit,
+            )
+        except Exception as e:
+            # letting it escape run() kills the thread without a word
+            self.failed.emit(str(e))
+            return
+        if locs is None:  # aborted
+            self.aborted.emit()
+            return
+        self.finished.emit(locs, info, time.time() - t0, False, False)
 
 
 def _no_linked_spots_message(split_fov: bool) -> str:

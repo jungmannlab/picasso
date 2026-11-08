@@ -237,11 +237,21 @@ def test_rounds_are_added_into_one_movie(
         "sim_1.yaml",
         "sim_1_kinetics.yaml",
         "sim_2_kinetics.yaml",
+        "sim_ground_truth.hdf5",
+        "sim_ground_truth.yaml",
     ]
     movie, info = io.load_movie(str(folder / "sim.raw"))
     np.testing.assert_array_equal(
         np.asarray(movie), simulate.check_type(short_movie[0] + short_movie[1])
     )
+    # the emitters of both rounds are in the movie's ground truth, whose
+    # photons are those the rendered rounds hold (no noise was added)
+    ground_truth, _ = io.load_locs(str(folder / "sim_ground_truth.hdf5"))
+    rendered = short_movie[0] + short_movie[1]
+    per_frame = ground_truth.groupby("frame")["photons"].sum()
+    assert per_frame.sum() == rendered.sum()
+    for frame, photons in per_frame.items():
+        assert photons == rendered[frame].sum()
     assert (
         window.statusBar()
         .currentMessage()
@@ -273,7 +283,13 @@ def test_concatenated_exchange_rounds_simulate_one_round_each(
     window.simulate()
 
     assert window.currentround == 0
-    assert _files(folder) == ["sim.raw", "sim.yaml", "sim_1.yaml"]
+    assert _files(folder) == [
+        "sim.raw",
+        "sim.yaml",
+        "sim_1.yaml",
+        "sim_ground_truth.hdf5",
+        "sim_ground_truth.yaml",
+    ]
     # round 1 has the docking strand of exchange round 1, round 2 the
     # two of exchange round 2
     for name, n_sites in (("sim_1.yaml", 1), ("sim.yaml", 2)):
@@ -296,8 +312,12 @@ def test_each_exchange_round_gets_its_own_movie(
     assert _files(folder) == [
         "sim_1.raw",
         "sim_1.yaml",
+        "sim_1_ground_truth.hdf5",
+        "sim_1_ground_truth.yaml",
         "sim_2.raw",
         "sim_2.yaml",
+        "sim_2_ground_truth.hdf5",
+        "sim_2_ground_truth.yaml",
     ]
     for name, n_sites in (("sim_1.yaml", 1), ("sim_2.yaml", 2)):
         (info,) = io.load_info(str(folder / name))

@@ -381,6 +381,7 @@ def build_animation(
     adjust_pixel_size: bool = True,
     scalebar_length_nm: int | float | None = None,
     scalebar_display_length: bool = True,
+    scalebar_style: dict | None = None,
     grid: GridOverlay | None = None,
     grid_bounds: tuple | None = None,
     grid_origin: tuple[float, float, float] = (0.0, 0.0, 0.0),
@@ -507,8 +508,14 @@ def build_animation(
         in and out. The bar is white, or black if 'invert_colors' is
         True. If None, no scale bar is drawn. Default is None.
     scalebar_display_length : bool, optional
-        If True, the scale bar's length is printed above it. Only used
-        if 'scalebar_length_nm' is given. Default is True.
+        If True, the scale bar's length is printed next to it. Only
+        used if 'scalebar_length_nm' is given. Default is True.
+    scalebar_style : dict, optional
+        Further keyword arguments of ``picasso.render.draw_scalebar``
+        that set the scale bar's appearance, e.g.,
+        ``{"position": "top left", "units": "auto"}``. A ``color``
+        given here replaces the default color. Only used if
+        'scalebar_length_nm' is given. Default is None.
     grid : GridOverlay, optional
         Grid planes or axes drawn into every frame, rotating with the
         localizations, see ``picasso.render.draw_grid_3d``. If None, no
@@ -643,6 +650,18 @@ def build_animation(
     assert isinstance(
         scalebar_display_length, bool
     ), "scalebar_display_length must be a bool."
+    assert scalebar_style is None or (
+        isinstance(scalebar_style, dict)
+        and not {
+            "image",
+            "viewport",
+            "scalebar_length_nm",
+            "display_length",
+        }.intersection(scalebar_style)
+    ), (
+        "scalebar_style must be a dict of draw_scalebar's appearance "
+        "arguments or None."
+    )
     assert grid is None or isinstance(
         grid, GridOverlay
     ), "grid must be a GridOverlay or None."
@@ -681,6 +700,7 @@ def build_animation(
             adjust_pixel_size=adjust_pixel_size,
             scalebar_length_nm=scalebar_length_nm,
             scalebar_display_length=scalebar_display_length,
+            scalebar_style=scalebar_style,
             grid=grid,
             grid_bounds=grid_bounds,
             grid_origin=grid_origin,
@@ -716,6 +736,7 @@ def _build_animation(
     scalebar_length_nm: int | float | None,
     scalebar_display_length: bool,
     progress: lib.Progress,
+    scalebar_style: dict | None = None,
     cancel: Callable[[], bool] | None = None,
     grid: GridOverlay | None = None,
     grid_bounds: tuple | None = None,
@@ -821,7 +842,7 @@ def _build_animation(
                     viewport=((y_min, x_min), (y_max, x_max)),
                     scalebar_length_nm=scalebar_length_nm,
                     display_length=scalebar_display_length,
-                    color=scalebar_color,
+                    **{"color": scalebar_color, **(scalebar_style or {})},
                 )
 
             # convert to a np.array and append

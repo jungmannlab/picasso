@@ -10,7 +10,7 @@ This page describes two dialogs of the ``View`` menu:
   method, scale bar and rendering by property.
 - :ref:`Info <render-show-info>` (:kbd:`Ctrl+I`) reports on the loaded data:
   the current field of view, the localization precision and NeNA, the FRC
-  resolution and statistics of the picks.
+  and decorrelation resolutions and statistics of the picks.
 
 Click the header of a section to collapse or expand it. Picasso remembers
 which sections are open, also in the 3D view's display settings, in
@@ -197,9 +197,35 @@ Jittered Triangulation
 Scale bar
 ~~~~~~~~~
 
-Tick ``Scale bar`` to show a scale bar of ``Scale bar length (nm)``.
-``Automatic length`` keeps it at roughly 1/8 of the window width as you zoom,
-and ``Print scale bar length`` prints the length next to it.
+Tick ``Scale bar`` to show a scale bar of ``Length (nm)``; its settings are
+grayed out while it is unticked. ``Automatic length`` keeps it at roughly 1/8
+of the window width as you zoom; typing a length switches it off.
+
+The other settings set the look of the scale bar:
+
+- ``Position``: one of the four corners or centered at the top or bottom
+  (default ``Bottom right``).
+- ``Margin x`` and ``Margin y``: the distance from the nearest side and from
+  the top or bottom edge, in screen pixels. The vertical margin includes the
+  printed length. The centered positions do not use ``Margin x``.
+- ``Thickness`` of the bar, in screen pixels.
+- ``Color`` of the bar and its length; ``Auto`` (default) is white on a dark
+  and black on a white background.
+- ``Background``: the opacity of a box behind the scale bar that keeps it
+  readable over bright localizations, black behind a light and white behind
+  a dark scale bar. ``None`` (default) draws no box.
+- ``Print length`` prints the length of the scale bar, in ``nm``, ``µm`` or,
+  with ``Automatic``, in µm from 1 µm on and nm below. ``Label`` places it
+  ``Above the bar`` or ``Below the bar``, and ``Font``, ``Font size``,
+  ``Bold`` and ``Italic`` set its font. These settings are grayed out while the length is
+  not printed.
+
+``Reset`` restores the default look and keeps the length. The look of the
+scale bar and ``Print length`` are restored at the next start (``ScaleBar``
+in the :ref:`user-settings-file`); each start shows the automatic length and
+a hidden scale bar. Exported images show the
+scale bar as set here; when it is hidden, ``File > Export current view`` saves
+a second image with it (``_scalebar``).
 
 .. dropdown:: Python
    :icon: code
@@ -213,6 +239,34 @@ and ``Print scale bar length`` prints the length next to it.
       from picasso import render
 
       length_nm = render.optimal_scalebar_length(width_nm=8320)
+
+   ``render.draw_scalebar`` draws a scale bar onto a rendered image (a
+   ``QImage``, e.g., from ``render.render_scene``) of the field of view
+   ``viewport`` (nm), with the same settings as the dialog;
+   ``render.SCALEBAR_POSITIONS`` lists the positions.
+
+   .. code-block:: python
+
+      from PyQt6 import QtGui
+      from picasso import render
+
+      image = render.draw_scalebar(
+          image,
+          viewport=((0, 0), (8320, 8320)),  # (y_min, x_min), (y_max, x_max)
+          scalebar_length_nm=1000,
+          display_length=True,
+          color=QtGui.QColor("white"),
+          display_height=6,  # thickness (px)
+          margin=(20, 20),  # (x, y) (px)
+          text_fontsize=24,
+          position="top left",
+          label_position="below",
+          units="auto",  # "nm", "um" or "auto"
+          font_family="Arial",
+          bold=True,
+          italic=False,
+          background_opacity=0.5,
+      )
 
 .. _render-grid:
 
@@ -354,20 +408,31 @@ Display
    was saved before Picasso 1.0, in camera pixels, and is converted with the
    pixel size of the first channel when it is loaded. A saved ``.txt`` file can also be
    dropped onto the main window.
+   Also in the View menu (:kbd:`Ctrl+Shift+B` and :kbd:`Ctrl+B`), see
+   :ref:`render-save-load-fov`.
 
 .. _render-info-precision:
 
-Precision
-~~~~~~~~~
+Precision and resolution
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+With several channels loaded, ``Channel`` chooses the channel whose values
+are shown and calculated. Each channel keeps its own results, so switching
+back shows them again. ``NeNA`` and the median precision use all
+localizations of the channel; ``FRC (FOV)`` and ``Decorrelation (FOV)`` use
+those in the current field of view. Each row's ``Calculate`` computes the
+value and ``Plot`` shows its curve (calculating it first if needed).
 
 .. _render-nena:
 
-``Median localization precision`` shows the mean of the medians of ``lpx``
-and ``lpy`` (in nm). With several channels loaded, the menu below it chooses
-which channel is shown.
+Precision
+^^^^^^^^^
 
-``Calculate NeNA`` estimates the average localization precision via the NeNA
-(nearest neighbor based analysis) approach, and ``Show NeNA plot`` displays
+``Median localization precision`` shows the mean of the medians of ``lpx``
+and ``lpy`` (in nm).
+
+The ``NeNA precision`` row estimates the average localization precision via
+the NeNA (nearest neighbor based analysis) approach, and ``Plot`` displays
 its fit (`Endesfelder et al., Histochemistry and Cell Biology, 2014
 <https://doi.org/10.1007/s00418-014-1192-3>`__). The NeNA value is added to
 the metadata of the channel, so it is saved with the localizations.
@@ -392,19 +457,19 @@ the metadata of the channel, so it is saved with the localizations.
 .. _render-info-frc:
 
 FRC
-~~~
+^^^
 
 Estimates the resolution by Fourier ring correlation (`Nieuwenhuizen et al.,
 Nature Methods, 2013 <https://doi.org/10.1038/nmeth.2448>`__):
 
-- ``Calculate FRC`` splits the localizations of the **current field of view**
+- ``Calculate`` in the ``FRC resolution (FOV)`` row splits the localizations of the **current field of view**
   (cropped to a square) randomly into two halves, renders an image of each
-  with a pixel size set by NeNA, and correlates them. ``FRC resolution (nm)``
-  is where the FRC curve drops below 1/7. Zoom to a region of interest first;
+  with a pixel size set by NeNA, and correlates them. The resolution is where
+  the FRC curve drops below 1/7. Zoom to a region of interest first;
   a large field of view takes long.
-- ``Save rendered images`` also saves the two images as ``_1.tif`` and
+- ``Save FRC images`` also saves the two images as ``_1.tif`` and
   ``_2.tif``.
-- ``Show FRC plot`` shows the FRC curve.
+- ``Plot`` shows the FRC curve.
 - The Q factor correction for repeated localizations of the same molecule
   (blinking, DNA-PAINT rebinding) is not applied, so the value reported may be
   optimistic.
@@ -444,6 +509,66 @@ the FRC resolution:
       )
       print(rois["resolutions"].mean(), rois["resolutions"].std())
 
+.. _render-info-decorrelation:
+
+Decorrelation
+^^^^^^^^^^^^^
+
+Estimates the resolution by decorrelation analysis (`Descloux et al., Nature
+Methods, 2019 <https://doi.org/10.1038/s41592-019-0515-7>`__) from all
+localizations at once, unlike the FRC, which splits them in two:
+
+- ``Calculate`` in the ``Decorrelation (FOV)`` row renders the localizations of the **current
+  field of view** as a bilinear histogram (each localization spread on its
+  four nearest pixels) and correlates the image with its Fourier transform
+  normalized to unit amplitude, low-pass filtered at increasing frequencies.
+  The correlation peaks where higher frequencies add more noise than signal;
+  repeating it on high-pass filtered images finds the highest frequency with
+  signal, the cut-off, whose period is the resolution.
+- The result depends on the pixel size: large pixels limit the resolution to
+  about twice the pixel size, small pixels leave gaps between sparse
+  localizations. With ``Pixel size (nm)`` at ``Scan``, the localizations are
+  rendered at pixel sizes from 2 to 64 nm and the smallest resolution is
+  reported (`Descloux et al., Communications Biology, 2021
+  <https://doi.org/10.1038/s42003-021-02086-1>`__); the pixel size used is shown next to ``Pixel size (nm)``. Pixel
+  sizes that give an image larger than 8,192 pixels on a side are skipped, so
+  zoom in for the smallest pixel sizes. If the resolution is close to twice
+  the smallest pixel size rendered (below three times it), Picasso says that
+  it may be limited by the pixel size: smaller pixels may give a better value.
+- ``Plot`` shows the decorrelation functions at the pixel
+  size of the resolution (without and with high-pass filters, their peaks and
+  the cut-off) and the resolution at each pixel size.
+- The estimate needs enough localizations: Descloux et al. (2021) found it
+  reliable above about 1-4 x 10^4 localizations per µm² of sample; below,
+  it improves with more localizations. The plot reports this density. As for
+  the FRC, repeated localizations of the same molecule are not corrected for,
+  so the value reported may be optimistic.
+
+The same analysis runs from the command line over the whole field of view,
+see :ref:`cmd-decorrelation`.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``decorrelation`` renders the localizations in a viewport (by default the
+   whole field of view) at each pixel size; ``imageprocess.decorrelation``
+   analyzes any image.
+
+   .. code-block:: python
+
+      from picasso import imageprocess, postprocess
+
+      result = postprocess.decorrelation(
+          locs, info, viewport=((0, 0), (8320, 8320))  # nm
+      )
+      print(result["resolution"], result["pixel_size"])  # nm
+      result["resolutions"]  # at each of result["pixel_sizes"]
+      fig = postprocess.plot_decorrelation(result)
+
+      image_result = imageprocess.decorrelation(image, pixel_size=65.0)
+      print(image_result["resolution"])  # nm
+
 
 .. _render-info-fov:
 
@@ -468,7 +593,9 @@ deviation over the picks of:
 - ``RMSD to COM (nm)``, the root mean square distance of the localizations to
   the pick's center of mass, and ``RMSD in z (nm)`` for 3D data;
 - ``Bright time (frames)`` and ``Dark time (frames)``, the mean bright and
-  dark times of each pick, fitted to their cumulative distributions.
+  dark times of each pick, fitted to their cumulative distributions;
+- ``SBR``, ``Localization drop (%)`` and ``Destroyed sites (%)``, the
+  performance of the dye, see :ref:`render-info-dye-performance`.
 
 ``Ignore dark times <=`` sets the longest gap (in frames) within one binding
 event: localizations separated by at most this many frames are linked into
@@ -489,7 +616,74 @@ qPAINT:
    deviation over the picks.
 
 ``Show fitted binding kinetics`` plots the distributions of the bright and dark
-times with their fits.
+times with their fits, the histogram of the ratios :math:`r` (see below) with
+the fitted exponential and the cut-off, and the picked localizations over time.
+
+.. _render-info-dye-performance:
+
+Dye performance: SBR, localization drop and destroyed docking sites
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Three values characterize the dye and the imaging conditions, following `Steen
+et al., Nature Methods, 2024 <https://doi.org/10.1038/s41592-024-02374-8>`__.
+Pick single docking sites, e.g., on DNA origami, so that each pick holds one
+docking site.
+
+- ``SBR``, the signal-to-background ratio: the photons of the fitted PSF within
+  one camera pixel around the localization, divided by the background per
+  pixel. Only the localizations in the centers of binding events of at least
+  three frames are used, since the first and the last frame record only a part
+  of a binding (see :ref:`render-select-central-frames`). Mean and standard
+  deviation over these localizations. It needs a Gaussian fit (``sx`` and
+  ``sy``).
+- ``Localization drop (%)``, the decrease of the number of picked
+  localizations from the first to the last 20% of the frames, e.g., as the
+  docking sites are damaged.
+- ``Destroyed sites (%)``, the estimated percentage of docking sites destroyed
+  during the measurement. For each pick, :math:`r = t_\mathrm{end} /
+  \tau_d` is the time from its last localization to the end of the
+  measurement over its mean dark time. An intact docking site keeps binding
+  until the end, so :math:`r` follows an exponential distribution with mean
+  1; a destroyed one stops binding, so its :math:`r` is large. An exponential
+  with mean :math:`\mu` is fitted to the histogram of :math:`r`;
+  :math:`\mu` is above 1 if the binding slows down over the measurement. The
+  percentage of picks with :math:`r > 4\mu`, minus the 1.83%
+  (:math:`e^{-4}`) expected for an exponential distribution, is reported.
+  Picks with fewer than three binding events are left out. The mean dark
+  time of each pick is fitted to the cumulative distribution of its dark
+  times without an amplitude and an offset, as in the paper, so it can differ
+  slightly from ``Dark time (frames)``.
+
+``Ignore dark times <=`` also sets the binding events here; Steen et al. link
+only localizations in consecutive frames (0).
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``dye_performance`` computes all three from the localizations of each
+   docking site, e.g., from ``picked_locs``; ``signal_to_background``,
+   ``localization_rate_drop`` and ``docking_site_damage`` compute each one.
+   The same is available on the command line as ``picasso dye-performance``
+   (see :ref:`cmd-dye-performance`).
+
+   .. code-block:: python
+
+      import numpy as np
+      from picasso import io, postprocess
+
+      locs, info = io.load_locs("origami_locs.hdf5")
+      picks, shape, size = io.load_picks("sites_picks.yaml")
+      picked = postprocess.picked_locs(
+          locs, info, picks=picks, pick_shape=shape, pick_size=size
+      )
+
+      result = postprocess.dye_performance(picked, info)  # max_dark_time=0
+      print(np.nanmean(result["sbr"]), result["localization_drop"])
+      damage = result["damage"]
+      print(damage["fraction_destroyed"], damage["mu"])
+      fig = postprocess.plot_docking_site_damage(damage)
+      fig = postprocess.plot_localization_rate(result["locs"], info)
 
 Dark times are counted as the number of frames without signal between two
 binding events in a pick; see "HDF5 Pick Property Files" in the file format

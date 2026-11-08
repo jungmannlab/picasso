@@ -24,6 +24,7 @@ from scipy.spatial.transform import Rotation
 from .. import io, render, lib, lib_qt, __version__, docs_url
 from . import idle, theme, toolbars
 from .grid_settings import GridGroupBox
+from .scalebar_settings import ScaleBarGroupBox
 from .render_worker import (
     RenderWorker,
     global_precisions_for,
@@ -45,7 +46,12 @@ def source_key(view, source: str) -> tuple:
             "fov",
             (float(y_min), float(x_min), float(y_max), float(x_max)),
         )
-    return ("pick", repr(view._picks[0]), view._pick_shape, view._pick_size)
+    return (
+        "pick",
+        repr(view._picks[0]),
+        view._pick_shapes[0],
+        view._pick_sizes[0],
+    )
 
 
 N_GROUP_COLORS = render.N_GROUP_COLORS  # 8
@@ -90,11 +96,12 @@ class DisplaySettingsRotationDialog(lib.Dialog):
     disp_px_size : QDoubleSpinBox
         Contains the size of super-resolution pixels in nm.
     scalebar : QSpinBox
-        Contains the scale bar's length (nm).
-    scalebar_groupbox : CollapsibleGroupBox
+        Contains the scale bar's length (nm), ``scalebar_groupbox.length``.
+    scalebar_groupbox : ScaleBarGroupBox
         Group with options for customizing scale bar, tick to display.
     scalebar_text : QCheckBox
-        Tick to display scale bar's length (nm).
+        Tick to display scale bar's length (nm),
+        ``scalebar_groupbox.print_length``.
     _silent_disp_px_update : bool
         True if update display pixel size in background.
     """
@@ -398,36 +405,14 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         }
 
         # scalebar
-        self.scalebar_groupbox = lib.CollapsibleGroupBox("Scale bar")
-        self.scalebar_groupbox.setCheckable(True)
-        self.scalebar_groupbox.setChecked(False)
-        self.scalebar_groupbox.toggled.connect(self.render_scene)
+        self.scalebar_groupbox = ScaleBarGroupBox(
+            optimal_length=self.window.view_rot.optimal_scalebar_length
+        )
+        self.scalebar_groupbox.changed.connect(self.render_scene)
         vbox.addWidget(self.scalebar_groupbox)
-        scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox.content)
-        scalebar_length_label = QtWidgets.QLabel("Scale bar length (nm):")
-        scalebar_length_label.setToolTip("Set the length of the scale bar.")
-        scalebar_grid.addWidget(scalebar_length_label, 0, 0)
-        self.scalebar = QtWidgets.QSpinBox()
-        self.scalebar.setRange(1, 100000)
-        self.scalebar.setValue(500)
-        self.scalebar.setKeyboardTracking(False)
-        self.scalebar.valueChanged.connect(self.render_scene)
-        self.scalebar.valueChanged.connect(self._uncheck_optimal_scalebar)
-        scalebar_grid.addWidget(self.scalebar, 0, 1)
-        self.scalebar_text = QtWidgets.QCheckBox("Print scale bar length")
-        self.scalebar_text.setToolTip("Display the length of the scale bar?")
-        self.scalebar_text.stateChanged.connect(self.render_scene)
-        scalebar_grid.addWidget(self.scalebar_text, 1, 0)
-        self.optimal_scalebar_check = QtWidgets.QCheckBox("Automatic length")
-        self.optimal_scalebar_check.setToolTip(
-            "Set the scale bar length to approximately 1/8 of the current "
-            "viewport width."
-        )
-        self.optimal_scalebar_check.setChecked(True)
-        self.optimal_scalebar_check.stateChanged.connect(
-            self.window.view_rot.set_optimal_scalebar
-        )
-        scalebar_grid.addWidget(self.optimal_scalebar_check, 1, 1)
+        self.scalebar = self.scalebar_groupbox.length
+        self.scalebar_text = self.scalebar_groupbox.print_length
+        self.optimal_scalebar_check = self.scalebar_groupbox.auto_length
 
         # grid planes rotating with the data
         self.grid_box = GridGroupBox(
@@ -545,14 +530,6 @@ class DisplaySettingsRotationDialog(lib.Dialog):
         self.maximum.setValue(value)
         self.maximum.blockSignals(False)
         self.contrast_slider.sync()
-
-    def _uncheck_optimal_scalebar(self, *args) -> None:
-        """Uncheck the automatic scale bar checkbox when the user
-        manually changes the scale bar length."""
-        if self.optimal_scalebar_check.isChecked():
-            self.optimal_scalebar_check.blockSignals(True)
-            self.optimal_scalebar_check.setChecked(False)
-            self.optimal_scalebar_check.blockSignals(False)
 
     def render_scene(self, *args, **kwargs):
         """Update scene in the rotation window."""
@@ -995,6 +972,11 @@ class AnimationDialog(lib.Dialog):
         width, height = self.width_px.value(), self.height_px.value()
         last_viewport = positions[-1][1]
         disp_px_size = render.viewport_width(last_viewport) / width  # nm
+        # frames are exported with the text sizes they always had
+        with theme.unscaled_text():
+            scalebar_style = disp_dlg.scalebar_groupbox.style_kwargs(
+                data_dlg.wbackground.isChecked()
+            )
         kwargs = dict(
             positions=positions,
             durations=durations,
@@ -1020,6 +1002,7 @@ class AnimationDialog(lib.Dialog):
                 else None
             ),
             scalebar_display_length=disp_dlg.scalebar_text.isChecked(),
+            scalebar_style=scalebar_style,
         )
         grid = disp_dlg.grid_box.grid()
         if grid is not None and view._grid_bounds is not None:
@@ -1582,8 +1565,8 @@ class ViewRotation(QtWidgets.QLabel, idle.SpillableChannels):
         else:
             # save the pick information
             self.pick = w.view._picks[0]
-            self.pick_shape = w.view._pick_shape
-            self.pick_size = w.view._pick_size
+            self.pick_shape = w.view._pick_shapes[0]
+            self.pick_size = w.view._pick_sizes[0]
             self.viewport = self.fit_in_view_rotated(get_viewport=True)
         self._source_key = source_key(w.view, self._source)
 
@@ -2107,38 +2090,31 @@ class ViewRotation(QtWidgets.QLabel, idle.SpillableChannels):
             self.group_color = []
         return True
 
-    def draw_scalebar(self, image: QtGui.QImage) -> QtGui.QImage:
-        """Draw a scalebar.
+    def draw_scalebar(
+        self, image: QtGui.QImage, force: bool = False
+    ) -> QtGui.QImage:
+        """Draw the scale bar set in the display settings, if shown.
 
         Parameters
         ----------
         image : QImage
             Image containing rendered localizations.
+        force : bool, optional
+            If True, draw the scale bar also while it is hidden.
+            Default False.
 
         Returns
         -------
         QImage
             Image with the drawn scalebar.
         """
-        d_dialog = self.window.display_settings_dlg
-        if d_dialog.scalebar_groupbox.isChecked():
-            color = (
-                QtGui.QColor("white")
-                if not self.window.dataset_dialog.wbackground.isChecked()
-                else QtGui.QColor("black")
-            )
-            d_dialog = self.window.display_settings_dlg
-            image = render.draw_scalebar(
-                image=image,
-                viewport=self.viewport,
-                scalebar_length_nm=d_dialog.scalebar.value(),
-                display_length=d_dialog.scalebar_text.isChecked(),
-                color=color,
-                text_fontsize=theme.scaled_text_size(
-                    render.SCALEBAR_FONT_SIZE
-                ),
-            )
-        return image
+        scalebar_box = self.window.display_settings_dlg.scalebar_groupbox
+        return scalebar_box.draw(
+            image,
+            self.viewport,
+            self.window.dataset_dialog.wbackground.isChecked(),
+            force=force,
+        )
 
     def grid_geometry(
         self,
@@ -2426,21 +2402,28 @@ class ViewRotation(QtWidgets.QLabel, idle.SpillableChannels):
         """Shift pick in the main window."""
         self._arrow_pan_relative(0.0, SHIFT)
 
+    def optimal_scalebar_length(self) -> int | None:
+        """Automatic scale bar length (nm): approx. 1/8 of the current
+        viewport's width, rounded; None without a view."""
+        if getattr(self, "viewport", None) is None:
+            return None
+        return render.optimal_scalebar_length(
+            render.viewport_width(self.viewport)
+        )
+
     def set_optimal_scalebar(
         self, force: bool = False, silent: bool = False
     ) -> None:
         """Sets scalebar to approx. 1/8 of the current viewport's
         width."""
-        optimal_scalebar = (
-            self.window.display_settings_dlg.optimal_scalebar_check
-        )
-        if force or optimal_scalebar.isChecked():
-            width = render.viewport_width(self.viewport)
-            scalebar = render.optimal_scalebar_length(width)
-            scalebar_spinbox = self.window.display_settings_dlg.scalebar
-            scalebar_spinbox.blockSignals(True)
-            scalebar_spinbox.setValue(scalebar)
-            scalebar_spinbox.blockSignals(False)
+        scalebar_box = self.window.display_settings_dlg.scalebar_groupbox
+        if force or scalebar_box.auto_length.isChecked():
+            length = self.optimal_scalebar_length()
+            if length is None:
+                return
+            scalebar_box.length.blockSignals(True)
+            scalebar_box.length.setValue(length)
+            scalebar_box.length.blockSignals(False)
             if not silent:
                 self.update_scene()
 
@@ -2917,7 +2900,7 @@ class ViewRotation(QtWidgets.QLabel, idle.SpillableChannels):
         check_ext = [".yaml"]
         scalebar_box = self.window.display_settings_dlg.scalebar_groupbox
         scalebar = scalebar_box.isChecked()
-        if scalebar:
+        if not scalebar:
             check_ext.append("_scalebar.png")
         if self.x_render_state:
             check_ext.append(COLORBAR_SUFFIX + io.colorbar_export_format())
@@ -2937,13 +2920,10 @@ class ViewRotation(QtWidgets.QLabel, idle.SpillableChannels):
                 self.save_property_colorbar(path)
                 self.export_current_view_info(path)
                 if not scalebar:
-                    self.set_optimal_scalebar(force=True)
-                    scalebar_box.setChecked(True)
-                    self.update_scene(synchronous=True)
-                    self.qimage.save(
+                    self.set_optimal_scalebar(force=True, silent=True)
+                    self.draw_scalebar(self.qimage.copy(), force=True).save(
                         os.path.splitext(path)[0] + "_scalebar.png"
                     )
-                    scalebar_box.setChecked(False)
             self.update_scene(synchronous=True)
 
     def save_property_colorbar(self, path: str) -> None:
@@ -3471,42 +3451,50 @@ class RotationWindow(QtWidgets.QMainWindow):
         """
         if self.view_rot.pick_shape is None:
             return  # the field of view is shown: no pick to move
-        if self.view_rot.pick_shape in ["Circle", "Square"]:
-            x = self.window.view._picks[0][0]
-            y = self.window.view._picks[0][1]
-            self.window.view._picks = [(x + dx, y + dy)]  # main window
-            self.view_rot.pick = (x + dx, y + dy)  # view rotation
-        elif self.view_rot.pick_shape in ["Rectangle", "Box"]:
-            # both are defined by two points: the ends of the center
-            # axis for a rectangle, two opposite corners for a box
-            (xs, ys), (xe, ye) = self.window.view._picks[0]
-            self.window.view._picks = [
-                (
+        with self.window.view.undo_step("Move pick", picks=True):
+            if self.view_rot.pick_shape in ["Circle", "Square"]:
+                x = self.window.view._picks[0][0]
+                y = self.window.view._picks[0][1]
+                self.window.view._picks = [(x + dx, y + dy)]  # main window
+                self.view_rot.pick = (x + dx, y + dy)  # view rotation
+            elif self.view_rot.pick_shape in ["Rectangle", "Box"]:
+                # both are defined by two points: the ends of the center
+                # axis for a rectangle, two opposite corners for a box
+                (xs, ys), (xe, ye) = self.window.view._picks[0]
+                self.window.view._picks = [
+                    (
+                        (xs + dx, ys + dy),
+                        (xe + dx, ye + dy),
+                    )
+                ]  # main window
+                self.view_rot.pick = (
                     (xs + dx, ys + dy),
                     (xe + dx, ye + dy),
-                )
-            ]  # main window
-            self.view_rot.pick = (
-                (xs + dx, ys + dy),
-                (xe + dx, ye + dy),
-            )  # view rotation
-        elif self.view_rot.pick_shape == "Polygon":
-            new_pick = []
-            for point in self.window.view._picks[0]:
-                new_pick.append((point[0] + dx, point[1] + dy))
-            self.window.view._picks = [new_pick] + []  # main window
-            self.view_rot.pick = new_pick  # view rotation
-        elif self.view_rot.pick_shape == "Brush":
-            # shift every point of every stroke, keeping their widths
-            new_pick = [
-                (
-                    stroke[0],
-                    [(x + dx, y + dy) for x, y in stroke[1]],
-                )
-                for stroke in self.window.view._picks[0]
-            ]
-            self.window.view._picks = [new_pick]  # main window
-            self.view_rot.pick = new_pick  # view rotation
+                )  # view rotation
+            elif self.view_rot.pick_shape == "Polygon":
+                new_pick = []
+                for point in self.window.view._picks[0]:
+                    new_pick.append((point[0] + dx, point[1] + dy))
+                self.window.view._picks = [new_pick] + []  # main window
+                self.view_rot.pick = new_pick  # view rotation
+            elif self.view_rot.pick_shape == "Brush":
+                # shift every point of every stroke, keeping their widths
+                new_pick = [
+                    (
+                        stroke[0],
+                        [(x + dx, y + dy) for x, y in stroke[1]],
+                    )
+                    for stroke in self.window.view._picks[0]
+                ]
+                self.window.view._picks = [new_pick]  # main window
+                self.view_rot.pick = new_pick  # view rotation
+            # the main window keeps only the moved pick, with its own shape
+            # and size rather than those of the pick tool
+            self.window.view._set_picks(
+                self.window.view._picks,
+                self.view_rot.pick_shape,
+                self.view_rot.pick_size,
+            )
 
         self.window.view.update_scene()  # update scene in main window
 
@@ -3593,7 +3581,20 @@ class RotationWindow(QtWidgets.QMainWindow):
                         by="frame",
                         inplace=True,
                     )
-                    info = self.view_rot.infos[0] + new_info
+                    # the metadata of the localizations saved, i.e., of
+                    # the main window, as Render combines them
+                    info = (
+                        self.window.view.infos[0]
+                        + [
+                            {
+                                **lib.step_info("Combine"),
+                                "Paths to combined files": (
+                                    self.window.view.locs_paths
+                                ),
+                            }
+                        ]
+                        + new_info
+                    )
                     io.save_locs(path, all_locs, info)
             # save all channels one by one
             elif channel == len(self.view_rot.paths):  # all channels
@@ -3610,7 +3611,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                             self.view_rot.paths[channel]
                         )
                         out_path = base + suffix + ".hdf5"
-                        info = self.view_rot.infos[channel] + new_info
+                        info = self.window.view.infos[channel] + new_info
                         io.save_locs(
                             out_path, self.window.view.locs[channel], info
                         )
@@ -3628,7 +3629,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                     check_ext=".yaml",
                 )
                 if path:
-                    info = self.view_rot.infos[channel] + new_info
+                    info = self.window.view.infos[channel] + new_info
                     io.save_locs(path, self.window.view.locs[channel], info)
 
     def update_scene(self) -> None:

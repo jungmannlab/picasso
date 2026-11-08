@@ -284,6 +284,13 @@ class TestStitch:
             _relative(report["positions"]), _relative(origins), atol=TOL
         )
         assert out_infos[1][-1]["Stitched files"] == paths[1::2]
+        # the settings of the alignment, shared by both targets
+        entry = out_infos[1][-1]
+        assert entry["Files used for alignment"] == paths[::2]
+        assert entry["Min. overlap (um)"] == 1.0
+        assert entry["Max. residual (nm)"] == 30.0
+        assert entry["Frames offset"] is True
+        assert entry["Aligned in z"] is True  # the tiles have z
         # the sparse target is placed like the dense one: its sites
         # land where they are in the sample
         site_x = out[1].groupby("site")["x"].mean()

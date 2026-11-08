@@ -19,6 +19,7 @@ from PyQt6 import QtWidgets
 
 from picasso import io
 from picasso.gui import render as gui_render
+from picasso.gui import render_undo
 
 WIDTH = HEIGHT = 32.0
 PIXELSIZE = 130.0
@@ -135,14 +136,17 @@ def test_reorder_updates_channel_indices_elsewhere(window):
     tools = window.tools_settings_dialog
     tools.set_move_channels((2,))
     view._drift = ["d0", "d1", "d2"]
-    view._move_undo = [((0, 2), 1.0, 2.0)]
+    # a step to undo that changed channels 0 and 2
+    record = render_undo.ChannelRecord(False, None, 0, None, None)
+    view.history._undo.append(render_undo.Step("Move", {0: record, 2: record}))
     window.test_clusterer_dialog.channels.setCurrentIndex(2)
 
     window.dataset_dialog.move_channel(2, 0)
 
     assert tools.move_channels() == (0,)
     assert view._drift == ["d2", "d0", "d1"]
-    assert view._move_undo == [((1, 0), 1.0, 2.0)]
+    undo, _ = view.history.steps()
+    assert set(undo[-1].records) == {1, 0}
     combo = window.test_clusterer_dialog.channels
     assert [combo.itemText(i) for i in range(3)] == [
         "locs_2.hdf5",
@@ -187,11 +191,9 @@ def test_close_removes_drift_data(window):
     view = window.view
     view._drift = ["d0", "d1", "d2"]
     view._driftfiles = ["f0", "f1", "f2"]
-    view.currentdrift = ["c0", "c1", "c2"]
     window.dataset_dialog.close_file(1, render=False)
     assert view._drift == ["d0", "d2"]
     assert view._driftfiles == ["f0", "f2"]
-    assert view.currentdrift == ["c0", "c2"]
 
 
 # --- default colors ---------------------------------------------------

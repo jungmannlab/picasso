@@ -4,13 +4,15 @@ picasso.fitting
 
 Levenberg-Marquardt PSF fitters, on the CPU and on CUDA GPUs.
 
-Every module here is a port of Gpufit (https://github.com/gpufit/Gpufit)
-- its LM driver, its damping rule, its least-squares and Poisson
-maximum-likelihood estimators, and its Gaussian and
-cubic-spline PSF models - written in Python and compiled by Numba, for the CPU
-(``numba.jit``) and for CUDA GPUs (``numba.cuda.jit``).
+The fitters are ports of Gpufit (https://github.com/gpufit/Gpufit) - its LM
+driver, its damping rule, its least-squares and Poisson maximum-likelihood
+estimators, and its Gaussian and cubic-spline PSF models - written in Python
+and compiled by Numba, for the CPU (``numba.jit``) and for CUDA GPUs
+(``numba.cuda.jit``); the multi-emitter fitting of :mod:`residualfit` is a
+port of storm-analysis instead.
 
-These modules are what :func:`picasso.localize.fit` runs. They are
+These modules are what :func:`picasso.localize.fit` and
+:func:`picasso.localize.localize_multi_emitter` run. They are
 documented for reference, but are not part of the public API and may change
 in any release, except :mod:`precision` (see the stability policy in the
 documentation). To fit a movie, use :func:`picasso.localize.fit`; to fit
@@ -32,6 +34,10 @@ spots you cut out yourself, :func:`picasso.localize.fit_spots_gauss` or
     same LM driver.
 :mod:`gaussfit_cuda`
     GPU 2D Gaussian PSF fitting (spherical, elliptical and rotated).
+:mod:`residualfit`
+    CPU multi-emitter fitting of whole frames: peaks found in the residual
+    of the fit, fitted with their neighbors in place (3D-DAOSTORM, ported
+    from storm-analysis; see ``LICENSES/storm-analysis-LICENSE.txt``).
 :mod:`seeds`
     The initial parameters the fitters above start from, one closed-form
     estimator per model family. Plain NumPy, and the one module that has to

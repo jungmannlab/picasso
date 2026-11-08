@@ -197,8 +197,31 @@ def test_find_target_counts_missing_target_zero(monomer_dimer_structures):
 def test_targets_from_structures_is_unique_and_order_preserving(
     het_structures,
 ):
-    targets = spinna._targets_from_structures(het_structures)
+    targets = spinna.targets_from_structures(het_structures)
     assert targets == ["A", "B"]
+
+
+def test_fit_label_uncertainty_with_one_value_fits_nothing(
+    monomer_dimer_structures, monkeypatch
+):
+    def fail(*args, **kwargs):
+        raise AssertionError("nothing may be fitted")
+
+    monkeypatch.setattr(spinna, "compare_models_given_label_unc", fail)
+    label_unc = {"target": [4.0]}
+    fitted, scores = spinna.fit_label_uncertainty(
+        [monomer_dimer_structures],
+        {"target": np.zeros((10, 2))},
+        3,
+        label_unc,
+        {"target": LE},
+        width=ROI,
+        height=ROI,
+        parallel=False,
+    )
+    assert fitted == {"target": 4.0}
+    assert scores == {}
+    assert label_unc == {"target": [4.0]}  # not modified
 
 
 def test_get_structures_permutation_homo_dimer(monomer_dimer_structures):
@@ -1769,6 +1792,40 @@ def test_compare_models_full_fits_label_unc(
     assert len(best_props) == 2
 
 
+@pytest.mark.slow
+def test_fit_label_uncertainty_scores_each_candidate(
+    mols_real, monomer_dimer_structures
+):
+    coords = mols_real[["x", "y"]].to_numpy()
+    models = [monomer_dimer_structures]
+    kwargs = dict(
+        exp_data={"target": coords},
+        granularity=3,
+        le={"target": LE},
+        width=ROI,
+        height=ROI,
+        N_sim=1,
+        parallel=False,
+    )
+    label_unc = {"target": [3.0, 6.0]}
+    np.random.seed(0)
+    fitted, scores = spinna.fit_label_uncertainty(
+        models, label_unc=label_unc, **kwargs
+    )
+    assert label_unc == {"target": [3.0, 6.0]}  # not modified
+    assert scores["target"]["candidates"] == [3.0, 6.0]
+    target_scores = scores["target"]["scores"]
+    assert len(target_scores) == 2
+    assert np.isfinite(target_scores).all()
+    best = scores["target"]["candidates"][int(np.argmin(target_scores))]
+    assert fitted == {"target": best}
+    # the first step of compare_models
+    np.random.seed(0)
+    label_unc_compared = {"target": [3.0, 6.0]}
+    spinna.compare_models(models, label_unc=label_unc_compared, **kwargs)
+    assert label_unc_compared == fitted
+
+
 def test_fit_le_smoke(mols_real):
     """End-to-end smoke test for spinna.fit_le on a small dataset."""
     coords = mols_real[["x", "y"]].to_numpy()
@@ -2179,6 +2236,48 @@ def test_fit_le_reports_phases(mols_real):
         "model 1/1"
     ]
     _assert_phases_end_at_maximum(recorder)
+
+
+def test_fit_le_bootstrap_std(mols_real):
+    coords = mols_real[["x", "y"]].to_numpy()
+
+    def fit_le(**kwargs):
+        # compare_models replaces the lists of label_unc by the fit
+        return spinna.fit_le(
+            target_a="A",
+            target_b="B",
+            exp_data={"A": coords, "B": coords},
+            # fine enough for the refits to find different candidates
+            granularity=40,
+            label_unc={"A": [3.0], "B": [3.0]},
+            distances=[10.0],
+            width=ROI,
+            height=ROI,
+            parallel=False,
+            fitting_mode="brute-force",
+            **kwargs,
+        )
+
+    np.random.seed(0)
+    recorder = _PhaseRecorder()
+    result = fit_le(bootstrap=True, progress=recorder)
+    assert len(result) == 7
+    le_values, le_std = result[0], result[6]
+    assert set(le_std) == set(le_values) == {"A", "B"}
+    assert all(np.isfinite(v) and v > 0 for v in le_std.values())
+    # the refits around the best fit come after the fit itself
+    labels = recorder.labels()
+    assert labels[0].startswith("[Round 1/1] Final comparison")
+    assert labels[1:] == [
+        f"Labeling efficiency uncertainty | Bootstrapping {i}/20"
+        for i in range(1, 21)
+    ]
+    _assert_phases_end_at_maximum(recorder)
+    # without bootstrapping, the same best fit and no le_std
+    np.random.seed(0)
+    unbootstrapped = fit_le()
+    assert len(unbootstrapped) == 6
+    assert unbootstrapped[0] == pytest.approx(le_values)
 
 
 @pytest.mark.slow

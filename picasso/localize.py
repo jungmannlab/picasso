@@ -27,6 +27,7 @@ License (MIT): ``LICENSES/Gpufit-LICENSE.txt``.
 from __future__ import annotations
 
 import logging
+import math
 import numbers
 import os
 import sqlite3
@@ -53,6 +54,7 @@ from scipy.ndimage import gaussian_filter
 from scipy.optimize import curve_fit
 from scipy.signal import fftconvolve
 from scipy.spatial.distance import cdist
+from scipy import stats
 
 from .ext import bitplane
 
@@ -76,6 +78,7 @@ from .fitting import (
     gaussfit,
     gaussfit_cuda,
     precision,
+    residualfit,
     seeds,
     splinefit,
     splinefit_cuda,
@@ -85,18 +88,24 @@ _log = logging.getLogger(__name__)
 
 __all__ = [
     "FIT_METHODS",
+    "FIT_METHOD_ALIASES",
+    "resolve_fit_method",
     "IDENTIFY_METHODS",
     "IdentificationParameters",
     "NetGradient",
+    "MultiEmitterParameters",
     # one channel
     "localize",
     "localize_frames",
+    "localize_multi_emitter",
     "identify",
     "identify_in_frame",
     "identify_by_frame_number",
+    "estimate_min_net_gradient",
     "clip_rois",
     "add_roi_id",
     "get_spots",
+    "to_photons",
     "fit",
     "fit_spots_gauss",
     "gauss_schedule",
@@ -222,6 +231,7 @@ LOCALIZATION_COLUMNS = {
     "Least squares only": ["chi_square"],
     "Goodness of fit": ["reduced_chi_square"],
     "Uncertainty": ["photons_unc", "bg_unc", "sx_unc", "sy_unc"],
+    "Multi-emitter only": ["significance", "n_emitters"],
     "Multichannel only": (
         [f"photons_ch{c}" for c in range(precision._LINK_XYZ_MAX_CHANNELS)]
         + [f"bg_ch{c}" for c in range(precision._LINK_XYZ_MAX_CHANNELS)]
@@ -1851,7 +1861,9 @@ class SummedChannelsMovie:
         if calibration is not None:
             offset = calibration.get("offset")
             gain = calibration.get("gain")
-        return _to_photons(frame, self.camera_infos[channel], offset, gain)
+        return to_photons(
+            frame, self.camera_infos[channel], offset=offset, gain_patch=gain
+        )
 
     def __getitem__(self, it):
         if isinstance(it, tuple):
@@ -2530,6 +2542,34 @@ def _identify_serial(
     return ids
 
 
+def _identification_filtered_movie(
+    movie: MovieLike,
+    parameters: IdentificationParameters,
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None,
+) -> MovieLike:
+    """``movie`` as :func:`identify` searches it: temporal median
+    filtered and then Gaussian smoothed, as ``parameters`` set (lazy
+    views; the movie itself without filters). The temporal median is
+    computed only within ``roi`` (with a margin)."""
+    if parameters.temporal_median_window:
+        movie = TemporalMedianMovie(
+            movie,
+            parameters.temporal_median_window,
+            stride=parameters.temporal_median_stride,
+            roi=roi,
+            roi_pad=identification_roi_pad(
+                parameters.box,
+                parameters.gaussian_filter_sigma,
+                parameters.method,
+            ),
+        )
+    # temporal median first, then smoothing: the Gaussian is meant to merge
+    # the maxima of one spot, not those of the background it sits on
+    if parameters.gaussian_filter_sigma:
+        movie = GaussianFilteredMovie(movie, parameters.gaussian_filter_sigma)
+    return movie
+
+
 def identify(
     movie: MovieLike,
     info: list[dict] | None = None,
@@ -2563,8 +2603,9 @@ def identify(
         :class:`SummedChannelsMovie`) is filtered and searched in that
         rectangle only, and the ROIs are clipped to it.
     info : list of dicts or None, optional
-        Metadata of the movie, e.g., from ``io.load_movie``. Default is
-        None, i.e., none.
+        Metadata of the movie, e.g., from ``io.load_movie``. Default is None,
+        i.e., no earlier metadata, so the returned metadata holds only the
+        entry of this step.
     parameters : IdentificationParameters
         The identification method with its threshold(s), the box size and
         the filters applied before identifying. The filters apply to the
@@ -2672,23 +2713,9 @@ def identify(
     if window is not None:
         movie = CroppedMovie(movie, window)
         search_roi = _roi_in_window(roi, window)
-    roi_pad = identification_roi_pad(
-        box, parameters.gaussian_filter_sigma, method
-    )
-    if parameters.temporal_median_window:
-        # note that identify_async() is not wrapped: callers driving the
-        # thread pool themselves build the filtered views explicitly
-        movie = TemporalMedianMovie(
-            movie,
-            parameters.temporal_median_window,
-            stride=parameters.temporal_median_stride,
-            roi=search_roi,
-            roi_pad=roi_pad,
-        )
-    # temporal median first, then smoothing: the Gaussian is meant to merge
-    # the maxima of one spot, not those of the background it sits on
-    if parameters.gaussian_filter_sigma:
-        movie = GaussianFilteredMovie(movie, parameters.gaussian_filter_sigma)
+    # note that identify_async() is not wrapped: callers driving the
+    # thread pool themselves build the filtered views explicitly
+    movie = _identification_filtered_movie(movie, parameters, search_roi)
     with lib.tracked_progress(
         progress, "Identifying spots", unit="frame"
     ) as progress:
@@ -2737,7 +2764,174 @@ def identify(
         ]
         entry["Sum Regions"] = summed.regions
         entry["Sum Reference Channel"] = summed.reference
+        entry["Sum Interpolation Order"] = summed.order
+        entry["Sum In Photons"] = summed.camera_infos is not None
     return ids, lib.append_metadata(info, entry)
+
+
+def _sample_frame_numbers(n_frames: int, n_sample: int) -> lib.IntArray1D:
+    """``n_sample`` frames evenly spaced from the first frame on (one
+    more if the spacing does not divide the movie evenly), as
+    picasso-workflow samples them; all frames of a shorter movie."""
+    n_sample = min(n_sample, n_frames)
+    if n_sample < 2:
+        return np.arange(n_frames)
+    step = int(n_frames / (n_sample - 1))
+    return np.arange(0, n_frames, step)
+
+
+def _background_peak_threshold(
+    net_gradients: lib.FloatArray1D,
+    start_net_gradient: float,
+    zscore: float,
+) -> dict:
+    """The histogram analysis of :func:`estimate_min_net_gradient` on the
+    net gradients of the local maxima."""
+    high = np.quantile(net_gradients, 0.9995)
+    bins = np.linspace(start_net_gradient, high, num=500)
+    hist, edges = np.histogram(net_gradients, bins=bins, density=True)
+    # the background peak is assumed to be the highest; its width is
+    # taken from its lower half, which spots do not reach
+    peak_height, peak = np.max(hist), int(np.argmax(hist))
+    half_below = np.argsort(np.abs(hist[:peak] - peak_height / 2))
+    if len(half_below) == 0:
+        half_below = [peak - 1]
+    fwhm = 2 * np.abs(peak - half_below[0])  # in bins
+    width = fwhm / np.sqrt(4 * np.log(2))  # in bins
+    threshold = min(int(zscore * width) + peak, len(edges) - 1)
+    return {
+        "min_net_gradient": float(edges[threshold]),
+        "background": float(edges[peak]),
+        "background_width": float(width * (edges[1] - edges[0])),
+        "histogram": hist,
+        "bin_edges": edges,
+    }
+
+
+def estimate_min_net_gradient(
+    movie: MovieLike,
+    *,
+    box: int,
+    frames: int | list[int] = 40,
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
+    frame_bounds: tuple[int, int] | list | None = None,
+    zscore: float = 5.0,
+    start_net_gradient: float = -3000.0,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> dict:
+    """Estimate the minimum net gradient that separates spots from the
+    background, from the net gradients of the local maxima of a sample
+    of frames.
+
+    The local maxima are identified with a minimum net gradient of
+    ``start_net_gradient`` (see :class:`NetGradient`), low enough to
+    include those of the background, i.e., without a spot. Their net
+    gradients are histogrammed in 500 bins from ``start_net_gradient``
+    to their 99.95% quantile. The highest bin is taken as the peak of
+    the background, which is assumed to be Gaussian. Its width is found
+    from the lower half of the peak, which spots do not reach: w = FWHM
+    / sqrt(4 ln 2), where the full width at half maximum, FWHM, is twice
+    the distance from the peak to the bin below it whose height is
+    closest to half the peak's (w is sqrt(2) times the standard
+    deviation of a Gaussian). The estimate is ``zscore`` widths above
+    the background peak, at a bin edge.
+
+    The method was written by Heinrich Grabmayr for picasso-workflow
+    (https://github.com/jungmannlab/picasso-workflow).
+
+    Parameters
+    ----------
+    movie : MovieLike
+        The movie, (N, Y, X), in camera counts as it is identified.
+    box : int
+        Size of the box used for calculating the net gradient (odd), as
+        in the identification.
+    frames : int or list of int, optional
+        The number of frames to sample, evenly spaced from the first
+        frame on (one more if the spacing does not divide the movie
+        evenly; all frames of a shorter movie), or the frame numbers.
+        Default is 40.
+    roi : tuple or list of tuples, optional
+        Region(s) of interest to search, as in :func:`identify`. If
+        None, the entire frame is searched. Default is None.
+    frame_bounds : tuple or list of tuples, optional
+        Frame range(s) to sample the frames from, as in
+        :func:`identify`; only used when ``frames`` is a number. If
+        None, all frames are sampled from. Default is None.
+    zscore : float, optional
+        Number of background widths above the background peak at which
+        the minimum net gradient is set. Default is 5.0.
+    start_net_gradient : float, optional
+        Lowest net gradient of the local maxima that are included,
+        below the background. Default is -3000.0.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase over the frames.
+        Default is None.
+
+    Returns
+    -------
+    result : dict
+        "min_net_gradient" (the estimate), "background" (net gradient of
+        the background peak), "background_width" (w, see above),
+        "frames" (the frame numbers used), "histogram" (density of the
+        net gradients in each bin) and "bin_edges".
+
+    Raises
+    ------
+    ValueError
+        If no local maxima are found in the frames.
+    """
+    if isinstance(frames, (int, np.integer)):
+        n_frames = len(movie)
+        segments = lib.normalize_frame_bounds(frame_bounds, n_frames)
+        if segments is None:
+            candidates = np.arange(n_frames)
+        else:
+            candidates = np.unique(
+                np.concatenate(
+                    [
+                        np.arange(max(lo, 0), min(hi, n_frames - 1) + 1)
+                        for lo, hi in segments
+                    ]
+                )
+            )
+        frame_numbers = candidates[
+            _sample_frame_numbers(len(candidates), int(frames))
+        ]
+    else:
+        frame_numbers = np.asarray(frames, dtype=int)
+    method = NetGradient(start_net_gradient)
+    net_gradients = []
+    with lib.tracked_progress(
+        progress, "Estimating the min. net gradient", unit="frame"
+    ) as progress:
+        lib.start_phase(
+            progress,
+            "Estimating the min. net gradient",
+            len(frame_numbers),
+            unit="frame",
+        )
+        for i, frame_number in enumerate(frame_numbers):
+            ids = identify_by_frame_number(
+                movie, method, box, int(frame_number), roi=roi
+            )
+            net_gradients.append(ids["net_gradient"].to_numpy(np.float64))
+            progress.set_value(i + 1)
+    net_gradients = (
+        np.concatenate(net_gradients) if net_gradients else np.empty(0)
+    )
+    if net_gradients.size == 0:
+        raise ValueError(
+            "No local maxima were found in the frames, so the minimum net "
+            "gradient cannot be estimated."
+        )
+    result = _background_peak_threshold(
+        net_gradients, start_net_gradient, zscore
+    )
+    result["frames"] = frame_numbers
+    return result
 
 
 def wavelet_from_parameters(
@@ -2912,8 +3106,9 @@ def identify_multichannel_sum(
         One movie per channel, reference first (or at ``reference``). For
         split-FOV data pass the single movie repeated once per region.
     info : list of dicts or None, optional
-        Metadata of the reference channel's movie. Default is None, i.e.,
-        none.
+        Metadata of the reference channel's movie. Default is None, i.e., no
+        earlier metadata, so the returned metadata holds only the entry of this
+        step.
     transforms : list of lib.FloatArray2D
         One ``(2, 3)`` reference->channel affine per channel; see
         :class:`SummedChannelsMovie`.
@@ -2965,8 +3160,9 @@ def identify_multichannel_sum(
         Metadata of the identifications: ``info`` with an entry appended
         (see ``lib.append_metadata``), as in :func:`identify`, recording
         the summing under ``"Identification Mode"``,
-        ``"Sum Channel Transforms"``, ``"Sum Regions"`` and
-        ``"Sum Reference Channel"``.
+        ``"Sum Channel Transforms"``, ``"Sum Regions"``,
+        ``"Sum Reference Channel"``, ``"Sum Interpolation Order"`` and
+        ``"Sum In Photons"`` (False if the raw counts were summed).
 
     None is returned instead if the identification was aborted via
     ``abort_callback``.
@@ -3536,18 +3732,39 @@ def _sensitivity(
     return 1.0 / gain_patch
 
 
-def _to_photons(
+def to_photons(
     spots: lib.FloatArray3D,
     camera_info: dict,
+    *,
     offset: lib.FloatArray3D | None = None,
     gain_patch: lib.FloatArray3D | None = None,
 ) -> lib.FloatArray3D:
-    """Convert the cut spots to photon counts based on camera
-    information.
+    """Convert camera counts to photons (photoelectrons).
 
-    ``offset`` and ``gain_patch`` are per-spot ``(k, box, box)`` patches of an
-    sCMOS camera calibration; each overrides the corresponding scalar
-    (``Baseline``, ``Sensitivity``) where it is given.
+    The baseline is subtracted and the counts are scaled by
+    ``Sensitivity / Gain``: photons = (counts - Baseline) *
+    Sensitivity / Gain.
+
+    Parameters
+    ----------
+    spots : lib.FloatArray3D
+        Camera counts (ADU), e.g., the spots cut by ``get_spots``
+        (``(n_spots, box, box)``) or a frame.
+    camera_info : dict
+        Camera parameters with the keys "Baseline", "Sensitivity"
+        (electrons per count) and "Gain" (EM gain, 1 without EM).
+    offset : lib.FloatArray3D or None, optional
+        Per-pixel offset of an sCMOS camera calibration, in the shape of
+        ``spots``, replacing "Baseline". Default is None.
+    gain_patch : lib.FloatArray3D or None, optional
+        Per-pixel gain (counts per photoelectron) of an sCMOS camera
+        calibration, in the shape of ``spots``; its reciprocal replaces
+        "Sensitivity". Default is None.
+
+    Returns
+    -------
+    photons : lib.FloatArray3D
+        ``spots`` in photons, as float32.
     """
     spots = np.float32(spots)
     baseline = camera_info["Baseline"] if offset is None else offset
@@ -3563,7 +3780,7 @@ def _variance_to_photons(
 ) -> lib.FloatArray3D:
     """Convert a readout variance from ADU squared to photoelectrons squared.
 
-    :func:`_to_photons` scales counts by ``Sensitivity / Gain``, so a variance
+    :func:`to_photons` scales counts by ``Sensitivity / Gain``, so a variance
     scales by its square. This is Huang et al.'s ``var / g^2``, the quantity
     the noise model adds to both the data and the model mean.
     """
@@ -3958,7 +4175,9 @@ def _get_spots(
                 camera_info,
                 gain_patch,
             )
-    spots = _to_photons(spots, camera_info, offset, gain_patch)
+    spots = to_photons(
+        spots, camera_info, offset=offset, gain_patch=gain_patch
+    )
     if return_variance:
         return spots, variance
     return spots
@@ -4012,8 +4231,9 @@ def fit(
     movie : LoadedMovie
         The input movie, as loaded by ``picasso.io.load_movie``.
     info : list of dicts or None, optional
-        Metadata of the identifications (see :func:`identify`) or of the
-        movie. Default is None, i.e., none.
+        Metadata of the identifications (see :func:`identify`) or of the movie.
+        Default is None, i.e., no earlier metadata, so the returned metadata
+        holds only the entry of this step.
     camera_info : dict
         A dictionary containing camera information: "Baseline",
         "Sensitivity", "Gain" and "Pixelsize".
@@ -4207,6 +4427,7 @@ def fit(
     localize_info = _fit_localize_info(
         fitting_method,
         gauss_flags,
+        box,
         eps,
         max_it,
         spline_calibration,
@@ -4320,7 +4541,7 @@ def _validate_fit_args(
     # array in it would be dumped element by element into every sidecar. The
     # per-pixel maps travel as ``camera_calibration`` precisely so that cannot
     # happen. Checked here rather than at the merge so the message arrives
-    # before _to_photons turns it into an opaque broadcast error.
+    # before to_photons turns it into an opaque broadcast error.
     for _key, _value in camera_info.items():
         if isinstance(_value, np.ndarray):
             raise ValueError(
@@ -4479,16 +4700,25 @@ def _dispatch_fit(
 def _fit_localize_info(
     fitting_method: str,
     gauss_flags: dict | None,
+    box: int,
     eps: float | None,
     max_it: int | None,
     spline_calibration: dict | None,
     camera_calibration: dict | None,
     vectorfit_parameters: dict | None = None,
 ) -> dict:
-    """Build the "Generated by"/schedule metadata dict written by ``fit``."""
+    """Build the "Generated by"/schedule metadata dict written by ``fit``:
+    step ``"Fit 3D spline"`` for a 3D spline calibration (the fit yields
+    z), else ``"Fit 2D"``."""
+    spline_3d = (
+        fitting_method.startswith("spline")
+        and spline_calibration.get("model") != "spline-2d"
+    )
     localize_info = {
-        **lib.step_info("Fit 2D"),
+        **lib.step_info("Fit 3D spline" if spline_3d else "Fit 2D"),
         "Fit method": fitting_method,
+        # not "Box Size", which marks the identification entry
+        "Fit box size": int(box),
     }
     # Record the schedule the fit actually ran with, per method - each
     # backend has its own defaults, and "None" in the caller means "yours".
@@ -4515,15 +4745,9 @@ def _fit_localize_info(
         localize_info["Spline CRLB device"] = (
             "GPU" if precision.CUDA_AVAILABLE else "CPU"
         )
-        # Record what the fit actually used, not what was requested: the
-        # schedule depends on whether the axial multi-start ran. Identical
-        # on both devices - they share ``_run_splinefit``.
-        n_z_starts = _default_n_z_starts(spline_calibration)
-        _, apply_seeds = _spline_z_seeds(spline_calibration, n_z_starts)
-        tolerance, max_iterations = _spline_schedule(apply_seeds, eps, max_it)
-        localize_info["Convergence criterion"] = tolerance
-        localize_info["Max iterations"] = max_iterations
-        localize_info["Axial seeds"] = n_z_starts if apply_seeds else 1
+        localize_info.update(
+            _spline_schedule_info(spline_calibration, None, eps, max_it)
+        )
     if fitting_method == "vectorfit":
         localize_info["Convergence criterion"] = (
             vectorfit.TOLERANCE if eps is None else eps
@@ -4537,6 +4761,29 @@ def _fit_localize_info(
             localize_info[f"VectorFit {key}"] = value
     localize_info.update(camera_calibration_info(camera_calibration))
     return localize_info
+
+
+def _spline_schedule_info(
+    calibration: dict,
+    n_z_starts: int | None,
+    tolerance: float | None,
+    max_iterations: int | None,
+) -> dict:
+    """Metadata keys of the schedule a spline fit ran with: what the fit
+    actually used, not what was requested, as the schedule depends on
+    whether the axial multi-start ran (see ``_prepare_splinefit_args``).
+    Identical on both devices - they share ``_run_splinefit``."""
+    if n_z_starts is None:
+        n_z_starts = _default_n_z_starts(calibration)
+    _, apply_seeds = _spline_z_seeds(calibration, n_z_starts)
+    tolerance, max_iterations = _spline_schedule(
+        apply_seeds, tolerance, max_iterations
+    )
+    return {
+        "Convergence criterion": tolerance,
+        "Max iterations": max_iterations,
+        "Axial seeds": n_z_starts if apply_seeds else 1,
+    }
 
 
 # Per-method convergence schedules. Each backend's own defaults, kept here so
@@ -4620,6 +4867,71 @@ FIT_METHODS = tuple(
         "vectorfit",
     ]
 )
+
+#: Short names of the fitting methods, as ``picasso localize
+#: --fit-method`` takes them, mapped to the fitting method (one of
+#: ``FIT_METHODS``). The names ending in "-3d" ask for an astigmatic 3D
+#: fit: the 2D Gaussian fit followed by ``zfit.zfit`` with a z
+#: calibration (see ``resolve_fit_method``).
+FIT_METHOD_ALIASES = {
+    "mle": "gaussmle",
+    "mle-gpu": "gaussmle-gpu",
+    "mle-spherical": "gaussmle-spherical",
+    "mle-spherical-gpu": "gaussmle-spherical-gpu",
+    "mle-rotated": "gaussmle-rotated",
+    "mle-rotated-gpu": "gaussmle-rotated-gpu",
+    "lq": "gausslq",
+    "lq-spherical": "gausslq-spherical",
+    "lq-spherical-gpu": "gausslq-spherical-gpu",
+    "lq-rotated": "gausslq-rotated",
+    "lq-rotated-gpu": "gausslq-rotated-gpu",
+    "lq-gpu": "gausslq-gpu",
+    "lq-3d": "gausslq",
+    "lq-gpu-3d": "gausslq-gpu",
+    "mle-3d": "gaussmle",
+    "spline": "spline",
+    "spline-mle": "spline-mle",
+    "spline-gpu": "spline-gpu",
+    "spline-mle-gpu": "spline-mle-gpu",
+    "avg": "avg",
+    "vectorfit": "vectorfit",
+}
+
+
+def resolve_fit_method(name: str) -> tuple[str, bool]:
+    """Return the fitting method that a short name stands for.
+
+    Parameters
+    ----------
+    name : str
+        Short name of the fitting method, one of
+        ``FIT_METHOD_ALIASES`` (as ``picasso localize --fit-method``
+        takes it), e.g., "mle", "lq-gpu-3d" or "spline".
+
+    Returns
+    -------
+    fitting_method : str
+        The fitting method, one of ``FIT_METHODS``, as ``fit`` and
+        ``localize`` take it.
+    astigmatic_3d : bool
+        Whether the name asks for an astigmatic 3D fit (the names ending
+        in "-3d"): the 2D fit is followed by ``zfit.zfit`` with a z
+        calibration. Spline fits find z themselves and are not
+        included.
+
+    Raises
+    ------
+    ValueError
+        If ``name`` is not a short name of a fitting method.
+    """
+    try:
+        fitting_method = FIT_METHOD_ALIASES[name]
+    except KeyError:
+        raise ValueError(
+            f"Unknown fitting method {name!r}; choose one of "
+            f"{', '.join(FIT_METHOD_ALIASES)}."
+        ) from None
+    return fitting_method, name.endswith("-3d")
 
 
 _GAUSS_SCHEDULES = {
@@ -5606,36 +5918,68 @@ def _joint_fit_entry(
     camera_infos: list[dict],
     calibration: dict,
     *,
+    box: int,
     link_photons: bool | str,
     use_gpu: bool | None,
     tolerance: float | None,
     max_iterations: int | None,
     camera_calibrations: list[dict | None] | None,
+    n_z_starts: int | None = None,
+    apply_roi_residuals: bool | None = None,
 ) -> dict:
     """Metadata entry recording a joint fit of several channels (or
-    split-FOV regions): the method, the calibration or channel
-    registration (its ``"Path"`` and ``"model"``), the schedule asked for
-    (None: the fitter's default, not recorded), the sCMOS calibration and
-    the reference channel's camera information."""
+    split-FOV regions): the method and the device it ran on, the box, the
+    calibration or channel registration (its ``"Path"`` and ``"model"``),
+    the schedule the fit ran with (for a spline fit also its axial seeds,
+    from ``n_z_starts``, and whether the ROI residuals were applied), the
+    sCMOS calibration and the reference channel's camera information.
+    The camera information and sCMOS calibrations of all channels are
+    listed too if they differ between the channels."""
+    use_gpu = _spline_use_gpu(use_gpu)  # the device the fit ran on
     entry = {
         **lib.step_info(step),
         "Fit method": fit_method + ("-gpu" if use_gpu else ""),
+        # not "Box Size", which marks the identification entry
+        "Fit box size": int(box),
         "Channels": len(calibration.get("channel_transforms") or camera_infos),
         "Link photons": link_photons,
         "Calibration path": calibration.get("Path", "N/A"),
     }
     if calibration.get("model"):
         entry["Calibration model"] = calibration["model"]
-    if tolerance is not None:
+    if fit_method.startswith("spline"):
+        entry.update(
+            _spline_schedule_info(
+                calibration, n_z_starts, tolerance, max_iterations
+            )
+        )
+        entry["ROI residuals applied"] = bool(apply_roi_residuals)
+    else:
+        tolerance, max_iterations = gauss_schedule(
+            "mle" in fit_method, use_gpu, tolerance, max_iterations
+        )
         entry["Convergence criterion"] = tolerance
-    if max_iterations is not None:
         entry["Max iterations"] = max_iterations
-    entry.update(camera_calibration_info((camera_calibrations or [None])[0]))
+    camera_calibrations = camera_calibrations or [None]
+    entry.update(camera_calibration_info(camera_calibrations[0]))
+    paths = [
+        camera_calibration_info(c).get("Camera calibration path")
+        for c in camera_calibrations
+    ]
+    if len(set(paths)) > 1:
+        entry["Camera calibration paths per channel"] = paths
+    if any(c != camera_infos[0] for c in camera_infos[1:]):
+        entry["Camera information per channel"] = [
+            dict(c) for c in camera_infos
+        ]
     return entry | camera_infos[0]
 
 
 def _record_regions(
-    info: list[dict], regions: list, reference: int
+    info: list[dict],
+    regions: list,
+    reference: int,
+    confine_to_reference: bool,
 ) -> list[dict]:
     """``info`` of a joint fit with the split-FOV regions it fitted
     recorded in its last entry (a new dict, see ``lib.append_metadata``)."""
@@ -5644,9 +5988,20 @@ def _record_regions(
             "Split FOV": True,
             "Regions": [_normalize_rect(region) for region in regions],
             "Reference region": int(reference),
+            "Confined to reference region": bool(confine_to_reference),
         }
     )
     return info
+
+
+def _fit_entry(info: list[dict]) -> dict:
+    """The last entry of ``info`` that records a fit (see ``fit``), i.e.,
+    not the one of the lateral corrections applied after it."""
+    return next(
+        entry
+        for entry in reversed(info)
+        if entry.get("Step") != "Affine correction"
+    )
 
 
 def fit_gauss_multichannel(
@@ -5684,7 +6039,8 @@ def fit_gauss_multichannel(
         order must match the registration's channels.
     info : list of dicts or None, optional
         Metadata of the reference channel's identifications (see
-        :func:`identify`) or movie. Default is None, i.e., none.
+        :func:`identify`) or movie. Default is None, i.e., no earlier metadata,
+        so the returned metadata holds only the entry of this step.
     camera_infos : list of dict
         One camera-info dict per channel.
     identifications : pd.DataFrame
@@ -5827,6 +6183,7 @@ def fit_gauss_multichannel(
         "gaussmle-spherical" if mle else "gausslq-spherical",
         camera_infos,
         channel_registration,
+        box=box,
         link_photons=link_photons,
         use_gpu=use_gpu,
         tolerance=tolerance,
@@ -5878,7 +6235,8 @@ def fit_gauss_split_fov(
         The single loaded movie.
     info : list of dicts or None, optional
         Metadata of the reference channel's identifications (see
-        :func:`identify`) or movie. Default is None, i.e., none.
+        :func:`identify`) or movie. Default is None, i.e., no earlier metadata,
+        so the returned metadata holds only the entry of this step.
     camera_info : dict
         Camera info of ``movie``.
     identifications : pd.DataFrame
@@ -5976,7 +6334,9 @@ def fit_gauss_split_fov(
     if result is None:  # aborted
         return None
     locs, info = result
-    return locs, _record_regions(info, fit_regions, reference)
+    return locs, _record_regions(
+        info, fit_regions, reference, confine_to_reference
+    )
 
 
 # ----------------------------------------------------------------------
@@ -6829,15 +7189,8 @@ def _locs_from_fits_spline_link_xyz(
         photons_unc = np.sqrt(np.sum(var_amp * (ps[None, :] ** 2), axis=1))
         bg_unc = np.sqrt(np.sum(var_bg, axis=1))
 
-    z_center = float(calibration.get("z_center", 0.0))
-    z_init = float(calibration.get("z_init", z_center))
-    z_step_nm = float(calibration.get("z_step_nm", 1.0))
-    magnification_factor = float(calibration.get("magnification_factor", 1.0))
-    z = (z_shift + z_init) * z_step_nm * magnification_factor + (
-        z_center - z_init
-    ) * z_step_nm
+    z, lpz = _spline_z_nm(z_shift, crlb[:, 2], calibration)
     with np.errstate(invalid="ignore", divide="ignore"):
-        lpz = np.sqrt(crlb[:, 2]) * z_step_nm * magnification_factor
         # Each channel's share of the total photons; sums to 1 per spot.
         rel_photons = np.where(
             photons[:, None] > 0, photons_ch / photons[:, None], np.nan
@@ -6875,6 +7228,41 @@ def _locs_from_fits_spline_link_xyz(
     locs = pd.DataFrame(_lengths_to_nm(columns, pixelsize))
     locs.sort_values(by="frame", kind="quicksort", inplace=True)
     return locs
+
+
+def _spline_z_nm(
+    z_shift: np.ndarray, z_variance: np.ndarray, calibration: dict
+) -> tuple[np.ndarray, np.ndarray]:
+    """``z`` and ``lpz`` (nm) of spline fits from their fitted z shift
+    (spline slices, the negative of the native spline coordinate) and its
+    variance.
+
+    The shift from the sharpest slice is scaled by the magnification
+    factor; the offset of that slice from the calibration's z reference
+    is raw stage nm."""
+    z_center = float(calibration.get("z_center", 0.0))
+    z_init = float(calibration.get("z_init", z_center))
+    z_step_nm = float(calibration.get("z_step_nm", 1.0))
+    magnification_factor = float(calibration.get("magnification_factor", 1.0))
+    z = (z_shift + z_init) * z_step_nm * magnification_factor + (
+        z_center - z_init
+    ) * z_step_nm
+    with np.errstate(invalid="ignore"):
+        lpz = np.sqrt(z_variance) * z_step_nm * magnification_factor
+    return z, lpz
+
+
+def _spline_z_shift(z: np.ndarray, calibration: dict) -> np.ndarray:
+    """The z shift (spline slices) of spline fits at ``z`` (nm), the
+    inverse of :func:`_spline_z_nm`."""
+    z_center = float(calibration.get("z_center", 0.0))
+    z_init = float(calibration.get("z_init", z_center))
+    z_step_nm = float(calibration.get("z_step_nm", 1.0))
+    magnification_factor = float(calibration.get("magnification_factor", 1.0))
+    z = np.asarray(z, dtype=np.float64)
+    return (z - (z_center - z_init) * z_step_nm) / (
+        z_step_nm * magnification_factor
+    ) - z_init
 
 
 def locs_from_fits_spline(
@@ -7091,20 +7479,8 @@ def _locs_from_fits_spline(
         **lib.net_gradient_column(identifications),
     }
     if is_3d:
-        z_shift = np.asarray(theta[:, 3])
-        z_center = float(calibration.get("z_center", 0.0))
-        z_init = float(calibration.get("z_init", z_center))
-        z_step_nm = float(calibration.get("z_step_nm", 1.0))
-        magnification_factor = float(
-            calibration.get("magnification_factor", 1.0)
-        )
-        z_position = (z_shift + z_init) * z_step_nm * magnification_factor
-        z_offset_nm = (z_center - z_init) * z_step_nm  # raw stage nm, no mag
-        z = z_position + z_offset_nm
+        z, lpz = _spline_z_nm(np.asarray(theta[:, 3]), crlb[:, 2], calibration)
         columns["z"] = z.astype(np.float32)
-        with np.errstate(invalid="ignore"):
-            # var(z_shift) -> nm via the same z-step scaling used for z
-            lpz = np.sqrt(crlb[:, 2]) * z_step_nm * magnification_factor
         columns["lpz"] = lpz.astype(np.float32)
     columns["photons_unc"] = photons_unc.astype(np.float32)
     columns["bg_unc"] = bg_unc.astype(np.float32)
@@ -8039,7 +8415,8 @@ def fit_spline_multichannel(
         order must match the calibration's channels.
     info : list of dicts or None, optional
         Metadata of the reference channel's identifications (see
-        :func:`identify`) or movie. Default is None, i.e., none.
+        :func:`identify`) or movie. Default is None, i.e., no earlier metadata,
+        so the returned metadata holds only the entry of this step.
     camera_infos : list of dict
         One camera-info dict per channel.
     identifications : pd.DataFrame
@@ -8176,11 +8553,14 @@ def fit_spline_multichannel(
         "spline-mle" if mle else "spline",
         camera_infos,
         calibration,
+        box=box,
         link_photons=link_photons,
         use_gpu=use_gpu,
         tolerance=tolerance,
         max_iterations=max_iterations,
         camera_calibrations=camera_calibrations,
+        n_z_starts=n_z_starts,
+        apply_roi_residuals=apply_roi_residuals,
     )
     return locs, lib.append_metadata(info, entry)
 
@@ -8297,7 +8677,8 @@ def fit_spline_multichannel_ratiometric(
         in :func:`fit_spline_multichannel`.
     info : list of dicts or None, optional
         Metadata of the reference channel's identifications (see
-        :func:`identify`) or movie. Default is None, i.e., none.
+        :func:`identify`) or movie. Default is None, i.e., no earlier metadata,
+        so the returned metadata holds only the entry of this step.
     camera_infos : list of dict
         One camera-info dict per channel.
     identifications : pd.DataFrame
@@ -8391,11 +8772,14 @@ def fit_spline_multichannel_ratiometric(
         "spline-mle" if mle else "spline",
         camera_infos,
         calibration,
+        box=box,
         link_photons="ratiometric",
         use_gpu=use_gpu,
         tolerance=tolerance,
         max_iterations=max_iterations,
         camera_calibrations=camera_calibrations,
+        n_z_starts=n_z_starts,
+        apply_roi_residuals=apply_roi_residuals,
     )
     entry["Photon ratios"] = np.asarray(photon_ratios).tolist()
     return locs, lib.append_metadata(info, entry)
@@ -8979,7 +9363,8 @@ def fit_spline_split_fov(
         The single loaded movie.
     info : list of dicts or None, optional
         Metadata of the reference channel's identifications (see
-        :func:`identify`) or movie. Default is None, i.e., none.
+        :func:`identify`) or movie. Default is None, i.e., no earlier metadata,
+        so the returned metadata holds only the entry of this step.
     camera_info : dict
         Camera info of ``movie``.
     identifications : pd.DataFrame
@@ -9128,7 +9513,9 @@ def fit_spline_split_fov(
             camera_calibrations=camera_calibrations,
             info=info,
         )
-    return locs, _record_regions(info, fit_regions, reference)
+    return locs, _record_regions(
+        info, fit_regions, reference, confine_to_reference
+    )
 
 
 # ----------------------------------------------------------------------
@@ -9396,8 +9783,9 @@ def fit_independent(
     movies : list
         One movie per channel, as loaded by ``picasso.io.load_movie``.
     infos : list or None, optional
-        Metadata of each channel's identifications (see :func:`identify`)
-        or movie, or None. Default is None, i.e., none.
+        Metadata of each channel's identifications (see :func:`identify`) or
+        movie, or None. Default is None, i.e., no earlier metadata, so each
+        channel's returned metadata holds only the entry of the fit.
     camera_infos : list of dict or dict
         One camera-info dict per channel, or a single one shared by all.
     identifications : list of pd.DataFrame
@@ -9520,6 +9908,7 @@ def fit_split_fov_independent(
     spline_calibration: dict | list | None = None,
     vectorfit_parameters: dict | list | None = None,
     camera_calibration: dict | None = None,
+    lateral_transforms: dict | list | str | None = None,
     parallel: bool = True,
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
@@ -9565,6 +9954,10 @@ def fit_split_fov_independent(
     camera_calibration : dict or None, optional
         Per-pixel sCMOS calibration for the (single) camera, covering the
         full frame. Default None.
+    lateral_transforms : dict, list, str or None, optional
+        Lateral (x, y) corrections applied to the localizations of every
+        region after its fit, in sensor coordinates, and recorded in an
+        entry of their own, as in :func:`fit`. Default None.
     parallel : bool, optional
         Whether to fit on a pool of workers, as in :func:`fit`. Default
         True.
@@ -9615,6 +10008,7 @@ def fit_split_fov_independent(
                 spline_calibration=splines[c],
                 vectorfit_parameters=vectorfits[c],
                 camera_calibration=camera_calibration,
+                lateral_transforms=lateral_transforms,
                 parallel=parallel,
                 progress=_LabeledProgress(
                     progress, f"Region {c + 1}/{n_regions}: "
@@ -9630,8 +10024,9 @@ def fit_split_fov_independent(
             locs = locs_to_region_coordinates(
                 locs, region, camera_info["Pixelsize"]
             )
-        # the entry of the fit, which is a new dict
-        region_info[-1].update(
+        # the entry of the fit (before that of the lateral corrections, if
+        # any), which is a new dict
+        _fit_entry(region_info).update(
             {
                 "Fit mode": FIT_MODE_INDEPENDENT,
                 "Channel": c,
@@ -9755,6 +10150,1273 @@ def _process_fitting_futures(
                 f.cancel()
     progress.set_value(N)
     return theta
+
+
+# ----------------------------------------------------------------------
+# Multi-emitter fitting
+#
+# Whole frames are fitted with all their emitters at once, so that spots
+# closer than about 2 PSF sigma are localized separately rather than
+# merged into one biased localization: the 3D-DAOSTORM analysis of Babcock,
+# Sigal & Zhuang (2012), run by ``picasso.fitting.residualfit``.
+# ----------------------------------------------------------------------
+
+#: Most frames sampled to estimate the PSF sigma of a movie.
+_PSF_SIGMA_SAMPLE_FRAMES = 200
+#: Provisional PSF sigma (camera pixels) the emitters for the estimate are
+#: first found with.
+_PSF_SIGMA_START = 0.9
+#: Fewest isolated, well fitted emitters the estimate needs.
+_PSF_SIGMA_MIN_SPOTS = 10
+#: p-value of the chi-square test an emitter must pass to count as well
+#: fitted in the estimate.
+_PSF_SIGMA_P_VALUE = 0.01
+
+
+@dataclass(frozen=True, kw_only=True)
+class MultiEmitterParameters:
+    """Settings of the multi-emitter fitting, see
+    :func:`localize_multi_emitter`.
+
+    The defaults are those of 3D-DAOSTORM (Babcock et al., 2012) in its
+    reference implementation, storm-analysis, except ``snr_threshold``.
+    All arguments are keyword-only.
+
+    Parameters
+    ----------
+    psf_model : {"fixed", "spherical", "elliptical", "spline"}, optional
+        The PSF of each emitter. The Gaussian models differ in its sigma:
+        "fixed" (the default) is the same for every emitter,
+        ``psf_sigma``; "spherical" fits one sigma per emitter, the same in
+        x and y; "elliptical" fits a sigma in x and one in y per emitter,
+        e.g., for astigmatic 3D data, whose z an astigmatic calibration
+        then gives (see :func:`localize_multi_emitter`). These are the
+        storm-analysis models ``2dfixed``, ``2d`` and ``3d``. A fitted
+        sigma stays within 0.5 to 5 times ``psf_sigma``. "spline" is an
+        experimental PSF from a spline calibration (Babcock & Zhuang,
+        2017), which gives z directly for a 3D calibration.
+    snr_threshold : float, optional
+        Peaks are found where the residual of the fit, smoothed with the
+        PSF, exceeds this many times its expected noise, and an emitter
+        is kept only if its significance exceeds it too. Default is 15.
+        storm-analysis uses 6. The noise is that of photon
+        counting; on EMCCD camera it is larger by the excess noise factor,
+        so the same threshold lets more noise through.
+    psf_sigma : float or None, optional
+        Standard deviation of the PSF in nm: fixed in the fit, or, where
+        it is fitted, its starting value. Peaks are found, and those
+        closer than it pruned, with it in every Gaussian model. None (the
+        default) estimates it from the movie, as the median sigma of
+        isolated emitters fitted with a free sigma. Must be None for the
+        spline, which takes its PSF from the calibration.
+    max_cycles : int, optional
+        Most cycles of finding, fitting and subtracting per frame. Default
+        is 20.
+    peak_radius : float, optional
+        Radius (camera pixels) within which a new peak must be the
+        maximum of the residual. Default is 5.
+    background_sigma : float, optional
+        Sigma (camera pixels) of the Gaussian low pass that estimates the
+        background from the frame minus the fit. Default is 8.
+    peak_search_z : tuple of float, optional
+        z (nm) at which the spline PSF filters the residual to find peaks
+        with a 3D calibration; a new emitter starts at the z where it is
+        brightest. More than one helps only for PSFs whose shape changes
+        with z beyond a blur, e.g., the double helix (Babcock & Zhuang,
+        2017). Ignored by the other models. Default is (0.0,).
+    fit_region_size : int or None, optional
+        Side length (camera pixels) of the disc each emitter is fitted
+        in with the spline: a crop of the calibration, as the box of the
+        single-emitter spline fit is, of at most the calibration box less
+        2. None (the default) takes it from the calibration's
+        Gaussian-equivalent sigma, as the Gaussian models do from theirs:
+        ``int(8 * sigma)``, or 1.5 times that (rounded down) for a 3D
+        calibration, whose PSF widens with z; within the calibration box
+        less 2. Must be None for the other models.
+
+    Raises
+    ------
+    ValueError
+        If ``psf_model`` is not one of the models, ``snr_threshold``,
+        ``peak_radius`` or ``background_sigma`` not a positive number,
+        ``max_cycles`` not a positive integer, ``psf_sigma`` neither None
+        nor a positive number or given for the spline,
+        ``peak_search_z`` not one or more finite numbers, or
+        ``fit_region_size`` neither None nor an integer of at least 3 or
+        given for a Gaussian model.
+
+    Examples
+    --------
+    >>> from picasso import localize
+    >>> parameters = localize.MultiEmitterParameters(snr_threshold=8.0)
+    >>> parameters = localize.MultiEmitterParameters(psf_sigma=140.0)
+
+    A sigma per emitter, e.g., where the emitters are not all in focus:
+
+    >>> parameters = localize.MultiEmitterParameters(psf_model="spherical")
+
+    An experimental PSF, from a spline calibration, fitted within 11
+    pixels:
+
+    >>> parameters = localize.MultiEmitterParameters(
+    ...     psf_model="spline", fit_region_size=11
+    ... )
+    """
+
+    psf_model: Literal["fixed", "spherical", "elliptical", "spline"] = "fixed"
+    snr_threshold: float = residualfit.THRESHOLD
+    psf_sigma: float | None = None
+    max_cycles: int = residualfit.N_CYCLES
+    peak_radius: float = residualfit.PEAK_RADIUS
+    background_sigma: float = residualfit.BACKGROUND_SIGMA
+    peak_search_z: tuple[float, ...] = (0.0,)
+    fit_region_size: int | None = None
+
+    def __post_init__(self) -> None:
+        if self.psf_model not in residualfit.PSF_MODELS:
+            raise ValueError(
+                "psf_model must be one of "
+                f"{', '.join(map(repr, residualfit.PSF_MODELS))}, got "
+                f"{self.psf_model!r}."
+            )
+        # frozen: normalize the values through object.__setattr__
+        for name in ("snr_threshold", "peak_radius", "background_sigma"):
+            value = getattr(self, name)
+            if not _is_positive_number(value) or not np.isfinite(value):
+                raise ValueError(
+                    f"{name} must be a positive number, got {value!r}."
+                )
+            object.__setattr__(self, name, float(value))
+        cycles = self.max_cycles
+        if (
+            isinstance(cycles, (bool, np.bool_))
+            or not isinstance(cycles, (int, np.integer))
+            or cycles < 1
+        ):
+            raise ValueError(
+                f"max_cycles must be a positive integer, got {cycles!r}."
+            )
+        object.__setattr__(self, "max_cycles", int(cycles))
+        sigma = self.psf_sigma
+        if sigma is not None:
+            if not _is_positive_number(sigma) or not np.isfinite(sigma):
+                raise ValueError(
+                    "psf_sigma must be None (estimated from the movie) or a "
+                    f"positive number of nm, got {sigma!r}."
+                )
+            object.__setattr__(self, "psf_sigma", float(sigma))
+            if self.psf_model == "spline":
+                raise ValueError(
+                    "psf_sigma does not apply to psf_model='spline', which "
+                    "takes its PSF from the spline calibration."
+                )
+        search_z = self.peak_search_z
+        if isinstance(search_z, (int, float, np.number)) and not isinstance(
+            search_z, (bool, np.bool_)
+        ):
+            search_z = (search_z,)
+        try:
+            values = tuple(float(z) for z in search_z)
+        except (TypeError, ValueError):
+            values = ()
+        if (
+            not values
+            or any(isinstance(z, (bool, np.bool_)) for z in search_z)
+            or not all(np.isfinite(values))
+        ):
+            raise ValueError(
+                "peak_search_z must be one or more finite numbers of nm, "
+                f"got {self.peak_search_z!r}."
+            )
+        object.__setattr__(self, "peak_search_z", values)
+        size = self.fit_region_size
+        if size is not None:
+            if (
+                isinstance(size, (bool, np.bool_))
+                or not isinstance(size, (int, np.integer))
+                or size < 3
+            ):
+                raise ValueError(
+                    "fit_region_size must be None (from the calibration) "
+                    f"or an integer of at least 3 pixels, got {size!r}."
+                )
+            object.__setattr__(self, "fit_region_size", int(size))
+            if self.psf_model != "spline":
+                raise ValueError(
+                    "fit_region_size applies to psf_model='spline' only; "
+                    "the Gaussian models take their region from the PSF "
+                    "sigma."
+                )
+
+    def to_info(self) -> dict:
+        """The settings under the keys of the fit's metadata.
+
+        ``"PSF Sigma (nm)"`` and ``"Fit Region Size"`` are only recorded
+        when they were given; the fit records the values it used either
+        way.
+
+        Returns
+        -------
+        info : dict
+            ``"PSF Model"``, ``"SNR Threshold"``, ``"PSF Sigma (nm)"``,
+            ``"Max. Cycles"``, ``"Peak Search Radius"``, ``"Background
+            Filter Sigma"`` and, for the spline, ``"Peak Search z
+            (nm)"`` and ``"Fit Region Size"``.
+        """
+        info = {
+            "PSF Model": self.psf_model,
+            "SNR Threshold": self.snr_threshold,
+        }
+        if self.psf_sigma is not None:
+            info["PSF Sigma (nm)"] = self.psf_sigma
+        info["Max. Cycles"] = self.max_cycles
+        info["Peak Search Radius"] = self.peak_radius
+        info["Background Filter Sigma"] = self.background_sigma
+        if self.psf_model == "spline":
+            info["Peak Search z (nm)"] = list(self.peak_search_z)
+            if self.fit_region_size is not None:
+                info["Fit Region Size"] = self.fit_region_size
+        return info
+
+    @classmethod
+    def from_info(cls, info: dict) -> MultiEmitterParameters:
+        """Read the settings from a dictionary with the keys of
+        :meth:`to_info`, e.g., the metadata of a multi-emitter fit.
+
+        Missing keys take the defaults. The metadata of a fit records the
+        PSF sigma and, for the spline, the fit region size it used, so the
+        settings read from it reproduce the fit.
+
+        Parameters
+        ----------
+        info : dict
+            Metadata or settings.
+
+        Returns
+        -------
+        MultiEmitterParameters
+            The settings found in ``info``.
+        """
+        return cls(
+            psf_model=info.get("PSF Model", "fixed"),
+            snr_threshold=info.get("SNR Threshold", residualfit.THRESHOLD),
+            psf_sigma=info.get("PSF Sigma (nm)"),
+            max_cycles=info.get("Max. Cycles", residualfit.N_CYCLES),
+            peak_radius=info.get(
+                "Peak Search Radius", residualfit.PEAK_RADIUS
+            ),
+            background_sigma=info.get(
+                "Background Filter Sigma", residualfit.BACKGROUND_SIGMA
+            ),
+            peak_search_z=info.get("Peak Search z (nm)", (0.0,)),
+            fit_region_size=info.get("Fit Region Size"),
+        )
+
+
+def _frame_photons(
+    frame: np.ndarray,
+    camera_info: dict,
+    offset: np.ndarray | None,
+    gain: np.ndarray | None,
+) -> np.ndarray:
+    """A camera frame in photons (float64), with the full-frame maps of an
+    sCMOS camera calibration where given (see :func:`to_photons`)."""
+    baseline = camera_info["Baseline"] if offset is None else offset
+    sensitivity = camera_info["Sensitivity"] if gain is None else 1.0 / gain
+    return (
+        (np.asarray(frame, dtype=np.float64) - baseline)
+        * sensitivity
+        / camera_info["Gain"]
+    )
+
+
+def _read_frame(
+    movie: LoadedMovie, frame_number: int, lock: threading.Lock
+) -> np.ndarray:
+    """One frame, read under ``lock`` unless the movie supports concurrent
+    reads (see :func:`identify_by_frame_number`)."""
+    concurrent = getattr(
+        movie, "supports_concurrent_reads", False
+    ) or isinstance(movie, np.memmap)
+    if concurrent:
+        return np.asarray(movie[frame_number])
+    with lock:
+        return np.asarray(movie[frame_number])
+
+
+def _peak_mask(
+    shape: tuple[int, int],
+    pad: int,
+    roi: tuple | list | None,
+    window: tuple | None,
+) -> np.ndarray:
+    """Where new peaks may be found in a frame padded by ``pad``: inside
+    the frame, the ROIs and the part of a canvas that holds data."""
+    height, width = shape
+    mask = np.zeros((height + 2 * pad, width + 2 * pad), dtype=bool)
+    rois = _as_roi_list(roi)
+    if rois is None:
+        mask[pad : pad + height, pad : pad + width] = True
+    else:
+        for (y0, x0), (y1, x1) in rois:
+            y0, y1 = max(y0, 0), min(y1, height)
+            x0, x1 = max(x0, 0), min(x1, width)
+            mask[pad + y0 : pad + y1, pad + x0 : pad + x1] = True
+    if window is not None:
+        (y0, x0), (y1, x1) = window
+        inside = np.zeros_like(mask)
+        inside[pad + y0 : pad + y1, pad + x0 : pad + x1] = True
+        mask &= inside
+    return mask
+
+
+def _estimate_psf_sigma(
+    movie: LoadedMovie,
+    frame_numbers: np.ndarray,
+    camera_info: dict,
+    offset: np.ndarray | None,
+    gain: np.ndarray | None,
+    roi: tuple | list | None,
+    parameters: MultiEmitterParameters,
+    em: bool,
+    progress: lib.Progress,
+    abort_callback: Callable[[], bool] | None,
+) -> float | None:
+    """PSF standard deviation (camera pixels) of a movie: the median sigma
+    of isolated emitters fitted with a free sigma, in frames sampled
+    evenly from ``frame_numbers``.
+
+    The emitters are found as in the first cycle of the multi-emitter fit,
+    with a provisional sigma; if the estimate is more than 20 % off it,
+    they are found once more with the estimate. Returns None if aborted.
+
+    Raises
+    ------
+    ValueError
+        If fewer than ``_PSF_SIGMA_MIN_SPOTS`` isolated, well fitted
+        emitters were found.
+    """
+    n_sample = min(len(frame_numbers), _PSF_SIGMA_SAMPLE_FRAMES)
+    sample = np.unique(
+        frame_numbers[
+            np.linspace(0, len(frame_numbers) - 1, n_sample).astype(int)
+        ]
+    )
+    window = getattr(movie, "filled_window", None)
+    lock = threading.Lock()
+    sigma = _PSF_SIGMA_START
+    lib.start_phase(progress, "Estimating the PSF sigma", 2 * len(sample))
+    for attempt in range(2):
+        half = int(math.ceil(3.0 * sigma))
+        box = 2 * half + 1
+        pad = residualfit.padding(sigma)
+        spots = []
+        for k, frame_number in enumerate(sample):
+            if callable(abort_callback) and abort_callback():
+                return None
+            photons = _frame_photons(
+                _read_frame(movie, int(frame_number), lock),
+                camera_info,
+                offset,
+                gain,
+            )
+            height, width = photons.shape
+            x, y = residualfit.find_peaks(
+                np.pad(photons, pad, mode="symmetric"),
+                _peak_mask(photons.shape, pad, roi, window),
+                sigma,
+                parameters.snr_threshold,
+                parameters.peak_radius,
+                parameters.background_sigma,
+            )
+            x = x - pad
+            y = y - pad
+            for i in range(len(x)):
+                # isolated: no other peak in the box or next to it; a
+                # neighbor's tail that still reaches in fails the
+                # chi-square test below
+                near = (np.abs(x - x[i]) <= half + 1) & (
+                    np.abs(y - y[i]) <= half + 1
+                )
+                inside = (
+                    half <= x[i] < width - half
+                    and half <= y[i] < height - half
+                )
+                if near.sum() == 1 and inside:
+                    spots.append(
+                        photons[
+                            y[i] - half : y[i] + half + 1,
+                            x[i] - half : x[i] + half + 1,
+                        ]
+                    )
+            progress.set_value(attempt * len(sample) + k + 1)
+        clean = np.zeros(0, dtype=bool)
+        if spots:
+            thetas, deviance = residualfit.fit_free_sigma(
+                np.clip(np.array(spots), 0, None)
+            )
+            p_value = stats.chi2.sf(
+                deviance / (2.0 if em else 1.0), box * box - 5
+            )
+            center = 0.5 * (box - 1)
+            with np.errstate(invalid="ignore"):
+                clean = (
+                    np.isfinite(thetas).all(axis=1)
+                    & (p_value >= _PSF_SIGMA_P_VALUE)
+                    & (np.abs(thetas[:, 1] - center) <= 1.0)
+                    & (np.abs(thetas[:, 2] - center) <= 1.0)
+                    & (thetas[:, 3] > 0.3)
+                    & (thetas[:, 3] < half)
+                    & (thetas[:, 0] > 0)
+                )
+        if clean.sum() < _PSF_SIGMA_MIN_SPOTS:
+            raise ValueError(
+                f"Only {int(clean.sum())} isolated, well fitted emitters "
+                "were found to estimate the PSF sigma of the movie, too "
+                "few. Give the PSF sigma as psf_sigma (nm) in the "
+                "MultiEmitterParameters."
+            )
+        estimate = float(np.median(thetas[clean, 3]))
+        converged = abs(estimate - sigma) <= 0.2 * sigma
+        sigma = estimate
+        if converged:
+            break
+    progress.set_value(2 * len(sample))
+    return sigma
+
+
+def _multi_emitter_frame(
+    frame: np.ndarray,
+    seeds: np.ndarray | None,
+    camera_info: dict,
+    offset: np.ndarray | None,
+    gain: np.ndarray | None,
+    variance: np.ndarray | None,
+    mask: np.ndarray,
+    sigma: float,
+    parameters: MultiEmitterParameters,
+    spline: residualfit.SplinePSF = residualfit.NO_SPLINE,
+) -> residualfit.FrameResult:
+    """Fit one camera frame (see ``residualfit.analyze_frame``); the
+    results are in the coordinates of the padded frame. ``seeds`` are
+    ``(n, 2)`` integer x, y pixel positions that start the first cycle
+    instead of the peak finder, or None. ``spline`` is the PSF of the
+    "spline" model (see :func:`_multi_emitter_spline`)."""
+    pad = residualfit.padding(sigma, parameters.psf_model, spline)
+    photons = np.pad(
+        _frame_photons(frame, camera_info, offset, gain),
+        pad,
+        mode="symmetric",
+    )
+    if variance is None:
+        padded_variance = np.zeros((1, 1))
+    else:
+        padded_variance = np.pad(variance, pad, mode="symmetric")
+    if seeds is None:
+        seed_x = seed_y = np.empty(0, dtype=np.int64)
+    else:
+        seed_x = seeds[:, 0].astype(np.int64) + pad
+        seed_y = seeds[:, 1].astype(np.int64) + pad
+    return residualfit.analyze_frame(
+        photons,
+        padded_variance,
+        variance is not None,
+        mask,
+        seed_x,
+        seed_y,
+        sigma,
+        residualfit.PSF_MODELS[parameters.psf_model],
+        parameters.snr_threshold,
+        parameters.max_cycles,
+        parameters.peak_radius,
+        parameters.background_sigma,
+        spline,
+    )
+
+
+def _multi_emitter_spline(
+    calibration: dict, parameters: MultiEmitterParameters
+) -> tuple[residualfit.SplinePSF, float]:
+    """The PSF of a "spline" multi-emitter fit from a spline calibration,
+    and the Gaussian-equivalent sigma (camera pixels) the fit prunes
+    with, which also sets the default ``fit_region_size``.
+
+    The PSF is divided by the calibration's ``photon_scale``, the sum of
+    its in-focus slice, so the fitted amplitude is in photons, as in the
+    single-emitter spline fit."""
+    model = calibration.get("model")
+    if model not in ("spline-2d", "spline-3d"):
+        raise ValueError(
+            "The multi-emitter fit takes a single-channel spline "
+            "calibration ('spline-2d' or 'spline-3d'), got a "
+            f"{model!r} calibration."
+        )
+    if float(calibration.get("oversampling", 1.0)) != 1.0:
+        raise ValueError(
+            "The multi-emitter fit takes a spline calibration with its "
+            "knots on the camera pixels (oversampling 1), got oversampling "
+            f"{calibration.get('oversampling')}."
+        )
+    # (1, niz, niy, nix, 4, 4, 4), the layout of the single-emitter fit
+    coeff = precision._spline_coeff_reshaped(calibration)
+    if model == "spline-2d":
+        # a 2D spline is a 3D one of a single z cell, held at z = 0
+        niy, nix = coeff.shape[1:3]
+        lifted = np.zeros((1, 1, niy, nix, 4, 4, 4))
+        lifted[0, 0, :, :, 0] = coeff[0]
+        coeff = lifted
+    box = coeff.shape[3] + 1
+    if box < 5:
+        raise ValueError(
+            "The multi-emitter fit needs a spline calibration box of at "
+            f"least 5 pixels, got {box}."
+        )
+    coeff = coeff / float(calibration.get("photon_scale", 1.0))
+    fit_z = model == "spline-3d"
+    search_z = (
+        -_spline_z_shift(np.asarray(parameters.peak_search_z), calibration)
+        if fit_z
+        else np.zeros(1)
+    )
+    n_slices = coeff.shape[1]
+    if fit_z and (search_z.min() < 0 or search_z.max() > n_slices):
+        z_min, z_max = _spline_z_nm(
+            -np.array([0.0, float(n_slices)]), np.zeros(2), calibration
+        )[0]
+        raise ValueError(
+            "peak_search_z must lie within the calibrated z range, "
+            f"{min(z_min, z_max):.0f} to {max(z_min, z_max):.0f} nm, got "
+            f"{list(parameters.peak_search_z)}."
+        )
+    sigma = calibration.get("effective_sigma")
+    if sigma is None:
+        # from the second moments of the PSF at its sharpest slice
+        z_focus = float(calibration.get("z_init", 0.0)) if fit_z else 0.0
+        image = np.clip(
+            [
+                [
+                    splinefit._eval_spline_3d(
+                        coeff, 0, float(i), float(j), z_focus
+                    )[0]
+                    for i in range(box)
+                ]
+                for j in range(box)
+            ],
+            0,
+            None,
+        )
+        weights = image / image.sum()
+        grid = (np.arange(box) - (box - 1) / 2) ** 2
+        sigma = np.sqrt(
+            0.5
+            * (
+                (weights.sum(axis=0) * grid).sum()
+                + (weights.sum(axis=1) * grid).sum()
+            )
+        )
+    size = parameters.fit_region_size
+    if size is None:
+        # as the Gaussian models from their sigma; a 3D PSF widens with z
+        # as a fitted sigma does
+        size = residualfit.roi_size(
+            float(sigma), "elliptical" if fit_z else "fixed"
+        )
+        size = min(max(size, 3), box - 2)
+    elif size > box - 2:
+        raise ValueError(
+            f"fit_region_size must be at most {box - 2} pixels with this "
+            f"calibration, its box ({box}) less 2, got {size}."
+        )
+    spline = residualfit.spline_psf(coeff, fit_z, search_z, size)
+    return spline, float(sigma)
+
+
+def _multi_emitter_worker(
+    movie: LoadedMovie,
+    frame_numbers: np.ndarray,
+    seeds: dict,
+    state: list,
+    lock: threading.Lock,
+    results: list,
+    args: tuple,
+) -> None:
+    """Fit frames until none is left. ``state`` is ``[claimed, finished,
+    stop]``, guarded by ``lock``; ``results[k]`` receives the fit of
+    frame ``frame_numbers[k]``, ``args`` the remaining arguments of
+    :func:`_multi_emitter_frame`."""
+    while True:
+        with lock:
+            k = state[0]
+            if state[2] or k >= len(frame_numbers):
+                return
+            state[0] += 1
+        frame_number = int(frame_numbers[k])
+        frame = _read_frame(movie, frame_number, lock)
+        results[k] = _multi_emitter_frame(
+            frame, seeds.get(frame_number), *args
+        )
+        with lock:
+            state[1] += 1
+
+
+def _fit_frames_multi_emitter(
+    movie: LoadedMovie,
+    frame_numbers: np.ndarray,
+    seeds: dict,
+    args: tuple,
+    parallel: bool,
+    progress: lib.Progress,
+    abort_callback: Callable[[], bool] | None,
+) -> list | None:
+    """Fit every frame of ``frame_numbers``, on a pool of threads if
+    ``parallel``, reporting the frames finished to the running phase of
+    ``progress``. Returns the results in frame order, or None if
+    aborted."""
+    n_frames = len(frame_numbers)
+    results = [None] * n_frames
+    lock = threading.Lock()
+    state = [0, 0, False]
+    if not parallel or n_frames < 2:
+        for k in range(n_frames):
+            if callable(abort_callback) and abort_callback():
+                return None
+            frame = _read_frame(movie, int(frame_numbers[k]), lock)
+            results[k] = _multi_emitter_frame(
+                frame, seeds.get(int(frame_numbers[k])), *args
+            )
+            progress.set_value(k + 1)
+        return results
+    n_threads = max(1, min(lib.n_workers(), n_frames))
+    executor = ThreadPoolExecutor(n_threads)
+    futures = [
+        executor.submit(
+            _multi_emitter_worker,
+            movie,
+            frame_numbers,
+            seeds,
+            state,
+            lock,
+            results,
+            args,
+        )
+        for _ in range(n_threads)
+    ]
+    executor.shutdown(wait=False)
+    try:
+        while True:
+            # polled before the completion check, as in _identify_threaded
+            if callable(abort_callback) and abort_callback():
+                return None
+            _, pending = wait_futures(futures, timeout=0.2)
+            for future in futures:
+                if future.done() and future.exception() is not None:
+                    raise future.exception()
+            if not pending:
+                break
+            progress.set_value(state[1])
+    finally:
+        # on an abort, an error or a cancellation the workers stop after
+        # their current frame
+        with lock:
+            state[2] = True
+    progress.set_value(n_frames)
+    return results
+
+
+def _locs_from_multi_emitter_fits(
+    frame_numbers: np.ndarray,
+    results: list,
+    sigma: float,
+    psf_model: str,
+    pixelsize: float,
+    em: bool,
+    spline: residualfit.SplinePSF | None = None,
+    spline_calibration: dict | None = None,
+) -> pd.DataFrame:
+    """One localization per emitter, with every length in nm. A "spline"
+    fit has no ``sx``, ``sy``, and its z (3D) is converted with
+    ``spline_calibration``."""
+    pad = residualfit.padding(sigma, psf_model, spline)
+    gaussian = psf_model != "spline"
+    fit_z = spline is not None and spline.fit_z
+    excess_noise = 2.0 if em else 1.0
+    tables = []
+    for frame_number, result in zip(frame_numbers, results):
+        n = len(result.x)
+        crlb = excess_noise * result.crlb
+        with np.errstate(invalid="ignore"):
+            columns = {
+                "frame": np.full(n, frame_number, dtype=np.uint32),
+                "x": result.x - pad,
+                "y": result.y - pad,
+                "photons": result.photons,
+            }
+            if gaussian:
+                columns["sx"] = result.sx
+                columns["sy"] = result.sy
+            columns["bg"] = result.bg
+            columns["lpx"] = np.sqrt(crlb[:, 1])
+            columns["lpy"] = np.sqrt(crlb[:, 2])
+            if fit_z:
+                # as the single-emitter spline fit (z shift = -native z)
+                columns["z"], columns["lpz"] = _spline_z_nm(
+                    -result.z, crlb[:, 6], spline_calibration
+                )
+            columns["photons_unc"] = np.sqrt(crlb[:, 0])
+            columns["bg_unc"] = np.sqrt(crlb[:, 3])
+            if psf_model in ("spherical", "elliptical"):
+                columns["sx_unc"] = np.sqrt(crlb[:, 4])
+                columns["sy_unc"] = np.sqrt(crlb[:, 5])
+            columns |= {
+                "log_likelihood": -0.5 * result.error,
+                "iterations": result.iterations.astype(np.int32),
+                # the deviance of the emitter's region over its degrees of
+                # freedom, see reduced_chi_square
+                "reduced_chi_square": result.error
+                / (
+                    excess_noise
+                    * np.maximum(result.n_pixels - result.n_parameters, 1)
+                ),
+                "significance": result.significance,
+                "n_emitters": result.n_emitters.astype(np.int32),
+            }
+        columns = {
+            name: (
+                values.astype(np.float32)
+                if values.dtype == np.float64
+                else values
+            )
+            for name, values in columns.items()
+        }
+        tables.append(pd.DataFrame(_lengths_to_nm(columns, pixelsize)))
+    if not tables:
+        tables.append(
+            pd.DataFrame(
+                _lengths_to_nm(
+                    {
+                        "frame": np.empty(0, dtype=np.uint32),
+                        **{
+                            name: np.empty(0, dtype=np.float32)
+                            for name in (
+                                "x",
+                                "y",
+                                "photons",
+                                *(("sx", "sy") if gaussian else ()),
+                                "bg",
+                                "lpx",
+                                "lpy",
+                                *(("z", "lpz") if fit_z else ()),
+                            )
+                        },
+                    },
+                    pixelsize,
+                )
+            )
+        )
+    locs = pd.concat(tables, ignore_index=True)
+    # an emitter whose Fisher matrix is singular has no uncertainty; it
+    # cannot be saved (lib.ensure_sanity), so it is not reported
+    finite = np.isfinite(locs[["lpx", "lpy"]].to_numpy()).all(axis=1)
+    return locs[finite].reset_index(drop=True)
+
+
+def localize_multi_emitter(
+    movie: LoadedMovie,
+    info: list[dict] | None = None,
+    *,
+    camera_info: dict,
+    parameters: MultiEmitterParameters | None = None,
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
+    frame_bounds: tuple[int, int] | list | None = None,
+    seed_identification: IdentificationParameters | None = None,
+    camera_calibration: dict | None = None,
+    calibration_3d: dict | str | None = None,
+    spline_calibration: dict | str | None = None,
+    lateral_transforms: dict | list | str | None = None,
+    parallel: bool = True,
+    fit_z_gpu: bool = False,
+    progress: lib.Progress | Literal["console"] | None = None,
+    abort_callback: Callable[[], bool] | None = None,
+    psf_sigma_callback: Callable[[float], None] | None = None,
+) -> tuple[pd.DataFrame | None, list[dict]]:
+    """Localize overlapping emitters: find and fit all emitters of a
+    frame at once.
+
+    Single-emitter fitting (:func:`localize`) fits one PSF per box, so
+    two emitters closer than about 2 PSF sigma in the same frame give
+    one biased localization. This fits whole frames instead, in cycles of
+    finding peaks in what the current fit leaves unexplained, fitting
+    them with all others in place, and subtracting: the 3D-DAOSTORM
+    analysis of Babcock, Sigal & Zhuang (2012), ported from its reference
+    implementation, storm-analysis. It replaces the identification - the
+    peaks are found in the residual of the fit, by their signal-to-noise
+    ratio - and fits, by maximum likelihood, a Gaussian PSF integrated
+    over the pixels, with a fixed sigma or, per emitter, a fitted one or a
+    fitted one in x and in y, or an experimental PSF from a spline
+    calibration, as in Babcock & Zhuang (2017) (``parameters.psf_model``).
+
+    Of two emitters closer than 1 PSF sigma, only the brighter is
+    kept, so pairs closer than about 1.5 PSF sigma are seldom resolved.
+    See the multi-emitter page of the documentation for when to use it.
+
+    Parameters
+    ----------
+    movie : LoadedMovie
+        The input movie, as loaded by ``picasso.io.load_movie``.
+    info : list of dicts or None, optional
+        Metadata of the movie. Default is None, i.e., no earlier metadata, so
+        the returned metadata holds only the entry of this step.
+    camera_info : dict
+        Camera information: "Baseline", "Sensitivity", "Gain" and
+        "Pixelsize".
+    parameters : MultiEmitterParameters or None, optional
+        The settings of the fit. None (the default) uses the defaults,
+        which estimate the PSF sigma from the movie.
+    roi : tuple or list of tuples, optional
+        Region(s) of interest in camera pixels, as in :func:`localize`:
+        emitters are only found inside them, and the localizations get a
+        ``roi_id`` column (see :func:`add_roi_id`). Default is None (the
+        whole frame).
+    frame_bounds : tuple or list of tuples, optional
+        Frames to fit, as in :func:`identify`. Default is None (all).
+    seed_identification : IdentificationParameters or None, optional
+        Picasso's identification (net gradient or wavelet, see
+        :func:`identify`) to start each frame from. If given, the movie
+        is identified first, and in each frame the identified spots, at
+        their pixel centers, replace the peaks that the first cycle of the
+        peak finder would find; later cycles find the emitters they miss
+        as usual. This reuses identification settings already tuned for
+        a movie. It is not part of 3D-DAOSTORM and the GUI does not offer
+        it. Default is None, i.e., the peak finder alone.
+    camera_calibration : dict or None, optional
+        Per-pixel sCMOS camera calibration, as in :func:`fit`: its maps
+        replace the scalar "Baseline" (and "Sensitivity"), and the
+        readout variance enters the noise model of the fit and of the
+        peak threshold. Default is None.
+    calibration_3d : dict, str or None, optional
+        Astigmatic 3D calibration (see ``picasso.zfit.calibrate_z`` and
+        ``io.load_calibration``), or the path of its file, to read z from
+        the sigmas in x and y of an "elliptical" fit after it (see
+        ``picasso.zfit.zfit``), as storm-analysis's ``3d`` model does.
+        Default is None.
+    spline_calibration : dict, str or None, optional
+        Spline calibration of a single channel, "spline-2d" or
+        "spline-3d" (see ``picasso.spline.calibrate_spline`` and
+        ``io.load_spline_calibration``), or the path of its file: the PSF
+        of the "spline" model, which needs it. A 3D calibration gives z
+        directly, and its own lateral corrections are applied. Each
+        emitter is fitted in a disc of ``parameters.fit_region_size``
+        pixels, a crop of the calibration box. Default is None.
+    lateral_transforms : dict, list, str or None, optional
+        Lateral (x, y) corrections applied to the localizations after the
+        fit, as in :func:`fit`: a calibration with an ``"Affine
+        transforms"`` list, the list itself, or the path of a calibration
+        file. They are recorded in an entry of their own. Default is
+        None.
+    parallel : bool, optional
+        If True, the frames are fitted on a pool of threads; if False, in
+        the calling thread. Default is True.
+    fit_z_gpu : bool, optional
+        If True, the z fit of ``calibration_3d`` runs on a CUDA-capable
+        GPU (see ``picasso.zfit.zfit``); the frames are fitted on the CPU
+        either way. Ignored without ``calibration_3d``. Default is False.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports the phases "Estimating the PSF
+        sigma" over twice the sampled frames (only for a Gaussian model
+        without ``parameters.psf_sigma``), "Identifying spots" (only with
+        ``seed_identification``, see :func:`identify`), "Fitting
+        frames" over the frames and "Fitting z" over the localizations
+        (only with ``calibration_3d``). Default is None.
+    abort_callback : callable or None, optional
+        Polled throughout; returning True stops the fit and the function
+        returns None for the localizations. Default is None.
+    psf_sigma_callback : callable or None, optional
+        Called with the PSF sigma (nm) as soon as it is known, i.e.,
+        once estimated, or right away when ``parameters.psf_sigma`` is
+        given, before the frames are fitted: the sigma of a "fixed" fit,
+        or the start of a fitted one. Not called for the spline. It is
+        called on the thread that runs this function. Default is None.
+
+    Returns
+    -------
+    locs : pd.DataFrame or None
+        One localization per emitter, with every length in nm: ``frame``,
+        ``x``, ``y``, ``photons``, ``sx`` and ``sy`` (the PSF sigma in x
+        and in y, fixed or fitted; not for the spline), ``bg``, the
+        Cramer-Rao bounds ``lpx``, ``lpy``, ``photons_unc`` and
+        ``bg_unc``, and for a fitted sigma ``sx_unc`` and ``sy_unc`` (see
+        Notes), ``log_likelihood``, ``iterations`` and
+        ``reduced_chi_square`` of the emitter's region, its
+        ``significance`` and ``n_emitters``, the number of emitters the
+        bounds were computed from: the emitter itself and its neighbors
+        within 4 PSF sigma, at most the 8 nearest (1 for an isolated
+        emitter, at most 9). With ``calibration_3d``, also ``z``,
+        ``d_zcalib`` and ``lpz`` (see ``picasso.zfit.zfit``); with a 3D
+        spline calibration, ``z`` and its bound ``lpz``, as in the
+        single-emitter spline fit. None if aborted.
+    info : list of dicts
+        Metadata of the localizations: ``info`` with an entry recording
+        the fit and ``camera_info`` appended (see ``lib.append_metadata``),
+        one recording the z fit if ``calibration_3d`` was given, and one
+        recording ``lateral_transforms`` if any were applied without it.
+
+    Raises
+    ------
+    ValueError
+        If ``camera_info`` lacks a positive "Pixelsize", the PSF sigma is
+        to be estimated and the movie has too few isolated emitters,
+        ``calibration_3d`` is given for a model other than "elliptical",
+        ``spline_calibration`` is missing for the spline, given for
+        another model, not a single-channel calibration or with a box
+        below 5 pixels, or ``parameters.peak_search_z`` lies outside its z
+        range.
+    RuntimeError
+        If ``fit_z_gpu`` is True with ``calibration_3d`` but no
+        CUDA-capable GPU is available; raised before the frames are
+        fitted.
+    TypeError
+        If ``parameters`` or ``seed_identification`` is of the wrong
+        type.
+
+    Notes
+    -----
+    The localization precision (``lpx``, ``lpy``, and likewise
+    ``photons_unc``, ``bg_unc``, ``sx_unc``, ``sy_unc`` and ``lpz``) is
+    the Cramer-Rao lower bound of the
+    fitted model, which storm-analysis does not report. An emitter's
+    bound comes from the Poisson Fisher information matrix of it and its
+    nearest neighbors jointly (Huang et al., 2011), with photons, x, y,
+    background and the fitted sigmas or z of each as parameters, over the
+    union of their fit regions and evaluated at the fitted values. A
+    fitted sigma costs some precision, most where the emitters overlap.
+    Inverting the joint
+    matrix makes a close neighbor raise the bound, as the overlap costs
+    precision. Where the matrix is singular, the approximation of
+    Huang et al.'s Eq. 11 is used instead. An sCMOS calibration's
+    readout variance is added to the expected counts; with an EM gain
+    above 1, the variances are doubled (excess noise factor 2).
+
+    References
+    ----------
+    Babcock, H., Sigal, Y. M. & Zhuang, X. A high-density 3D localization
+    algorithm for stochastic optical reconstruction microscopy. Opt.
+    Nanoscopy 1, 6 (2012). https://doi.org/10.1186/2192-2853-1-6
+
+    Huang, F., Schwartz, S. L., Byars, J. M. & Lidke, K. A. Simultaneous
+    multiple-emitter fitting for single molecule super-resolution
+    imaging. Biomed. Opt. Express 2, 1377-1393 (2011).
+    https://doi.org/10.1364/BOE.2.001377
+
+    Babcock, H. P. & Zhuang, X. Analyzing single molecule localization
+    microscopy data using cubic splines. Sci. Rep. 7, 552 (2017).
+    https://doi.org/10.1038/s41598-017-00622-w
+
+    Examples
+    --------
+    >>> from picasso import io, localize
+    >>> movie, movie_info = io.load_movie("movie.ome.tif")
+    >>> camera_info = {
+    ...     "Baseline": 100, "Sensitivity": 0.53, "Gain": 1, "Pixelsize": 130
+    ... }
+    >>> locs, info = localize.localize_multi_emitter(
+    ...     movie, movie_info, camera_info=camera_info
+    ... )
+
+    Isolated emitters only (no other within 4 PSF sigma):
+
+    >>> isolated = locs[locs["n_emitters"] == 1]
+
+    Astigmatic 3D: a sigma in x and one in y per emitter, and z from a
+    calibration:
+
+    >>> locs, info = localize.localize_multi_emitter(
+    ...     movie,
+    ...     movie_info,
+    ...     camera_info=camera_info,
+    ...     parameters=localize.MultiEmitterParameters(
+    ...         psf_model="elliptical"
+    ...     ),
+    ...     calibration_3d="3d_calib.yaml",
+    ... )
+
+    An experimental PSF from a spline calibration, with z for a 3D one:
+
+    >>> locs, info = localize.localize_multi_emitter(
+    ...     movie,
+    ...     movie_info,
+    ...     camera_info=camera_info,
+    ...     parameters=localize.MultiEmitterParameters(psf_model="spline"),
+    ...     spline_calibration="spline_calib.hdf5",
+    ... )
+    """
+    if parameters is None:
+        parameters = MultiEmitterParameters()
+    if not isinstance(parameters, MultiEmitterParameters):
+        raise TypeError(
+            "parameters must be a MultiEmitterParameters, got "
+            f"{type(parameters).__name__}."
+        )
+    if seed_identification is not None and not isinstance(
+        seed_identification, IdentificationParameters
+    ):
+        raise TypeError(
+            "seed_identification must be an IdentificationParameters or "
+            f"None, got {type(seed_identification).__name__}."
+        )
+    assert isinstance(camera_info, dict), "camera_info must be a dict"
+    assert isinstance(parallel, bool), "parallel must be a boolean"
+    assert isinstance(fit_z_gpu, bool), "fit_z_gpu must be a boolean"
+    pixelsize = camera_info.get("Pixelsize")
+    if not _is_positive_number(pixelsize):
+        raise ValueError(
+            "camera_info needs 'Pixelsize', the effective camera pixel size "
+            "in nm (after magnification): coordinates are stored in nm, "
+            f"so the fit cannot run without it. Got {pixelsize!r}."
+        )
+    pixelsize = float(pixelsize)
+    _validate_camera_calibration(camera_calibration, movie, camera_info)
+    offset = gain = variance = None
+    if camera_calibration is not None:
+        offset = np.asarray(camera_calibration["offset"], dtype=np.float64)
+        if camera_calibration.get("gain") is not None:
+            gain = np.asarray(camera_calibration["gain"], dtype=np.float64)
+        variance = np.asarray(
+            _variance_to_photons(
+                camera_calibration["variance"], camera_info, gain
+            ),
+            dtype=np.float64,
+        )
+    if calibration_3d is not None:
+        if parameters.psf_model != "elliptical":
+            raise ValueError(
+                "calibration_3d needs psf_model='elliptical': z is read from "
+                "the sigmas in x and y each emitter is fitted with, got "
+                f"psf_model={parameters.psf_model!r}."
+            )
+        # before the frames are fitted, not after
+        if fit_z_gpu and not zfit.CUDA_AVAILABLE:
+            raise RuntimeError(
+                "GPU z fitting requested (fit_z_gpu) but no CUDA-capable "
+                "GPU is available."
+            )
+        if isinstance(calibration_3d, str):
+            calibration_3d = io.load_calibration(
+                calibration_3d, pixelsize=pixelsize
+            )
+    is_spline = parameters.psf_model == "spline"
+    if is_spline != (spline_calibration is not None):
+        raise ValueError(
+            "psf_model='spline' needs a spline_calibration, and only it "
+            f"takes one; got psf_model={parameters.psf_model!r}"
+            + (" without one." if is_spline else " and one.")
+        )
+    spline = residualfit.NO_SPLINE
+    if is_spline:
+        if isinstance(spline_calibration, str):
+            spline_calibration = io.load_spline_calibration(
+                spline_calibration, pixelsize=pixelsize
+            )
+        spline, spline_sigma = _multi_emitter_spline(
+            spline_calibration, parameters
+        )
+    em = camera_info["Gain"] > 1
+    n_frames = len(movie)
+    frame_numbers = np.array(
+        [
+            f
+            for f in range(n_frames)
+            if lib.frame_in_bounds(f, frame_bounds, n_frames)
+        ],
+        dtype=np.int64,
+    )
+    sigma = None
+    results = None
+    with lib.tracked_progress(
+        progress, "Fitting frames", unit="frame"
+    ) as progress:
+        if is_spline:
+            sigma = spline_sigma
+        elif parameters.psf_sigma is None:
+            sigma = _estimate_psf_sigma(
+                movie,
+                frame_numbers,
+                camera_info,
+                offset,
+                gain,
+                roi,
+                parameters,
+                em,
+                progress,
+                abort_callback,
+            )
+        else:
+            sigma = parameters.psf_sigma / pixelsize
+        if (
+            sigma is not None
+            and not is_spline
+            and callable(psf_sigma_callback)
+        ):
+            psf_sigma_callback(sigma * pixelsize)
+        seeds = {}
+        if sigma is not None and seed_identification is not None:
+            identified = identify(
+                movie,
+                info,
+                parameters=seed_identification,
+                roi=roi,
+                frame_bounds=frame_bounds,
+                parallel=parallel,
+                progress=progress,
+                abort_callback=abort_callback,
+            )
+            if identified is None:  # aborted
+                sigma = None
+            else:
+                for frame_number, group in identified[0].groupby("frame"):
+                    seeds[int(frame_number)] = group[["x", "y"]].to_numpy(
+                        dtype=np.int64
+                    )
+        if sigma is not None:
+            pad = residualfit.padding(sigma, parameters.psf_model, spline)
+            height, width = np.shape(movie[0])
+            mask = _peak_mask(
+                (height, width),
+                pad,
+                roi,
+                getattr(movie, "filled_window", None),
+            )
+            args = (
+                camera_info,
+                offset,
+                gain,
+                variance,
+                mask,
+                sigma,
+                parameters,
+                spline,
+            )
+            lib.start_phase(
+                progress, "Fitting frames", len(frame_numbers), unit="frame"
+            )
+            results = _fit_frames_multi_emitter(
+                movie,
+                frame_numbers,
+                seeds,
+                args,
+                parallel,
+                progress,
+                abort_callback,
+            )
+        entry = {
+            **lib.step_info("Fit multi-emitter"),
+            **parameters.to_info(),
+        }
+        if is_spline:
+            # the region the fit used, given or from the calibration
+            entry["Fit Region Size"] = spline.roi
+            entry["Spline calibration model"] = spline_calibration.get("model")
+            entry["Spline calibration path"] = spline_calibration.get(
+                "Path", "N/A"
+            )
+            # the lateral corrections the calibration carries, applied
+            # below
+            own = lib.describe_lateral_transforms(spline_calibration)
+            if own:
+                entry["Lateral corrections applied"] = own
+        else:
+            if sigma is not None:
+                # the sigma the fit used (or started from), given or
+                # estimated
+                entry["PSF Sigma (nm)"] = sigma * pixelsize
+            entry["PSF Sigma Estimated"] = parameters.psf_sigma is None
+        if seed_identification is not None:
+            entry["Seed Identification"] = seed_identification.to_info()
+        entry["ROI"] = roi
+        entry["Frame Bounds"] = frame_bounds
+        entry.update(camera_calibration_info(camera_calibration))
+        info = lib.append_metadata(info, entry | camera_info)
+        if results is None:  # aborted
+            return None, info
+        locs = _locs_from_multi_emitter_fits(
+            frame_numbers,
+            results,
+            sigma,
+            parameters.psf_model,
+            pixelsize,
+            em,
+            spline if is_spline else None,
+            spline_calibration,
+        )
+        # before the lateral corrections, which move x and y
+        locs = add_roi_id(locs, roi, pixelsize=pixelsize)
+        if is_spline:
+            locs = lib.apply_lateral_transforms(locs, spline_calibration)
+            return _apply_extra_affine(
+                locs, info, lateral_transforms, applied=spline_calibration
+            )
+        if calibration_3d is None:
+            return _apply_extra_affine(locs, info, lateral_transforms)
+        return _fit_z_multi_emitter(
+            locs,
+            info,
+            calibration_3d,
+            lateral_transforms,
+            parallel,
+            fit_z_gpu,
+            progress,
+            abort_callback,
+        )
+
+
+def _fit_z_multi_emitter(
+    locs: pd.DataFrame,
+    info: list[dict],
+    calibration: dict,
+    lateral_transforms: dict | list | str | None,
+    parallel: bool,
+    gpu: bool,
+    progress: lib.Progress,
+    abort_callback: Callable[[], bool] | None,
+) -> tuple[pd.DataFrame | None, list[dict]]:
+    """z of the localizations of an elliptical multi-emitter fit from an
+    astigmatic calibration (see ``zfit.zfit``), which also applies the
+    lateral corrections.
+
+    A calibration records the widths of Picasso's single-emitter
+    Gaussian, which is sampled at the pixel centers. Fitted to the pixel-
+    integrated Gaussian of sigma ``s``, that Gaussian has a width of about
+    ``sqrt(s^2 + a^2 / 12)``, ``a`` the pixel size: the z fit is given
+    those widths, and the localizations keep their PSF sigmas. Returns
+    None for the localizations if aborted."""
+    pixelsize = lib.get_from_metadata(info, "Pixelsize")
+    blur = pixelsize**2 / 12.0
+    psf_sx = locs["sx"].to_numpy()
+    psf_sy = locs["sy"].to_numpy()
+    sampled = locs.assign(
+        sx=np.sqrt(psf_sx.astype(np.float64) ** 2 + blur),
+        sy=np.sqrt(psf_sy.astype(np.float64) ** 2 + blur),
+        # carried through the z fit, which may drop localizations
+        _psf_sx=psf_sx,
+        _psf_sy=psf_sy,
+    )
+    z_locs, z_info = zfit.zfit(
+        locs=sampled,
+        info=info,
+        calibration=calibration,
+        fitting_method="gaussmle",
+        filter=0,
+        lateral_transforms=lateral_transforms,
+        parallel=parallel,
+        gpu=gpu,
+        progress=progress,
+        abort_callback=abort_callback,
+    )
+    if z_locs is None:  # aborted
+        return None, info
+    z_locs = z_locs.assign(sx=z_locs.pop("_psf_sx"), sy=z_locs.pop("_psf_sy"))
+    return z_locs.reset_index(drop=True), z_info
 
 
 def localize(
@@ -10056,7 +11718,7 @@ def localize(
     )
 
 
-#: Camera keys ``fit`` reads off ``camera_info`` (see ``_to_photons`` /
+#: Camera keys ``fit`` reads off ``camera_info`` (see ``to_photons`` /
 #: ``_sensitivity``); the rest of a picasso info list is movie metadata.
 #: Pulled out of the info list-of-dicts by ``localize_frames`` when no
 #: ``camera_info`` is passed explicitly.

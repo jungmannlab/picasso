@@ -801,47 +801,36 @@ def test_apply_flip_exchanges_x_and_z(cmd, window_3d, monkeypatch):
     np.testing.assert_allclose(view.locs[0]["z"], x, atol=1e-2)
 
 
-def test_apply_spiral_and_undo(window, monkeypatch, answers):
+def test_apply_spiral_and_undo(window, monkeypatch):
     before = _xy(window.view)
     _apply(window, monkeypatch, "spiral 200 3")
     spiraled = _xy(window.view)
     assert not np.allclose(spiraled, before)
     assert np.abs(spiraled - before).max() <= 200 + 1e-3  # the radius
-    _apply(window, monkeypatch, "uspiral")
-    np.testing.assert_allclose(_xy(window.view), before, atol=1e-3)
-    answers.record_messages()
-    _apply(window, monkeypatch, "uspiral")  # undone already
-    assert answers.messages == ["Localizations have not been spiraled yet."]
-    np.testing.assert_allclose(_xy(window.view), before, atol=1e-3)
-
-
-def test_apply_undo_spiral_needs_a_spiral(window, monkeypatch, answers):
-    answers.record_messages()
-    before = _xy(window.view)
-    _apply(window, monkeypatch, "uspiral")
-    assert answers.messages == ["Localizations have not been spiraled yet."]
+    window.view.undo()  # File > Undo
     np.testing.assert_array_equal(_xy(window.view), before)
+    window.view.redo()
+    np.testing.assert_array_equal(_xy(window.view), spiraled)
 
 
 def test_apply_spiral_beyond_the_edge_and_undo(window, monkeypatch):
     """A spiral beyond the canvas grows it, which translates the
-    localizations; undoing the spiral must restore them in the new
-    frame."""
+    localizations; undoing the spiral restores them and the canvas."""
     from picasso import lib
 
-    def camera_frame() -> np.ndarray:
-        info = window.view.infos[0]
-        offset = [
-            lib.get_from_metadata(info, key, default=0.0) or 0.0
+    def offset() -> list[float]:
+        return [
+            lib.get_from_metadata(window.view.infos[0], key, 0)
             for key in lib.CANVAS_OFFSET_KEYS
         ]
-        return _xy(window.view) - np.array(offset)
 
-    before = camera_frame()
+    before = _xy(window.view)
     _apply(window, monkeypatch, "spiral 2000 1")
     assert window.view.locs[0]["x"].min() >= 0
-    _apply(window, monkeypatch, "uspiral")
-    np.testing.assert_allclose(camera_frame(), before, atol=1e-2)
+    assert any(offset())  # translated
+    window.view.undo()
+    np.testing.assert_array_equal(_xy(window.view), before)
+    assert not any(offset())
 
 
 # ---------------------------------------------------------------------------
@@ -1470,7 +1459,20 @@ def test_save_localizations_of_a_channel(window, answers, tmp_path):
     window.save_locs()
     locs, info = _load(out)
     assert len(locs) == len(window.view.locs[0])
-    assert "Last driftfile" in info[-1]
+    # the metadata as the steps returned them: no drift file to add
+    assert info == window.view.infos[0]
+
+
+def test_save_localizations_records_the_drift_file(window, answers, tmp_path):
+    driftfile = str(tmp_path / "drift.txt")
+    window.view._driftfiles[0] = driftfile
+    out = tmp_path / "saved.hdf5"
+    answers.save_path(out)
+    window.save_locs()
+    _, info = _load(out)
+    assert info[:-1] == window.view.infos[0]
+    assert info[-1]["Step"] == "Render"
+    assert info[-1]["Last driftfile"] == driftfile
 
 
 def test_save_localizations_of_all_channels(window2, answers, tmp_path):
@@ -1882,6 +1884,7 @@ def _molecules(window) -> None:
         ("ripley_h", lambda d: d.region.setCurrentIndex(1)),  # the FOV
         ("rdf", lambda d: d.partner.setCurrentIndex(2)),  # cross
         ("nnd", lambda d: None),
+        ("knn", lambda d: d.k_max.setValue(2)),
     ],
 )
 def test_spatial_statistic_with_the_dialog(
@@ -1973,6 +1976,28 @@ def test_spatial_statistic_dialog_in_3d(window_3d, answers, monkeypatch):
     assert ok
     assert params["z_range"] == (-50.0, 50.0)
     assert params["simulated_z"] == "observed"
+
+
+def test_knn_dialog_in_3d(window_3d, monkeypatch):
+    dialog = gui_render.SpatialStatisticDialog(window_3d, "knn")
+    dialog.use_z.setChecked(True)
+    assert not dialog.z_limits.isHidden()
+    # compared with uniform z only
+    assert dialog.simulated_z.isHidden()
+    dialog.close()
+
+    def setup(dialog):
+        dialog.use_z.setChecked(True)
+        dialog.k_max.setValue(4)
+        dialog.k_min.setValue(2)
+        dialog.r_min.setValue(5.0)
+
+    _accept_with(monkeypatch, gui_render.SpatialStatisticDialog, setup)
+    params, ok = gui_render.SpatialStatisticDialog.getParams(window_3d, "knn")
+    assert ok and params["use_z"]
+    assert (params["k_max"], params["k_min"], params["r_min"]) == (4, 2, 5.0)
+    assert params["partner"] is None
+    assert params["simulated_z"] == "uniform"
 
 
 # ---------------------------------------------------------------------------
@@ -2120,25 +2145,26 @@ def _window_with_a_fiducial(tmp_path) -> gui_render.Window:
 
 def test_pick_fiducials(qt_offscreen, tmp_path):
     window = _window_with_a_fiducial(tmp_path)
-    window.view._pick_shape = "Circle"
+    # the fiducials are circles, whatever the pick tool
+    window.tools_settings_dialog.pick_shape.setCurrentText("Square")
     window.view.pick_fiducials()
     ((x, y),) = window.view._picks
     assert (x, y) == pytest.approx((4000.0, 3000.0), abs=100.0)
-    assert window.view._pick_size > 500.0  # nm
+    assert window.view._pick_shapes == ["Circle"]
+    assert window.view._pick_shape == "Circle"
+    assert window.view._pick_sizes[0] > 500.0  # nm
+    assert window.view._pick_size == window.view._pick_sizes[0]
     window.close()
 
 
 def test_pick_fiducials_refusals(window, answers):
     answers.record_messages()
-    window.view._pick_shape = "Square"
-    window.view.pick_fiducials()
     window.view._pick_shape = "Circle"
     window.view._picks = [(100.0, 100.0)]
     window.view.pick_fiducials()
     window.view._picks = []
     window.view.pick_fiducials()  # no fiducial in the clusters
     assert answers.messages == [
-        "Please select circular pick before picking fiducials.",
         "Please remove all picks before picking fiducials.",
         "No fiducials found, manual picking is required.",
     ]
@@ -2252,9 +2278,74 @@ def mask_dialog(window, answers):
 
 def test_mask_dialog_shows_the_steps(mask_dialog):
     titles = [plot._title for plot in mask_dialog.plots]
-    assert titles == ["Histogrammed localizations", "Blur", "Mask"]
+    assert titles[:2] == ["Histogrammed localizations", "Blur"]
+    assert titles[2].startswith("Mask (") and titles[2].endswith("regions)")
     assert mask_dialog.mask.shape == mask_dialog.H.shape
     assert mask_dialog.save_mask_button.isEnabled()
+
+
+def test_mask_refinement(mask_dialog, window, answers):
+    from picasso import masking
+
+    mask_dialog.thresh_method.setCurrentText("Custom")
+    mask_dialog.mask_thresh.setValue(0.05)  # many regions
+    thresholded = mask_dialog.mask.astype(bool)
+    n_regions = len(masking.label_components(thresholded)[1])
+    assert n_regions > 1
+    mask_dialog.n_largest.setValue(1)
+    largest = mask_dialog.mask.astype(bool)
+    assert len(masking.label_components(largest)[1]) == 1
+    assert mask_dialog.plots[2]._title == "Mask (1 region)"
+    mask_dialog.n_largest.setValue(0)  # all
+    np.testing.assert_array_equal(mask_dialog.mask.astype(bool), thresholded)
+    # 260 nm pixels: growing by 260 nm adds at least the 4 neighbors
+    mask_dialog.grow.setValue(260.0)
+    grown = mask_dialog.mask.astype(bool)
+    assert grown.sum() > thresholded.sum() and grown[thresholded].all()
+    mask_dialog.grow.setValue(-260.0)
+    assert mask_dialog.mask.astype(bool).sum() < thresholded.sum()
+    mask_dialog.grow.setValue(0.0)
+    mask_dialog.fill_holes.setChecked(True)
+    assert mask_dialog.mask.astype(bool)[thresholded].all()
+    mask_dialog.min_area.setValue(1e6)  # um^2: more than the image
+    assert not mask_dialog.mask.any()
+    mask_dialog.min_area.setValue(0.0)
+    # recorded with the masked localizations
+    mask_dialog.mask_locs()
+    entry = mask_dialog.index_infos[0][-1]
+    assert entry["Fill holes"] is True
+    assert entry["Largest regions kept"] == "all"
+    assert entry["Grow (nm)"] == 0.0 and entry["Min. area (um^2)"] == 0.0
+
+
+def test_mask_regions_as_polygon_picks(mask_dialog, window, answers):
+    from picasso import masking, postprocess
+
+    view = window.view
+    n_picks = len(view._picks)
+    mask_dialog.n_largest.setValue(2)
+    assert mask_dialog.picks_button.isEnabled()
+    n_regions = len(masking.label_components(mask_dialog.mask)[1])
+    mask_dialog.add_mask_picks()
+    assert len(view._picks) == n_picks + n_regions
+    assert view._pick_shapes[n_picks:] == ["Polygon"] * n_regions
+    polygons = view._picks[n_picks:]
+    assert all(polygon[0] == polygon[-1] for polygon in polygons)
+    # the picks hold about the localizations inside the mask (the
+    # outline is smoothed by up to a pixel)
+    picked = postprocess.picked_locs(
+        view.locs[0], view.infos[0], picks=polygons, pick_shape="Polygon"
+    )
+    mask_dialog.mask_locs()
+    n_inside = len(mask_dialog.index_locs[0])
+    assert sum(len(locs) for locs in picked) == pytest.approx(
+        n_inside, rel=0.1
+    )
+    view.undo()  # one step
+    assert len(view._picks) == n_picks
+    mask_dialog.min_area.setValue(1e6)  # um^2: nothing left
+    mask_dialog.add_mask_picks()
+    assert len(answers.messages) == 1 and len(view._picks) == n_picks
 
 
 @pytest.mark.parametrize("method", ["Otsu", "Li", "Mean", "Triangle"])
@@ -3093,6 +3184,27 @@ def test_pick_statistics(window, qt_offscreen):
     assert float(info_dialog.n_localizations_mean.text()) > 100
     assert "dark" in info_dialog.pick_info
     info_dialog.pick_hist_window.close()
+
+
+def test_pick_statistics_dye_performance(window, qt_offscreen):
+    """SBR, localization drop and destroyed docking sites (Steen et
+    al., 2024) are shown, with the ratios r and the localizations over
+    time in the kinetics window."""
+    _circle_picks(window, n=3)
+    window.view.update_pick_info_long()
+    _wait_for_tasks(qt_offscreen)
+    info_dialog = window.info_dialog
+    assert float(info_dialog.sbr_mean.text()) > 0
+    assert float(info_dialog.sbr_std.text()) >= 0
+    float(info_dialog.loc_drop.text())
+    float(info_dialog.destroyed_sites.text())
+    hist_window = info_dialog.pick_hist_window
+    titles = [ax.get_title() for ax in hist_window.figure.axes]
+    assert "Docking site damage" in titles
+    assert "Localizations over time" in titles
+    hist_window.redraw()  # e.g., after a change of the plot style
+    assert len(hist_window.figure.axes) == 4
+    hist_window.close()
 
 
 def test_test_clusterer_g5m_calibration(window, monkeypatch, tmp_path):

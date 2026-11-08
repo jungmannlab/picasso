@@ -6,10 +6,10 @@ Tools Menu
 The first four entries select the active tool, and ``Tools settings...``
 (:kbd:`Ctrl+T`) sets how the tools behave and look; see :doc:`tools`:
 
-- ``Zoom`` (:kbd:`Ctrl+Z`), see :ref:`render-zoom`;
-- ``Pick`` (:kbd:`Ctrl+P`), see :ref:`render-pick`;
-- ``Measure`` (:kbd:`Ctrl+M`), see :ref:`render-measure`;
-- ``Move`` (:kbd:`Ctrl+G`), see :ref:`render-move`;
+- ``Zoom`` (:kbd:`Z`), see :ref:`render-zoom`;
+- ``Pick`` (:kbd:`P` or :kbd:`Ctrl+P`), see :ref:`render-pick`;
+- ``Measure`` (:kbd:`M` or :kbd:`Ctrl+M`), see :ref:`render-measure`;
+- ``Move`` (:kbd:`G` or :kbd:`Ctrl+G`), see :ref:`render-move`;
 - ``Tools settings...`` (:kbd:`Ctrl+T`), see :ref:`render-tools-settings`.
 
 The remaining entries work on the picks and the localizations:
@@ -24,19 +24,21 @@ Pick similar
 Shortcut: :kbd:`Ctrl+Shift+P`
 
 Automatically identifies picks that are similar to the current picks.
-Available for circular, square, rectangular and box picks. New circular and
-square picks take the current size. For rectangular picks, the new picks take
-the median length of the current picks and are oriented along the
-localizations they contain. New box picks take the median width and height of
-the current picks; the boxes you drew yourself are kept as drawn. See
-:ref:`render-picking-steps` for the similarity measures.
+Available for circular, square, rectangular and box picks, all of one shape.
+Picks of different sizes are searched for with their median size (diameter,
+side length or width), which the new picks take; the picks you drew keep
+theirs. For rectangular picks, the new picks take the median length of the
+current picks and are oriented along the localizations they contain. New box
+picks take the median width and height of the current picks; the boxes you
+drew yourself are kept as drawn. See :ref:`render-picking-steps` for the
+similarity measures.
 
 .. dropdown:: Python
    :icon: code
    :class-container: api-example
 
-   ``pick_size`` is the diameter for circles, in nm; ``std_range`` is
-   ``Pick similar ± range``.
+   ``pick_size`` is the diameter for circles, in nm, or one size per pick,
+   of which the median is used; ``std_range`` is ``Pick similar ± range``.
 
    .. code-block:: python
 
@@ -49,6 +51,68 @@ the current picks; the boxes you drew yourself are kept as drawn. See
           pick_shape="Circle",
           pick_size=diameter,
           std_range=2.0,
+      )
+
+
+.. _render-pick-by-n-locs-rmsd:
+
+Pick by localizations and RMSD
+------------------------------
+
+Picks similar structures without seed picks: by ranges of the number of
+localizations and of the RMSD (the root mean square distance of the
+localizations from their center of mass) that a pick contains. Available for
+circular picks.
+
+1. Set the pick diameter in ``Tools settings`` (:kbd:`Ctrl+T`) and select
+   ``Tools`` > ``Pick by localizations and RMSD...``.
+2. The field of view is scanned with candidate picks as in
+   :ref:`Pick similar <render-pick-similar>`: each is moved to the center of
+   mass of its localizations until it stops moving. The window shows the
+   number of localizations and the RMSD of the candidates as a 2D
+   histogram, in which structures of one kind form a cluster.
+
+   ``Min. localizations`` leaves out the candidates with fewer
+   localizations, by default 1% of the frames. The background forms many
+   candidates of a few localizations each, which can outnumber the
+   structures. Change it, or the pick diameter, and click
+   ``Find candidates`` to scan again.
+3. Set the ranges of the structures to pick: draw a rectangle on the
+   histogram (:kbd:`Esc` cancels it), or type them in. The number of
+   candidates in the ranges is shown next to ``Add picks``.
+
+   ``Find classes`` suggests ranges: it clusters the candidates by their
+   number of localizations and RMSD (OPTICS, on both scaled to the same
+   spread) and gives each class the ranges of its median ± one standard
+   deviation. The ranges of the classes are outlined on the histogram;
+   select a class from the list to use its ranges.
+4. Click ``Add picks`` to add the candidates in the ranges as circular picks.
+   ``File`` > ``Undo`` removes them again.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``pick_similar_candidates`` returns the candidates with their number of
+   localizations and RMSD, ``structure_classes`` their classes, and
+   ``pick_similar`` takes the ranges instead of seed picks.
+
+   .. code-block:: python
+
+      from picasso import postprocess
+
+      candidates = postprocess.pick_similar_candidates(
+          locs, info, pick_size=150, min_n_locs=info[0]["Frames"] // 100
+      )
+      labels, classes = postprocess.structure_classes(candidates)
+      print(classes)
+
+      picks = postprocess.pick_similar(
+          locs,
+          info,
+          pick_size=150,
+          n_locs_range=(400, 1000),
+          rmsd_range=(35, 50),
       )
 
 
@@ -96,6 +160,9 @@ densest spots of the image. Requires no existing picks.
    99th percentile of the pixel values as the minimum net gradient.
 3. Only spots with more localizations than 80% of the number of frames are
    kept, and each gets a circular pick with a diameter of the box size.
+
+The pick shape in ``Tools > Tools settings`` switches to ``Circle`` with the
+box size as the ``Diameter``, so that further picks match the fiducials.
 
 .. dropdown:: Python
    :icon: code
@@ -225,8 +292,10 @@ Clears all currently selected picks.
 Subtract pick regions
 ---------------------
 
-Allows loading another pick regions file to subtract from the currently
-selected picks. Can be slow for a large number of picks.
+Loads another pick regions file and removes the current picks whose centers
+lie inside one of its circles. Only for circular picks, both in Render and in
+the file; the remaining picks keep their sizes. Can be slow for a large number
+of picks.
 
 .. _render-cluster-in-pick:
 
@@ -260,16 +329,34 @@ from the density of the localizations of the selected channel:
    thresholds (``Isodata``, ``Li``, ``Mean``, ``Minimum``, ``Otsu``,
    ``Triangle``, ``Yen``) or local ones that vary across the image
    (``Local Gaussian``, ``Local mean``, ``Local median``).
-4. ``Mask`` applies the mask to the localizations and shows those inside it
+4. Optionally, refine the mask, in this order: ``Fill holes`` fills the areas
+   it encloses; ``Min. area (µm²)`` removes the regions smaller than that,
+   e.g., specks of background; ``Keep largest regions`` keeps only that number
+   of the largest regions (``All`` keeps all), e.g., 1 for the largest cell;
+   ``Grow / shrink (nm)`` grows the mask by that distance in all directions,
+   or shrinks it for a negative value, e.g., to stay away from the edges of
+   the cells (the image border is not an edge). Regions touching at an edge or
+   a corner are one region; the panel title shows their number. The settings
+   are recorded with the masked localizations.
+5. ``Mask`` applies the mask to the localizations and shows those inside it
    (panel *Masked*). Tick ``Mask all channels`` to apply the same mask to every
    loaded channel.
-5. ``Save localizations`` saves the localizations inside and outside the mask
+6. ``Save localizations`` saves the localizations inside and outside the mask
    as two files (``_mask_in.hdf5`` and ``_mask_out.hdf5``; with all channels,
    you choose the suffixes). The loaded localizations are not changed.
 
 ``Save Mask`` saves the mask as a ``.npy`` array (plus a ``.png`` image) and
 ``Load Mask`` loads one, e.g., to apply the same mask to another dataset.
 ``Save Blurred`` saves the blurred image as a ``.png``.
+
+``Add as polygon picks`` adds each region of the mask as a polygon pick, e.g.,
+to analyze each cell separately with the spatial statistics (such as
+:ref:`render-ripley-h`) or the pick properties, or to save the cells as a
+picks file. The outline follows the pixels of the mask, smoothed by up to one
+pixel. A region with holes becomes one polygon whose outline runs along a cut
+into each hole, around it and back along the cut (a "keyhole" polygon); the
+cut adds no area, so the localizations in a hole are outside the pick.
+:menuselection:`File --> Undo` removes the added picks.
 
 The panels zoom and pan together: :kbd:`Ctrl`/:kbd:`Cmd` + scrolling zooms,
 dragging with the right mouse button (or :kbd:`Ctrl`/:kbd:`Cmd` + the left
@@ -285,15 +372,23 @@ button) pans, and a double click resets the zoom.
    mask under ``Area (um^2)`` (used, e.g., by SPINNA) and ``mask_info``.
    To mask other localizations, e.g., another channel, with the same mask,
    pass the field of view of the first as ``field_of_view``.
+   ``label_components``, ``keep_components``, ``fill_holes``, ``erode`` and
+   ``dilate`` refine a mask; lengths are in the unit of ``pixel_size``, e.g.,
+   nm, and areas in its square. ``mask_to_polygons`` outlines each region as
+   a polygon pick (``tolerance`` in nm, 0 for the exact outline of the
+   pixels, which holds the same localizations as ``mask_locs``).
 
    .. code-block:: python
 
       import numpy as np
-      from picasso import io, masking
+      from picasso import io, lib, masking
 
       locs, info = io.load_locs("movie_locs.hdf5")
       image = masking.generate_image(locs, info, disp_px_size=300, blur=500)   # nm
       mask, threshold = masking.mask_image(image, "otsu")   # or 0.5, "li", "local_mean", ...
+      mask = masking.fill_holes(mask)
+      mask = masking.keep_components(mask, n_largest=1)       # the largest cell
+      mask = masking.erode(mask, 500.0, pixel_size=300.0)    # nm
       locs_in, info_in, locs_out, info_out = masking.mask_locs(
           locs, info, mask=mask, mask_info={"Blur (nm)": 500}
       )
@@ -301,3 +396,7 @@ button) pans, and a double click resets the zoom.
       io.save_locs("movie_locs_mask_in.hdf5", locs_in, info_in)
       io.save_locs("movie_locs_mask_out.hdf5", locs_out, info_out)
       np.save("movie_locs_mask.npy", mask)
+
+      # each region (cell) as a polygon pick
+      picks = masking.mask_to_polygons(mask, field_of_view=lib.field_of_view(info))
+      io.save_picks("movie_locs_mask_picks.yaml", picks, "Polygon")

@@ -513,7 +513,8 @@ def filter_entry(
     Parameters
     ----------
     conditions : sequence of str
-        Conditions applied, in order; listed under ``"Filter steps"``.
+        Conditions applied, in order; listed under ``"Filter steps"`` if
+        any.
         The limits of each range condition (``"100 < sx < 160"``) are
         also stored as ``column: [min, max]`` (intersected if a column
         is limited more than once), which is all that Picasso before 1.0
@@ -537,7 +538,8 @@ def filter_entry(
             entry[column] = [vmin, vmax]
     if removed_columns:
         entry["Removed columns"] = list(removed_columns)
-    entry[lib.FILTER_STEPS_KEY] = list(conditions)
+    if conditions:
+        entry[lib.FILTER_STEPS_KEY] = list(conditions)
     return entry
 
 

@@ -13,7 +13,7 @@ Open
 Shortcut: :kbd:`Ctrl+O`
 
 Open a localization file in render. Picasso ``.hdf5`` files are loaded
-directly (a file written before Picasso 1.0 holds camera pixels and is converted to nm when it is opened, see :ref:`files-legacy`); ThunderSTORM ``.csv``, SMAP ``_sml.mat`` and PyME ``.h5r`` and ``.hdf`` files are imported. In both cases you may be asked for the camera pixel size in nm if the file does not record it. Localization files can also be imported by dragging and dropping them onto the render window. A PyME file with several channels (``probe`` column) opens as one channel per probe, named ``<file>_probe<k>``. See :ref:`render-export-pyme` for how the columns are converted.
+directly (a file written before Picasso 1.0 holds camera pixels and is converted to nm when it is opened, see :ref:`files-legacy`); ThunderSTORM ``.csv``, SMAP ``_sml.mat`` and PyME ``.h5r`` and ``.hdf`` files are imported. In both cases you may be asked for the camera pixel size in nm if the file does not record it. Localization files can also be imported by dragging and dropping them onto the render window. A PyME file with several channels (``probe`` column) opens as one channel per probe, named ``<file>_probe<k>``. See :ref:`render-export-pyme` for how the columns are converted. MINFLUX localizations processed with `pyMINFLUX <https://github.com/bsse-scf/pyMINFLUX>`_ (``.pmx`` and its ``.csv`` export) are imported, too, as are other MINFLUX tables saved as ``.csv`` (columns ``tid``, ``t`` or ``tim``, ``x``, ``y`` and, optionally, ``z``). Render asks whether to load every MINFLUX localization or one per trace (photon-weighted mean), opens one channel per fluorophore, and moves the localizations next to the origin (the shift is stored in the metadata). See :func:`picasso.io.import_minflux` for how the columns are converted.
 
 .. _render-open-rotated:
 
@@ -66,12 +66,14 @@ integer column ``group`` with the index of their pick (see
 color when the file is opened (see :ref:`render-coloring`). To display the group number in Render, select ``Annotate picks`` in
 ``Tools > Tools settings`` (see :ref:`render-tools-settings`).
 
-In case of rectangular picks, the saved localizations file will contain new
+If all picks are rectangular, the saved localizations file will contain new
 columns ``x_pick_rot`` and ``y_pick_rot``, which are localization coordinates
 into the coordinate system of the pick rectangle (coordinate (0,0) is where
 the rectangle was started to be drawn, and ``y_pick_rot`` is in the direction
 of the drawn line.) These columns can be used to plot density profiles of
-localizations along the rectangle dimensions easily.
+localizations along the rectangle dimensions easily. With picks of other
+shapes among them (see :ref:`render-pick-sizes`), the columns are left out,
+since they are undefined for those picks.
 
 The picked regions themselves (shape, size and positions, in the same format
 as a pick regions ``.yaml`` file, see :ref:`render-save-pick-regions`) can
@@ -182,8 +184,8 @@ pick, e.g., to plot its distribution in :doc:`/filter`.
 Save pick regions
 -----------------
 
-Saves the positions of the picked regions (yellow circles) in a .yaml file. It
-is possible to manually add regions or copy them from another pick regions
+Saves the picked regions (their shapes, sizes and positions) in a .yaml file.
+It is possible to manually add regions or copy them from another pick regions
 file with a text editor. The file always carries a ``Shape`` key and the
 format marker ``picasso_format`` (see :ref:`files-format-versions`); the
 remaining keys depend on the shape. All coordinates and all sizes are in nm:
@@ -201,6 +203,14 @@ remaining keys depend on the shape. All coordinates and all sizes are in nm:
   pick is not stored: it follows from their geometry and is worked out again
   when the file is loaded, so overlapping strokes always come back as a single
   pick.
+
+Picks of one shape but different sizes store a list with the size of each
+pick, in the order of the positions, e.g., ``Diameter (nm): [100.0, 160.0]``.
+Picks of different shapes (see :ref:`render-pick-sizes`) are stored with
+``Shape: Mixed`` and a ``Picks`` list, in which each pick has its own
+``Shape``, size (as above) and position: ``Center`` for a circle or square,
+``Center-Axis-Points``, ``Vertices`` or ``Corners`` for a single rectangle,
+polygon or box, and ``Strokes`` for the strokes of one brush pick.
 
 For example:
 
@@ -224,6 +234,20 @@ For example:
     - Width (nm): 80.0
       Path:
       - [1950.0, 3250.0]
+
+.. code-block:: yaml
+
+    Shape: Mixed
+    picasso_format: '1.0'
+    Picks:
+    - Shape: Circle
+      Diameter (nm): 100.0
+      Center: [1625.0, 3913.0]
+    - Shape: Rectangle
+      Width (nm): 80.0
+      Center-Axis-Points: [[5200.0, 7200.0], [6100.0, 7650.0]]
+    - Shape: Box
+      Corners: [[10400.0, 1300.0], [12415.0, 2899.0]]
 
 Pick regions saved before Picasso 1.0 (no ``picasso_format`` key) hold their
 coordinates in camera pixels; they are converted when loaded, see
@@ -251,18 +275,97 @@ Load pick regions
 
 Resets the current picked regions and loads regions from a .yaml file that
 contains pick regions. The ``.yaml`` file can also be dropped in the Render window.
+Every pick keeps the shape and size stored in the file. If the file holds
+picks of one shape, the pick shape in ``Tools > Tools settings`` switches to
+it, and so does the size if all picks share one, so that new picks match the
+loaded ones.
 
 .. dropdown:: Python
    :icon: code
    :class-container: api-example
 
-   Positions and the size (a diameter for circles) come back in nm.
-   ``pixelsize`` is needed only for files written before Picasso 1.0.
+   Positions and the size (a diameter for circles) come back in nm. Picks
+   of different shapes or sizes come with a list of the shape or size of
+   each pick, which every function taking picks accepts. ``pixelsize`` is
+   needed only for files written before Picasso 1.0.
 
    .. code-block:: python
 
       picks, shape, size = io.load_picks("movie_locs_picks.yaml")
 
+
+.. _render-undo:
+.. _render-redo:
+
+Undo and redo
+-------------
+
+``Undo`` (:kbd:`Ctrl+Z`)
+   Takes back the last step that changed the localizations, the picks or
+   the measurements. The button on the toolbar names the step when you
+   hover over it.
+``Redo`` (:kbd:`Ctrl+Shift+Z`, :kbd:`Ctrl+Y` on Windows)
+   Redoes the last step undone by putting back its result rather than
+   running it again, e.g., a drift correction is not computed again. A new
+   step after an undo replaces the steps undone.
+
+These actions are steps:
+
+- moving channels with the :ref:`Move tool <render-move>`;
+- drift correction: ``Undrift by AIM``, ``Undrift by RCC``,
+  ``Undrift from picked`` and ``Apply drift from an external file``, also a
+  drift file dropped onto the window (see :doc:`drift`);
+- ``Apply expression to localizations`` (see :ref:`render-apply-expressions`);
+  applied to all channels, it is one step;
+- ``Remove localizations in picks``;
+- ``Remove columns``, ``Synchronize groups across channels`` and
+  ``Unfold groups/picks``;
+- ``Link localizations``, ``Select central frames localizations`` and
+  ``Combine localizations in picks``;
+- ``Align channels``;
+- ``Track particles`` (see :doc:`tracking`);
+- picks: adding and removing them with the :ref:`Pick tool <render-pick>`
+  (each click, each polygon vertex and each brush stroke is a step),
+  ``Clear picks``, ``Load pick regions``, ``Subtract pick regions``,
+  ``Pick similar``, ``Pick fiducials``, ``Filter picks by count``, the picks
+  removed in ``Select picks`` and ``Cluster in pick``, ``Apply to all`` of the
+  pick sizes, and moving the pick in the :doc:`3D view <3d>`;
+- measurements: each point added with the :ref:`Measure tool
+  <render-measure>`, removing the last set and ``Clear measurements``.
+
+Undoing a step brings back the localizations of the channels it changed, with
+their metadata and drift. If the step moved the canvas, e.g., a channel
+dragged beyond the top left edge, the picks, the measured points and the view
+move back with it. Otherwise, undoing a step that changed the localizations
+leaves the picks as they are, except that undoing ``Unfold groups/picks``
+brings back the picks it used.
+
+.. _render-undo-history:
+
+The history of steps
+~~~~~~~~~~~~~~~~~~~~
+
+Each Render window keeps its last 10 steps that changed the localizations
+and, so that clicking picks does not push those out, its last 50 steps that
+changed only the picks or the measurements. Steps older than the 10th last
+step that changed the localizations are forgotten with it.
+
+- Opening or closing a file clears the history.
+- So does a change of a channel shared with a :ref:`linked window
+  <render-new-linked-window>`, in the window that takes the change over; the
+  window where the change was made keeps its history.
+- Display settings, the view, opening and closing files, and ``Stitch
+  tiles`` are not steps.
+- The drift ``.txt`` files written by drift correction stay on disk after an
+  undo.
+
+A step keeps only what it changed, e.g., only the x and y coordinates after a
+move, but the whole channel after ``Remove localizations in picks``. So that
+large data sets do not take several times the memory, the history keeps at
+most 200 MB in memory. Larger steps are moved to ``~/.picasso/spill``, as for
+the :ref:`release of memory while idle <user-settings-file>`, and read back
+when they are undone, which may take a moment. They are deleted when the
+history no longer needs them and when Picasso closes.
 
 .. _render-export-roi-imaris:
 

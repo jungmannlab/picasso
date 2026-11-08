@@ -25,6 +25,7 @@ The following PSF models are implemented:
 - **Spherical (isotropic) Gaussian.** Fits a single shared width, so ``sx`` and ``sy`` are always equal. The ``ellipticity`` column is not saved for this model. Supports multichannel fitting as well, see :ref:`localize-multichannel-gaussian`.
 - **Rotated elliptical Gaussian.** Same as *Elliptical Gaussian*, however, an in-plane rotation angle is also fitted and saved in the ``angle`` column, in degrees.
 - **Experimental PSF (cubic spline).** Fits an experimentally measured PSF; a 3D calibration recovers ``z`` directly; see :doc:`localize/spline`. Supports multichannel fitting as well, see :ref:`localize-multichannel-spline`.
+- **Overlapping emitters (3D-DAOSTORM).** Fits all emitters of a frame at once, so that emitters closer than about 2 PSF σ are localized separately, with a Gaussian PSF whose σ is fixed for the movie or fitted per emitter, in x and y for astigmatic 3D, or with an experimental PSF from a spline calibration. It finds the spots itself, without the identification step; see :doc:`localize/multi-emitter`.
 - **Vectorial PSF (VectorFit).** Fits a vectorial PSF model computed from the optics (numerical aperture, emission wavelength, refractive indices) and user-defined aberrations, with no calibration needed; the 3D model recovers ``z`` directly. Requires the optional VectorFit library, see :doc:`localize/vectorfit`.
 
 In addition, ``Average of ROI`` is available as a non-fitting option that simply sums the intensity of each spot.
@@ -99,6 +100,9 @@ Picasso Localize reads the following movie formats:
    * - Leica LIF
      - ``.lif``
      - Requires ``pip install picassosr[lif]``, Python ≥ 3.12; available in the one-click installer.
+   * - PicoQuant PTU
+     - ``.ptu``
+     - Confocal scans (photon counting); see the note below. Requires ``pip install picassosr[ptu]``, Python ≥ 3.12; available in the one-click installer.
    * - Raw binary
      - ``.raw``
      - A dialog asks for the file specifications when the file is opened.
@@ -130,6 +134,20 @@ Picasso Localize reads the following movie formats:
 
    To load every channel of a multichannel file at once, see :ref:`localize-opening-channels`.
 
+.. _localize-ptu:
+
+.. note::
+
+   **PicoQuant** ``.ptu`` confocal scans are read via the optional `ptufile <https://github.com/cgohlke/ptufile>`_ library (``ptu`` extra, Python ≥ 3.12). A pixel counts the photons detected in it; when a file is opened, a dialog asks how many scan frames to sum into one frame and for optional microtime gates. Each detector, or detector and gate, is a channel. *View > Show lifetime* colors the pixels by the lifetime of their photons.
+
+   .. dropdown:: Details
+
+      - **Pixels are photons:** the camera parameters are set to baseline 0, sensitivity 1 and EM gain 1, and the pixel size is read from the file. Photons are assigned to pixels with the dwell time of the file header, as in PicoQuant's software; photons detected during the line retrace are left out.
+      - **Frame sums:** *Frames to sum* scan frames make one frame, a new sum starting every *Stride* scan frames (default: as many as are summed, so every photon is used once; 1 is a sliding window).
+      - **Microtime gates** keep the photons arriving within a range of times after the laser pulse, e.g., one gate per laser of pulsed interleaved excitation (PIE). Drag over the decay histogram in the dialog to add one; the channels are named *Detector 1 gate 1*, *Detector 1 gate 2*, ...
+      - **Lifetime display:** a pixel's color is the mean delay of its photons after the maximum of the decay, its brightness the intensity. *View > Lifetime display...* sets the time window, pools neighboring pixels (*Binning*) and sets the fewest photons a colored pixel needs (others stay gray).
+      - Only T3 image scans are read, not point or line scans, z-stacks or T2 data. The metadata record ``Frame Sum Window``, ``Frame Sum Stride``, ``Scan Frames``, ``Microtime Gate (ns)``, ``Photon Counting`` and the file header (``PTU Metadata``).
+
 We are open to feature requests regarding support for other file formats, please visit our `GitHub page <https://github.com/jungmannlab/picasso>`_.
 
 .. dropdown:: Python
@@ -148,6 +166,13 @@ We are open to feature requests regarding support for other file formats, please
       movie, info = io.load_movie("movie.nd2")
       frame = movie[100]      # one frame as a NumPy array
       print(info[0]["Frames"], info[0]["Height"], info[0]["Width"])
+
+   ``.ptu`` scans also take ``frame_sum_window``, ``frame_sum_stride``
+   and ``microtime_gates`` (``(start, end)`` in ns):
+
+   .. code-block:: python
+
+      movie, info = io.load_movie("scan.ptu", frame_sum_window=20)
 
 
 Topics
@@ -186,6 +211,12 @@ Topics
 
       Building and checking a spline PSF calibration, fitting with it, and multichannel (e.g. biplane) spline fitting.
 
+   .. grid-item-card:: :octicon:`copy;1.5em;sd-mr-1` Overlapping emitters
+      :link: localize/multi-emitter
+      :link-type: doc
+
+      Multi-emitter fitting of dense frames: when to use it, its settings and its output.
+
    .. grid-item-card:: :octicon:`telescope;1.5em;sd-mr-1` Vectorial PSF (VectorFit)
       :link: localize/vectorfit
       :link-type: doc
@@ -212,6 +243,7 @@ Topics
    localize/camera
    localize/3d-calibration
    localize/spline
+   localize/multi-emitter
    localize/vectorfit
    localize/lateral-correction
    localize/multichannel

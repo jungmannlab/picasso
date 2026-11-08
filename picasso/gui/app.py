@@ -64,6 +64,93 @@ def _apply_theme(app: QtWidgets.QApplication) -> None:
         sys.excepthook(*sys.exc_info())
 
 
+#: Widgets whose value the mouse wheel changes; scroll bars excepted.
+_WHEEL_INPUTS = (
+    QtWidgets.QAbstractSpinBox,
+    QtWidgets.QComboBox,
+    QtWidgets.QAbstractSlider,
+)
+
+
+def _takes_wheel(widget: QtWidgets.QWidget) -> bool:
+    """True if the mouse wheel changes the value of ``widget``."""
+    return isinstance(widget, _WHEEL_INPUTS) and not isinstance(
+        widget, QtWidgets.QScrollBar
+    )
+
+
+def _in_scroll_area(widget: QtWidgets.QWidget) -> bool:
+    """True if ``widget`` lies inside a scroll area of its window, e.g.,
+    a scrollable dialog or a table."""
+    parent = widget.parentWidget()
+    while parent is not None:
+        if isinstance(parent, QtWidgets.QAbstractScrollArea):
+            return True
+        if parent.isWindow():
+            return False
+        parent = parent.parentWidget()
+    return False
+
+
+def _no_wheel_focus(widget: QtWidgets.QWidget) -> None:
+    """Let ``widget`` take the focus by click and tab, not by the
+    wheel."""
+    if widget.focusPolicy() == QtCore.Qt.FocusPolicy.WheelFocus:
+        widget.setFocusPolicy(QtCore.Qt.FocusPolicy.StrongFocus)
+
+
+class _ScrollGuard(QtCore.QObject):
+    """Application event filter that passes the wheel over an input
+    without the focus on to the scroll area around it, see
+    ``install_scroll_guard``. It reacts only to polish and wheel
+    events."""
+
+    def eventFilter(self, obj, event):
+        kind = event.type()
+        if kind == QtCore.QEvent.Type.Polish:
+            if _takes_wheel(obj):
+                _no_wheel_focus(obj)
+        elif kind == QtCore.QEvent.Type.Wheel:
+            if (
+                _takes_wheel(obj)
+                and not obj.hasFocus()
+                and _in_scroll_area(obj)
+            ):
+                # an ignored event goes on to the parents, up to the
+                # scroll area
+                event.ignore()
+                return True
+        return False
+
+
+def install_scroll_guard(app: QtWidgets.QApplication) -> None:
+    """Keep scrolling through a dialog from changing its inputs.
+
+    A spin box, combo box or slider inside a scroll area (e.g., a
+    scrollable dialog or a table) takes the mouse wheel only while it
+    has the keyboard focus, i.e., after it was clicked or tabbed into;
+    without the focus, the wheel scrolls the area around it. Inputs
+    outside scroll areas keep reacting to the wheel.
+
+    Qt gives the focus to a spin box when the wheel turns over it
+    (``WheelFocus``), before any event filter sees the wheel, so the
+    inputs take the focus by click and tab only (``StrongFocus``).
+    Installing twice has no further effect.
+
+    Parameters
+    ----------
+    app : QtWidgets.QApplication
+        The application.
+    """
+    if app.findChild(_ScrollGuard) is not None:
+        return
+    # widgets polished before the filter was installed
+    for widget in app.allWidgets():
+        if _takes_wheel(widget):
+            _no_wheel_focus(widget)
+    app.installEventFilter(_ScrollGuard(app))
+
+
 def run_gui(
     window_factory: Callable[[], QtWidgets.QWidget],
     name: str | None = None,
@@ -110,6 +197,7 @@ def run_gui(
     from . import accessibility
 
     accessibility.install(app)
+    install_scroll_guard(app)
 
     try:
         window = window_factory()

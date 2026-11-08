@@ -14,7 +14,7 @@ Zoom
 
 .. rst-class:: shortcut
 
-Shortcut: :kbd:`Ctrl+Z`
+Shortcut: :kbd:`Z`
 
 Selects the zoom tool. Dragging a rectangle with the left mouse button (in any
 direction) zooms into it; a right click (or :kbd:`Esc`) while dragging cancels
@@ -30,7 +30,7 @@ Pick
 
 .. rst-class:: shortcut
 
-Shortcut: :kbd:`Ctrl+P`
+Shortcut: :kbd:`P` or :kbd:`Ctrl+P`
 
 Selects the pick tool. The mouse can now be used for picking localizations.
 The user can set the pick shape in the ``Tools settings`` (:kbd:`Ctrl+T`)
@@ -38,12 +38,18 @@ dialog; see :ref:`render-pick-shapes` for all shapes.
 
 - The default shape is Circle with the diameter to be set.
 - For rectangles, the user draws the length, while the width is controlled via
-  a parameter for all drawn rectangles, similar to the diameter for circular
-  picks.
+  a parameter, similar to the diameter for circular picks.
+- The size set in the dialog applies to the next picks; picks already drawn
+  keep theirs, and picks of different shapes can be mixed (see
+  :ref:`render-pick-sizes`).
+- A right click removes the pick under the cursor, whatever its shape (see
+  :ref:`render-pick-shapes`).
 - For a polygonal pick, the user clicks with the left button to draw the
-  desired polygon. The right button deletes the last selected vertex. The
-  polygon can be closed by clicking with the left button on the starting
+  desired polygon. The right button deletes the last selected vertex instead.
+  The polygon can be closed by clicking with the left button on the starting
   vertex.
+- ``File > Undo`` (:kbd:`Ctrl+Z`) takes back the picks added or removed one
+  by one, see :ref:`render-undo`.
 
 .. _render-measure:
 
@@ -52,7 +58,7 @@ Measure
 
 .. rst-class:: shortcut
 
-Shortcut: :kbd:`Ctrl+M`
+Shortcut: :kbd:`M` or :kbd:`Ctrl+M`
 
 Selects the measure tool, which is used to measure distances on the rendered
 image.
@@ -72,6 +78,9 @@ is even placed. Chaining several left clicks measures a multi-segment path.
 * While in this frozen state, a **further** right click *deletes* the most
   recently finalized set. Repeating it removes the previous sets one by one.
 
+``File > Undo`` (:kbd:`Ctrl+Z`) takes back the points one by one and brings
+back deleted sets, see :ref:`render-undo`.
+
 Distances and lines are only drawn within a set, never across sets, so
 multiple independent measurements can be displayed at the same time.
 
@@ -82,7 +91,7 @@ Move
 
 .. rst-class:: shortcut
 
-Shortcut: :kbd:`Ctrl+G`
+Shortcut: :kbd:`G` or :kbd:`Ctrl+G`
 
 Selects the move tool, which changes the x and y coordinates of localizations
 by dragging them with the left mouse button, e.g., to register channels by
@@ -92,8 +101,8 @@ eye.
   ``Tools settings`` (:kbd:`Ctrl+T`) dialog: *Select...* opens a list of the
   loaded channels with a checkbox each. By default, the first channel is
   dragged.
-- *Undo last move* in the ``Tools settings`` dialog reverses the moves one by
-  one.
+- ``File > Undo`` (:kbd:`Ctrl+Z`) reverses the moves one by one, see
+  :ref:`render-undo`.
 
 Normally, localizations outside the image (x or y at or beyond ``Width`` or
 ``Height`` in the metadata, or negative) would be removed when saving.
@@ -135,8 +144,10 @@ Define the settings of the tools:
 
 - The **Pick** section sets:
 
-  - the pick shape and its size (``Diameter``, ``Width``, ``Side length`` or
-    ``Stroke width``, see :ref:`render-pick-shapes`);
+  - the shape and size of the next picks (``Diameter``, ``Width``,
+    ``Side length`` or ``Stroke width``, see :ref:`render-pick-shapes`);
+    ``Apply to all`` gives all picks of the shape the current size (see
+    :ref:`render-pick-sizes`);
   - ``Pick similar +/- range (std)`` (2 by default), the tolerance of
     :ref:`Pick similar <render-pick-similar>`. That tool computes the number of
     localizations and their RMSD from the center of mass in each of your
@@ -146,8 +157,8 @@ Define the settings of the tools:
     pick's axis are checked separately;
   - ``Annotate picks``, which shows the index of each pick next to it;
   - ``Display circular picks as points``.
-- The **Move** section selects the channels dragged with the move tool and
-  undoes the last move, see :ref:`render-move`.
+- The **Move** section selects the channels dragged with the move tool, see
+  :ref:`render-move`.
 
 .. _render-tool-appearance:
 

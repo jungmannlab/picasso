@@ -39,6 +39,7 @@ from scipy.spatial.transform import Rotation
 from .. import io, lib, lib_qt, render, spinna, __version__, docs_url
 from .app import run_gui
 from . import theme
+from .scalebar_settings import ScaleBarOptions
 
 matplotlib.use("agg")
 
@@ -401,6 +402,7 @@ class MaskPreview(QtWidgets.QWidget):
                     (y_max * pixelsize, x_max * pixelsize),
                 ),
                 scalebar_length_nm=self.mask_tab.scalebar_length.value(),
+                **self.mask_tab.scalebar_options.draw_kwargs(),
             )
         cx, cy = self.center
         origin = QtCore.QPointF(
@@ -520,7 +522,9 @@ class MaskPreview(QtWidgets.QWidget):
 
     def save_current_view(self) -> None:
         """Save the current view as png or tif."""
-        rendered = self.render_view()
+        # with the text sizes exports always had
+        with theme.unscaled_text():
+            rendered = self.render_view()
         if rendered is None:
             return
         path, _ = lib.get_save_filename_ext_dialog(
@@ -813,7 +817,11 @@ class MaskGeneratorTab(lib.Dialog):
         self.zslice_slider.setVisible(False)
         display_layout.addWidget(self.zslice_slider, 0, 1)
 
-        # scalebar
+        # scalebar, its look shared with Localize
+        self.scalebar_options = ScaleBarOptions(
+            "SPINNA", "Print scale bar length (mask)", True, parent=self
+        )
+        self.scalebar_options.changed.connect(self.preview.update)
         self.scalebar_check = QtWidgets.QCheckBox("Scale bar (nm):")
         self.scalebar_check.setChecked(False)
         self.scalebar_check.setEnabled(False)
@@ -828,7 +836,10 @@ class MaskGeneratorTab(lib.Dialog):
         self.scalebar_length.valueChanged.connect(
             lambda _: self.preview.update()
         )
-        display_layout.addWidget(self.scalebar_length, 1, 1)
+        scalebar_row = QtWidgets.QHBoxLayout()
+        scalebar_row.addWidget(self.scalebar_length, 1)
+        scalebar_row.addWidget(self.scalebar_options.settings_button(self))
+        display_layout.addLayout(scalebar_row, 1, 1)
 
         self.fig = plt.Figure(
             figsize=MASK_LEGEND_FIGSIZE,
@@ -1401,16 +1412,14 @@ class StructurePreview(QtWidgets.QLabel):
         ):
             return image
 
-        # draw scalebar
-        painter = QtGui.QPainter(image)
-        length = int(self.structure_tab.scalebar_length.value() * self.factor)
-        height = 10
-        painter.setBrush(QtGui.QBrush(QtGui.QColor("white")))
-        x = STRUCTURE_PREVIEW_SIZE - length - 35
-        y = STRUCTURE_PREVIEW_SIZE - height - 20
-        painter.drawRect(x, y, length, height)
-        painter.end()
-        return image
+        # the preview shows STRUCTURE_PREVIEW_SIZE / factor nm
+        size_nm = STRUCTURE_PREVIEW_SIZE / self.factor
+        return render.draw_scalebar(
+            image=image,
+            viewport=((0, 0), (size_nm, size_nm)),
+            scalebar_length_nm=self.structure_tab.scalebar_length.value(),
+            **self.structure_tab.scalebar_options.draw_kwargs(),
+        )
 
     def draw_rotation(self, image: QtGui.QImage) -> QtGui.QImage:
         """Draw a small 3 axes icon that rotates with the molecular,
@@ -1582,7 +1591,16 @@ class StructuresTab(lib.Dialog):
         self.show_scalebar_check = QtWidgets.QCheckBox("Show scale bar")
         self.show_scalebar_check.setChecked(True)
         self.show_scalebar_check.stateChanged.connect(self.update_preview)
-        preview_layout.addWidget(self.show_scalebar_check, 2, 1)
+        # the look of the scale bar is shared with Localize
+        self.scalebar_options = ScaleBarOptions(
+            "SPINNA", "Print scale bar length (structures)", False, parent=self
+        )
+        self.scalebar_options.changed.connect(self.update_preview)
+        scalebar_row = QtWidgets.QHBoxLayout()
+        scalebar_row.addWidget(self.show_scalebar_check)
+        scalebar_row.addWidget(self.scalebar_options.settings_button(self))
+        scalebar_row.addStretch()
+        preview_layout.addLayout(scalebar_row, 2, 1)
 
         length_label = QtWidgets.QLabel("Length (nm):")
         length_label.setToolTip("Scale bar length.")
@@ -2010,7 +2028,11 @@ class StructuresTab(lib.Dialog):
         )
         if path:
             self.window.pwd = os.path.dirname(path)
-            self.preview.qimage.save(path)
+            # with the text sizes exports always had
+            with theme.unscaled_text():
+                self.preview.render()
+                self.preview.qimage.save(path)
+            self.preview.render()
 
 
 class GenerateSearchSpaceDialog(lib.Dialog):
@@ -3538,7 +3560,9 @@ class SimulationsTab(lib.Dialog):
 
         self.bootstrap_check = QtWidgets.QCheckBox("Bootstrap")
         self.bootstrap_check.setToolTip(
-            "Perform bootstrap analysis during fitting?"
+            "Perform bootstrap analysis during fitting? With Fit labeling"
+            "\nefficiency, it gives the uncertainty of the labeling"
+            "\nefficiencies."
         )
         self.bootstrap_check.setChecked(False)
         fitting_layout.addWidget(self.bootstrap_check, 1, 1)
@@ -4551,29 +4575,31 @@ class SimulationsTab(lib.Dialog):
             "Brute force": "brute-force",
         }[self.settings_dialog.fitting_mode.currentText()]
 
+        bootstrap = self.bootstrap_check.isChecked()
         try:
-            le_values, best_lunc, best_d, score, props, best_mixer = (
-                spinna.fit_le(
-                    target_a=self.targets[0],
-                    target_b=self.targets[1],
-                    exp_data=self.exp_data,
-                    granularity=self.granularity,
-                    label_unc=label_unc,
-                    distances=distances,
-                    N_sim=self.n_sim_fit,
-                    mask_dict=base_mixer.mask_dict,
-                    width=base_mixer.roi[0],
-                    height=base_mixer.roi[1],
-                    depth=base_mixer.roi[2],
-                    random_rot_mode=base_mixer.random_rot_mode,
-                    parallel=self.settings_dialog.parallel_check.isChecked(),
-                    savedir=savedir,
-                    progress=progress,
-                    fitting_mode=fitting_mode,
-                )
+            fitted = spinna.fit_le(
+                target_a=self.targets[0],
+                target_b=self.targets[1],
+                exp_data=self.exp_data,
+                granularity=self.granularity,
+                label_unc=label_unc,
+                distances=distances,
+                N_sim=self.n_sim_fit,
+                mask_dict=base_mixer.mask_dict,
+                width=base_mixer.roi[0],
+                height=base_mixer.roi[1],
+                depth=base_mixer.roi[2],
+                random_rot_mode=base_mixer.random_rot_mode,
+                parallel=self.settings_dialog.parallel_check.isChecked(),
+                savedir=savedir,
+                progress=progress,
+                fitting_mode=fitting_mode,
+                bootstrap=bootstrap,
             )
         finally:
             progress.close()
+        le_values, best_lunc, best_d, score, props, best_mixer = fitted[:6]
+        le_std = fitted[6] if bootstrap else None
 
         # push fitted label_unc back into the simulations-tab spin boxes
         for spin, l in zip(self.label_unc_spins, best_lunc.values()):
@@ -4601,17 +4627,18 @@ class SimulationsTab(lib.Dialog):
         lunc_text = ", ".join(
             f"{t}={float(v):.2f} nm" for t, v in best_lunc.items()
         )
-        text = (
-            f"LE {self.targets[0]}: {le_values[self.targets[0]]:.1f}%, "
-            f"LE {self.targets[1]}: {le_values[self.targets[1]]:.1f}%, "
-            f"distance: {best_d:.2f} nm, "
-            f"label_unc: {lunc_text}"
+        le_text = ", ".join(
+            f"LE {t}: {le_values[t]:.1f}%"
+            + (f" +/- {le_std[t]:.1f}%" if le_std is not None else "")
+            for t in self.targets
         )
+        text = f"{le_text}, distance: {best_d:.2f} nm, label_unc: {lunc_text}"
         self.fit_results_display.setText(text)
 
         # save a .txt summary of the fit
         self._save_le_fit_summary(
             le_values=le_values,
+            le_std=le_std,
             best_lunc=best_lunc,
             best_d=best_d,
             score=score,
@@ -4660,6 +4687,7 @@ class SimulationsTab(lib.Dialog):
         self,
         *,
         le_values: dict,
+        le_std: dict | None,
         best_lunc: dict,
         best_d: float,
         score: float,
@@ -4669,7 +4697,8 @@ class SimulationsTab(lib.Dialog):
     ) -> None:
         """Write a .txt summary of the Fit LE results, mirroring the
         format produced by ``save_fit_results`` for the stoichiometry
-        fit."""
+        fit; with bootstrapping (``le_std``), each LE is given as
+        "mean +/- s.d."."""
         metadata = {
             "Date": datetime.now().strftime("%d/%m/%Y %H:%M:%S"),
             "Molecular targets": ", ".join(self.targets),
@@ -4697,9 +4726,10 @@ class SimulationsTab(lib.Dialog):
         )
         metadata["Fitted heterodimer distance (nm)"] = f"{best_d:.4f}"
         for target in self.targets:
-            metadata[f"Fitted labeling efficiency (%) ({target})"] = (
-                f"{float(le_values[target]):.2f}"
-            )
+            le_text = f"{float(le_values[target]):.2f}"
+            if le_std is not None:
+                le_text += f" +/- {float(le_std[target]):.2f}"
+            metadata[f"Fitted labeling efficiency (%) ({target})"] = le_text
         metadata["Best fitting structure proportions (%)"] = ", ".join(
             f"{structure.title}: {float(p):.2f}"
             for structure, p in zip(self.structures, props)

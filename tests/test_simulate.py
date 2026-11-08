@@ -490,3 +490,130 @@ class TestMovieRoundtrip:
         # save_info wraps into [info]; load_info also returns a list
         assert loaded[0]["Frames"] == 10
         assert loaded[0]["Pixelsize"] == 130
+
+
+# ---------------------------------------------------------------------------
+# ground_truth_locs — the simulated emitters in Picasso's coordinates
+# ---------------------------------------------------------------------------
+
+
+def _two_sites() -> np.ndarray:
+    """Two binding sites: x and y in camera pixels in the simulation's
+    frame, exchange round, structure index and z in nm."""
+    return np.array(
+        [
+            [10.25, 20.6],
+            [5.75, 14.15],
+            [1, 1],
+            [0, 1],
+            [12.0, -30.0],
+        ]
+    )
+
+
+class TestGroundTruthLocs:
+    def test_one_row_per_site_and_emitting_frame(self):
+        photondist = np.array([[0, 500, 0, 20], [300, 0, 0, 40]])
+        locs = simulate.ground_truth_locs(
+            _two_sites(), photondist, height=32, pixelsize=130.0
+        )
+        assert list(locs.columns) == [
+            "frame",
+            "x",
+            "y",
+            "photons",
+            "lpx",
+            "lpy",
+        ]
+        assert locs["frame"].tolist() == [0, 1, 3, 3]
+        assert locs["photons"].tolist() == [300, 500, 20, 40]
+        assert (locs["lpx"] == 0).all() and (locs["lpy"] == 0).all()
+        assert locs["frame"].dtype == np.uint32
+
+    def test_converts_to_picasso_frame_in_nm(self):
+        # pixel i spans [i, i + 1) and y points up in the simulation;
+        # Picasso puts pixel centers on integers and y down the rows
+        photondist = np.array([[1], [1]])
+        locs = simulate.ground_truth_locs(
+            _two_sites(), photondist, height=32, pixelsize=130.0
+        )
+        np.testing.assert_allclose(
+            locs["x"], [(10.25 - 0.5) * 130, (20.6 - 0.5) * 130], rtol=1e-6
+        )
+        np.testing.assert_allclose(
+            locs["y"],
+            [(32 - 5.75 - 0.5) * 130, (32 - 14.15 - 0.5) * 130],
+            rtol=1e-6,
+        )
+
+    def test_z_only_in_3d(self):
+        photondist = np.array([[1], [1]])
+        locs = simulate.ground_truth_locs(
+            _two_sites(), photondist, height=32, pixelsize=130.0, is_3d=True
+        )
+        assert locs["z"].tolist() == [12.0, -30.0]
+        assert "z" not in simulate.ground_truth_locs(
+            _two_sites(), photondist, height=32, pixelsize=130.0
+        )
+
+    def test_rejects_mismatched_photon_distribution(self):
+        with pytest.raises(ValueError, match="binding sites"):
+            simulate.ground_truth_locs(
+                _two_sites(), np.ones((3, 2)), height=32, pixelsize=130.0
+            )
+
+    def test_fitting_the_movie_finds_the_ground_truth(self):
+        """Pins the coordinate convention: the movie Simulate renders,
+        localized by Picasso, puts each emitter where its ground truth
+        says."""
+        from picasso import localize
+
+        np.random.seed(1)
+        height = 32
+        pixelsize = 100.0
+        structures = _two_sites()
+        photondist = np.full((2, 1), 100_000)
+        frame = simulate.convert_movie(
+            0,
+            photondist,
+            structures,
+            height,
+            1,
+            1.0,  # PSF sigma (camera pixels)
+            0,
+            0,
+            0,
+            False,
+            [],
+            [],
+        )
+        frames = (frame + 5.0)[None].astype(np.uint16)
+        info = [
+            {
+                "Frames": 1,
+                "Width": height,
+                "Height": height,
+                "Pixelsize": pixelsize,
+                "Baseline": 0,
+                "Sensitivity": 1,
+                "Gain": 1,
+            }
+        ]
+        locs = localize.localize_frames(
+            frames,
+            info,
+            identification_parameters=localize.IdentificationParameters(
+                method=localize.NetGradient(5000), box=7
+            ),
+            fitting_method="gaussmle",
+            parallel=False,
+        )
+        truth = simulate.ground_truth_locs(
+            structures, photondist, height=height, pixelsize=pixelsize
+        )
+        locs = locs.sort_values("x", ignore_index=True)
+        truth = truth.sort_values("x", ignore_index=True)
+        assert len(locs) == len(truth) == 2
+        # 1e5 photons: the fit is precise to well below 0.02 px
+        np.testing.assert_allclose(locs["x"], truth["x"], atol=2.0)
+        np.testing.assert_allclose(locs["y"], truth["y"], atol=2.0)

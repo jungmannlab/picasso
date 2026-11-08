@@ -1180,6 +1180,8 @@ class TestFit2DIntegration:
             spline_calibration=calibration,
         )
         assert fit_info[-1]["Fit method"] == "spline"
+        # a 3D calibration fits z, so the step is not "Fit 2D"
+        assert fit_info[-1]["Step"] == "Fit 3D spline"
         assert fit_info[-1]["Spline fit device"] == "CPU"
         assert fit_info[-1]["Convergence criterion"] == (
             splinefit.TOLERANCE_MULTI_START

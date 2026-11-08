@@ -30,6 +30,8 @@ Filtering of localizations
    or 2D histogram. The selected area will be shaded (in orange by default).
    Each localization event with histogram properties outside the selected area
    is immediately removed from the localization list.
+   Press :kbd:`Esc` before releasing the mouse button to stop drawing the
+   selection without filtering.
 4. Save the filtered localization table by selecting ``File > Save``.
 
 The look of the histograms is set in ``Plot > Plot settings...``, or with the
@@ -81,6 +83,23 @@ Numerical filtering
 In the menu bar, click ``Filter > Filter numerically...`` (:kbd:`Ctrl+F`). A dialog is displayed where the user can numerically filter values for any of the columns. Click the ``Filter`` button in the dialog to remove localizations which do not fit in the input parameters.
 
 The limits are inclusive: localizations with values equal to ``min`` or ``max`` are kept. Localizations with non-finite values (NaN, infinity) in the column are always removed.
+
+.. _filter-undo:
+
+Undo and redo
+~~~~~~~~~~~~~
+
+``Filter > Undo`` (:kbd:`Ctrl+Z`) takes back the last step: a selection in a
+1D or 2D histogram, a numerical filter, a filter by
+:ref:`expression <filter-expression>`, the
+:ref:`filters from metadata <filter-metadata>` (all their steps at once) or
+``Filter > Remove columns...``, which brings the columns back. ``Filter >
+Redo`` (:kbd:`Ctrl+Shift+Z`, :kbd:`Ctrl+Y` on Windows) applies the step again.
+Both are also on the toolbar, where hovering over the button shows the step.
+
+The last 10 steps can be undone. A new step after an undo replaces the steps
+undone, and opening a file starts anew. Saving writes the localizations and the
+filter steps currently shown, i.e., without the steps undone.
 
 .. _filter-expression:
 

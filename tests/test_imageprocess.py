@@ -307,3 +307,88 @@ class TestRadialSum:
         img = np.zeros(shape, dtype=np.float64)
         with pytest.raises(AssertionError):
             imageprocess.radial_sum(img)
+
+
+# ---------------------------------------------------------------------------
+# Decorrelation analysis
+# ---------------------------------------------------------------------------
+
+
+def _blurred_noise(sigma: float, size: int = 512, seed: int = 0):
+    """Random texture blurred by a Gaussian of ``sigma`` pixels, with
+    white noise: band-limited signal, the higher frequencies noise."""
+    from scipy.ndimage import gaussian_filter
+
+    rng = np.random.default_rng(seed)
+    signal = gaussian_filter(rng.normal(size=(size, size)), sigma)
+    signal *= 10 / signal.std()
+    return signal + rng.normal(size=(size, size))
+
+
+class TestDecorrelation:
+    def test_resolution_follows_the_blur(self):
+        sharp = imageprocess.decorrelation(_blurred_noise(2.0))
+        blurred = imageprocess.decorrelation(_blurred_noise(4.0))
+        assert 0 < sharp["resolution"] < blurred["resolution"]
+        assert blurred["resolution"] / sharp["resolution"] == pytest.approx(
+            2.0, rel=0.2
+        )
+        # the cut-off and the resolution agree
+        assert sharp["resolution"] == pytest.approx(2 / sharp["cutoff"])
+        assert 0 < sharp["amplitude"] < 1
+
+    def test_pixel_size_sets_the_unit(self):
+        image = _blurred_noise(2.0)
+        in_pixels = imageprocess.decorrelation(image)
+        in_nm = imageprocess.decorrelation(image, pixel_size=65.0)
+        assert in_nm["resolution"] == pytest.approx(
+            65.0 * in_pixels["resolution"]
+        )
+        np.testing.assert_allclose(
+            in_nm["frequencies"], in_nm["radii"] / 130.0
+        )
+
+    def test_curves_and_peaks(self):
+        result = imageprocess.decorrelation(
+            _blurred_noise(2.0, size=200), n_radii=30, n_filters=6
+        )
+        assert result["curves"].shape == (7, 30)
+        assert result["filters"].shape == (6,)
+        assert result["peak_radii"].shape == (7,)
+        np.testing.assert_allclose(result["radii"], np.linspace(0, 1, 30))
+        found = np.isfinite(result["peak_radii"])
+        assert found.any()
+        # the refined cut-off is at least the highest coarse peak
+        assert result["cutoff"] >= np.nanmax(result["peak_radii"]) - 1e-12
+        assert (result["peak_amplitudes"][found] >= 0.05).all()
+
+    def test_rectangular_image(self):
+        result = imageprocess.decorrelation(_blurred_noise(2.0)[:, :300])
+        assert np.isfinite(result["resolution"])
+
+    @pytest.mark.parametrize(
+        "image",
+        [
+            np.random.default_rng(1).normal(size=(256, 256)),  # noise
+            np.ones((64, 64)),  # no signal
+        ],
+        ids=["noise", "constant"],
+    )
+    def test_no_resolution_without_signal(self, image):
+        result = imageprocess.decorrelation(image)
+        assert np.isnan(result["resolution"])
+        assert np.isnan(result["cutoff"])
+
+    @pytest.mark.parametrize(
+        "image, kwargs, match",
+        [
+            (np.zeros((40, 40, 2)), {}, "2D"),
+            (np.zeros((40, 20)), {}, "at least 32"),
+            (np.zeros((40, 40)), {"pixel_size": 0}, "pixel_size"),
+            (np.zeros((40, 40)), {"n_radii": 5}, "n_radii"),
+            (np.zeros((40, 40)), {"n_filters": 1}, "n_filters"),
+        ],
+    )
+    def test_invalid_input(self, image, kwargs, match):
+        with pytest.raises(ValueError, match=match):
+            imageprocess.decorrelation(image, **kwargs)

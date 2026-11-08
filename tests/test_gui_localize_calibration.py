@@ -21,7 +21,7 @@ import pandas as pd
 import pytest
 from PyQt6 import QtCore, QtWidgets
 
-from picasso import io, lib, localize, scmos
+from picasso import axial_scaling, io, lib, localize, scmos
 from picasso.gui import localize as gui_localize
 
 ACCEPTED = QtWidgets.QDialog.DialogCode.Accepted
@@ -183,6 +183,157 @@ class TestCalibrateSplineDialog:
             "translation",
             True,
         )
+
+
+def _calculate_button(dialog):
+    """The 'Calculate...' button next to the magnification factor."""
+    (button,) = [
+        button
+        for button in dialog.findChildren(QtWidgets.QPushButton)
+        if button.text() == "Calculate..."
+    ]
+    return button
+
+
+class TestMagnificationFactorDialog:
+    def _ok(self, dialog):
+        return dialog.buttons.button(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+        )
+
+    def test_calculates_the_factor(self, qt_offscreen):
+        dialog = gui_localize.MagnificationFactorDialog(None)
+        # a TIRF objective from oil into water at the coverslip: the
+        # midpoint (Lyakin) near-surface value
+        assert dialog.near_surface.currentData() == "midpoint"
+        assert dialog.factor == pytest.approx(
+            axial_scaling.near_surface_factor(
+                na=1.49,
+                n_immersion=1.518,
+                n_sample=1.33,
+                near_surface="midpoint",
+            )
+        )
+        # the user can choose the full-aperture value instead
+        dialog.near_surface.setCurrentIndex(
+            dialog.near_surface.findData("full-aperture")
+        )
+        assert dialog.factor == pytest.approx(0.7355, abs=1e-4)
+        dialog.near_surface.setCurrentIndex(
+            dialog.near_surface.findData("midpoint")
+        )
+        assert "Near-surface value" in dialog.result.text()
+        assert self._ok(dialog).isEnabled()
+        dialog.depth.setValue(5000)
+        assert dialog.factor == pytest.approx(
+            axial_scaling.magnification_factor(
+                5000,
+                na=1.49,
+                n_immersion=1.518,
+                n_sample=1.33,
+                wavelength=560,
+            )
+        )
+        assert "Depth-dependent" in dialog.result.text()
+
+    def test_ok_is_disabled_without_a_factor(self, qt_offscreen):
+        dialog = gui_localize.MagnificationFactorDialog(None)
+        dialog.n_immersion.setValue(1.78)
+        dialog.na.setValue(1.7)
+        # the midpoint ray is totally internally reflected
+        assert dialog.factor is None
+        assert "totally internally reflected" in dialog.result.text()
+        assert not self._ok(dialog).isEnabled()
+        dialog.near_surface.setCurrentIndex(
+            dialog.near_surface.findData("full-aperture")
+        )
+        assert dialog.factor is not None
+        assert self._ok(dialog).isEnabled()
+        dialog.na.setValue(1.79)
+        assert "smaller than the refractive index" in dialog.result.text()
+        assert not self._ok(dialog).isEnabled()
+
+    def test_the_inputs_are_remembered_when_accepted(
+        self, qt_offscreen, monkeypatch
+    ):
+        def fill(dialog):
+            dialog.na.setValue(1.4)
+            dialog.wavelength.setValue(600)
+            dialog.depth.setValue(2000)
+            dialog.near_surface.setCurrentIndex(
+                dialog.near_surface.findData("full-aperture")
+            )
+            dialog.accept()  # saves the inputs
+
+        _answer(
+            monkeypatch, gui_localize.MagnificationFactorDialog, ACCEPTED, fill
+        )
+        factor, accepted = gui_localize.MagnificationFactorDialog.getFactor()
+        assert accepted
+        assert factor == pytest.approx(
+            axial_scaling.magnification_factor(
+                2000,
+                na=1.4,
+                n_immersion=1.518,
+                n_sample=1.33,
+                wavelength=600,
+                near_surface="full-aperture",
+            )
+        )
+        again = gui_localize.MagnificationFactorDialog(None)
+        assert again.na.value() == 1.4
+        assert again.wavelength.value() == 600
+        assert again.depth.value() == 2000
+        assert again.near_surface.currentData() == "full-aperture"
+
+    def test_cancel_is_reported_and_forgets_the_inputs(
+        self, qt_offscreen, monkeypatch
+    ):
+        _answer(
+            monkeypatch,
+            gui_localize.MagnificationFactorDialog,
+            REJECTED,
+            lambda dialog: dialog.na.setValue(1.2),
+        )
+        _, accepted = gui_localize.MagnificationFactorDialog.getFactor()
+        assert not accepted
+        assert gui_localize.MagnificationFactorDialog(None).na.value() == 1.49
+
+    def test_broken_settings_fall_back_to_the_defaults(self, qt_offscreen):
+        settings = io.load_user_settings()
+        settings["Localize"]["magnification_calculator"] = {
+            "na": "high",
+            "near_surface": "unknown",
+        }
+        io.save_user_settings(settings)
+        dialog = gui_localize.MagnificationFactorDialog(None)
+        assert dialog.na.value() == 1.49
+        assert dialog.near_surface.currentData() == "midpoint"
+
+    @pytest.mark.parametrize("code", [ACCEPTED, REJECTED])
+    def test_calculate_sets_the_spin_boxes(self, window, monkeypatch, code):
+        _answer(
+            monkeypatch,
+            gui_localize.MagnificationFactorDialog,
+            code,
+            lambda dialog: dialog.na.setValue(1.4),
+        )
+        expected = (
+            round(
+                axial_scaling.near_surface_factor(
+                    na=1.4, n_immersion=1.518, n_sample=1.33
+                ),
+                4,
+            )
+            if code == ACCEPTED
+            else 0.79
+        )
+        parameters = window.parameters_dialog
+        _calculate_button(parameters).click()
+        assert parameters.magnification_factor.value() == expected
+        spline_dialog = gui_localize.CalibrateSplineDialog(window)
+        _calculate_button(spline_dialog).click()
+        assert spline_dialog.magnification_factor.value() == expected
 
 
 class TestRegisterChannelsDialog:

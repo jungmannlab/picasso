@@ -18,6 +18,7 @@ import warnings
 from collections import OrderedDict
 from copy import deepcopy
 from typing import Literal, NamedTuple
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor as _ThreadPoolExecutor
 from threading import Thread
 
@@ -25,8 +26,10 @@ import numba
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from scipy import interpolate
-from scipy.optimize import curve_fit, OptimizeWarning
+from matplotlib import ticker
+from scipy import interpolate, special
+from scipy import ndimage as ndi
+from scipy.optimize import curve_fit, minimize_scalar, OptimizeWarning
 from scipy.spatial import KDTree
 from scipy.stats import rankdata
 
@@ -44,6 +47,8 @@ __all__ = [
     # picks
     "picked_locs",
     "pick_similar",
+    "pick_similar_candidates",
+    "structure_classes",
     "remove_locs_in_picks",
     "pick_properties",
     # binding events
@@ -51,6 +56,12 @@ __all__ = [
     "compute_dark_times",
     "dark_times",
     "select_binding_event_cores",
+    "dye_performance",
+    "signal_to_background",
+    "docking_site_damage",
+    "plot_docking_site_damage",
+    "localization_rate_drop",
+    "plot_localization_rate",
     "combine_locs_in_picks",
     "groupprops",
     # drift and alignment
@@ -62,12 +73,15 @@ __all__ = [
     "align",
     "align_rcc",
     "align_from_picked",
+    "align_from_points",
     # resolution
     "nena",
     "plot_nena",
     "frc",
     "frc_rois",
     "plot_frc",
+    "decorrelation",
+    "plot_decorrelation",
     # spatial analysis
     "nn_analysis",
     "pair_correlation",
@@ -83,6 +97,10 @@ __all__ = [
     "plot_rdf",
     "nnd_distributions",
     "plot_nnd_distributions",
+    "knn_density",
+    "plot_knn_density",
+    "knn_csr_pdf",
+    "knn_csr_cdf",
 ]
 
 #: Convergence tolerance (nm) of the center-of-mass iterations of
@@ -234,14 +252,11 @@ def _picked_circular_locs(
     locs: pd.DataFrame,
     info: list[dict],
     picks: list[tuple],
-    radius: float,
+    radii: list[float],
     index_blocks: tuple | None,
-    add_group: bool,
-    progress: lib.Progress,
-) -> list[pd.DataFrame]:
-    """Helper function for picking localizations using circular picks.
-    See ``picked_locs`` for more details."""
-    picked_locs = []
+) -> Iterator[pd.DataFrame]:
+    """Yield the localizations in each circular pick. See
+    ``picked_locs`` for more details."""
     if _is_pyramid(index_blocks):
         # the load-time pyramid: no pick-size specific indexing needed
         pyramid = index_blocks
@@ -249,19 +264,21 @@ def _picked_circular_locs(
         ys = locs["y"].to_numpy()
     else:
         pyramid = None
-        if index_blocks is None:
-            index_blocks = get_index_blocks(locs, info, radius)
+        # the 3x3 block neighborhood around a pick's center holds all of
+        # its localizations only if the blocks are as large as its radius
+        r_max = max(radii)
+        if index_blocks is None or index_blocks[1] < r_max:
+            index_blocks = get_index_blocks(locs, info, r_max)
+        block_size = index_blocks[1]
         locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
-    for i, pick in enumerate(picks):
-        x, y = pick
+    for (x, y), radius in zip(picks, radii):
         if pyramid is not None:
             idx = spatial_index.query_circle(pyramid, xs, ys, x, y, radius)
-            group_locs = locs.iloc[idx].copy()
+            yield locs.iloc[idx].copy()
         else:
-            x_, y_ = int(x / radius), int(y / radius)
             block_locs_idx = _get_block_locs_at(
-                x_,
-                y_,
+                int(x / block_size),
+                int(y / block_size),
                 index_blocks[4],
                 index_blocks[5],
                 index_blocks[6],
@@ -271,34 +288,21 @@ def _picked_circular_locs(
             group_locs_idx = lib.is_loc_in_circle(
                 x, y, locs_xy[:, block_locs_idx], radius
             )
-            group_locs = block_locs.iloc[group_locs_idx].copy()
-
-        if add_group:
-            group_locs = lib.append_group(group_locs, i)
-        group_locs.sort_values(
-            by="frame",
-            kind="quicksort",
-            inplace=True,
-        )
-        picked_locs.append(group_locs)
-
-        progress.set_value(i + 1)
-    return picked_locs
+            yield block_locs.iloc[group_locs_idx].copy()
 
 
 def _picked_rectangular_locs(
     locs: pd.DataFrame,
     picks: list[tuple],
-    pick_size: float,
-    add_group: bool,
-    progress: lib.Progress,
-) -> list[pd.DataFrame]:
-    """Helper function for picking localizations using rectangular
-    picks. See ``picked_locs`` for more details."""
-    picked_locs = []
-    for i, pick in enumerate(picks):
+    widths: list[float],
+    rotated: bool = True,
+) -> Iterator[pd.DataFrame]:
+    """Yield the localizations in each rectangular pick, with their
+    coordinates in the pick's frame (``x_pick_rot``, ``y_pick_rot``) if
+    ``rotated``. See ``picked_locs`` for more details."""
+    for pick, width in zip(picks, widths):
         (xs, ys), (xe, ye) = pick
-        X, Y = lib.get_pick_rectangle_corners(xs, ys, xe, ye, pick_size)
+        X, Y = lib.get_pick_rectangle_corners(xs, ys, xe, ye, width)
         x_min = min(X)
         x_max = max(X)
         y_min = min(Y)
@@ -310,6 +314,9 @@ def _picked_rectangular_locs(
             & (locs["y"] < y_max)
         )
         group_locs = lib.locs_in_rectangle(locs[mask], X, Y).copy()
+        if not rotated:
+            yield group_locs
+            continue
         # store rotated coordinates in x_rot and y_rot
         angle = 0.5 * np.pi - np.arctan2((ye - ys), (xe - xs))
         x_shifted = group_locs["x"] - xs
@@ -318,28 +325,20 @@ def _picked_rectangular_locs(
         y_pick_rot = x_shifted * np.sin(angle) + y_shifted * np.cos(angle)
         group_locs["x_pick_rot"] = x_pick_rot
         group_locs["y_pick_rot"] = y_pick_rot
-        if add_group:
-            group_locs = lib.append_group(group_locs, i)
-        group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
-        picked_locs.append(group_locs)
-
-        progress.set_value(i + 1)
-    return picked_locs
+        yield group_locs
 
 
 def _picked_polygonal_locs(
     locs: pd.DataFrame,
     picks: list[tuple],
-    add_group: bool,
-    progress: lib.Progress,
-):
-    """Helper function for picking localizations using polygonal picks. See
-    ``picked_locs`` for more details."""
-    picked_locs = []
-    for i, pick in enumerate(picks):
+) -> Iterator[pd.DataFrame | None]:
+    """Yield the localizations in each polygonal pick, None for a
+    polygon that is not closed. See ``picked_locs`` for more
+    details."""
+    for pick in picks:
         X, Y = lib.get_pick_polygon_corners(pick)
         if X is None:
-            progress.set_value(i + 1)
+            yield None
             continue
         mask = (
             (locs["x"] > min(X))
@@ -347,29 +346,18 @@ def _picked_polygonal_locs(
             & (locs["y"] > min(Y))
             & (locs["y"] < max(Y))
         )
-        group_locs = lib.locs_in_polygon(locs[mask], X, Y).copy()
-        if add_group:
-            group_locs = lib.append_group(group_locs, i)
-        group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
-        picked_locs.append(group_locs)
-
-        progress.set_value(i + 1)
-    return picked_locs
+        yield lib.locs_in_polygon(locs[mask], X, Y).copy()
 
 
 def _picked_square_locs(
     locs: pd.DataFrame,
     picks: list[tuple],
-    pick_size: float,
-    add_group: bool,
-    progress: lib.Progress,
-) -> list[pd.DataFrame]:
-    """Helper function for picking localizations using square picks. See
+    side_lengths: list[float],
+) -> Iterator[pd.DataFrame]:
+    """Yield the localizations in each square pick. See
     ``picked_locs`` for more details."""
-    picked_locs = []
-    for i, pick in enumerate(picks):
-        x, y = pick
-        half_a = pick_size / 2
+    for (x, y), side_length in zip(picks, side_lengths):
+        half_a = side_length / 2
         x_min = x - half_a
         x_max = x + half_a
         y_min = y - half_a
@@ -380,26 +368,16 @@ def _picked_square_locs(
             & (locs["y"] > y_min)
             & (locs["y"] < y_max)
         )
-        group_locs = locs[mask].copy()
-        if add_group:
-            group_locs = lib.append_group(group_locs, i)
-        group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
-        picked_locs.append(group_locs)
-
-        progress.set_value(i + 1)
-    return picked_locs
+        yield locs[mask].copy()
 
 
 def _picked_box_locs(
     locs: pd.DataFrame,
     picks: list[tuple],
-    add_group: bool,
-    progress: lib.Progress,
-) -> list[pd.DataFrame]:
-    """Helper function for picking localizations using box picks. See
-    ``picked_locs`` for more details."""
-    picked_locs = []
-    for i, pick in enumerate(picks):
+) -> Iterator[pd.DataFrame]:
+    """Yield the localizations in each box pick. See ``picked_locs``
+    for more details."""
+    for pick in picks:
         (x0, y0), (x1, y1) = pick
         x_min, x_max = (x0, x1) if x0 <= x1 else (x1, x0)
         y_min, y_max = (y0, y1) if y0 <= y1 else (y1, y0)
@@ -409,26 +387,16 @@ def _picked_box_locs(
             & (locs["y"] > y_min)
             & (locs["y"] < y_max)
         )
-        group_locs = locs[mask].copy()
-        if add_group:
-            group_locs = lib.append_group(group_locs, i)
-        group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
-        picked_locs.append(group_locs)
-
-        progress.set_value(i + 1)
-    return picked_locs
+        yield locs[mask].copy()
 
 
 def _picked_brush_locs(
     locs: pd.DataFrame,
     picks: list[tuple],
-    add_group: bool,
-    progress: lib.Progress,
-) -> list[pd.DataFrame]:
-    """Helper function for picking localizations using brush picks. See
-    ``picked_locs`` for more details."""
-    picked_locs = []
-    for i, pick in enumerate(picks):
+) -> Iterator[pd.DataFrame]:
+    """Yield the localizations in each brush pick. See ``picked_locs``
+    for more details."""
+    for pick in picks:
         x_min, x_max, y_min, y_max = lib.pick_bounds(pick, "Brush", None)
         mask = (
             (locs["x"] > x_min)
@@ -436,14 +404,33 @@ def _picked_brush_locs(
             & (locs["y"] > y_min)
             & (locs["y"] < y_max)
         )
-        group_locs = lib.locs_in_brush(locs[mask], pick).copy()
-        if add_group:
-            group_locs = lib.append_group(group_locs, i)
-        group_locs.sort_values(by="frame", kind="quicksort", inplace=True)
-        picked_locs.append(group_locs)
+        yield lib.locs_in_brush(locs[mask], pick).copy()
 
-        progress.set_value(i + 1)
-    return picked_locs
+
+def _picked_locs_of_shape(
+    locs: pd.DataFrame,
+    info: list[dict],
+    shape: str,
+    picks: list[tuple],
+    sizes: list[float | None],
+    index_blocks: tuple | None,
+    rotated: bool,
+) -> Iterator[pd.DataFrame | None]:
+    """Yield the localizations in each of ``picks``, all of ``shape``
+    (None for a polygon that is not closed); ``rotated`` adds the
+    coordinates in the frame of rectangular picks."""
+    if shape == "Circle":
+        radii = [size / 2 for size in sizes]
+        return _picked_circular_locs(locs, info, picks, radii, index_blocks)
+    elif shape == "Rectangle":
+        return _picked_rectangular_locs(locs, picks, sizes, rotated)
+    elif shape == "Polygon":
+        return _picked_polygonal_locs(locs, picks)
+    elif shape == "Square":
+        return _picked_square_locs(locs, picks, sizes)
+    elif shape == "Box":
+        return _picked_box_locs(locs, picks)
+    return _picked_brush_locs(locs, picks)
 
 
 def picked_locs(
@@ -451,10 +438,11 @@ def picked_locs(
     info: list[dict],
     *,
     picks: list[tuple],
-    pick_shape: Literal[
-        "Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"
-    ],
-    pick_size: float = None,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | list[str]
+    ),
+    pick_size: float | list[float | None] | None = None,
     add_group: bool = True,
     index_blocks: tuple = None,
     progress: lib.Progress | Literal["console"] | None = None,
@@ -470,21 +458,24 @@ def picked_locs(
         Metadata of the localizations list.
     picks : list
         List of picks.
-    pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square', 'Box', 'Brush'}
-        Shape of the pick.
-    pick_size : float, optional
-        Size of the pick in nm. Diameter for the circles, width
-        for the rectangles, side length for squares, None for the
-        polygons, boxes and brush picks (they carry their own extent).
-        Default is None.
+    pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square', 'Box', \
+            'Brush'} or list of str
+        Shape of the picks, or the shape of each pick, see
+        ``lib.pick_shapes_and_sizes``.
+    pick_size : float, list of float or None, optional
+        Size of the picks in nm, or the size of each pick. Diameter for
+        the circles, width for the rectangles, side length for squares,
+        None for the polygons, boxes and brush picks (they carry their
+        own extent). Default is None.
     add_group : boolean, optional
         True if group id should be added to locs. Each pick will be
-        assigned a different id. Default is True.
+        assigned a different id, its index in ``picks``. Default is
+        True.
     index_blocks : tuple or spatial_index.RenderIndexPyramid, optional
         Used only for circular picks. Precomputed index blocks for
-        localizations, see ``get_index_blocks`` (built with block size
-        ``pick_size / 2``, the pick radius), or the pick-size
-        independent pyramid of
+        localizations, see ``get_index_blocks`` (built with a block size
+        of at least the largest pick radius, else they are rebuilt), or
+        the pick-size independent pyramid of
         ``spatial_index.build_render_index``. If None, index blocks
         will be calculated internally. Default is None.
     progress : lib.Progress, "console" or None, optional
@@ -496,15 +487,19 @@ def picked_locs(
     Returns
     -------
     picked_locs : list of pd.DataFrames
-        List of pd.DataFrames, each containing locs from one pick.
+        List of pd.DataFrames, each containing locs from one pick, in
+        the order of ``picks``. Polygons that are not closed are left
+        out. If all picks are rectangular, the localizations carry their
+        coordinates in the frame of their pick (``x_pick_rot``,
+        ``y_pick_rot``); with other shapes among the picks they do not,
+        since the column would be undefined for the rest.
     """
-    _valid_shapes = lib.PICK_SHAPES
-    assert (
-        pick_shape in _valid_shapes
-    ), f"Invalid pick shape: {pick_shape}. Choose one of {_valid_shapes}."
+    shapes, sizes = lib.pick_shapes_and_sizes(picks, pick_shape, pick_size)
     if len(picks) == 0:
         return []
+    rotated = all(shape == "Rectangle" for shape in shapes)
 
+    picked = [None] * len(picks)
     with lib.tracked_progress(
         progress, "Picking localizations", unit="pick"
     ) as progress:
@@ -512,67 +507,48 @@ def picked_locs(
             progress, "Picking localizations", len(picks), unit="pick"
         )
         progress.set_value(0)
-        if pick_shape == "Circle":
-            picked_locs = _picked_circular_locs(
-                locs=locs,
-                info=info,
-                picks=picks,
-                radius=pick_size / 2,
-                index_blocks=index_blocks,
-                add_group=add_group,
-                progress=progress,
+        n_done = 0
+        for shape in lib.PICK_SHAPES:
+            idx = [i for i, _ in enumerate(shapes) if _ == shape]
+            if not idx:
+                continue
+            group_locs_iter = _picked_locs_of_shape(
+                locs,
+                info,
+                shape,
+                [picks[i] for i in idx],
+                [sizes[i] for i in idx],
+                index_blocks,
+                rotated,
             )
-        elif pick_shape == "Rectangle":
-            picked_locs = _picked_rectangular_locs(
-                locs=locs,
-                picks=picks,
-                pick_size=pick_size,
-                add_group=add_group,
-                progress=progress,
-            )
-        elif pick_shape == "Polygon":
-            picked_locs = _picked_polygonal_locs(
-                locs=locs,
-                picks=picks,
-                add_group=add_group,
-                progress=progress,
-            )
-        elif pick_shape == "Square":
-            picked_locs = _picked_square_locs(
-                locs=locs,
-                picks=picks,
-                pick_size=pick_size,
-                add_group=add_group,
-                progress=progress,
-            )
-        elif pick_shape == "Box":
-            picked_locs = _picked_box_locs(
-                locs=locs,
-                picks=picks,
-                add_group=add_group,
-                progress=progress,
-            )
-        elif pick_shape == "Brush":
-            picked_locs = _picked_brush_locs(
-                locs=locs,
-                picks=picks,
-                add_group=add_group,
-                progress=progress,
-            )
+            for i, group_locs in zip(idx, group_locs_iter):
+                if group_locs is not None:
+                    if add_group:
+                        group_locs = lib.append_group(group_locs, i)
+                    group_locs.sort_values(
+                        by="frame", kind="quicksort", inplace=True
+                    )
+                    picked[i] = group_locs
+                n_done += 1
+                progress.set_value(n_done)
         progress.set_value(len(picks))
-    return picked_locs
+    return [_ for _ in picked if _ is not None]
 
 
 def pick_similar(
     locs: pd.DataFrame,
     info: list[dict],
     *,
-    picks: list[tuple],
-    pick_shape: Literal["Circle", "Rectangle", "Square", "Box"] = "Circle",
-    pick_size: float = None,
+    picks: list[tuple] | None = None,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Square", "Box"] | list[str]
+    ) = "Circle",
+    pick_size: float | list[float] | None = None,
     std_range: float = 2.0,
     index_blocks: tuple = None,
     grid_spacing: float = None,
+    n_locs_range: tuple[float, float] | None = None,
+    rmsd_range: tuple[float, float] | None = None,
 ) -> list[tuple]:
     """Find picks similar to the given ones, based on the number of
     localizations and their RMSD.
@@ -581,7 +557,13 @@ def pick_similar(
     the allowed range is defined by the given standard deviation range
     (``std_range``). Only picks with number of localizations and RMSD
     within these ranges are returned. The input picks are always part of
-    the output.
+    the output, first and in their order.
+
+    Instead of seed picks, the ranges can be given directly
+    (``n_locs_range`` and/or ``rmsd_range``, circular picks only): the
+    candidates of :func:`pick_similar_candidates` within the ranges are
+    returned, scanned with the lower bound of ``n_locs_range`` as
+    ``min_n_locs``.
 
     A grid of overlapping candidate picks covering the field of view is
     scanned and each candidate is shifted towards the center of mass of
@@ -592,7 +574,11 @@ def pick_similar(
     median width and height of the input picks. Candidates overlapping
     an already accepted pick are discarded.
 
-    Not implemented for polygonal picks, which have no size or
+    All picks must have the same shape. Circular, square and
+    rectangular picks of different sizes are measured and searched for
+    with their median size, which the new picks take as well.
+
+    Not implemented for polygonal and brush picks, which have no size or
     canonical form to replicate.
 
     Parameters
@@ -601,17 +587,19 @@ def pick_similar(
         Localizations.
     info : list of dicts
         Metadata of the localizations.
-    picks : list
-        List of picks. ``(x, y)`` coordinates for circular and square
-        picks, ``((x_start, y_start), (x_end, y_end))`` center-axis
-        points for rectangular picks, and the two opposite corners
-        ``((x0, y0), (x1, y1))`` for box picks.
-    pick_shape : {'Circle', 'Rectangle', 'Square', 'Box'}, optional
-        Shape of the picks. Default is 'Circle'.
-    pick_size : float, optional
-        Size of the pick in nm. Diameter for circles, side length for
-        squares, width for rectangles. Ignored for boxes,
-        which carry their own extent. Default is None.
+    picks : list, optional
+        List of seed picks. ``(x, y)`` coordinates for circular and
+        square picks, ``((x_start, y_start), (x_end, y_end))``
+        center-axis points for rectangular picks, and the two opposite
+        corners ``((x0, y0), (x1, y1))`` for box picks. None (default)
+        with ``n_locs_range`` and/or ``rmsd_range`` given instead.
+    pick_shape : {'Circle', 'Rectangle', 'Square', 'Box'} or list of str
+        Shape of the picks; a list (one shape per pick) must hold one
+        shape only. Default is 'Circle'.
+    pick_size : float, list of float or None, optional
+        Size of the picks in nm, or the size of each pick. Diameter for
+        circles, side length for squares, width for rectangles. Ignored
+        for boxes, which carry their own extent. Default is None.
     std_range : float, optional
         Standard deviation range for picking similar localizations.
         Default is 2.0.
@@ -625,12 +613,46 @@ def pick_similar(
         used for rectangular picks, where the default
         (a quarter of the median pick length) trades speed for the
         chance of missing closely spaced structures. Default is None.
+    n_locs_range : tuple of float, optional
+        Minimum and maximum number of localizations of the picks to
+        find (inclusive; either may be None for no bound), without seed
+        picks. None (default) for no bound, unless ``rmsd_range`` is
+        None as well, which needs seed picks.
+    rmsd_range : tuple of float, optional
+        Minimum and maximum RMSD (nm, inclusive) of the picks to find,
+        without seed picks; see ``n_locs_range``. Default is None.
 
     Returns
     -------
     new_picks : list of tuples
         List of similar picks, in the same format as ``picks``.
+
+    Raises
+    ------
+    ValueError
+        If the picks have different shapes, a shape is not supported or
+        a size is missing, or if both or neither of the seed picks and
+        the ranges are given.
     """
+    if n_locs_range is not None or rmsd_range is not None:
+        return _pick_similar_in_ranges(
+            locs,
+            info,
+            picks,
+            pick_shape,
+            pick_size,
+            grid_spacing,
+            n_locs_range,
+            rmsd_range,
+        )
+    if picks is None:
+        raise ValueError(
+            "Pick similar needs seed picks, or n_locs_range and/or "
+            "rmsd_range."
+        )
+    pick_shape, pick_size = _pick_similar_shape_and_size(
+        picks, pick_shape, pick_size
+    )
     _validate_pick_similar_args(pick_shape, pick_size, grid_spacing)
     if len(picks) == 0:
         return []
@@ -659,6 +681,349 @@ def pick_similar(
         return _pick_similar_rectangular(
             info, picks, pick_size, std_range, index_blocks, grid_spacing
         )
+
+
+def pick_similar_candidates(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    pick_size: float,
+    min_n_locs: int = 2,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> pd.DataFrame:
+    """The circular picks that :func:`pick_similar` considers, with
+    their number of localizations and RMSD, to select picks from
+    without seed picks.
+
+    As in :func:`pick_similar`, a grid of overlapping circular picks
+    covering the field of view (a triangular lattice) is scanned and
+    each candidate is shifted to the center of mass of the
+    localizations within it until it converges. Every converged
+    candidate with at least ``min_n_locs`` localizations that does not
+    overlap a candidate found before (centers closer than
+    ``pick_size``) is returned, in the order of the scan.
+
+    The number of localizations and the RMSD tell the structures apart:
+    e.g., in a 2D histogram of the two, DNA origami of one design form a
+    cluster, which ``n_locs_range`` and ``rmsd_range`` of
+    :func:`pick_similar` select.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+    info : list of dicts
+        Metadata of the localizations.
+    pick_size : float
+        Diameter of the circular picks in nm.
+    min_n_locs : int, optional
+        Minimum number of localizations of a candidate. A candidate has
+        at least 2 (one localization has no center of mass to converge
+        to), so smaller values have no effect. Candidates with fewer
+        localizations are not kept and do not exclude the candidates
+        they overlap, so set it close to the smallest structure of
+        interest: e.g., candidates of a few background localizations
+        next to a structure can otherwise exclude it. Default is 2.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports one phase over the columns of
+        the grid. Default is None.
+
+    Returns
+    -------
+    candidates : pd.DataFrame
+        One row per candidate: "n_locs" (the number of localizations
+        within the converged pick), "x" and "y" (their center of mass,
+        where the pick converged, in nm) and "rmsd" (their root mean
+        square distance from it, in nm).
+
+    Raises
+    ------
+    ValueError
+        If ``pick_size`` is not positive.
+
+    Examples
+    --------
+    >>> candidates = postprocess.pick_similar_candidates(
+    ...     locs, info, pick_size=150
+    ... )
+    >>> origami = candidates.query("300 <= n_locs <= 600 and rmsd <= 25")
+    """
+    if not pick_size > 0:
+        raise ValueError(f"pick_size must be positive, got {pick_size}.")
+    d = float(pick_size)
+    r = d / 2
+    index_blocks = get_index_blocks(locs, info, r)
+    x_range, y_shift, y_base, x_r, y_r1, y_r2 = _pick_similar_circle_grid(
+        info, d, index_blocks[1]
+    )
+    _, _, _, _, block_starts, block_ends, K, L = index_blocks
+    locs_xy = _index_blocks_xy(index_blocks)
+    found = tuple(np.empty(0) for _ in range(4))
+    n_columns = len(x_range)
+    # the scan runs in chunks of columns for the progress, each
+    # continuing the candidates found so far
+    chunk = max(1, n_columns // 100)
+    phase = "Scanning candidate picks"
+    with lib.tracked_progress(progress, phase, unit="column") as progress:
+        lib.start_phase(progress, phase, n_columns, unit="column")
+        for start in range(0, n_columns, chunk):
+            stop = min(start + chunk, n_columns)
+            found = _pick_similar_scan(
+                x_range[start:stop],
+                y_shift,
+                y_base,
+                start,
+                max(int(min_n_locs), 2),
+                np.inf,
+                -np.inf,
+                np.inf,
+                x_r[start:stop],
+                y_r1,
+                y_r2,
+                locs_xy,
+                block_starts,
+                block_ends,
+                K,
+                L,
+                *found,
+                r,
+                d**2,
+            )
+            progress.set_value(stop)
+    x, y, n_locs, rmsd = found
+    return pd.DataFrame(
+        {"x": x, "y": y, "n_locs": n_locs.astype(np.int64), "rmsd": rmsd}
+    )
+
+
+def structure_classes(
+    candidates: pd.DataFrame,
+    *,
+    min_samples: float = 0.01,
+    xi: float = 0.05,
+    min_cluster_size: float = 0.05,
+    std_range: float = 1.0,
+) -> tuple[lib.IntArray1D, pd.DataFrame]:
+    """Classes of structures among the candidate picks of
+    :func:`pick_similar_candidates`, by their number of localizations
+    and RMSD, with the ranges that pick each class.
+
+    The candidates are clustered by OPTICS with the xi method (Ankerst
+    et al., ACM SIGMOD 1999; ``sklearn.cluster.OPTICS``) in their
+    number of localizations and RMSD, each standardized to zero mean
+    and unit standard deviation, so that neither dominates through its
+    unit. A cluster can spread widely, so each class is then described
+    by the median +/- ``std_range`` standard deviations of the number of
+    localizations and of the RMSD of its candidates: the ranges that
+    :func:`pick_similar` takes (``n_locs_range``, ``rmsd_range``) to
+    pick the structures of the class.
+
+    The candidates of the background (a few localizations each) can
+    outnumber the structures and merge with them into one class: find
+    the candidates with a ``min_n_locs`` above the background, e.g., 1%
+    of the frames.
+
+    The method was written by Heinrich Grabmayr for picasso-workflow
+    (https://github.com/jungmannlab/picasso-workflow), which clusters
+    the RMSD and the number of localizations per frame as they are; here
+    both are standardized and ``min_samples`` is a fraction of the
+    candidates rather than of the frames.
+
+    Parameters
+    ----------
+    candidates : pd.DataFrame
+        Candidate picks with the columns "n_locs" and "rmsd", see
+        :func:`pick_similar_candidates`.
+    min_samples : float, optional
+        Number of candidates in a neighborhood for a candidate to be a
+        core point, as a fraction of the candidates (at least 2), or as
+        a number if larger than 1. Default is 0.01.
+    xi : float, optional
+        Minimum steepness of the reachability plot that bounds a
+        cluster, between 0 and 1. Default is 0.05.
+    min_cluster_size : float, optional
+        Minimum number of candidates in a class, as a fraction of the
+        candidates (at least 2), or as a number if larger than 1.
+        Default is 0.05.
+    std_range : float, optional
+        Number of standard deviations around the median that the ranges
+        of a class span. Default is 1.0.
+
+    Returns
+    -------
+    labels : lib.IntArray1D
+        Class of each candidate (the row of ``classes``), or -1 for
+        none.
+    classes : pd.DataFrame
+        One row per class: "n_candidates", the median number of
+        localizations and RMSD ("n_locs", "rmsd", nm) and the ranges
+        ("n_locs_min", "n_locs_max", "rmsd_min", "rmsd_max", nm; the
+        minima at least 0).
+
+    Raises
+    ------
+    ValueError
+        If there are fewer than 2 candidates.
+
+    Examples
+    --------
+    >>> candidates = postprocess.pick_similar_candidates(
+    ...     locs, info, pick_size=150, min_n_locs=info[0]["Frames"] // 100
+    ... )
+    >>> labels, classes = postprocess.structure_classes(candidates)
+    >>> first = classes.iloc[0]
+    >>> picks = postprocess.pick_similar(
+    ...     locs,
+    ...     info,
+    ...     pick_size=150,
+    ...     n_locs_range=(first["n_locs_min"], first["n_locs_max"]),
+    ...     rmsd_range=(first["rmsd_min"], first["rmsd_max"]),
+    ... )
+    """
+    from sklearn.cluster import OPTICS
+
+    if len(candidates) < 2:
+        raise ValueError(
+            "Structure classes need at least 2 candidates, got "
+            f"{len(candidates)}."
+        )
+    n_locs = candidates["n_locs"].to_numpy(np.float64)
+    rmsd = candidates["rmsd"].to_numpy(np.float64)
+    features = np.stack((n_locs, rmsd), axis=1)
+    std = features.std(axis=0)
+    std[std == 0] = 1.0  # a constant feature separates nothing
+    features = (features - features.mean(axis=0)) / std
+    labels = (
+        OPTICS(
+            min_samples=_optics_size(min_samples),
+            xi=xi,
+            min_cluster_size=_optics_size(min_cluster_size),
+        )
+        .fit(features)
+        .labels_
+    )
+    rows = []
+    for label in range(labels.max() + 1):
+        members = labels == label
+        n_median, n_std = np.median(n_locs[members]), n_locs[members].std()
+        r_median, r_std = np.median(rmsd[members]), rmsd[members].std()
+        rows.append(
+            {
+                "n_candidates": int(members.sum()),
+                "n_locs": n_median,
+                "rmsd": r_median,
+                "n_locs_min": max(n_median - std_range * n_std, 0.0),
+                "n_locs_max": n_median + std_range * n_std,
+                "rmsd_min": max(r_median - std_range * r_std, 0.0),
+                "rmsd_max": r_median + std_range * r_std,
+            }
+        )
+    columns = [
+        "n_candidates",
+        "n_locs",
+        "rmsd",
+        "n_locs_min",
+        "n_locs_max",
+        "rmsd_min",
+        "rmsd_max",
+    ]
+    return labels.astype(np.int64), pd.DataFrame(rows, columns=columns)
+
+
+def _optics_size(value: float) -> float | int:
+    """A size of ``sklearn.cluster.OPTICS``: a fraction of the samples
+    up to 1, else a number."""
+    return float(value) if value <= 1 else int(value)
+
+
+def _pick_similar_in_ranges(
+    locs: pd.DataFrame,
+    info: list[dict],
+    picks: list[tuple] | None,
+    pick_shape: str | list[str],
+    pick_size: float | list[float] | None,
+    grid_spacing: float | None,
+    n_locs_range: tuple[float, float] | None,
+    rmsd_range: tuple[float, float] | None,
+) -> list[tuple]:
+    """``pick_similar`` without seed picks: the candidates of
+    ``pick_similar_candidates`` within the ranges."""
+    if picks:
+        raise ValueError(
+            "Pick similar takes seed picks or n_locs_range/rmsd_range, "
+            "not both."
+        )
+    shapes = {pick_shape} if isinstance(pick_shape, str) else set(pick_shape)
+    if shapes - {"Circle"}:
+        raise ValueError(
+            "Pick similar without seed picks finds circular picks only."
+        )
+    if pick_size is None or np.ndim(pick_size):
+        raise ValueError(
+            "Pick similar without seed picks needs one pick_size (the "
+            "diameter)."
+        )
+    if grid_spacing is not None:
+        raise ValueError(
+            "grid_spacing is only supported for rectangular picks."
+        )
+    candidates = pick_similar_candidates(
+        locs,
+        info,
+        pick_size=pick_size,
+        min_n_locs=_range_min_n_locs(n_locs_range),
+    )
+    keep = _in_range(candidates["n_locs"], n_locs_range) & _in_range(
+        candidates["rmsd"], rmsd_range
+    )
+    return list(zip(candidates["x"][keep], candidates["y"][keep]))
+
+
+def _range_min_n_locs(
+    n_locs_range: tuple[float | None, float | None] | None,
+) -> int:
+    """The minimum number of localizations of the candidates scanned for
+    the picks within ``n_locs_range``: its lower bound (at least 2), so
+    that candidates with fewer localizations, e.g., of the background,
+    do not exclude the ones they overlap."""
+    low = None if n_locs_range is None else n_locs_range[0]
+    return 2 if low is None else max(2, int(np.ceil(low)))
+
+
+def _in_range(
+    values: pd.Series, bounds: tuple[float | None, float | None] | None
+) -> pd.Series:
+    """Whether each value is within the inclusive ``bounds``, where
+    None is no bound."""
+    if bounds is None:
+        return pd.Series(True, index=values.index)
+    low, high = bounds
+    low = -np.inf if low is None else low
+    high = np.inf if high is None else high
+    return (values >= low) & (values <= high)
+
+
+def _pick_similar_shape_and_size(
+    picks: list[tuple],
+    pick_shape: str | list[str],
+    pick_size: float | list[float] | None,
+) -> tuple[str, float | None]:
+    """The one shape and size ``pick_similar`` works with: the median
+    size of picks of different sizes."""
+    if not isinstance(pick_shape, str):
+        shapes = set(pick_shape)
+        if len(shapes) > 1:
+            raise ValueError(
+                "Pick similar needs picks of one shape, got "
+                f"{', '.join(sorted(shapes))}."
+            )
+        pick_shape = shapes.pop() if shapes else "Circle"
+    if np.ndim(pick_size) and len(picks):
+        _, sizes = lib.pick_shapes_and_sizes(picks, pick_shape, pick_size)
+        pick_size = None if sizes[0] is None else float(np.median(sizes))
+    return pick_shape, pick_size
 
 
 def _validate_pick_similar_args(
@@ -789,15 +1154,11 @@ def _pick_similar_circular(
     y_similar = np.array([_[1] for _ in picks], dtype=np.float64)
 
     # preparations for grid search
-    fov_width, fov_height = lib.field_of_view(info)
-    x_range = np.arange(d / 2, fov_width, np.sqrt(3) * d / 2)
-    y_range_base = np.arange(d / 2, fov_height - d / 2, d)
-    y_range_shift = y_range_base + d / 2
-    locs_temp, size, _, _, block_starts, block_ends, K, L = index_blocks
-    locs_xy = np.stack((locs_temp.x, locs_temp.y))
-    x_r = np.uint64(x_range / size)
-    y_r1 = np.uint64(y_range_shift / size)
-    y_r2 = np.uint64(y_range_base / size)
+    x_range, y_range_shift, y_range_base, x_r, y_r1, y_r2 = (
+        _pick_similar_circle_grid(info, d, index_blocks[1])
+    )
+    _, _, _, _, block_starts, block_ends, K, L = index_blocks
+    locs_xy = _index_blocks_xy(index_blocks)
     # pick similar
     x_similar, y_similar = _pick_similar(
         x_range,
@@ -824,8 +1185,32 @@ def _pick_similar_circular(
     return new_picks
 
 
+def _pick_similar_circle_grid(
+    info: list[dict], d: float, block_size: float
+) -> tuple[lib.FloatArray1D, ...]:
+    """The grid of overlapping circular candidate picks of diameter
+    ``d`` that pick similar scans: columns ``x`` (nm) with the y
+    positions of the odd (``y_shift``) and even (``y_base``) columns,
+    and the index blocks (of size ``block_size``) of all three."""
+    fov_width, fov_height = lib.field_of_view(info)
+    x_range = np.arange(d / 2, fov_width, np.sqrt(3) * d / 2)
+    y_range_base = np.arange(d / 2, fov_height - d / 2, d)
+    y_range_shift = y_range_base + d / 2
+    x_r = np.uint64(x_range / block_size)
+    y_r1 = np.uint64(y_range_shift / block_size)
+    y_r2 = np.uint64(y_range_base / block_size)
+    return x_range, y_range_shift, y_range_base, x_r, y_r1, y_r2
+
+
+def _index_blocks_xy(index_blocks: tuple) -> lib.FloatArray2D:
+    """``(2, N)`` x and y of the block-sorted localizations of
+    ``index_blocks`` (see ``get_index_blocks``)."""
+    locs_temp = index_blocks[0]
+    return np.stack((locs_temp.x, locs_temp.y))
+
+
 @numba.jit(nopython=True, nogil=True, cache=True)
-def _pick_similar(  # noqa: C901
+def _pick_similar(
     x: lib.FloatArray1D,
     y_shift: lib.FloatArray1D,
     y_base: lib.FloatArray1D,
@@ -854,7 +1239,8 @@ def _pick_similar(  # noqa: C901
     center of mass of the localizations within the pick. If the picked
     localizations have the required number of localizations and the
     RMSD, it is added to the output list (``x_similar`` and
-    ``y_similar``).
+    ``y_similar``). See ``_pick_similar_scan``, which it runs over the
+    whole grid.
 
     This function is implemented in numba for speed, called from
     ``pick_similar``. See that function for more user-friendly
@@ -894,10 +1280,81 @@ def _pick_similar(  # noqa: C901
     x_similar, y_similar : lib.FloatArray1D
         Arrays with the x and y coordinates of the similar picks.
     """
+    x_similar, y_similar, _, _ = _pick_similar_scan(
+        x,
+        y_shift,
+        y_base,
+        0,
+        min_n_locs,
+        max_n_locs,
+        min_rmsd,
+        max_rmsd,
+        x_r,
+        y_r1,
+        y_r2,
+        locs_xy,
+        block_starts,
+        block_ends,
+        K,
+        L,
+        x_similar,
+        y_similar,
+        np.empty(0),
+        np.empty(0),
+        r,
+        d2,
+    )
+    return x_similar, y_similar
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _pick_similar_scan(  # noqa: C901
+    x: lib.FloatArray1D,
+    y_shift: lib.FloatArray1D,
+    y_base: lib.FloatArray1D,
+    first_column: int,
+    min_n_locs: int,
+    max_n_locs: float,
+    min_rmsd: float,
+    max_rmsd: float,
+    x_r: lib.IntArray1D,
+    y_r1: lib.IntArray1D,
+    y_r2: lib.IntArray1D,
+    locs_xy: lib.FloatArray2D,
+    block_starts: lib.IntArray2D,
+    block_ends: lib.IntArray2D,
+    K: int,
+    L: int,
+    x_similar: lib.FloatArray1D,
+    y_similar: lib.FloatArray1D,
+    n_similar: lib.FloatArray1D,
+    rmsd_similar: lib.FloatArray1D,
+    r: float,
+    d2: float,
+) -> tuple[lib.FloatArray1D, ...]:
+    """The grid scan of pick similar over the columns ``x`` of the grid
+    (see ``_pick_similar``): each candidate is shifted to the center of
+    mass of its localizations until it converges, and kept if its number
+    of localizations and its RMSD are in range and it does not overlap a
+    pick kept before (``x_similar``, ``y_similar``).
+
+    The columns can be scanned in chunks, each continuing the picks the
+    previous one returned: ``first_column`` is the index of ``x[0]`` in
+    the whole grid, which decides which columns are shifted.
+
+    Returns
+    -------
+    x_similar, y_similar : lib.FloatArray1D
+        The picks given and those found.
+    n_similar, rmsd_similar : lib.FloatArray1D
+        The number of localizations and the RMSD of the given
+        ``n_similar``/``rmsd_similar`` followed by those of the picks
+        found (not of the seed picks in ``x_similar``).
+    """
     for i, x_grid in enumerate(x):
         x_range = x_r[i]
         # y_grid is shifted for odd columns
-        if i % 2:
+        if (first_column + i) % 2:
             y = y_shift
             y_r = y_r1
         else:
@@ -955,15 +1412,15 @@ def _pick_similar(  # noqa: C901
                         (x_similar - x_test) ** 2 + (y_similar - y_test) ** 2
                         > d2
                     ):
-                        if min_n_locs <= picked_locs_xy.shape[1] <= max_n_locs:
-                            if (
-                                min_rmsd
-                                <= lib.rmsd_at_com(picked_locs_xy)
-                                <= max_rmsd
-                            ):
+                        n_picked = picked_locs_xy.shape[1]
+                        if min_n_locs <= n_picked <= max_n_locs:
+                            rmsd = lib.rmsd_at_com(picked_locs_xy)
+                            if min_rmsd <= rmsd <= max_rmsd:
                                 x_similar = np.append(x_similar, x_test)
                                 y_similar = np.append(y_similar, y_test)
-    return x_similar, y_similar
+                                n_similar = np.append(n_similar, n_picked)
+                                rmsd_similar = np.append(rmsd_similar, rmsd)
+    return x_similar, y_similar, n_similar, rmsd_similar
 
 
 def _pick_similar_grid(
@@ -1041,9 +1498,9 @@ def _circle_moments_at(
     runtime. Coordinates are shifted by ``(xc, yc)`` before accumulation
     to avoid loss of precision in the second moments.
 
-    Note that the block bounds are inclusive of the first row and
-    column (``0 <= k < K``), like ``_get_block_locs_at`` and
-    unlike ``_n_block_locs_at``.
+    The block bounds include the first row and column
+    (``0 <= k < K``), like ``_get_block_locs_at`` and
+    ``_n_block_locs_at``.
 
     Parameters
     ----------
@@ -2142,10 +2599,11 @@ def remove_locs_in_picks(
     info: list[dict],
     *,
     picks: list[tuple],
-    pick_shape: Literal[
-        "Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"
-    ],
-    pick_size: float | None = None,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | list[str]
+    ),
+    pick_size: float | list[float | None] | None = None,
     index_blocks: tuple = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Remove localizations in picks.
@@ -2159,13 +2617,14 @@ def remove_locs_in_picks(
     picks : list of tuples
         List of picks, each pick is a list of coordinates of the pick
         corners. See ``io.load_picks``.
-    pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"}
-        Shape of picks.
-    pick_size : float or None
-        Size of picks in nm. For circles - diameters. For
-        rectangles - width. For squares - side length. For polygons,
-        boxes and brush picks - ignored. Ignored if picks are loaded
-        from a YAML file.
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
+            "Brush"} or list of str
+        Shape of picks, or the shape of each pick, see
+        ``lib.pick_shapes_and_sizes``.
+    pick_size : float, list of float or None
+        Size of picks in nm, or the size of each pick. For circles -
+        diameters. For rectangles - width. For squares - side length.
+        For polygons, boxes and brush picks - ignored.
     index_blocks : tuple, optional
         Used only for circular picks. Precomputed index blocks for
         localizations, see  ``get_index_blocks``. If None, they will be
@@ -2179,15 +2638,6 @@ def remove_locs_in_picks(
         Metadata of the remaining localizations: ``info`` with an entry
         recording the removal appended, see ``lib.append_metadata``.
     """
-    assert (
-        pick_shape in lib.PICK_SHAPES
-    ), f"pick_shape must be one of {lib.PICK_SHAPES}."
-    if pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE:
-        assert isinstance(
-            pick_size, (int, float)
-        ), "pick_size must be a number."
-    if pick_shape != "Circle":
-        index_blocks = None  # ignore index blocks, only used for circle picks
     all_picked_locs = picked_locs(
         locs,
         info,
@@ -2209,20 +2659,24 @@ def remove_locs_in_picks(
 def _picks_entry(
     step: str,
     picks: list[tuple],
-    pick_shape: str,
-    pick_size: float | None,
+    pick_shape: str | list[str],
+    pick_size: float | list[float | None] | None,
 ) -> dict:
     """Metadata entry recording a step on picked localizations: the
-    number, shape and size of the picks (the diameter for circles)."""
+    number, shape and size of the picks (the diameter for circles).
+    Shapes and sizes the picks do not share are listed per pick."""
+    shape, size = lib._compact_pick_shapes_and_sizes(
+        *lib.pick_shapes_and_sizes(picks, pick_shape, pick_size)
+    )
     entry = {
         **lib.step_info(step),
         "Number of picks": len(picks),
-        "Pick shape": pick_shape,
+        "Pick shape": shape if len(picks) else pick_shape,
     }
-    if pick_shape == "Circle":
-        entry["Pick diameter (nm)"] = float(pick_size)
-    elif pick_size is not None:
-        entry["Pick size (nm)"] = float(pick_size)
+    if shape == "Circle":
+        entry["Pick diameter (nm)"] = size
+    elif size is not None:
+        entry["Pick size (nm)"] = size
     return entry
 
 
@@ -2236,21 +2690,16 @@ def _n_block_locs_at(
     block_ends: lib.IntArray2D,
 ) -> int:
     """Return the number of localizations in the blocks around the
-    given coordinates."""
-    step = 0
+    given coordinates (the 3 x 3 blocks centered on them, clipped to
+    the grid; 0 if none of them is on the grid)."""
+    n_block_locs = np.uint32(0)
     for k in range(y_range - 1, y_range + 2):
-        if 0 < k < K:
+        if 0 <= k < K:
             for ll in range(x_range - 1, x_range + 2):
-                if 0 < ll < L:
-                    if step == 0:
-                        n_block_locs = np.uint32(
-                            block_ends[k][ll] - block_starts[k][ll]
-                        )
-                        step = 1
-                    else:
-                        n_block_locs += np.uint32(
-                            block_ends[k][ll] - block_starts[k][ll]
-                        )
+                if 0 <= ll < L:
+                    n_block_locs += np.uint32(
+                        block_ends[k][ll] - block_starts[k][ll]
+                    )
     return n_block_locs
 
 
@@ -2759,6 +3208,7 @@ def frc(
     viewport: tuple[tuple[float, float], tuple[float, float]],
     random_seed: int = 42,
     lp: float | None = None,
+    max_image_size: int | None = 16384,
 ) -> dict:
     """Calculate the Fourier Ring Correlation (FRC) resolution.
 
@@ -2780,6 +3230,12 @@ def frc(
         Localization precision (nm) that sets the bin size of the
         rendered images (``lp / 2``). If None (default), NeNA of
         ``locs`` is used.
+    max_image_size : int or None, optional
+        Largest side length (pixels) of the rendered images. A larger
+        (square) viewport raises a ValueError instead of rendering
+        images that may not fit into memory, which grows with the
+        square of the side length. None renders any size. Default is
+        16384.
 
     Returns
     -------
@@ -2788,6 +3244,12 @@ def frc(
         "frequencies" (for spatial frequencies probed (nm^-1)),
         "resolution" (estimated resolution in nm) and "images"
         (2 grayscale images rendered and masked).
+
+    Raises
+    ------
+    ValueError
+        If the rendered images would be larger than
+        ``max_image_size`` pixels on a side.
     """
     if lp is None:
         lp = nena(locs, info)[1]
@@ -2807,6 +3269,16 @@ def frc(
 
     # select the locs within the viewport
     (y_min, x_min), (y_max, x_max) = viewport
+    image_size = (x_max - x_min) / (lp / 2)
+    if max_image_size is not None and image_size > max_image_size:
+        raise ValueError(
+            f"The FRC images would be {image_size:,.0f} x "
+            f"{image_size:,.0f} pixels (bin size {lp / 2:.2f} nm, half "
+            f"the localization precision), more than max_image_size = "
+            f"{max_image_size:,} pixels on a side, and may not fit into "
+            "memory. Use a smaller viewport (e.g., frc_rois for the whole "
+            "field of view) or raise max_image_size."
+        )
     in_view = (
         (locs["x"] > x_min)
         & (locs["y"] > y_min)
@@ -2844,14 +3316,15 @@ def frc_rois(
     roi_size: float = 5000.0,
     min_locs: int = 1000,
     random_seed: int = 42,
+    lp: float | None = None,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> dict:
     """Calculate the FRC resolution in several random ROIs.
 
     Places up to ``n_rois`` non-overlapping square ROIs in ``viewport``
     (see ``lib.select_frc_rois``) and runs ``frc`` in each of them. The
-    image bin size is set by the NeNA of all ``locs``, computed once,
-    so that the ROIs are comparable. The spread of the resolutions
+    image bin size is set by the NeNA of all ``locs``, computed once
+    (unless given as ``lp``), so that the ROIs are comparable. The spread of the resolutions
     across ROIs estimates the uncertainty of the FRC resolution.
 
     Parameters
@@ -2872,12 +3345,16 @@ def frc_rois(
     random_seed : int, optional
         Random seed for the ROI placement and the splitting into
         halves. Default is 42.
+    lp : float or None, optional
+        Localization precision (nm) that sets the bin size of the
+        rendered images (``lp / 2``), e.g. a NeNA calculated before. If
+        None (default), NeNA of ``locs`` is calculated.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
         or None for no reporting. Reports "Calculating NeNA" over the
-        localizations, then "Calculating FRC" over the ROIs. Default is
-        None.
+        localizations (unless ``lp`` is given), then "Calculating FRC"
+        over the ROIs. Default is None.
 
     Returns
     -------
@@ -2886,7 +3363,7 @@ def frc_rois(
         "n_locs" (localizations per ROI), "frc_results" (list of
         ``frc`` results, one per ROI), "resolutions" (in nm, NaN where
         the FRC curve does not cross the 1/7 threshold) and "lp" (NeNA
-        in nm).
+        in nm, or ``lp`` if given).
     """
     rois = lib.select_frc_rois(
         locs,
@@ -2898,9 +3375,12 @@ def frc_rois(
         random_seed=random_seed,
     )
     with lib.tracked_progress(
-        progress, "Calculating NeNA", unit="loc"
+        progress,
+        "Calculating NeNA" if lp is None else "Calculating FRC",
+        unit="loc",
     ) as progress:
-        lp = nena(locs, info, progress=progress)[1]
+        if lp is None:
+            lp = nena(locs, info, progress=progress)[1]
         x = locs["x"].to_numpy()
         y = locs["y"].to_numpy()
         n_locs = []
@@ -3050,6 +3530,464 @@ def _frc(
             resolution = 1 / f_res  # in nm
             break
     return frc_curve, frc_curve_smooth, frequencies, resolution, (im1, im2)
+
+
+#: Pixel sizes (nm) at which ``decorrelation`` renders the
+#: localizations by default: 2 to 64 nm in steps of a factor sqrt(2)
+DECORRELATION_PIXEL_SIZES = tuple(
+    float(size) for size in 2.0 * np.sqrt(2.0) ** np.arange(11)
+)
+#: A resolution below this factor times the smallest pixel size
+#: rendered by ``decorrelation`` may be limited by the pixel size
+#: (about twice the pixel size for pixels that are too large)
+DECORRELATION_LIMIT_FACTOR = 3.0
+#: Pixel size (nm) and threshold of the image whose pixels above the
+#: threshold make up the area covered by the sample (Descloux et al.,
+#: 2021), see ``decorrelation``
+_SAMPLE_AREA_PIXEL_SIZE = 5.0
+_SAMPLE_AREA_THRESHOLD = 0.5
+
+
+def _bilinear_weights(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    x_min: float,
+    y_min: float,
+    pixel_size: float,
+) -> Iterator[tuple[lib.IntArray1D, lib.IntArray1D, lib.FloatArray1D]]:
+    """The column, row and weight with which the points ``(x, y)`` (nm)
+    are spread on each of the four nearest pixel centers of an image
+    whose corner is at ``(x_min, y_min)``: bilinear interpolation."""
+    u = (x - x_min) / pixel_size - 0.5
+    v = (y - y_min) / pixel_size - 0.5
+    column = np.floor(u).astype(np.int64)
+    row = np.floor(v).astype(np.int64)
+    fu = u - column
+    fv = v - row
+    for d_row, w_row in ((0, 1.0 - fv), (1, fv)):
+        for d_column, w_column in ((0, 1.0 - fu), (1, fu)):
+            yield column + d_column, row + d_row, w_row * w_column
+
+
+def _render_bilinear(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    x_min: float,
+    y_min: float,
+    pixel_size: float,
+    shape: tuple[int, int],
+) -> lib.FloatArray2D:
+    """Bilinear histogram of the points ``(x, y)`` (nm) on an image of
+    ``shape`` (rows, columns) whose corner is at ``(x_min, y_min)``:
+    each point is spread on its four nearest pixels (Descloux et al.,
+    2021), which avoids the rounding of a plain histogram."""
+    n_rows, n_columns = shape
+    image = np.zeros(n_rows * n_columns)
+    for column, row, weight in _bilinear_weights(
+        x, y, x_min, y_min, pixel_size
+    ):
+        inside = (
+            (column >= 0) & (column < n_columns) & (row >= 0) & (row < n_rows)
+        )
+        image += np.bincount(
+            row[inside] * n_columns + column[inside],
+            weight[inside],
+            n_rows * n_columns,
+        )
+    return image.reshape(shape)
+
+
+def _sample_area(x: lib.FloatArray1D, y: lib.FloatArray1D) -> float:
+    """Area (nm^2) covered by the points ``(x, y)`` (nm): the pixels of
+    their bilinear histogram with 5 nm pixels that exceed 0.5 (Descloux
+    et al., 2021). Only the occupied pixels are stored."""
+    if not len(x):
+        return 0.0
+    pixel_size = _SAMPLE_AREA_PIXEL_SIZE
+    pixels, weights = [], []
+    # the corner one pixel below the points: all indices are positive
+    corner = (x.min() - pixel_size, y.min() - pixel_size)
+    for column, row, weight in _bilinear_weights(x, y, *corner, pixel_size):
+        pixels.append(row * 2**31 + column)
+        weights.append(weight)
+    occupied, inverse = np.unique(np.concatenate(pixels), return_inverse=True)
+    values = np.bincount(inverse, np.concatenate(weights), len(occupied))
+    n_pixels = int(np.sum(values > _SAMPLE_AREA_THRESHOLD))
+    return n_pixels * pixel_size**2
+
+
+def decorrelation(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    viewport: tuple[tuple[float, float], tuple[float, float]] | None = None,
+    pixel_size: float | list[float] | None = None,
+    n_radii: int = 50,
+    n_filters: int = 10,
+    max_image_size: int | None = 8192,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> dict:
+    """Resolution of localizations by decorrelation analysis (Descloux
+    et al., 2019 and 2021), from one set of localizations and without
+    parameters to tune, unlike the FRC, which splits them in two.
+
+    The localizations are rendered as a bilinear histogram, i.e., each
+    localization is spread on its four nearest pixels, and the
+    resolution of the image is found by decorrelation analysis, see
+    ``imageprocess.decorrelation``. The result depends on the pixel
+    size: pixels that are too large limit the resolution to about twice
+    the pixel size, and pixels that are too small leave gaps between
+    sparse localizations. As advised by Descloux et al. (2021), the
+    resolution is computed at several pixel sizes and the smallest
+    value is reported.
+
+    The estimate also depends on the density of the localizations:
+    below about 1-4 x 10^4 localizations per um^2 of sample, it improves
+    with more localizations (Descloux et al., 2021). The density is
+    reported over the area covered by the sample: the pixels of a
+    bilinear histogram with 5 nm pixels above 0.5, as in that paper. As
+    for the FRC, repeated localizations of the same molecule (e.g.,
+    blinking or rebinding) correlate and may make the resolution
+    appear better than it is.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations.
+    info : list of dicts
+        Metadata of the localizations, used for the field of view if
+        ``viewport`` is None.
+    viewport : tuple or None, optional
+        Region ``((y_min, x_min), (y_max, x_max))`` in nm whose
+        localizations are rendered. If None, the whole field of view is
+        used. Default is None.
+    pixel_size : float, list of floats or None, optional
+        Pixel size or sizes in nm at which the localizations are
+        rendered. If None, ``DECORRELATION_PIXEL_SIZES`` (2 to 64 nm).
+        Pixel sizes that give an image larger than ``max_image_size``
+        or smaller than 32 pixels on a side are skipped. Default is
+        None.
+    n_radii : int, optional
+        Number of radii of the decorrelation functions, see
+        ``imageprocess.decorrelation``. Default is 50.
+    n_filters : int, optional
+        Number of high-pass filters, see
+        ``imageprocess.decorrelation``. Default is 10.
+    max_image_size : int or None, optional
+        Largest side length (pixels) of the rendered images; smaller
+        pixel sizes are skipped, since the memory grows with the square
+        of the side length. None renders any size. Default is 8192.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating decorrelation"
+        over the pixel sizes. Default is None.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with the keys:
+
+        - "resolution": smallest resolution over the pixel sizes in nm,
+          NaN if no pixel size gives one.
+        - "pixel_size": pixel size of that resolution in nm (NaN
+          without a resolution).
+        - "pixel_size_limited": whether the resolution may be limited by
+          the pixel size: it is at the smallest pixel size rendered and
+          below ``DECORRELATION_LIMIT_FACTOR`` (3) times it. Smaller
+          pixels (e.g., a smaller viewport, or a larger
+          ``max_image_size``) may then give a better resolution.
+        - "pixel_sizes": pixel sizes rendered in nm, and "resolutions":
+          the resolution at each in nm (NaN without one).
+        - "results": result of ``imageprocess.decorrelation`` at each
+          pixel size (curves, peaks, etc.).
+        - "skipped_pixel_sizes": pixel sizes skipped for the size of
+          their image, in nm.
+        - "n_locs": number of localizations in the viewport.
+        - "sample_area": area covered by the localizations in nm^2, and
+          "density": localizations per um^2 of it.
+        - "viewport".
+
+    Raises
+    ------
+    ValueError
+        If the viewport is empty, a pixel size is not positive or no
+        pixel size gives an image of 32 to ``max_image_size`` pixels on
+        a side.
+
+    See Also
+    --------
+    plot_decorrelation : Plot the result.
+    frc : Resolution by Fourier ring correlation.
+
+    References
+    ----------
+    Descloux, A., Grussmayer, K. S., Radenovic, A. Parameter-free
+    image resolution estimation based on decorrelation analysis. Nat
+    Methods 16, 918-924 (2019).
+    https://doi.org/10.1038/s41592-019-0515-7
+
+    Descloux, A., Grussmayer, K. S., Radenovic, A. Parameter-free
+    rendering of single-molecule localization microscopy data for
+    parameter-free resolution estimation. Commun Biol 4, 550 (2021).
+    https://doi.org/10.1038/s42003-021-02086-1
+
+    Examples
+    --------
+    >>> result = postprocess.decorrelation(locs, info)
+    >>> print(f"{result['resolution']:.1f} nm")
+    """
+    if viewport is None:
+        width, height = lib.field_of_view(info)
+        viewport = ((0.0, 0.0), (float(height), float(width)))
+    (y_min, x_min), (y_max, x_max) = viewport
+    if not (x_max > x_min and y_max > y_min):
+        raise ValueError(f"The viewport {viewport} is empty.")
+    if pixel_size is None:
+        sizes = np.array(DECORRELATION_PIXEL_SIZES)
+    else:
+        sizes = np.atleast_1d(np.asarray(pixel_size, dtype=np.float64))
+    if not (sizes > 0).all():
+        raise ValueError("Pixel sizes must be positive.")
+    min_size = imageprocess.DECORRELATION_MIN_SIZE
+    used, skipped = [], []
+    for size in sizes:
+        shape = (
+            int(np.ceil((y_max - y_min) / size)),
+            int(np.ceil((x_max - x_min) / size)),
+        )
+        too_large = max_image_size is not None and max(shape) > max_image_size
+        if too_large or min(shape) < min_size:
+            skipped.append(size)
+        else:
+            used.append((float(size), shape))
+    if not used:
+        limits = f"{min_size} to {max_image_size}"
+        if max_image_size is None:
+            limits = f"at least {min_size}"
+        raise ValueError(
+            f"No pixel size gives an image of {limits} pixels on a side "
+            f"for the viewport of {x_max - x_min:,.0f} x "
+            f"{y_max - y_min:,.0f} nm; choose other pixel sizes or "
+            "viewport."
+        )
+    x = locs["x"].to_numpy(dtype=np.float64)
+    y = locs["y"].to_numpy(dtype=np.float64)
+    in_view = (x >= x_min) & (x < x_max) & (y >= y_min) & (y < y_max)
+    x, y = x[in_view], y[in_view]
+
+    results = []
+    phase = "Calculating decorrelation"
+    with lib.tracked_progress(progress, phase, unit="pixel size") as progress:
+        lib.start_phase(progress, phase, len(used), unit="pixel size")
+        progress.set_value(0)
+        for i, (size, shape) in enumerate(used):
+            image = _render_bilinear(x, y, x_min, y_min, size, shape)
+            results.append(
+                imageprocess.decorrelation(
+                    image,
+                    pixel_size=size,
+                    n_radii=n_radii,
+                    n_filters=n_filters,
+                )
+            )
+            progress.set_value(i + 1)
+        progress.set_value(len(used))
+    resolutions = np.array([result["resolution"] for result in results])
+    resolution = best_size = np.nan
+    pixel_size_limited = False
+    if np.isfinite(resolutions).any():
+        best = int(np.nanargmin(resolutions))
+        resolution = float(resolutions[best])
+        best_size = used[best][0]
+        # no smaller pixels were rendered to show the resolution beyond
+        pixel_size_limited = bool(
+            best_size == min(size for size, _ in used)
+            and resolution < DECORRELATION_LIMIT_FACTOR * best_size
+        )
+    area = _sample_area(x, y)
+    return {
+        "resolution": resolution,
+        "pixel_size": best_size,
+        "pixel_size_limited": pixel_size_limited,
+        "pixel_sizes": np.array([size for size, _ in used]),
+        "resolutions": resolutions,
+        "results": results,
+        "skipped_pixel_sizes": np.array(skipped),
+        "n_locs": int(len(x)),
+        "sample_area": area,
+        "density": len(x) / (area / 1e6) if area > 0 else np.nan,
+        "viewport": viewport,
+    }
+
+
+def _best_decorrelation(result: dict) -> dict:
+    """The result of ``imageprocess.decorrelation`` in ``result`` (of
+    ``decorrelation`` or ``imageprocess.decorrelation``) at the pixel
+    size of the reported resolution, or at the first pixel size without
+    one."""
+    if "results" not in result:
+        return result
+    if np.isfinite(result["resolution"]):
+        return result["results"][int(np.nanargmin(result["resolutions"]))]
+    return result["results"][0]
+
+
+def plot_decorrelation(
+    decorrelation_result: dict,
+    fig: plt.Figure | None = None,
+) -> plt.Figure:
+    """Plot the decorrelation functions at the pixel size of the
+    resolution, with their peaks and the cut-off frequency, and, for
+    several pixel sizes, the resolution at each pixel size.
+
+    Parameters
+    ----------
+    decorrelation_result : dict
+        Result of ``decorrelation`` or ``imageprocess.decorrelation``.
+    fig : plt.Figure or None, optional
+        Figure to plot on, cleared first. If None, a new figure is
+        created. Default is None.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    if fig is None:
+        fig = plt.Figure(constrained_layout=True)
+    else:
+        fig.clear()
+    result = decorrelation_result
+    scan = "results" in result and len(result["pixel_sizes"]) > 1
+    in_nm = "results" in result
+    if scan:
+        ax, ax_sizes = fig.subplots(1, 2, gridspec_kw={"width_ratios": [3, 2]})
+    else:
+        ax = fig.add_subplot(111)
+    # colors of the active style, resolved now (lines look "CN" colors
+    # up only when drawn)
+    data_color, cutoff_color = plt.rcParams["axes.prop_cycle"].by_key()[
+        "color"
+    ][:2]
+    best = _best_decorrelation(result)
+    frequencies = best["frequencies"]
+    for i, curve in enumerate(best["curves"][1:]):
+        ax.plot(
+            frequencies,
+            curve,
+            color="0.6",
+            linewidth=0.8,
+            label="High-pass filtered" if i == 0 else None,
+        )
+    ax.plot(
+        frequencies,
+        best["curves"][0],
+        color=data_color,
+        linewidth=1.8,
+        label="Not filtered",
+    )
+    found = np.isfinite(best["peak_radii"])
+    ax.plot(
+        best["peak_radii"][found] / (2 * best["pixel_size"]),
+        best["peak_amplitudes"][found],
+        "o",
+        color=data_color,
+        markersize=4,
+        label="Peaks",
+    )
+    unit = "nm" if in_nm else "units"
+    if np.isfinite(best["cutoff"]):
+        ax.axvline(
+            best["cutoff"] / (2 * best["pixel_size"]),
+            color=cutoff_color,
+            linestyle="--",
+            linewidth=1.2,
+            label=f"Cut-off: {best['resolution']:.1f} {unit}",
+        )
+    ax.set_xlim(0, frequencies[-1])
+    ax.set_ylim(bottom=0)
+    ax.set_xlabel(
+        "Spatial frequency (nm⁻¹)"
+        if in_nm
+        else "Spatial frequency (1 / unit of the pixel size)"
+    )
+    ax.set_ylabel("Decorrelation")
+    ax.set_title(f"Pixel size {best['pixel_size']:.3g} {unit}")
+    ax.legend(loc="best")
+
+    if scan:
+        sizes = result["pixel_sizes"]
+        ax_sizes.plot(
+            sizes,
+            2 * sizes,
+            color="0.5",
+            linestyle=":",
+            label="2 x pixel size",
+        )
+        ax_sizes.plot(
+            sizes, result["resolutions"], "o-", color=data_color, label="Data"
+        )
+        if np.isfinite(result["resolution"]):
+            ax_sizes.plot(
+                result["pixel_size"],
+                result["resolution"],
+                "o",
+                color=cutoff_color,
+                markersize=9,
+                label="Smallest",
+            )
+        ax_sizes.set_xscale("log", base=2)
+        ax_sizes.set_yscale("log", base=2)
+        for axis in (ax_sizes.xaxis, ax_sizes.yaxis):
+            axis.set_major_formatter(ticker.FuncFormatter(_plain_number))
+            axis.set_minor_formatter(ticker.NullFormatter())
+        ax_sizes.set_xlabel("Pixel size (nm)")
+        ax_sizes.set_ylabel("Resolution (nm)")
+        ax_sizes.legend(loc="best")
+    title = "Decorrelation resolution: " + (
+        f"{result['resolution']:.1f} {unit}"
+        if np.isfinite(result["resolution"])
+        else "n/a"
+    )
+    if in_nm and result["pixel_size_limited"]:
+        title += " (limited by the pixel size)"
+    if in_nm:
+        title += (
+            f"\n{result['n_locs']:,} localizations, "
+            f"{result['density']:,.0f} per µm² of sample"
+        )
+    fig.suptitle(title)
+    return fig
+
+
+def _plain_number(value: float, _position: int | None = None) -> str:
+    """Tick label of a logarithmic axis as a plain number, e.g., 16."""
+    return f"{value:g}"
+
+
+def _decorrelation_tables(
+    decorrelation_result: dict,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The result of ``decorrelation`` as two tables: the resolution at
+    each pixel size and the decorrelation functions at the pixel size
+    of the reported resolution (the first column without high-pass
+    filter). Used for saving the result as .csv files."""
+    result = decorrelation_result
+    sizes = pd.DataFrame(
+        {
+            "pixel_size_nm": result["pixel_sizes"],
+            "resolution_nm": result["resolutions"],
+            "cutoff": [r["cutoff"] for r in result["results"]],
+            "amplitude": [r["amplitude"] for r in result["results"]],
+        }
+    )
+    best = _best_decorrelation(result)
+    curves = {"frequency_per_nm": best["frequencies"]}
+    curves["not_filtered"] = best["curves"][0]
+    for sigma, curve in zip(best["filters"], best["curves"][1:]):
+        curves[f"filter_{sigma:.4g}"] = curve
+    return sizes, pd.DataFrame(curves)
 
 
 def pair_correlation(
@@ -3206,8 +4144,8 @@ def evaluate_picks(
     """Calculate pick statistics: number of localizations and binding
     events, rmsd, bright and dark times.
 
-    Returned arrays may contain NaNs (``np.empty`` is used for
-    initialization and not all picks may be evaluated successfully).
+    Returned arrays hold NaN for the picks that are not evaluated, e.g.,
+    empty ones.
 
     Parameters
     ----------
@@ -3245,13 +4183,14 @@ def evaluate_picks(
         with added 'length' and 'dark' fields/columns.
     """
     n_picks = len(picked_locs)
-    N = np.empty(n_picks)  # number of locs per pick
-    n_events = np.empty(n_picks)  # number of events per pick
-    rmsd = np.empty(n_picks)  # rmsd in each pick
-    length = np.empty(n_picks)  # estimated mean bright time
-    dark = np.empty(n_picks)  # estimated mean dark time
+    # NaN for the picks that are not evaluated, e.g., empty ones
+    N = np.full(n_picks, np.nan)  # number of locs per pick
+    n_events = np.full(n_picks, np.nan)  # number of events per pick
+    rmsd = np.full(n_picks, np.nan)  # rmsd in each pick
+    length = np.full(n_picks, np.nan)  # estimated mean bright time
+    dark = np.full(n_picks, np.nan)  # estimated mean dark time
     has_z = "z" in picked_locs[0].columns
-    rmsd_z = np.empty(n_picks)
+    rmsd_z = np.full(n_picks, np.nan)
     new_locs = []  # linked locs in each pick
     # e.g., the statistics of one-localization picks; scoped, so that
     # the warning filters of the caller are kept
@@ -3517,12 +4456,14 @@ def compute_dark_times(
         removed.
     info : list of dicts
         Metadata of ``locs``: ``info`` with an entry recording the step
-        (``"Step": "Dark"``) appended, see ``lib.append_metadata``.
-        ``io.load_locs`` reads the Picasso version of this entry to
-        tell the dark-time convention.
+        (``"Step": "Dark"``) and whether a ``group`` was given
+        appended, see ``lib.append_metadata``. ``io.load_locs`` reads
+        the Picasso version of this entry to tell the dark-time
+        convention.
     """
     locs = _compute_dark_times(locs, group)
-    return locs, lib.append_metadata(info, lib.step_info("Dark"))
+    entry = lib.step_info("Dark", **{"Per group": group is not None})
+    return locs, lib.append_metadata(info, entry)
 
 
 def _compute_dark_times(
@@ -3811,15 +4752,628 @@ def select_binding_event_cores(
     return lib.append_group(out_locs, event_id.astype(np.int32)), info
 
 
+def dye_performance(
+    picked_locs: list[pd.DataFrame],
+    info: list[dict],
+    *,
+    max_dark_time: int = 0,
+    cutoff: float = 4.0,
+    fraction: float = 0.2,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> dict:
+    """Performance of a DNA-PAINT dye at picked docking sites (Steen et
+    al., 2024): the signal-to-background ratio (SBR), the drop of the
+    number of localizations over the measurement and the fraction of
+    destroyed docking sites.
+
+    The SBR (``signal_to_background``) is computed for the
+    localizations in the centers of binding events of at least three
+    frames (``select_binding_event_cores``), since the first and the
+    last frame record only a part of a binding; the binding events stay
+    within each pick. The localization drop compares the first and the
+    last ``fraction`` of the frames (``localization_rate_drop``), and
+    the destroyed docking sites are estimated from the time after the
+    last binding event of each pick (``docking_site_damage``). A value
+    that cannot be computed is None, with the reason in "errors".
+
+    Parameters
+    ----------
+    picked_locs : list of pd.DataFrames
+        Localizations of each docking site, e.g., of picks of single
+        docking sites (see ``picked_locs``).
+    info : list of dicts
+        Metadata of the localizations, which holds the number of frames
+        (``Frames``) and the camera pixel size (``Pixelsize``, nm).
+    max_dark_time : int, optional
+        Largest number of frames without a localization within a binding
+        event, see ``link``. Steen et al. link only localizations in
+        consecutive frames. Default is 0.
+    cutoff : float, optional
+        Cut-off of the ratio r of ``docking_site_damage`` in units of
+        its fitted mean. Default is 4.
+    fraction : float, optional
+        Fraction of the frames at the beginning and at the end compared
+        by ``localization_rate_drop``. Default is 0.2.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating kinetics" over
+        the picks. Default is None.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with the keys:
+
+        - "sbr": SBR of each localization in the center of a binding
+          event, or None (e.g., without ``sx`` and ``sy`` of a Gaussian
+          fit).
+        - "localization_drop": relative decrease of the number of
+          localizations, e.g., 0.3 for 30%, or None.
+        - "damage": result of ``docking_site_damage``, or None (e.g.,
+          if no pick has three binding events).
+        - "locs": the localizations of all picks, with the pick in the
+          ``group`` column (kept if present), or None without
+          localizations.
+        - "errors": why each of "sbr", "localization_drop" and "damage"
+          that is None could not be computed.
+
+    See Also
+    --------
+    plot_docking_site_damage : Plot the docking site damage.
+    plot_localization_rate : Plot the localizations over time.
+
+    References
+    ----------
+    Steen, P. R. et al. The DNA-PAINT palette: a comprehensive
+    performance analysis of fluorescent dyes. Nat Methods 21, 1755-1762
+    (2024). https://doi.org/10.1038/s41592-024-02374-8
+    """
+    result = {
+        "sbr": None,
+        "localization_drop": None,
+        "damage": None,
+        "locs": None,
+        "errors": {},
+    }
+    picked = [locs for locs in picked_locs if len(locs)]
+    if not picked:
+        result["errors"] = dict.fromkeys(
+            ("sbr", "localization_drop", "damage"),
+            "no localizations in the picks",
+        )
+        return result
+    pooled = pd.concat(picked, ignore_index=True)
+    if "group" not in pooled.columns:  # one group per pick
+        pooled["group"] = np.repeat(
+            np.arange(len(picked), dtype=np.int32),
+            [len(locs) for locs in picked],
+        )
+    result["locs"] = pooled
+    try:
+        result["localization_drop"] = localization_rate_drop(
+            pooled, info, fraction=fraction
+        )
+    except (ValueError, KeyError) as e:
+        result["errors"]["localization_drop"] = str(e).strip("'")
+    try:
+        result["damage"] = docking_site_damage(
+            picked_locs,
+            info,
+            max_dark_time=max_dark_time,
+            cutoff=cutoff,
+            progress=progress,
+        )
+    except (ValueError, KeyError) as e:
+        result["errors"]["damage"] = str(e).strip("'")
+    try:
+        cores, _ = select_binding_event_cores(
+            pooled, r_max=np.inf, max_dark_time=max_dark_time
+        )
+        result["sbr"] = signal_to_background(cores, info)
+    except (ValueError, KeyError) as e:
+        result["errors"]["sbr"] = str(e).strip("'")
+    return result
+
+
+def signal_to_background(
+    locs: pd.DataFrame,
+    info: list[dict],
+) -> lib.FloatArray1D:
+    """Signal-to-background ratio (SBR) of each localization, as defined
+    by Steen et al. (2024): the photons of the fitted Gaussian PSF that
+    fall within one camera pixel centered on the localization, divided
+    by the background per pixel::
+
+        SBR = photons * erf(a / (2 sqrt(2) sx)) * erf(a / (2 sqrt(2) sy))
+              / bg
+
+    with the camera pixel size ``a`` (``Pixelsize`` in the metadata).
+
+    The first and the last frame of a binding event record only a part
+    of it (the imager binds or unbinds during the exposure), so their
+    SBR is too low. Steen et al. report the SBR of the other
+    localizations of binding events of at least three frames, see
+    ``select_binding_event_cores``.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations of a Gaussian fit, with the columns ``photons``,
+        ``sx``, ``sy`` (nm) and ``bg`` (photons per pixel).
+    info : list of dicts
+        Metadata of the localizations, which holds the camera pixel size
+        (``Pixelsize``, nm).
+
+    Returns
+    -------
+    sbr : lib.FloatArray1D
+        SBR of each localization; NaN where the background is not
+        positive.
+
+    Raises
+    ------
+    ValueError
+        If a column is missing, e.g., for spline fits, which have no
+        ``sx`` and ``sy``.
+    KeyError
+        If the metadata has no ``Pixelsize``.
+
+    References
+    ----------
+    Steen, P. R. et al. The DNA-PAINT palette: a comprehensive
+    performance analysis of fluorescent dyes. Nat Methods 21, 1755-1762
+    (2024). https://doi.org/10.1038/s41592-024-02374-8
+    """
+    missing = [c for c in ("photons", "sx", "sy", "bg") if c not in locs]
+    if missing:
+        raise ValueError(
+            "The SBR needs the columns photons, sx, sy and bg of a "
+            f"Gaussian fit; missing: {', '.join(missing)}."
+        )
+    pixel_size = float(
+        lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    )
+    # half the pixel over sqrt(2) times the PSF width
+    scale = 0.5 * pixel_size / np.sqrt(2)
+    peak = (
+        locs["photons"].to_numpy(dtype=np.float64)
+        * special.erf(scale / locs["sx"].to_numpy(dtype=np.float64))
+        * special.erf(scale / locs["sy"].to_numpy(dtype=np.float64))
+    )
+    bg = locs["bg"].to_numpy(dtype=np.float64)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        return np.where(bg > 0, peak / bg, np.nan)
+
+
+def docking_site_damage(
+    picked_locs: list[pd.DataFrame],
+    info: list[dict],
+    *,
+    max_dark_time: int = 0,
+    cutoff: float = 4.0,
+    bin_width: float = 0.5,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> dict:
+    """Fraction of docking sites destroyed during the measurement,
+    estimated from the time after their last binding event (Steen et
+    al., 2024).
+
+    Each pick holds the localizations of one docking site. Its
+    localizations are linked into binding events (see ``link``) and its
+    mean dark time, tau_d, is fitted to the cumulative distribution of
+    its dark times: 1 - exp(-t / tau_d) is fitted to the fractions
+    0, 1 / (n - 1), ..., 1 of its n sorted dark times, as by Steen et al.
+    (unlike ``pick_kinetics``, without an amplitude and an offset, which
+    overestimate tau_d for sites with few binding events). The time
+    from its last localization to the end of the measurement, t_end (in
+    frames without signal, like the dark times), gives the ratio::
+
+        r = t_end / tau_d
+
+    At an intact docking site, binding continues until the end, so r
+    follows an exponential distribution with mean 1. A destroyed site
+    stops binding, so its r is large. The exponential a * exp(-r / mu)
+    is fitted to the histogram of r of all sites; mu is above 1 if the
+    binding slows down over time, e.g., as sites are damaged. The
+    fraction of sites with r > ``cutoff`` * mu, minus the fraction
+    expected for an exponential distribution (exp(-``cutoff``), 1.83%
+    for the default cut-off of 4), estimates the fraction of destroyed
+    docking sites.
+
+    Parameters
+    ----------
+    picked_locs : list of pd.DataFrames
+        Localizations of each docking site, e.g., of picks of single
+        docking sites (see ``picked_locs``).
+    info : list of dicts
+        Metadata of the localizations, which holds the number of frames
+        of the measurement (``Frames``).
+    max_dark_time : int, optional
+        Largest number of frames without a localization within a binding
+        event, see ``link``. Steen et al. link only localizations in
+        consecutive frames. Default is 0.
+    cutoff : float, optional
+        Cut-off of r in units of the fitted mean mu. Default is 4.
+    bin_width : float, optional
+        Width of the bins of the histogram of r that the exponential is
+        fitted to. Default is 0.5.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating kinetics" over
+        the picks. Default is None.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with the keys:
+
+        - "r": ratio r of each pick; NaN for picks without a mean dark
+          time.
+        - "t_end": frames after the last localization of each pick
+          (NaN for empty picks).
+        - "dark": mean dark time of each pick in frames (NaN with fewer
+          than two dark times or if the fit failed).
+        - "n_sites": number of picks with r.
+        - "edges", "counts": histogram of r.
+        - "amplitude", "mu": parameters of the exponential fitted to
+          the histogram (NaN if the fit failed).
+        - "r_cutoff": cut-off of r, ``cutoff`` * mu.
+        - "fraction_above_cutoff": fraction of the sites with r above
+          the cut-off.
+        - "fraction_destroyed": estimated fraction of destroyed docking
+          sites, i.e., ``fraction_above_cutoff`` minus exp(-``cutoff``);
+          may be slightly negative without damage.
+        - "max_dark_time", "cutoff", "bin_width": the parameters.
+
+    Raises
+    ------
+    ValueError
+        If the parameters are invalid or no pick has a mean dark time.
+    KeyError
+        If the metadata has no ``Frames``.
+
+    See Also
+    --------
+    plot_docking_site_damage : Plot the result.
+    localization_rate_drop : Decrease of the number of localizations
+        over the measurement.
+
+    References
+    ----------
+    Steen, P. R. et al. The DNA-PAINT palette: a comprehensive
+    performance analysis of fluorescent dyes. Nat Methods 21, 1755-1762
+    (2024). https://doi.org/10.1038/s41592-024-02374-8
+    """
+    if max_dark_time < 0:
+        raise ValueError("max_dark_time must not be negative.")
+    if not cutoff > 0:
+        raise ValueError("cutoff must be positive.")
+    if not bin_width > 0:
+        raise ValueError("bin_width must be positive.")
+    n_frames = int(lib.get_from_metadata(info, "Frames", raise_error=True))
+    n_picks = len(picked_locs)
+    t_end = np.full(n_picks, np.nan)
+    dark = np.full(n_picks, np.nan)
+    with (
+        lib.tracked_progress(
+            progress, "Calculating kinetics", unit="pick"
+        ) as progress,
+        warnings.catch_warnings(),
+    ):
+        warnings.simplefilter(
+            "ignore", category=(OptimizeWarning, RuntimeWarning)
+        )
+        lib.start_phase(progress, "Calculating kinetics", n_picks, unit="pick")
+        progress.set_value(0)
+        for i, locs in enumerate(picked_locs):
+            if len(locs):
+                t_end[i] = n_frames - 1 - int(locs["frame"].max())
+                if "len" not in locs.columns:
+                    locs = _link(
+                        locs,
+                        info,
+                        r_max=np.inf,  # one docking site per pick
+                        max_dark_time=max_dark_time,
+                    )
+                dark[i] = _exponential_cdf_mean(
+                    dark_times(locs).astype(np.float64)
+                )
+            progress.set_value(i + 1)
+        progress.set_value(n_picks)
+    r = t_end / dark
+    valid = r[np.isfinite(r)]
+    if not len(valid):
+        raise ValueError(
+            "No pick has a mean dark time (at least three binding events)."
+        )
+    n_bins = max(int(np.ceil(valid.max() / bin_width)), 1)
+    edges = np.arange(n_bins + 1) * bin_width
+    counts = np.histogram(valid, edges)[0]
+    centers = edges[:-1] + 0.5 * bin_width
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", OptimizeWarning)
+            (amplitude, mu), _ = curve_fit(
+                lambda x, a, m: a * np.exp(-x / m),
+                centers,
+                counts,
+                p0=(max(counts.max(), 1), 1.0),
+                bounds=((0, 1e-9), (np.inf, np.inf)),
+            )
+    except (RuntimeError, ValueError):
+        amplitude = mu = np.nan
+    r_cutoff = cutoff * mu
+    above = float(np.mean(valid > r_cutoff)) if mu > 0 else np.nan
+    return {
+        "r": r,
+        "t_end": t_end,
+        "dark": dark,
+        "n_sites": len(valid),
+        "edges": edges,
+        "counts": counts,
+        "amplitude": float(amplitude),
+        "mu": float(mu),
+        "r_cutoff": float(r_cutoff),
+        "fraction_above_cutoff": above,
+        "fraction_destroyed": above - np.exp(-cutoff),
+        "max_dark_time": max_dark_time,
+        "cutoff": cutoff,
+        "bin_width": bin_width,
+    }
+
+
+def _exponential_cdf_mean(times: lib.FloatArray1D) -> float:
+    """Mean of the exponential distribution whose cumulative
+    distribution function, 1 - exp(-t / tau), fits the empirical one of
+    ``times`` best (least squares at the fractions 0, 1 / (n - 1), ...,
+    1 of the n sorted times; Steen et al., 2024). Negative times
+    (missing dark times, see ``dark_times``) are ignored; NaN for fewer
+    than two times or a failed fit."""
+    times = np.sort(times[times >= 0])
+    n = len(times)
+    if n < 2:
+        return np.nan
+    if times[-1] == times[0]:
+        return float(times[0]) if times[0] > 0 else np.nan
+    fractions = np.arange(n) / (n - 1)
+    try:
+        (tau,), _ = curve_fit(
+            lambda t, tau: 1 - np.exp(-t / tau),
+            times,
+            fractions,
+            p0=(max(times.mean(), 1e-9),),
+            bounds=(1e-9, np.inf),
+        )
+    except (RuntimeError, ValueError):
+        return np.nan
+    return float(tau)
+
+
+def plot_docking_site_damage(
+    damage_result: dict,
+    ax: plt.Axes | None = None,
+) -> plt.Figure:
+    """Plot the histogram of the ratios r of ``docking_site_damage``
+    with the fitted exponential and the cut-off, up to r = 10 (or 2.5
+    times the cut-off).
+
+    Parameters
+    ----------
+    damage_result : dict
+        Result of ``docking_site_damage``.
+    ax : plt.Axes or None, optional
+        Axes to plot on. If None, a new figure with one axes is created.
+        Default is None.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    if ax is None:
+        fig = plt.Figure(constrained_layout=True)
+        ax = fig.add_subplot()
+    else:
+        fig = ax.figure
+    data_color, fit_color = plt.rcParams["axes.prop_cycle"].by_key()["color"][
+        :2
+    ]
+    edges = damage_result["edges"]
+    ax.stairs(
+        damage_result["counts"],
+        edges,
+        fill=True,
+        color=data_color,
+        alpha=lib.OUTLINED_FILL_ALPHA,
+        label=f"{damage_result['n_sites']:,} sites",
+    )
+    mu = damage_result["mu"]
+    # the bulk of the distribution; destroyed sites reach far beyond
+    r_max = 10.0
+    if np.isfinite(mu):
+        r_max = max(r_max, 2.5 * damage_result["r_cutoff"])
+    r_max = min(r_max, edges[-1])
+    if np.isfinite(mu):
+        r = np.linspace(0, r_max, 200)
+        ax.plot(
+            r,
+            damage_result["amplitude"] * np.exp(-r / mu),
+            color=fit_color,
+            label=f"Exponential fit, μ = {mu:.2f}",
+        )
+        ax.axvline(
+            damage_result["r_cutoff"],
+            color=fit_color,
+            linestyle="--",
+            linewidth=1,
+            label=(
+                f"Cut-off {damage_result['cutoff']:g}μ: "
+                f"{100 * damage_result['fraction_destroyed']:.1f}% "
+                "destroyed"
+            ),
+        )
+    ax.set_xlim(0, r_max)
+    ax.set_xlabel("r = time after the last event / mean dark time")
+    ax.set_ylabel("Docking sites")
+    ax.set_title("Docking site damage")
+    ax.legend(loc="best")
+    return fig
+
+
+def localization_rate_drop(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    fraction: float = 0.2,
+) -> float:
+    """Relative decrease of the number of localizations from the
+    beginning to the end of the measurement, e.g., as docking sites are
+    damaged (Steen et al., 2024): one minus the number of localizations
+    in the last ``fraction`` of the frames over that in the first
+    ``fraction``.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations, e.g., of picked docking sites (see
+        ``picked_locs``).
+    info : list of dicts
+        Metadata of the localizations, which holds the number of frames
+        (``Frames``).
+    fraction : float, optional
+        Fraction of the frames at the beginning and at the end that are
+        compared, at most 0.5. Default is 0.2.
+
+    Returns
+    -------
+    drop : float
+        Relative decrease, e.g., 0.3 for 30% fewer localizations at the
+        end; negative for an increase.
+
+    Raises
+    ------
+    ValueError
+        If ``fraction`` is not in (0, 0.5] or there are no localizations
+        in the first ``fraction`` of the frames.
+    KeyError
+        If the metadata has no ``Frames``.
+
+    See Also
+    --------
+    plot_localization_rate : Plot the localizations over time.
+
+    References
+    ----------
+    Steen, P. R. et al. The DNA-PAINT palette: a comprehensive
+    performance analysis of fluorescent dyes. Nat Methods 21, 1755-1762
+    (2024). https://doi.org/10.1038/s41592-024-02374-8
+    """
+    if not 0 < fraction <= 0.5:
+        raise ValueError("fraction must be in (0, 0.5].")
+    n_frames = int(lib.get_from_metadata(info, "Frames", raise_error=True))
+    frame = locs["frame"].to_numpy()
+    n_first = int(np.count_nonzero(frame < fraction * n_frames))
+    n_last = int(np.count_nonzero(frame >= (1 - fraction) * n_frames))
+    if not n_first:
+        raise ValueError(
+            f"No localizations in the first {100 * fraction:g}% of the "
+            "frames."
+        )
+    return 1.0 - n_last / n_first
+
+
+def plot_localization_rate(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    fraction: float = 0.2,
+    n_bins: int = 50,
+    ax: plt.Axes | None = None,
+) -> plt.Figure:
+    """Plot the number of localizations over the measurement with the
+    mean levels of the first and the last ``fraction`` of the frames,
+    whose ratio gives ``localization_rate_drop``.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Localizations, e.g., of picked docking sites.
+    info : list of dicts
+        Metadata of the localizations, which holds the number of frames
+        (``Frames``).
+    fraction : float, optional
+        Fraction of the frames at the beginning and at the end that are
+        compared, see ``localization_rate_drop``. Default is 0.2.
+    n_bins : int, optional
+        Number of time bins. Default is 50.
+    ax : plt.Axes or None, optional
+        Axes to plot on. If None, a new figure with one axes is created.
+        Default is None.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    if not 0 < fraction <= 0.5:
+        raise ValueError("fraction must be in (0, 0.5].")
+    if n_bins < 1:
+        raise ValueError("n_bins must be at least 1.")
+    if ax is None:
+        fig = plt.Figure(constrained_layout=True)
+        ax = fig.add_subplot()
+    else:
+        fig = ax.figure
+    data_color, level_color = plt.rcParams["axes.prop_cycle"].by_key()[
+        "color"
+    ][:2]
+    n_frames = int(lib.get_from_metadata(info, "Frames", raise_error=True))
+    frame = locs["frame"].to_numpy()
+    edges = np.linspace(0, n_frames, n_bins + 1)
+    ax.stairs(
+        np.histogram(frame, edges)[0],
+        edges,
+        fill=True,
+        color=data_color,
+        alpha=lib.OUTLINED_FILL_ALPHA,
+        label=f"{len(frame):,} localizations",
+    )
+    # mean number per bin in the first and the last part
+    window = fraction * n_frames
+    per_bin = (n_frames / n_bins) / window
+    n_first = np.count_nonzero(frame < window)
+    n_last = np.count_nonzero(frame >= n_frames - window)
+    label = "First and last {:g}%".format(100 * fraction)
+    if n_first:
+        label += f": drop {100 * (1 - n_last / n_first):.1f}%"
+    ax.hlines(
+        [n_first * per_bin, n_last * per_bin],
+        [0, n_frames - window],
+        [window, n_frames],
+        color=level_color,
+        linewidth=2,
+        label=label,
+    )
+    ax.set_xlim(0, n_frames)
+    ax.set_xlabel("Frame")
+    ax.set_ylabel("Localizations per bin")
+    ax.set_title("Localizations over time")
+    ax.legend(loc="best")
+    return fig
+
+
 def combine_locs_in_picks(
     locs: pd.DataFrame,
     info: list[dict],
     *,
     picks: list[tuple],
-    pick_shape: Literal[
-        "Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"
-    ],
-    pick_size: float | None = None,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | list[str]
+    ),
+    pick_size: float | list[float | None] | None = None,
     index_blocks: tuple | None = None,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
@@ -3834,19 +5388,21 @@ def combine_locs_in_picks(
         Metadata of the localizations.
     picks : list of tuples
         List of pick positions. See ``io.load_picks``.
-    pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square', 'Box', 'Brush'}
-        Shape of the picks.
-    pick_size : float or None, optional
-        Size of the picks. For circular picks, the size is the diameter;
-        for rectangular picks, the size is the width; for square picks,
-        the size is the side length. None for polygonal, box and brush
-        picks (size not defined).
+    pick_shape : {'Circle', 'Rectangle', 'Polygon', 'Square', 'Box', \
+            'Brush'} or list of str
+        Shape of the picks, or the shape of each pick, see
+        ``lib.pick_shapes_and_sizes``.
+    pick_size : float, list of float or None, optional
+        Size of the picks in nm, or the size of each pick. For circular
+        picks, the size is the diameter; for rectangular picks, the size
+        is the width; for square picks, the size is the side length.
+        None for polygonal, box and brush picks (size not defined).
     index_blocks : tuple or None, optional
         Precomputed spatial index over ``locs`` as returned by
-        ``get_index_blocks`` (built with block size equal to the pick
-        radius). When provided, used to skip re-indexing inside circular
-        ``picked_locs``. Ignored for non-circular pick shapes. Default
-        is None (index is computed on demand).
+        ``get_index_blocks`` (built with a block size of at least the
+        largest pick radius). When provided, used to skip re-indexing
+        inside circular ``picked_locs``. Ignored for non-circular
+        picks. Default is None (index is computed on demand).
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -3863,13 +5419,7 @@ def combine_locs_in_picks(
         Metadata of ``out_locs``: ``info`` with an entry recording the
         combining appended, see ``lib.append_metadata``.
     """
-    assert (
-        pick_shape in lib.PICK_SHAPES
-    ), f"pick_shape must be one of {lib.PICK_SHAPES}."
-    if pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE:
-        assert (
-            pick_size is not None
-        ), "Pick size must be provided for this pick shape."
+    lib.pick_shapes_and_sizes(picks, pick_shape, pick_size)  # check
     with lib.tracked_progress(
         progress, "Picking localizations", unit="pick"
     ) as progress:
@@ -4494,10 +6044,11 @@ def undrift_from_fiducials(
     info: list[dict],
     *,
     picks: list[tuple] | None = None,
-    pick_size: float | None = None,
-    pick_shape: Literal[
-        "Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"
-    ] = "Circle",
+    pick_size: float | list[float | None] | None = None,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | list[str]
+    ) = "Circle",
     undrift_z: bool = True,
     index_blocks: tuple | None = None,
     progress: lib.Progress | Literal["console"] | None = None,
@@ -4515,27 +6066,28 @@ def undrift_from_fiducials(
         ``pick_shape``. If None (default), circular fiducials are
         automatically detected using
         ``picasso.imageprocess.find_fiducials``.
-    pick_size : float or None, optional
-        Size of the picks in nm: the diameter for circles, the width
-        for rectangles, the side length for squares.
-        Required when ``picks`` is a list of coordinates, unless
-        ``pick_shape`` carries its own extent ("Polygon", "Box").
-        Ignored when ``picks`` is None (determined by
+    pick_size : float, list of float or None, optional
+        Size of the picks in nm, or the size of each pick: the diameter
+        for circles, the width for rectangles, the side length for
+        squares. Required when ``picks`` is a list of coordinates,
+        unless ``pick_shape`` carries its own extent ("Polygon", "Box",
+        "Brush"). Ignored when ``picks`` is None (determined by
         ``find_fiducials``).
-    pick_shape : str, optional
-        Shape of the given picks, one of ``lib.PICK_SHAPES``. Forced to
-        "Circle" when ``picks`` is None. Default is "Circle".
+    pick_shape : str or list of str, optional
+        Shape of the given picks, one of ``lib.PICK_SHAPES``, or the
+        shape of each pick (see ``lib.pick_shapes_and_sizes``). Forced
+        to "Circle" when ``picks`` is None. Default is "Circle".
     undrift_z : bool, optional
         If True, also undrift the z coordinate if it exists in the
         localizations. Default is True.
     index_blocks : tuple or None, optional
         Precomputed spatial index over ``locs`` as returned by
-        ``get_index_blocks`` (built with block size equal to the pick
-        radius, ``pick_size / 2``). When provided, used to skip
-        re-indexing inside circular ``picked_locs``. Ignored for every
-        other pick shape, and when ``picks`` is None (auto-detected
-        fiducials use a size that may not match the precomputed index).
-        Default is None.
+        ``get_index_blocks`` (built with a block size of at least the
+        largest pick radius). When provided, used to skip re-indexing
+        inside circular ``picked_locs``. Ignored for every other pick
+        shape, and when ``picks`` is None (auto-detected fiducials use a
+        size that may not match the precomputed index). Default is
+        None.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -4558,11 +6110,10 @@ def undrift_from_fiducials(
     ------
     ValueError
         If ``pick_size`` is not provided when ``picks`` is a list of
-        coordinates of a shape that needs one.
+        coordinates of a shape that needs one, or if a shape is unknown.
     """
-    assert (
-        pick_shape in lib.PICK_SHAPES
-    ), f"pick_shape must be one of {lib.PICK_SHAPES}."
+    if isinstance(pick_shape, str):
+        lib.pick_shapes_and_sizes([], pick_shape)  # check the shape
     locs = locs.copy()
 
     with lib.tracked_progress(
@@ -4582,17 +6133,16 @@ def undrift_from_fiducials(
                 index_blocks = None
         else:
             # user-provided list of pick coordinates
-            needs_size = pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE
+            shapes = (
+                [pick_shape] if isinstance(pick_shape, str) else pick_shape
+            )
+            needs_size = set(shapes) - set(lib.PICK_SHAPES_WITHOUT_SIZE)
             if pick_size is None and needs_size:
                 raise ValueError(
                     "pick_size (diameter in nm for circular picks) "
                     "must be provided when picks are given as a list of "
                     "coordinates."
                 )
-
-        if pick_shape != "Circle":
-            # the index is built for circular lookups only
-            index_blocks = None
 
         if len(picks) == 0:
             raise ValueError("No picks found for drift correction.")
@@ -4619,6 +6169,7 @@ def undrift_from_fiducials(
     locs = _apply_drift(locs, drift)
 
     entry = _picks_entry("Undrift from picked", picks, pick_shape, pick_size)
+    entry["Undrift z"] = "z" in drift.columns
     return locs, lib.append_metadata(info, entry), drift
 
 
@@ -4696,8 +6247,11 @@ def _undrift_from_picked_coordinate(
     center of mass. The drift of a frame is the average over the picks
     with a localization in it (one per pick; the last one if a pick has
     several), each pick weighted by the inverse of its mean square
-    deviation from the unweighted average drift. Frames without
-    localizations are interpolated linearly.
+    deviation from the unweighted average drift. A pick that does not
+    deviate at all (e.g., the only pick, or a pick alone in all of its
+    frames) takes the median weight of the others, or all picks weigh
+    the same if none deviates. Frames without localizations are
+    interpolated linearly.
 
     The statistics are accumulated over the localizations, never over a
     (picks x frames) table, whose memory would grow with the number of
@@ -4743,8 +6297,14 @@ def _undrift_from_picked_coordinate(
             np.bincount(pick_e, minlength=n_picks)
         )
         # new mean drift over picks, where each pick is weighted
-        # according to its msd
-        weights = 1 / msd[pick_e]
+        # according to its msd; a pick with msd 0 would weigh infinitely
+        # and turn its frames into NaN
+        deviates = msd > 0
+        pick_weights = np.ones(n_picks)
+        pick_weights[deviates] = 1 / msd[deviates]
+        if deviates.any():
+            pick_weights[~deviates] = np.median(pick_weights[deviates])
+        weights = pick_weights[pick_e]
         drift_mean = np.bincount(
             frame_e, weights=weights * drift, minlength=n_frames
         ) / np.bincount(frame_e, weights=weights, minlength=n_frames)
@@ -4752,6 +6312,8 @@ def _undrift_from_picked_coordinate(
 
     # Linear interpolation for frames without localizations
     nans = np.isnan(drift_mean)
+    if nans.all():
+        raise ValueError("No picked localizations to compute the drift from.")
     drift_mean[nans] = np.interp(
         np.flatnonzero(nans), np.flatnonzero(~nans), drift_mean[~nans]
     )
@@ -4763,10 +6325,15 @@ def _apply_drift(locs: pd.DataFrame, drift: pd.DataFrame) -> pd.DataFrame:
     the drift is already in the correct format and that the number of
     frames matches."""
     frames = locs["frame"]
-    locs["x"] -= drift["x"].iloc[frames].to_numpy()
-    locs["y"] -= drift["y"].iloc[frames].to_numpy()
+    columns = ["x", "y"]
     if "z" in drift.columns and "z" in locs.columns:
-        locs["z"] -= drift["z"].iloc[frames].to_numpy()
+        columns.append("z")
+    # new arrays rather than written into the existing ones, which may be
+    # kept elsewhere, e.g., by the undo history of Render
+    for column in columns:
+        locs[column] = (
+            locs[column].to_numpy() - drift[column].iloc[frames].to_numpy()
+        )
     return locs
 
 
@@ -4799,7 +6366,9 @@ def apply_drift(
         (and 'z' if it exists in the drift).
     info : list of dicts
         Metadata of ``locs``: ``info`` with an entry recording the step
-        appended, see ``lib.append_metadata``.
+        appended, see ``lib.append_metadata``. The entry lists the
+        ``"Drift file"`` of a drift loaded with ``io.load_drift``
+        (``drift.attrs["Path"]``).
     """
     assert isinstance(
         drift, (pd.DataFrame, np.ndarray)
@@ -4822,6 +6391,8 @@ def apply_drift(
             columns=["x", "y"] + (["z"] if drift.shape[1] == 3 else []),
         )
     entry = lib.step_info("Apply drift")
+    if path := drift.attrs.get("Path"):
+        entry["Drift file"] = path
     return _apply_drift(locs, drift), lib.append_metadata(info, entry)
 
 
@@ -4905,16 +6476,19 @@ def align(
     locs: list[pd.DataFrame],
     infos: list[list[dict]],
     *,
-    method: Literal["rcc", "picked"] = "rcc",
+    method: Literal["rcc", "picked", "points"] = "rcc",
     picks: list[tuple] | None = None,
-    pick_shape: Literal[
-        "Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"
-    ] = "Circle",
-    pick_size: float | None = None,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | list[str]
+    ) = "Circle",
+    pick_size: float | list[float | None] | None = None,
     index_blocks: list[tuple | None] | None = None,
+    max_shift: float = 500.0,
     display: bool = False,
     return_shifts: bool = False,
     keep_non_overlapping: bool = True,
+    paths: list[str] | None = None,
 ) -> (
     tuple[list[pd.DataFrame], list[list[dict]]]
     | tuple[list[pd.DataFrame], list[list[dict]], tuple]
@@ -4922,10 +6496,12 @@ def align(
     """Align localizations from multiple channels (one per element in
     ``locs``).
 
-    The shifts between the channels are found either by RCC of the
-    rendered images (``method="rcc"``, see ``align_rcc``) or from the
-    localizations in picked regions (``method="picked"``, see
-    ``align_from_picked``). The input DataFrames are not modified.
+    The shifts between the channels are found by RCC of the rendered
+    images (``method="rcc"``, see ``align_rcc``), from the localizations
+    in picked regions (``method="picked"``, see ``align_from_picked``)
+    or from the displacements between the localizations of the channels
+    (``method="points"``, see ``align_from_points``). The input
+    DataFrames are not modified.
 
     Parameters
     ----------
@@ -4933,24 +6509,29 @@ def align(
         Localizations of each channel.
     infos : list of list of dicts
         Metadata of each channel in ``locs``.
-    method : {"rcc", "picked"}, optional
+    method : {"rcc", "picked", "points"}, optional
         How the shifts are found. Default is "rcc".
     picks : list or None, optional
         Picked regions, in the format required by ``pick_shape``, see
         ``io.load_picks``. Required for ``method="picked"`` and not
         accepted otherwise. Default is None.
-    pick_shape : str, optional
-        Shape of the picks, one of ``lib.PICK_SHAPES``. Only used for
+    pick_shape : str or list of str, optional
+        Shape of the picks, one of ``lib.PICK_SHAPES``, or the shape of
+        each pick (see ``lib.pick_shapes_and_sizes``). Only used for
         ``method="picked"``. Default is "Circle".
-    pick_size : float or None, optional
-        Size of the picks: the diameter of circular picks, the side
-        length of square picks and the width of rectangular picks. None
-        for polygon, box and brush picks. Only used for
-        ``method="picked"``. Default is None.
+    pick_size : float, list of float or None, optional
+        Size of the picks, or the size of each pick: the diameter of
+        circular picks, the side length of square picks and the width of
+        rectangular picks. None for polygon, box and brush picks. Only
+        used for ``method="picked"``. Default is None.
     index_blocks : list of tuple or None, optional
         Per-channel precomputed spatial indices for circular picks, see
         ``align_from_picked``. Only used for ``method="picked"``.
         Default is None.
+    max_shift : float, optional
+        Largest shift (nm) between two channels searched for, see
+        ``align_from_points``. Only used for ``method="points"``.
+        Default is 500.
     display : bool, optional
         If True, plots the mean shift per RCC iteration. Only used for
         ``method="rcc"``. Default is False.
@@ -4962,6 +6543,9 @@ def align(
         channels overlap are removed, see
         ``remove_non_overlapping_locs``. Default is True (all
         localizations are kept).
+    paths : list of str or None, optional
+        Paths of the channels' files, saved in the metadata
+        (``"Files"``). Default is None.
 
     Returns
     -------
@@ -4982,21 +6566,24 @@ def align(
     ------
     ValueError
         If ``method`` is unknown, if ``picks`` are missing for
-        ``method="picked"`` or given for ``method="rcc"``, or if
+        ``method="picked"`` or given for another method, if
+        ``method="points"`` finds no shift (see ``align_from_points``),
+        or if
         ``keep_non_overlapping`` is False and the aligned channels do
         not overlap.
     """
+    if method in ("rcc", "points") and picks is not None:
+        raise ValueError(
+            f"picks are only used with method='picked', not {method!r}."
+        )
     if method == "rcc":
-        if picks is not None:
-            raise ValueError(
-                "picks are only used with method='picked', not 'rcc'."
-            )
         locs, infos, shifts = align_rcc(
             locs,
             infos,
             display=display,
             return_shifts=True,
             keep_non_overlapping=keep_non_overlapping,
+            paths=paths,
         )
     elif method == "picked":
         if picks is None:
@@ -5010,10 +6597,21 @@ def align(
             index_blocks=index_blocks,
             return_shifts=True,
             keep_non_overlapping=keep_non_overlapping,
+            paths=paths,
+        )
+    elif method == "points":
+        locs, infos, shifts = align_from_points(
+            locs,
+            infos,
+            max_shift=max_shift,
+            return_shifts=True,
+            keep_non_overlapping=keep_non_overlapping,
+            paths=paths,
         )
     else:
         raise ValueError(
-            f"Unknown alignment method {method!r}, use 'rcc' or 'picked'."
+            f"Unknown alignment method {method!r}, use 'rcc', 'picked' or "
+            "'points'."
         )
     if return_shifts:
         return locs, infos, shifts
@@ -5021,11 +6619,17 @@ def align(
 
 
 def _aligned_infos(
-    infos: list[list[dict]], shifts: tuple, entry: dict
+    infos: list[list[dict]],
+    shifts: tuple,
+    entry: dict,
+    paths: list[str] | None,
 ) -> list[list[dict]]:
     """Metadata of aligned channels: each element of ``infos`` with a
     copy of ``entry`` appended that also holds the shift subtracted
-    from the channel (nm)."""
+    from the channel (nm) and the ``paths`` of the channels, if
+    given."""
+    if paths is not None:
+        entry = entry | {"Files": list(paths)}
     new_infos = []
     for i, info in enumerate(infos):
         channel_entry = dict(entry)
@@ -5088,6 +6692,7 @@ def align_rcc(
     display: bool = False,
     return_shifts: bool = False,
     keep_non_overlapping: bool = True,
+    paths: list[str] | None = None,
 ) -> (
     tuple[list[pd.DataFrame], list[list[dict]]]
     | tuple[list[pd.DataFrame], list[list[dict]], tuple]
@@ -5114,6 +6719,9 @@ def align_rcc(
         channels overlap are removed, see
         ``remove_non_overlapping_locs``. Default is True (all
         localizations are kept).
+    paths : list of str or None, optional
+        Paths of the channels' files, saved in the metadata
+        (``"Files"``). Default is None.
 
     Returns
     -------
@@ -5176,7 +6784,7 @@ def align_rcc(
             "Remove non-overlapping": not keep_non_overlapping,
         },
     )
-    infos = _aligned_infos(infos, shifts, entry)
+    infos = _aligned_infos(infos, shifts, entry, paths)
     if return_shifts:
         return locs, infos, shifts
     return locs, infos
@@ -5187,13 +6795,15 @@ def align_from_picked(
     infos: list[list[dict]],
     *,
     picks: list[tuple],
-    pick_shape: Literal[
-        "Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"
-    ],
-    pick_size: float | None = None,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | list[str]
+    ),
+    pick_size: float | list[float | None] | None = None,
     return_shifts: bool = False,
     index_blocks: list[tuple | None] | None = None,
     keep_non_overlapping: bool = True,
+    paths: list[str] | None = None,
 ) -> (
     tuple[list[pd.DataFrame], list[list[dict]]]
     | tuple[list[pd.DataFrame], list[list[dict]], tuple]
@@ -5208,16 +6818,17 @@ def align_from_picked(
     infos : list of list of dicts
         List of metadata dictionaries corresponding to each localization
         dataset in ``locs``.
-    picks : list of (2,) tuples
-        Coordinates of picked regions as (x, y) tuples. See
-        ``io.load_picks``.
-    pick_shape : str
-        Shape of the picks, one of ``lib.PICK_SHAPES``.
-    pick_size : float or None, optional
-        Size of the picks. For circular picks, the size is the diameter.
-        For square picks, the size is the side length. For rectangular
-        picks, the size is the width. None for polygon, box and brush
-        picks. Default is None.
+    picks : list
+        Coordinates of picked regions in the format of their shapes,
+        e.g., (x, y) tuples for circles. See ``io.load_picks``.
+    pick_shape : str or list of str
+        Shape of the picks, one of ``lib.PICK_SHAPES``, or the shape of
+        each pick (see ``lib.pick_shapes_and_sizes``).
+    pick_size : float, list of float or None, optional
+        Size of the picks, or the size of each pick. For circular picks,
+        the size is the diameter. For square picks, the size is the side
+        length. For rectangular picks, the size is the width. None for
+        polygon, box and brush picks. Default is None.
     return_shifts : bool, optional
         If True, also returns the calculated shifts for each channel.
         Default is False.
@@ -5233,6 +6844,9 @@ def align_from_picked(
         channels overlap are removed, see
         ``remove_non_overlapping_locs``. Default is True (all
         localizations are kept).
+    paths : list of str or None, optional
+        Paths of the channels' files, saved in the metadata
+        (``"Files"``). Default is None.
 
     Returns
     -------
@@ -5256,15 +6870,10 @@ def align_from_picked(
     ------
     ValueError
         If ``keep_non_overlapping`` is False and the aligned channels
-        do not overlap.
+        do not overlap, or if a pick shape is unknown or a size is
+        missing.
     """
-    assert (
-        pick_shape in lib.PICK_SHAPES
-    ), f"pick_shape must be one of {lib.PICK_SHAPES}"
-    if pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE:
-        assert (
-            pick_size is not None
-        ), "pick_size must be provided when picks is a list of coordinates"
+    lib.pick_shapes_and_sizes(picks, pick_shape, pick_size)  # check
     ib_list = index_blocks if index_blocks is not None else [None] * len(locs)
     pl = [
         picked_locs(
@@ -5304,10 +6913,456 @@ def align_from_picked(
     entry = _picks_entry("Align", picks, pick_shape, pick_size)
     entry["Method"] = "Picked"
     entry["Remove non-overlapping"] = not keep_non_overlapping
-    infos = _aligned_infos(infos, shifts, entry)
+    infos = _aligned_infos(infos, shifts, entry, paths)
     if return_shifts:
         return aligned_locs, infos, shifts
     return aligned_locs, infos
+
+
+def align_from_points(
+    locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+    *,
+    max_shift: float = 500.0,
+    return_shifts: bool = False,
+    keep_non_overlapping: bool = True,
+    paths: list[str] | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> (
+    tuple[list[pd.DataFrame], list[list[dict]]]
+    | tuple[list[pd.DataFrame], list[list[dict]], tuple]
+):
+    """Align localizations from multiple channels by the displacements
+    between their localizations, without rendering images. The input
+    DataFrames are not modified.
+
+    For each pair of channels, the displacements (x and y, nm) from
+    every localization of the first channel to every localization of
+    the second within ``max_shift`` are histogrammed, which is the
+    cross-correlation of the two sets of localizations: the structures
+    imaged in both channels give a peak at the shift between them,
+    unrelated localizations a flat background. A 2D Gaussian on a
+    constant background is fitted to the peak, first coarsely over the
+    whole range, then on a finer histogram around it; its center is the
+    shift. Its uncertainty (standard error) is estimated by a jackknife
+    over spatial blocks of the field of view: the peak is fitted again
+    with the localizations of each block left out. (The counts of the
+    histogram are not independent, since each localization takes part
+    in many pairs, so the errors of the fit would be too small.) Pairs
+    of channels without a peak, i.e., whose highest point of the
+    smoothed histogram is less than 20 times its noise (robust standard
+    deviation) above its median, are left out. The shift of
+    each channel is then found by weighted least squares from the shifts
+    of all pairs, weighted by the inverse variance of each (see
+    ``lib.minimize_shifts``), so that the first channel stays in place.
+
+    Unlike ``align_rcc``, the shifts are not limited by the pixels of
+    rendered images and come with an uncertainty; the shifts must be
+    smaller than ``max_shift``.
+
+    Parameters
+    ----------
+    locs : list of pd.DataFrames
+        Localizations of each channel.
+    infos : list of list of dicts
+        Metadata of each channel in ``locs``.
+    max_shift : float, optional
+        Largest shift (nm) between two channels that is searched for in x
+        and y. Larger values find larger shifts but count more pairs of
+        unrelated localizations, which is slower and gives a higher
+        background. Default is 500.
+    return_shifts : bool, optional
+        If True, also returns the shifts subtracted from each channel.
+        Default is False.
+    keep_non_overlapping : bool, optional
+        If False, localizations outside the region where all aligned
+        channels overlap are removed, see
+        ``remove_non_overlapping_locs``. Default is True (all
+        localizations are kept).
+    paths : list of str or None, optional
+        Paths of the channels' files, saved in the metadata
+        (``"Files"``). Default is None.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Finding shifts" over the pairs
+        of channels. Default is None.
+
+    Returns
+    -------
+    locs : list of pd.DataFrames
+        Aligned localizations of each channel.
+    infos : list of lists of dicts
+        Metadata of each aligned channel: its ``infos`` element with an
+        entry recording the alignment appended (see
+        ``lib.append_metadata``), with the shift subtracted from the
+        channel and its uncertainty (standard error, nm).
+    shifts : tuple of np.ndarrays
+        ``(shift_x, shift_y)``, the shift subtracted from each channel in
+        nm. Returned only if ``return_shifts`` is True.
+
+    Raises
+    ------
+    ValueError
+        If ``max_shift`` is not positive, fewer than two channels are
+        given, or the pairs of channels with a significant peak do not
+        connect every channel to the first one.
+    """
+    if not max_shift > 0:
+        raise ValueError("max_shift must be positive.")
+    n_channels = len(locs)
+    if n_channels < 2:
+        raise ValueError("At least two channels are needed.")
+    shifts_x = np.full((n_channels, n_channels), np.nan)
+    shifts_y = np.full((n_channels, n_channels), np.nan)
+    weights_x = np.zeros((n_channels, n_channels))
+    weights_y = np.zeros((n_channels, n_channels))
+    pairs = [
+        (i, j) for i in range(n_channels) for j in range(i + 1, n_channels)
+    ]
+    with lib.tracked_progress(progress, "Finding shifts", unit="pair") as (
+        progress
+    ):
+        lib.start_phase(progress, "Finding shifts", len(pairs), unit="pair")
+        progress.set_value(0)
+        for k, (i, j) in enumerate(pairs):
+            shift = _point_set_shift(locs[i], locs[j], max_shift)
+            if shift is not None:
+                shifts_x[i, j], shifts_y[i, j], error_x, error_y = shift
+                weights_x[i, j] = 1 / error_x**2
+                weights_y[i, j] = 1 / error_y**2
+            progress.set_value(k + 1)
+        progress.set_value(len(pairs))
+    try:
+        shift_y, shift_x, (covariance_y, covariance_x) = lib.minimize_shifts(
+            shifts_x,
+            shifts_y,
+            weights=[weights_x, weights_y],
+            return_covariance=True,
+        )
+    except ValueError:
+        raise ValueError(
+            "The shift could not be found between enough pairs of channels "
+            f"(no peak of the displacements within {max_shift:g} nm); the "
+            "channels may not share structures or be shifted by more than "
+            "max_shift."
+        ) from None
+    locs = [
+        locs_.assign(x=locs_["x"] - dx, y=locs_["y"] - dy)
+        for locs_, dx, dy in zip(locs, shift_x, shift_y)
+    ]
+    if not keep_non_overlapping:
+        locs = remove_non_overlapping_locs(locs)
+    shifts = (shift_x, shift_y)
+    entry = lib.step_info(
+        "Align",
+        **{
+            "Method": "Points",
+            "Max. shift (nm)": float(max_shift),
+            "Remove non-overlapping": not keep_non_overlapping,
+        },
+    )
+    infos = _aligned_infos(infos, shifts, entry, paths)
+    for info, error_x, error_y in zip(
+        infos, np.diag(covariance_x), np.diag(covariance_y)
+    ):
+        info[-1]["Shift x uncertainty (nm)"] = float(np.sqrt(error_x))
+        info[-1]["Shift y uncertainty (nm)"] = float(np.sqrt(error_y))
+    if return_shifts:
+        return locs, infos, shifts
+    return locs, infos
+
+
+#: Number of bins of the coarse displacement histogram in x and y, see
+#: ``_point_set_shift``
+_SHIFT_COARSE_BINS = 100
+#: Number of bins of the fine displacement histogram around the coarse
+#: peak in x and y
+_SHIFT_FINE_BINS = 40
+#: Smallest amplitude of the displacement peak, in standard errors of
+#: the fitted amplitude, for the peak to count
+_SHIFT_MIN_SIGNIFICANCE = 5.0
+#: Smallest height of the peak of the smoothed coarse displacement
+#: histogram above its median, in units of its robust noise (1.4826
+#: times the median absolute deviation), for two channels to share
+#: structures: unrelated channels reach about 12 (clustered), related
+#: ones over 100 in simulations
+_SHIFT_MIN_PROMINENCE = 20.0
+#: Blocks per side of the grid over the field of view whose
+#: localizations are left out in turn to estimate the uncertainty of a
+#: shift (jackknife); the finer grid is used if the coarser has fewer
+#: than ``_SHIFT_MIN_BLOCKS`` blocks with pairs
+_SHIFT_BLOCK_GRIDS = (4, 8)
+_SHIFT_MIN_BLOCKS = 8
+
+
+def _point_set_shift(
+    reference: pd.DataFrame,
+    moving: pd.DataFrame,
+    max_shift: float,
+) -> tuple[float, float, float, float] | None:
+    """Shift (nm) of the localizations ``moving`` relative to
+    ``reference``, x and y with their standard errors, from the peak of
+    the histogram of the displacements between them (see
+    ``align_from_points``), or None without a significant peak."""
+    if not len(reference) or not len(moving):
+        return None
+    tx = reference["x"].to_numpy(dtype=np.float64)
+    ty = reference["y"].to_numpy(dtype=np.float64)
+    x = moving["x"].to_numpy(dtype=np.float64)
+    y = moving["y"].to_numpy(dtype=np.float64)
+    # coarse: the whole range
+    bin_size = 2 * max_shift / _SHIFT_COARSE_BINS
+    (counts,) = _displacement_histogram(
+        x, y, tx, ty, 0.0, 0.0, max_shift, _SHIFT_COARSE_BINS
+    )
+    smoothed = ndi.gaussian_filter(counts, 1.0)
+    median = np.median(smoothed)
+    # at least the smoothed count of a single pair
+    noise = max(1.4826 * np.median(np.abs(smoothed - median)), 1 / (2 * np.pi))
+    if smoothed.max() - median < _SHIFT_MIN_PROMINENCE * noise:
+        return None  # no common structures
+    peak = _fit_displacement_peak(counts, max_shift, bin_size)
+    if peak is None:
+        return None
+    center_x, center_y, _, _, sigma = peak
+    # fine: around the coarse peak, by spatial block of the moving points
+    half_width = min(max(4 * sigma, 3 * bin_size), max_shift)
+    fine_bin_size = 2 * half_width / _SHIFT_FINE_BINS
+    for n_side in _SHIFT_BLOCK_GRIDS:
+        block = _spatial_blocks(x, y, n_side)
+        block_counts = _displacement_histogram(
+            x,
+            y,
+            tx,
+            ty,
+            center_x,
+            center_y,
+            half_width,
+            _SHIFT_FINE_BINS,
+            block,
+            n_side**2,
+        )
+        used = np.flatnonzero(block_counts.sum(axis=(1, 2)))
+        if len(used) >= _SHIFT_MIN_BLOCKS:
+            break
+    counts = block_counts.sum(axis=0)
+    peak = _fit_displacement_peak(counts, half_width, fine_bin_size)
+    if peak is None:
+        return None
+    fine_x, fine_y, error_x, error_y, _ = peak
+    # jackknife: the peak without the pairs of each block in turn
+    centers = []
+    for k in used:
+        left_out = _fit_displacement_peak(
+            counts - block_counts[k], half_width, fine_bin_size
+        )
+        if left_out is not None:
+            centers.append(left_out[:2])
+    if len(centers) >= 4:  # else the errors of the fit
+        centers = np.array(centers)
+        n = len(centers)
+        error_x, error_y = np.sqrt(
+            (n - 1) / n * ((centers - centers.mean(axis=0)) ** 2).sum(axis=0)
+        )
+    return center_x + fine_x, center_y + fine_y, error_x, error_y
+
+
+def _spatial_blocks(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    n_side: int,
+) -> lib.IntArray1D:
+    """Index of the block of each point ``(x, y)`` in a grid of
+    ``n_side`` x ``n_side`` blocks over their bounding box."""
+    blocks = []
+    for values in (x, y):
+        low, high = values.min(), values.max()
+        scaled = (values - low) / max(high - low, 1e-12) * n_side
+        blocks.append(np.minimum(scaled.astype(np.int64), n_side - 1))
+    return blocks[1] * n_side + blocks[0]
+
+
+def _displacement_histogram(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    tx: lib.FloatArray1D,
+    ty: lib.FloatArray1D,
+    center_x: float,
+    center_y: float,
+    half_width: float,
+    n_bins: int,
+    block: lib.IntArray1D | None = None,
+    n_blocks: int = 1,
+) -> lib.FloatArray3D:
+    """Histograms (rows y, columns x) of the displacements ``(x, y) -
+    (tx, ty)`` of all pairs of points within ``half_width`` of
+    ``(center_x, center_y)`` in x and y, over that square in ``n_bins``
+    bins per side: one per block of the points ``(x, y)`` (``block``,
+    the block of each point, None for one block), shape (n_blocks,
+    n_bins, n_bins)."""
+    if block is None:
+        block = np.zeros(len(x), dtype=np.int64)
+    # the reference points sorted by the cell of a grid with cells of
+    # at least the half width, so that the partners of a point are in
+    # the adjacent cells
+    x_min, y_min = tx.min(), ty.min()
+    extent = max(tx.max() - x_min, ty.max() - y_min)
+    cell_size = max(half_width, extent / 1024)
+    n_cells_x = int((tx.max() - x_min) // cell_size) + 1
+    n_cells_y = int((ty.max() - y_min) // cell_size) + 1
+    cell = ((ty - y_min) // cell_size).astype(np.int64) * n_cells_x + (
+        (tx - x_min) // cell_size
+    ).astype(np.int64)
+    order = np.argsort(cell, kind="stable")
+    cell_starts = np.searchsorted(
+        cell[order], np.arange(n_cells_x * n_cells_y + 1)
+    )
+    args = (
+        x - center_x,
+        y - center_y,
+        np.ascontiguousarray(tx[order]),
+        np.ascontiguousarray(ty[order]),
+        cell_starts,
+        x_min,
+        y_min,
+        cell_size,
+        n_cells_x,
+        n_cells_y,
+        half_width,
+        n_bins,
+        block,
+        n_blocks,
+    )
+    n = len(x)
+    n_threads = lib.n_workers() if n > 10_000 else 1
+    bounds = np.linspace(0, n, n_threads + 1).astype(np.int64)
+    if n_threads == 1:
+        return _displacement_counts(*args, 0, n).astype(np.float64)
+    with _ThreadPoolExecutor(n_threads) as executor:
+        futures = [
+            executor.submit(_displacement_counts, *args, start, end)
+            for start, end in zip(bounds[:-1], bounds[1:])
+        ]
+        return np.sum([f.result() for f in futures], axis=0).astype(np.float64)
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _displacement_counts(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    tx: lib.FloatArray1D,
+    ty: lib.FloatArray1D,
+    cell_starts: lib.IntArray1D,
+    x_min: float,
+    y_min: float,
+    cell_size: float,
+    n_cells_x: int,
+    n_cells_y: int,
+    half_width: float,
+    n_bins: int,
+    block: lib.IntArray1D,
+    n_blocks: int,
+    start: int,
+    end: int,
+) -> lib.IntArray3D:
+    """Counts of ``_displacement_histogram`` of the points ``start`` to
+    ``end`` of ``(x, y)`` (already shifted by the center of the
+    window); the reference points ``(tx, ty)`` are sorted by the cell
+    of a grid, see there."""
+    counts = np.zeros((n_blocks, n_bins, n_bins), dtype=np.int64)
+    bin_size = 2 * half_width / n_bins
+    for k in range(start, end):
+        px = x[k]
+        py = y[k]
+        cx = int(np.floor((px - x_min) / cell_size))
+        cy = int(np.floor((py - y_min) / cell_size))
+        for gy in range(max(cy - 1, 0), min(cy + 2, n_cells_y)):
+            for gx in range(max(cx - 1, 0), min(cx + 2, n_cells_x)):
+                cell = gy * n_cells_x + gx
+                for m in range(cell_starts[cell], cell_starts[cell + 1]):
+                    dx = px - tx[m] + half_width
+                    dy = py - ty[m] + half_width
+                    if 0.0 <= dx < 2 * half_width and 0.0 <= dy < 2 * (
+                        half_width
+                    ):
+                        bx = min(int(dx / bin_size), n_bins - 1)
+                        by = min(int(dy / bin_size), n_bins - 1)
+                        counts[block[k], by, bx] += 1
+    return counts
+
+
+def _fit_displacement_peak(
+    counts: lib.FloatArray2D,
+    half_width: float,
+    bin_size: float,
+) -> tuple[float, float, float, float, float] | None:
+    """Fit a 2D Gaussian on a constant background to the highest peak of
+    a displacement histogram over ``[-half_width, half_width)`` in x
+    and y (rows y, columns x), by least squares with Poisson weights.
+    Returns the center x and y, their standard errors and the larger
+    width of the peak (nm), or None if the fit fails or the peak is not
+    significant."""
+    if not counts.any():
+        return None
+    centers = -half_width + (np.arange(counts.shape[0]) + 0.5) * bin_size
+    grid_x, grid_y = np.meshgrid(centers, centers)
+    smoothed = ndi.gaussian_filter(counts, 1.0)
+    row, column = np.unravel_index(np.argmax(smoothed), smoothed.shape)
+    background = float(np.median(counts))
+    p0 = (
+        max(smoothed[row, column] - background, 1.0),
+        centers[column],
+        centers[row],
+        2 * bin_size,
+        2 * bin_size,
+        background,
+    )
+
+    def model(xy, amplitude, x0, y0, sigma_x, sigma_y, offset):
+        gx, gy = xy
+        return offset + amplitude * np.exp(
+            -0.5 * (((gx - x0) / sigma_x) ** 2 + ((gy - y0) / sigma_y) ** 2)
+        )
+
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", OptimizeWarning)
+            params, covariance = curve_fit(
+                model,
+                (grid_x.ravel(), grid_y.ravel()),
+                counts.ravel(),
+                p0=p0,
+                sigma=np.sqrt(np.maximum(counts.ravel(), 1.0)),
+                absolute_sigma=True,
+                bounds=(
+                    (
+                        0,
+                        -half_width,
+                        -half_width,
+                        bin_size / 4,
+                        bin_size / 4,
+                        0,
+                    ),
+                    (
+                        np.inf,
+                        half_width,
+                        half_width,
+                        2 * half_width,
+                        2 * half_width,
+                        np.inf,
+                    ),
+                ),
+            )
+    except (RuntimeError, ValueError):
+        return None
+    errors = np.sqrt(np.diag(covariance))
+    if not np.isfinite(errors).all():
+        return None
+    amplitude, x0, y0, sigma_x, sigma_y, _ = params
+    if amplitude < _SHIFT_MIN_SIGNIFICANCE * errors[0]:
+        return None
+    return float(x0), float(y0), errors[1], errors[2], max(sigma_x, sigma_y)
 
 
 def overlap_region(
@@ -6899,8 +8954,8 @@ _SHIFT_REGIONS_ERROR = (
 def _statistic_regions(
     info: list[dict],
     picks: list[tuple] | None,
-    pick_shape: str | None,
-    pick_size: float | None,
+    pick_shape: str | list[str] | None,
+    pick_size: float | list[float | None] | None,
     shift: bool,
 ) -> list[_Region | None]:
     """The regions of interest in nm: the picks (None for those
@@ -6917,14 +8972,11 @@ def _statistic_regions(
             )
         ]
     else:
-        if pick_shape not in lib.PICK_SHAPES:
-            raise ValueError(
-                f"Invalid pick shape: {pick_shape}. Choose one of "
-                f"{lib.PICK_SHAPES}."
-            )
-        if pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE and not pick_size:
-            raise ValueError(f"{pick_shape} picks require a pick size.")
-        regions = [_pick_region(pick, pick_shape, pick_size) for pick in picks]
+        shapes, sizes = lib.pick_shapes_and_sizes(picks, pick_shape, pick_size)
+        regions = [
+            _pick_region(pick, shape, size)
+            for pick, shape, size in zip(picks, shapes, sizes)
+        ]
     if shift:
         for region in regions:
             if (
@@ -7207,9 +9259,10 @@ def ripley_h(
     picks: list[tuple] | None = None,
     pick_shape: (
         Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | list[str]
         | None
     ) = None,
-    pick_size: float | None = None,
+    pick_size: float | list[float | None] | None = None,
     r_max: float = 500.0,
     steps: int = 100,
     edge_correction: bool = True,
@@ -7278,13 +9331,14 @@ def ripley_h(
         None, the whole field of view (``Width`` x ``Height`` in the
         metadata) is used. Default is None.
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
-"Brush"} or None, optional
-        Shape of the picks. Required if ``picks`` is given. Default is
-        None.
-    pick_size : float or None, optional
-        Size of the picks in nm: diameter for circles, width for
-        rectangles, side length for squares, None for polygons, boxes
-        and brush picks. Default is None.
+"Brush"}, list of str or None, optional
+        Shape of the picks, or the shape of each pick (see
+        ``lib.pick_shapes_and_sizes``). Required if ``picks`` is given.
+        Default is None.
+    pick_size : float, list of float or None, optional
+        Size of the picks in nm, or the size of each pick: diameter for
+        circles, width for rectangles, side length for squares, None for
+        polygons, boxes and brush picks. Default is None.
     r_max : float, optional
         Largest radius in nm. It should be well below the size of the
         regions; the edge correction is less reliable for radii
@@ -7468,9 +9522,10 @@ def rdf(
     picks: list[tuple] | None = None,
     pick_shape: (
         Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | list[str]
         | None
     ) = None,
-    pick_size: float | None = None,
+    pick_size: float | list[float | None] | None = None,
     r_max: float = 500.0,
     steps: int = 50,
     edge_correction: bool = True,
@@ -7528,13 +9583,14 @@ def rdf(
         ``pick_shape``. If None, the whole field of view is used. See
         ``ripley_h``. Default is None.
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
-"Brush"} or None, optional
-        Shape of the picks. Required if ``picks`` is given. Default is
-        None.
-    pick_size : float or None, optional
-        Size of the picks in nm: diameter for circles, width for
-        rectangles, side length for squares, None for polygons, boxes
-        and brush picks. Default is None.
+"Brush"}, list of str or None, optional
+        Shape of the picks, or the shape of each pick (see
+        ``lib.pick_shapes_and_sizes``). Required if ``picks`` is given.
+        Default is None.
+    pick_size : float, list of float or None, optional
+        Size of the picks in nm, or the size of each pick: diameter for
+        circles, width for rectangles, side length for squares, None for
+        polygons, boxes and brush picks. Default is None.
     r_max : float, optional
         Largest radius in nm. It should be well below the size of the
         regions. Default is 500.
@@ -7905,9 +9961,10 @@ def nnd_distributions(
     picks: list[tuple] | None = None,
     pick_shape: (
         Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | list[str]
         | None
     ) = None,
-    pick_size: float | None = None,
+    pick_size: float | list[float | None] | None = None,
     names: list[str] | None = None,
     r_max: float = 200.0,
     steps: int = 40,
@@ -7959,13 +10016,14 @@ def nnd_distributions(
         ``pick_shape``. If None, the whole field of view is used. See
         ``ripley_h``. Default is None.
     pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
-"Brush"} or None, optional
-        Shape of the picks. Required if ``picks`` is given. Default is
-        None.
-    pick_size : float or None, optional
-        Size of the picks in nm: diameter for circles, width for
-        rectangles, side length for squares, None for polygons, boxes
-        and brush picks. Default is None.
+"Brush"}, list of str or None, optional
+        Shape of the picks, or the shape of each pick (see
+        ``lib.pick_shapes_and_sizes``). Required if ``picks`` is given.
+        Default is None.
+    pick_size : float, list of float or None, optional
+        Size of the picks in nm, or the size of each pick: diameter for
+        circles, width for rectangles, side length for squares, None for
+        polygons, boxes and brush picks. Default is None.
     names : list of str or None, optional
         Names of the channels for the plot and the saved tables. If
         None, the channels are called "0", "1", ... Default is None.
@@ -8386,6 +10444,933 @@ def _nnd_tables(nnd_result: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     return pd.DataFrame(curves), pd.DataFrame(summary)
 
 
+#: Area (2D) or volume (3D) of the ball of radius 1: the area (volume)
+#: within distance r of a point is ``_UNIT_BALL[dim] * r**dim``
+_UNIT_BALL = {2: np.pi, 3: 4.0 / 3.0 * np.pi}
+
+
+def _check_knn_order(k: int, dim: int) -> None:
+    """Raise ValueError unless ``k`` is a positive integer and ``dim``
+    is 2 or 3."""
+    if dim not in _UNIT_BALL:
+        raise ValueError(f"dim must be 2 or 3, not {dim!r}.")
+    if isinstance(k, bool) or int(k) != k or k < 1:
+        raise ValueError(f"k must be a positive integer, not {k!r}.")
+
+
+def knn_csr_pdf(
+    r: float | np.ndarray,
+    density: float,
+    *,
+    k: int = 1,
+    dim: Literal[2, 3] = 2,
+) -> float | np.ndarray:
+    """Probability density of the distance from a point to its k-th
+    nearest neighbor under complete spatial randomness (CSR).
+
+    For points placed uniformly at random (a homogeneous Poisson
+    process) with ``density`` points per unit area, the number of
+    points within distance r of a point follows a Poisson distribution
+    with mean ``u = density * pi * r^2`` (in 3D, ``density * 4/3 * pi *
+    r^3``). The distance to the k-th nearest neighbor then has the
+    probability density (Thompson, 1956)::
+
+        f_k(r) = dim * u^k * exp(-u) / (r * (k - 1)!)
+
+    Parameters
+    ----------
+    r : float or np.ndarray
+        Distances, in any unit of length.
+    density : float
+        Number of points per unit area (2D) or volume (3D), in the unit
+        of ``r``: e.g., per nm^2 for distances in nm.
+    k : int, optional
+        Order of the neighbor: 1 for the nearest neighbor, 2 for the
+        second nearest, etc. Default is 1.
+    dim : {2, 3}, optional
+        Number of dimensions. Default is 2.
+
+    Returns
+    -------
+    pdf : float or np.ndarray
+        Probability density at each distance, per unit of ``r``; 0 for
+        distances of 0 or less.
+
+    Raises
+    ------
+    ValueError
+        If ``density`` is not positive, ``k`` is not a positive integer
+        or ``dim`` is not 2 or 3.
+
+    See Also
+    --------
+    knn_csr_cdf : Cumulative distribution function.
+    knn_density : Fit the density to measured distances.
+
+    References
+    ----------
+    Thompson, H. R. Distribution of distance to nth neighbour in a
+    population of randomly distributed individuals. Ecology 37,
+    391-394 (1956). https://doi.org/10.2307/1933159
+
+    Examples
+    --------
+    Distances in nm of 100 molecules per um^2 (1e-4 per nm^2):
+
+    >>> pdf = postprocess.knn_csr_pdf([20.0, 50.0], 1e-4, k=2)
+    >>> print(pdf.round(5))
+    [0.00139 0.01125]
+    """
+    _check_knn_order(k, dim)
+    if not density > 0:
+        raise ValueError(f"density must be positive, not {density!r}.")
+    r = np.asarray(r, dtype=np.float64)
+    positive = r > 0
+    r_positive = np.where(positive, r, 1.0)
+    u = density * _UNIT_BALL[dim] * r_positive**dim
+    log_pdf = (
+        np.log(dim)
+        + k * np.log(u)
+        - u
+        - np.log(r_positive)
+        - special.gammaln(k)
+    )
+    return np.where(positive, np.exp(log_pdf), 0.0)[()]
+
+
+def knn_csr_cdf(
+    r: float | np.ndarray,
+    density: float,
+    *,
+    k: int = 1,
+    dim: Literal[2, 3] = 2,
+) -> float | np.ndarray:
+    """Cumulative distribution function of the distance from a point to
+    its k-th nearest neighbor under complete spatial randomness (CSR).
+
+    The probability that the k-th nearest neighbor lies within distance
+    r is the probability that at least k points lie within r, i.e., the
+    regularized lower incomplete gamma function of the expected number
+    of points ``u`` there (see ``knn_csr_pdf``; Thompson, 1956)::
+
+        F_k(r) = P(k, u) = 1 - exp(-u) * sum_(j < k) u^j / j!
+
+    Parameters
+    ----------
+    r : float or np.ndarray
+        Distances, in any unit of length.
+    density : float
+        Number of points per unit area (2D) or volume (3D), in the unit
+        of ``r``: e.g., per nm^2 for distances in nm.
+    k : int, optional
+        Order of the neighbor: 1 for the nearest neighbor, 2 for the
+        second nearest, etc. Default is 1.
+    dim : {2, 3}, optional
+        Number of dimensions. Default is 2.
+
+    Returns
+    -------
+    cdf : float or np.ndarray
+        Probability that the k-th nearest neighbor lies within each
+        distance; 0 for distances of 0 or less.
+
+    Raises
+    ------
+    ValueError
+        If ``density`` is not positive, ``k`` is not a positive integer
+        or ``dim`` is not 2 or 3.
+
+    See Also
+    --------
+    knn_csr_pdf : Probability density.
+    knn_density : Fit the density to measured distances.
+
+    References
+    ----------
+    Thompson, H. R. Distribution of distance to nth neighbour in a
+    population of randomly distributed individuals. Ecology 37,
+    391-394 (1956). https://doi.org/10.2307/1933159
+
+    Examples
+    --------
+    The median distance to the nearest neighbor of 100 molecules per
+    um^2 (1e-4 per nm^2) is about 47 nm:
+
+    >>> print(postprocess.knn_csr_cdf(47.0, 1e-4).round(3))
+    0.5
+    """
+    _check_knn_order(k, dim)
+    if not density > 0:
+        raise ValueError(f"density must be positive, not {density!r}.")
+    r = np.clip(np.asarray(r, dtype=np.float64), 0.0, None)
+    return special.gammainc(k, density * _UNIT_BALL[dim] * r**dim)[()]
+
+
+def _log_knn_sf(u: float | np.ndarray, k: int) -> float | np.ndarray:
+    """Logarithm of the probability that the k-th nearest neighbor
+    under CSR lies beyond the distance within which ``u`` neighbors are
+    expected, i.e., of the regularized upper incomplete gamma function
+    Q(k, u) = exp(-u) * sum_(j < k) u^j / j!, accurate for large u."""
+    u = np.asarray(u, dtype=np.float64)
+    j = np.arange(k)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        terms = j * np.log(u)[..., None] - special.gammaln(j + 1)
+    terms[..., 0] = 0.0  # u^0 / 0! = 1, also at u = 0
+    return -u + special.logsumexp(terms, axis=-1)
+
+
+class _KnnSample(NamedTuple):
+    """The k-th nearest neighbor distances in nm used in the fit (at
+    least ``r_min``) of one order k: the ``exact`` distances, and the
+    distances to the region boundary of the molecules whose k-th
+    nearest neighbor lies farther than the boundary (``censored``)."""
+
+    k: int
+    exact: lib.FloatArray1D
+    censored: lib.FloatArray1D
+
+
+def _knn_region_distances(
+    points: tuple,
+    region: _Region,
+    region_z: tuple[float, float] | None,
+    k_max: int,
+    edge_correction: bool,
+) -> tuple[lib.FloatArray2D, lib.FloatArray1D]:
+    """The distances (nm) from each of the ``points`` ``(x, y, z)`` (z
+    None in 2D) in a region to its ``k_max`` nearest neighbors in the
+    region (inf where there are fewer), shape (n, k_max), and to the
+    region boundary (in 3D, also to the top and bottom of ``region_z``;
+    inf without ``edge_correction``)."""
+    x, y, z = points
+    coordinates = np.column_stack([x, y] if z is None else [x, y, z])
+    distances = KDTree(coordinates).query(coordinates, k=k_max + 1)[0]
+    if not edge_correction:
+        return distances[:, 1:], np.full(len(x), np.inf)
+    boundary = _boundary_distances(
+        x, y, region.kind, region.circle, region.segments
+    )
+    if z is not None:
+        z_min, z_max = region_z
+        boundary = np.minimum(boundary, np.minimum(z - z_min, z_max - z))
+    return distances[:, 1:], boundary
+
+
+def _knn_samples(
+    observed: list[tuple[lib.FloatArray2D, lib.FloatArray1D]],
+    k_max: int,
+    r_min: float,
+) -> list[_KnnSample]:
+    """The sample of each order k = 1, ..., ``k_max`` from the
+    neighbor and boundary distances of each region (``observed``, see
+    ``_knn_region_distances``). A distance up to the boundary distance
+    is exact; a longer one is censored at the boundary distance. Exact
+    distances shorter than ``r_min`` are left out, and so are censored
+    ones whose boundary distance is shorter than ``r_min`` (it is then
+    unknown whether the distance is shorter), as are molecules without
+    a k-th neighbor without edge correction."""
+    distances = np.concatenate([d for d, _ in observed])
+    boundary = np.concatenate([b for _, b in observed])
+    samples = []
+    for k in range(1, k_max + 1):
+        r = distances[:, k - 1]
+        seen = np.minimum(r, boundary)
+        used = np.isfinite(seen) & (seen >= r_min)
+        exact = r <= boundary
+        samples.append(_KnnSample(k, r[used & exact], boundary[used & ~exact]))
+    return samples
+
+
+def _knn_log_likelihood(
+    rate: float,
+    samples: list[_KnnSample],
+    dim: int,
+    r_min: float,
+) -> float:
+    """Log-likelihood (up to a constant) of the ``samples`` under CSR,
+    with ``rate`` = density * ``_UNIT_BALL[dim]``: the probability
+    density of each exact distance and the probability of each
+    censored one being longer than its boundary distance, both given
+    that the distance is at least ``r_min``."""
+    log_rate = np.log(rate)
+    total = 0.0
+    for sample in samples:
+        total += sample.k * len(sample.exact) * log_rate - rate * np.sum(
+            sample.exact**dim
+        )
+        if len(sample.censored):
+            total += np.sum(_log_knn_sf(rate * sample.censored**dim, sample.k))
+        if r_min > 0:
+            n = len(sample.exact) + len(sample.censored)
+            total -= n * _log_knn_sf(rate * r_min**dim, sample.k)
+    return total
+
+
+def _fit_knn_density(
+    samples: list[_KnnSample],
+    dim: int,
+    r_min: float,
+) -> float:
+    """Maximum likelihood density (per nm^dim) of one or more samples
+    (orders k) under CSR; NaN without exact distances."""
+    n_events = sum(sample.k * len(sample.exact) for sample in samples)
+    exposure = sum(
+        np.sum(sample.exact**dim) + np.sum(sample.censored**dim)
+        for sample in samples
+    )
+    if not n_events or not exposure > 0:
+        return np.nan
+    # the closed-form estimate without censoring and r_min; the fit
+    # only lies above it
+    start = np.log(n_events / exposure)
+    result = minimize_scalar(
+        lambda log_rate: -_knn_log_likelihood(
+            np.exp(log_rate), samples, dim, r_min
+        ),
+        bounds=(start - 1.0, start + 10.0),
+        method="bounded",
+        options={"xatol": 1e-9},
+    )
+    return float(np.exp(result.x)) / _UNIT_BALL[dim]
+
+
+def _knn_kaplan_meier(
+    sample: _KnnSample,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
+    """Kaplan-Meier estimate of the distribution of the distances of a
+    sample, given that they are at least ``r_min``: the exact distances
+    in ascending order and the probability that a distance is longer
+    than each (Baddeley and Gill, 1997)."""
+    times = np.concatenate([sample.exact, sample.censored])
+    is_exact = np.arange(len(times)) < len(sample.exact)
+    order = np.lexsort((~is_exact, times))  # exact first at ties
+    times, is_exact = times[order], is_exact[order]
+    at_risk = len(times) - np.arange(len(times))
+    survival = np.cumprod(np.where(is_exact, 1.0 - 1.0 / at_risk, 1.0))
+    return times[is_exact], survival[is_exact]
+
+
+def _knn_ks_distance(
+    times: lib.FloatArray1D,
+    survival: lib.FloatArray1D,
+    density: float,
+    k: int,
+    dim: int,
+    r_min: float,
+) -> float:
+    """Largest difference between the cumulative distribution of a
+    Kaplan-Meier estimate (``times``, ``survival``, see
+    ``_knn_kaplan_meier``) and that of CSR with ``density``, given
+    that the distance is at least ``r_min`` (Kolmogorov-Smirnov
+    distance)."""
+    rate = density * _UNIT_BALL[dim]
+    model = -np.expm1(
+        _log_knn_sf(rate * times**dim, k) - _log_knn_sf(rate * r_min**dim, k)
+    )
+    after = 1.0 - survival
+    before = 1.0 - np.concatenate([[1.0], survival[:-1]])
+    return float(
+        max(np.max(np.abs(after - model)), np.max(np.abs(before - model)))
+    )
+
+
+def _knn_analysis(
+    observed: list[tuple[lib.FloatArray2D, lib.FloatArray1D]],
+    k_max: int,
+    k_min: int,
+    r_min: float,
+    dim: int,
+    edges: lib.FloatArray1D | None = None,
+) -> dict:
+    """Fit the density to the neighbor and boundary distances of the
+    regions (``observed``) for each order k, and pooled over ``k_min``
+    to ``k_max``, with the KS distance of each order and (if ``edges``
+    is given) the histogram of its Kaplan-Meier estimate."""
+    samples = _knn_samples(observed, k_max, r_min)
+    densities = np.array(
+        [_fit_knn_density([sample], dim, r_min) for sample in samples]
+    )
+    pooled = _fit_knn_density(samples[k_min - 1 :], dim, r_min)
+    ks_distances = np.full(k_max, np.nan)
+    histograms = None
+    if edges is not None:
+        histograms = np.full((k_max, len(edges) - 1), np.nan)
+    for i, sample in enumerate(samples):
+        if np.isnan(densities[i]):
+            continue
+        times, survival = _knn_kaplan_meier(sample)
+        ks_distances[i] = _knn_ks_distance(
+            times, survival, densities[i], sample.k, dim, r_min
+        )
+        if edges is not None:
+            survival_at = np.concatenate([[1.0], survival])[
+                np.searchsorted(times, edges, side="right")
+            ]
+            histograms[i] = -np.diff(survival_at) / np.diff(edges)
+    return {
+        "samples": samples,
+        "densities": densities,
+        "density": pooled,
+        "ks_distances": ks_distances,
+        "histograms": histograms,
+    }
+
+
+def knn_density(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    picks: list[tuple] | None = None,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | list[str]
+        | None
+    ) = None,
+    pick_size: float | list[float | None] | None = None,
+    k_max: int = 5,
+    k_min: int = 1,
+    r_min: float = 0.0,
+    edge_correction: bool = True,
+    n_simulations: int = 99,
+    use_z: bool = False,
+    z_range: tuple[float, float] | None = None,
+    r_max: float | None = None,
+    steps: int = 50,
+    random_seed: int | None = 0,
+    progress: lib.Progress | Literal["console"] | None = None,
+) -> dict:
+    """Density of molecules from the distances to their k nearest
+    neighbors, and a test of whether the molecules are distributed at
+    random (complete spatial randomness, CSR).
+
+    For molecules placed uniformly at random, the distance from a
+    molecule to its k-th nearest neighbor follows a known distribution
+    that depends only on the density (Thompson, 1956; see
+    ``knn_csr_pdf``). The density is fitted to the distances to the
+    k-th nearest neighbors by maximum likelihood, for each order k = 1,
+    ..., ``k_max`` separately and for the orders ``k_min`` to ``k_max``
+    together (pooled). The fits reflect the density around the
+    molecules, which may differ from the number of molecules per area
+    (``"count_density"``), e.g., if the regions include areas without
+    molecules.
+
+    For molecules at random, all orders give the same density, and the
+    distances follow the fitted distributions. For clustered molecules,
+    the nearest neighbors are closer than at random, so the density
+    fitted to k = 1 is the highest and it decreases with k.
+
+    Neighbors outside a region are not seen, which makes the distances
+    of molecules near its boundary too long. With ``edge_correction``,
+    a distance longer than that from the molecule to the region
+    boundary is not used as measured; the fit uses only that the
+    neighbor lies farther than the boundary (a censored distance, as in
+    the Kaplan-Meier estimate of Baddeley and Gill, 1997), which removes
+    the bias.
+
+    How well the fitted distribution describes the distances of each
+    order is measured by the Kolmogorov-Smirnov (KS) distance, the
+    largest difference between the measured and fitted cumulative
+    distributions (with edge correction, the Kaplan-Meier estimate of
+    the measured one). Since the density is fitted to the same
+    distances, the usual KS p-values would be too high. Instead, each
+    region is simulated ``n_simulations`` times with as many uniformly
+    random points as it holds molecules, the density is fitted to each
+    simulation in the same way, and the p-value is the fraction of the
+    simulations, counting the data as one of them, whose KS distance is
+    at least that of the data. The spread of the densities fitted to
+    the simulations gives the standard errors.
+
+    The method was written by Heinrich Grabmayr for picasso-workflow
+    (https://github.com/jungmannlab/picasso-workflow), which fits the
+    pooled density without edge correction and computes the p-values
+    from the KS distances directly; here, the distances are corrected
+    for the edges and the p-values come from simulations.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Molecules, i.e., one localization per molecule, such as the
+        molecules found by ``g5m.g5m`` or the cluster centers of
+        ``clusterer.find_cluster_centers``.
+    info : list of dicts
+        Metadata of the localizations, used for the field of view if
+        ``picks`` is None.
+    picks : list of tuples or None, optional
+        Regions of interest in nm, in the format of ``pick_shape`` (see
+        ``picked_locs``). Each molecule's neighbors are searched in the
+        same region. If None, the whole field of view (``Width`` x
+        ``Height`` in the metadata) is used. Default is None.
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
+"Brush"}, list of str or None, optional
+        Shape of the picks, or the shape of each pick (see
+        ``lib.pick_shapes_and_sizes``). Required if ``picks`` is given.
+        Default is None.
+    pick_size : float, list of float or None, optional
+        Size of the picks in nm, or the size of each pick: diameter for
+        circles, width for rectangles, side length for squares, None for
+        polygons, boxes and brush picks. Default is None.
+    k_max : int, optional
+        Highest order of the neighbors, at least 1. Default is 5.
+    k_min : int, optional
+        Lowest order of the pooled fit, from 1 to ``k_max``; e.g., 2
+        leaves out the nearest neighbors, which are affected the most by
+        molecules counted twice. Default is 1.
+    r_min : float, optional
+        Shortest distance in nm used. Shorter distances are left out
+        and the distributions are fitted to the longer ones only, e.g.,
+        to ignore molecules counted twice or closer than the resolution.
+        Default is 0.
+    edge_correction : bool, optional
+        If True, distances longer than the distance to the region
+        boundary (in 3D, also to the top and bottom of the z range) are
+        censored, see above. Without it, the densities are biased
+        downwards by the molecules near the boundary, more so in small
+        regions. Default is True.
+    n_simulations : int, optional
+        Number of CSR simulations for the p-values and standard errors.
+        The smallest p-value is ``1 / (n_simulations + 1)``, i.e., 0.01
+        for 99 simulations. 0 skips the simulations. Default is 99.
+    use_z : bool, optional
+        If True, the distances are measured in 3D (x, y and z in nm),
+        which requires a ``z`` column, and the densities are per volume.
+        Default is False.
+    z_range : tuple of floats or None, optional
+        ``(z_min, z_max)`` in nm over which every region extends in 3D;
+        localizations outside of it are ignored. If None, each region
+        extends over the z range of its molecules. Only used in 3D.
+        Default is None.
+    r_max : float or None, optional
+        Upper end in nm of the histograms of the distances
+        (``"histograms"``); does not affect the fits. If None, the 99th
+        percentile of the distances to the ``k_max``-th neighbors is
+        used. Default is None.
+    steps : int, optional
+        Number of histogram bins up to ``r_max``. Default is 50.
+    random_seed : int or None, optional
+        Seed of the simulations. None gives different simulations on
+        each call. Default is 0.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``: e.g. a
+        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
+        or None for no reporting. Reports "Calculating k-NN distances"
+        over the regions, then (if ``n_simulations > 0``) "Simulating
+        CSR" over the simulations. Default is None.
+
+    Returns
+    -------
+    result : dict
+        Dictionary with the keys:
+
+        - "k": the orders 1, ..., ``k_max``.
+        - "densities": density fitted to each order k, in molecules per
+          nm^2 (per nm^3 in 3D; multiply by 1e6 (1e9) for um^-2
+          (um^-3)); NaN for orders without distances.
+        - "density": density fitted to the orders ``k_min`` to
+          ``k_max`` together, per nm^2 (nm^3).
+        - "count_density": number of molecules divided by the total area
+          (volume) of the regions, per nm^2 (nm^3).
+        - "densities_se", "density_se": standard errors of the fitted
+          densities from the simulations, or None without simulations.
+        - "ks_distances": KS distance of each order.
+        - "p_values": p-value of each order, or None without
+          simulations.
+        - "n_distances": number of exact distances of each order, and
+          "n_censored": number of censored ones.
+        - "edges": edges of the histogram bins in nm, shape (steps + 1,).
+        - "histograms": distribution of the measured distances of each
+          order given that they are at least ``r_min`` (with edge
+          correction, the Kaplan-Meier estimate), as probability
+          density per nm in each bin, shape (k_max, steps).
+        - "n_molecules": number of molecules in the regions.
+        - "n_regions", "n_simulations", "k_min", "r_min",
+          "edge_correction", "use_z".
+
+    Raises
+    ------
+    ValueError
+        If the parameters are invalid, z is missing in 3D or no
+        molecule has a neighbor in its region at a distance of at least
+        ``r_min``.
+
+    Warns
+    -----
+    UserWarning
+        If ``locs`` are not molecules (no ``n_events`` or
+        ``std_frame`` column). Each molecule is then counted as many
+        times as it was localized, which appears as clustering at short
+        distances.
+
+    See Also
+    --------
+    plot_knn_density : Plot the result.
+    knn_csr_pdf : Distribution of the distances under CSR.
+    nnd_distributions : Distributions of the nearest neighbor
+        distances within and between channels, compared with
+        simulations.
+
+    References
+    ----------
+    Thompson, H. R. Distribution of distance to nth neighbour in a
+    population of randomly distributed individuals. Ecology 37,
+    391-394 (1956). https://doi.org/10.2307/1933159
+
+    Baddeley, A. J., Gill, R. D. Kaplan-Meier estimators of distance
+    distributions for spatial point processes. Ann Stat 25, 263-292
+    (1997). https://doi.org/10.1214/aos/1034276629
+
+    Examples
+    --------
+    >>> result = postprocess.knn_density(molecules, info)
+    >>> print(f"{result['density'] * 1e6:.0f} molecules per um^2")
+    """
+    if isinstance(k_max, bool) or int(k_max) != k_max or k_max < 1:
+        raise ValueError(f"k_max must be a positive integer, not {k_max!r}.")
+    if isinstance(k_min, bool) or int(k_min) != k_min:
+        raise ValueError(f"k_min must be an integer, not {k_min!r}.")
+    if not 1 <= k_min <= k_max:
+        raise ValueError("k_min must be between 1 and k_max.")
+    k_max, k_min = int(k_max), int(k_min)
+    if not r_min >= 0:
+        raise ValueError("r_min must not be negative.")
+    if r_max is not None and not r_max > r_min:
+        raise ValueError("r_max must be larger than r_min.")
+    if steps < 1:
+        raise ValueError("steps must be at least 1.")
+    if n_simulations < 0:
+        raise ValueError("n_simulations must not be negative.")
+    if use_z:
+        if "z" not in locs.columns:
+            raise ValueError("3D requires z in the localizations.")
+        if z_range is not None and not z_range[0] < z_range[1]:
+            raise ValueError("z_range must be (z_min, z_max), z_min < z_max.")
+    dim = 3 if use_z else 2
+    regions = _statistic_regions(info, picks, pick_shape, pick_size, False)
+    _warn_if_not_molecules(locs, "The localizations are", stacklevel=3)
+
+    coordinates = [
+        (
+            locs["x"].to_numpy(dtype=np.float64),
+            locs["y"].to_numpy(dtype=np.float64),
+            locs["z"].to_numpy(dtype=np.float64) if use_z else None,
+        )
+    ]
+    n_regions = len(regions)
+    observed = []
+    region_counts = []  # (region, z range, number of molecules)
+    n_molecules = 0
+    size = 0.0  # total area (volume) of the regions
+    with lib.tracked_progress(
+        progress, "Calculating k-NN distances", unit="region"
+    ) as progress:
+        lib.start_phase(
+            progress, "Calculating k-NN distances", n_regions, unit="region"
+        )
+        progress.set_value(0)
+        for i, region in enumerate(regions):
+            region_data = _nnd_region_points(
+                region, coordinates, use_z, z_range
+            )
+            if region_data is not None:
+                region_z, (points,) = region_data
+                n = len(points[0])
+                n_molecules += n
+                size += region.area * (
+                    region_z[1] - region_z[0] if use_z else 1.0
+                )
+                if n:
+                    observed.append(
+                        _knn_region_distances(
+                            points, region, region_z, k_max, edge_correction
+                        )
+                    )
+                    region_counts.append((region, region_z, n))
+            progress.set_value(i + 1)
+        progress.set_value(n_regions)
+        if not observed:
+            raise ValueError("No region contains molecules.")
+        samples = _knn_samples(observed, k_max, r_min)
+        if r_max is None:
+            exact = next(
+                (s.exact for s in reversed(samples) if len(s.exact)), None
+            )
+            if exact is None:
+                raise ValueError(
+                    "No molecule has a neighbor in its region at a "
+                    f"distance of at least r_min ({r_min} nm)."
+                )
+            r_max = float(np.quantile(exact, 0.99))
+            r_max = r_max if r_max > r_min else r_min + 1.0
+        edges = np.linspace(0.0, r_max, steps + 1)
+        data = _knn_analysis(observed, k_max, k_min, r_min, dim, edges)
+        if np.isnan(data["densities"]).all():
+            raise ValueError(
+                "No molecule has a neighbor in its region at a distance of "
+                f"at least r_min ({r_min} nm)."
+            )
+
+        densities_se = density_se = p_values = None
+        if n_simulations:
+            rng = np.random.default_rng(random_seed)
+            simulated_densities = np.full((n_simulations, k_max), np.nan)
+            simulated_density = np.full(n_simulations, np.nan)
+            simulated_ks = np.full((n_simulations, k_max), np.nan)
+            lib.start_phase(
+                progress, "Simulating CSR", n_simulations, unit="simulation"
+            )
+            progress.set_value(0)
+            for s in range(n_simulations):
+                simulated = []
+                for region, region_z, n in region_counts:
+                    x, y = _uniform_in_region(n, region, rng)
+                    z = rng.uniform(*region_z, n) if use_z else None
+                    simulated.append(
+                        _knn_region_distances(
+                            (x, y, z), region, region_z, k_max, edge_correction
+                        )
+                    )
+                fit = _knn_analysis(simulated, k_max, k_min, r_min, dim)
+                simulated_densities[s] = fit["densities"]
+                simulated_density[s] = fit["density"]
+                simulated_ks[s] = fit["ks_distances"]
+                progress.set_value(s + 1)
+            progress.set_value(n_simulations)
+            with warnings.catch_warnings(), np.errstate(invalid="ignore"):
+                # orders without distances in all simulations
+                warnings.simplefilter("ignore", RuntimeWarning)
+                densities_se = data["densities"] * _relative_spread(
+                    simulated_densities
+                )
+                density_se = data["density"] * _relative_spread(
+                    simulated_density
+                )
+            valid = ~np.isnan(simulated_ks)
+            p_values = (
+                1 + np.sum(valid & (simulated_ks >= data["ks_distances"]), 0)
+            ) / (1 + valid.sum(axis=0))
+            p_values[np.isnan(data["ks_distances"])] = np.nan
+
+    return {
+        "k": np.arange(1, k_max + 1),
+        "densities": data["densities"],
+        "density": data["density"],
+        "count_density": n_molecules / size if size > 0 else np.nan,
+        "densities_se": densities_se,
+        "density_se": density_se,
+        "ks_distances": data["ks_distances"],
+        "p_values": p_values,
+        "n_distances": np.array([len(s.exact) for s in data["samples"]]),
+        "n_censored": np.array([len(s.censored) for s in data["samples"]]),
+        "edges": edges,
+        "histograms": data["histograms"],
+        "n_molecules": n_molecules,
+        "n_regions": n_regions,
+        "n_simulations": n_simulations,
+        "k_min": k_min,
+        "r_min": float(r_min),
+        "edge_correction": edge_correction,
+        "use_z": use_z,
+    }
+
+
+def _relative_spread(values: np.ndarray) -> np.ndarray | float:
+    """Standard deviation over the first axis of ``values`` divided by
+    their mean, ignoring NaN; NaN for fewer than two values."""
+    return np.nanstd(values, axis=0, ddof=1) / np.nanmean(values, axis=0)
+
+
+def plot_knn_density(
+    knn_result: dict,
+    fig: plt.Figure | None = None,
+) -> plt.Figure:
+    """Plot the distributions of the distances to the k-th nearest
+    neighbors with the distributions of complete spatial randomness
+    (CSR) at the fitted densities, and the fitted densities by k.
+
+    Parameters
+    ----------
+    knn_result : dict
+        Result of ``knn_density``.
+    fig : plt.Figure or None, optional
+        Figure to plot on, cleared first. If None, a new figure is
+        created. Default is None.
+
+    Returns
+    -------
+    fig : plt.Figure
+        Figure containing the plot.
+    """
+    if fig is None:
+        fig = plt.Figure(constrained_layout=True)
+    else:
+        fig.clear()
+    ax_distances, ax_densities = fig.subplots(
+        1, 2, gridspec_kw={"width_ratios": [2, 1]}
+    )
+    use_z = knn_result["use_z"]
+    dim = 3 if use_z else 2
+    scale = 1e9 if use_z else 1e6  # per um^dim
+    unit = "µm⁻³" if use_z else "µm⁻²"
+    edges = knn_result["edges"]
+    r_min = knn_result["r_min"]
+    # colors of the active style, resolved now (lines look "CN" colors
+    # up only when drawn)
+    colors = plt.rcParams["axes.prop_cycle"].by_key()["color"]
+    r = np.linspace(edges[0], edges[-1], 400)
+    densities = knn_result["densities"]
+    p_values = knn_result["p_values"]
+    se = knn_result["densities_se"]
+    for i, k in enumerate(knn_result["k"]):
+        if np.isnan(densities[i]):
+            continue
+        color = colors[i % len(colors)]
+        label = f"k = {k}"
+        if p_values is not None:
+            label += f" (p = {p_values[i]:.2g})"
+        ax_distances.stairs(
+            knn_result["histograms"][i],
+            edges,
+            color=color,
+            linewidth=1.5,
+            label=label,
+        )
+        rate = densities[i] * _UNIT_BALL[dim]
+        pdf = knn_csr_pdf(r, densities[i], k=int(k), dim=dim) / np.exp(
+            _log_knn_sf(rate * r_min**dim, int(k))
+        )
+        pdf[r < r_min] = np.nan
+        ax_distances.plot(r, pdf, color=color, linestyle="--", linewidth=1)
+        ax_densities.errorbar(
+            k,
+            densities[i] * scale,
+            yerr=None if se is None else se[i] * scale,
+            fmt="o",
+            color=color,
+            capsize=3,
+        )
+    ax_distances.plot(
+        [], [], color="0.4", linestyle="--", label="CSR, fitted density"
+    )
+    if r_min > 0:
+        ax_distances.axvspan(
+            0,
+            r_min,
+            color="0.5",
+            alpha=0.2,
+            linewidth=0,
+            label="Shorter than r_min",
+        )
+    ax_distances.set_xlim(0, edges[-1])
+    ax_distances.set_ylim(bottom=0)
+    ax_distances.set_xlabel("Distance to the k-th nearest neighbor (nm)")
+    ax_distances.set_ylabel("Probability density (1/nm)")
+    ax_distances.legend(loc="best")
+
+    k_min, k_max = knn_result["k_min"], int(knn_result["k"][-1])
+    pooled = knn_result["density"] * scale
+    orders = f"k = {k_min}-{k_max}" if k_min < k_max else f"k = {k_max}"
+    pooled_label = f"Pooled ({orders}): {pooled:.3g}"
+    if knn_result["density_se"] is not None:
+        pooled_label += f" ± {knn_result['density_se'] * scale:.2g}"
+    ax_densities.axhline(
+        pooled, color="0.2", linestyle="--", linewidth=1, label=pooled_label
+    )
+    per = "volume" if use_z else "area"
+    count = knn_result["count_density"] * scale
+    ax_densities.axhline(
+        count,
+        color="0.5",
+        linestyle=":",
+        linewidth=1,
+        label=f"Molecules / {per}: {count:.3g}",
+    )
+    ax_densities.set_xticks(knn_result["k"])
+    ax_densities.set_xlim(0.5, k_max + 0.5)
+    ax_densities.set_ylim(bottom=0)
+    ax_densities.set_xlabel("k")
+    ax_densities.set_ylabel(f"Fitted density ({unit})")
+    ax_densities.legend(loc="best")
+    title = "Distances to the k-th nearest neighbors" + (
+        " (3D)" if use_z else ""
+    )
+    if knn_result["n_simulations"]:
+        title += (
+            f"\np-values and errors from {knn_result['n_simulations']} "
+            "simulations of random positions"
+        )
+    fig.suptitle(title)
+    return fig
+
+
+def _knn_density_tables(
+    knn_result: dict,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """The result of ``knn_density`` as two tables: the distributions
+    of the distances by bin (measured and CSR at the fitted density of
+    each order, per nm) and the fitted densities (each order, pooled
+    and the number of molecules per area) with their standard errors,
+    KS distances, p-values and numbers of distances. Used for saving
+    the result as .csv files."""
+    use_z = knn_result["use_z"]
+    dim = 3 if use_z else 2
+    scale, unit = (1e9, "um3") if use_z else (1e6, "um2")
+    edges = knn_result["edges"]
+    centers = (edges[:-1] + edges[1:]) / 2
+    r_min = knn_result["r_min"]
+    curves = {"bin_start_nm": edges[:-1], "bin_end_nm": edges[1:]}
+    densities = knn_result["densities"]
+    for i, k in enumerate(knn_result["k"]):
+        curves[f"k{k}_per_nm"] = knn_result["histograms"][i]
+        csr = np.full(len(centers), np.nan)
+        if not np.isnan(densities[i]):
+            rate = densities[i] * _UNIT_BALL[dim]
+            csr = knn_csr_pdf(centers, densities[i], k=int(k), dim=dim) / (
+                np.exp(_log_knn_sf(rate * r_min**dim, int(k)))
+            )
+            csr[centers < r_min] = np.nan
+        curves[f"k{k}_csr_per_nm"] = csr
+
+    def se(values, i=None):
+        if values is None:
+            return np.nan
+        return (values if i is None else values[i]) * scale
+
+    rows = []
+    for i, k in enumerate(knn_result["k"]):
+        rows.append(
+            {
+                "estimate": f"k={k}",
+                f"density_per_{unit}": densities[i] * scale,
+                f"density_se_per_{unit}": se(knn_result["densities_se"], i),
+                "ks_distance": knn_result["ks_distances"][i],
+                "p_value": (
+                    np.nan
+                    if knn_result["p_values"] is None
+                    else knn_result["p_values"][i]
+                ),
+                "n_distances": knn_result["n_distances"][i],
+                "n_censored": knn_result["n_censored"][i],
+            }
+        )
+    k_min, k_max = knn_result["k_min"], int(knn_result["k"][-1])
+    rows.append(
+        {
+            "estimate": f"pooled k={k_min}-{k_max}",
+            f"density_per_{unit}": knn_result["density"] * scale,
+            f"density_se_per_{unit}": se(knn_result["density_se"]),
+        }
+    )
+    rows.append(
+        {
+            "estimate": "molecules/" + ("volume" if use_z else "area"),
+            f"density_per_{unit}": knn_result["count_density"] * scale,
+        }
+    )
+    summary = pd.DataFrame(rows)
+    counts = ["n_distances", "n_censored"]
+    summary[counts] = summary[counts].astype("Int64")
+    return pd.DataFrame(curves), summary
+
+
 def resi(
     locs: list[pd.DataFrame],
     infos: list[list[dict]],
@@ -8394,6 +11379,7 @@ def resi(
     radius_z: float | list[float] | None = None,
     min_locs: int | list[int] = 10,
     apply_fa: bool = True,
+    paths: list[str] | None = None,
     save_clustered_locs: bool = False,
     save_cluster_centers: bool = False,
     resi_path: str | None = None,
@@ -8430,6 +11416,9 @@ def resi(
     apply_fa : bool, optional
         If True, apply basic frame analysis to clustered localizations.
         Default is True.
+    paths : list of str or None, optional
+        Paths of the channels' files, saved in the metadata. Default is
+        None.
     save_clustered_locs : bool, optional
         If True, save clustered localizations for each channel to a
         file. Requires output_paths to be provided. Default is False.
@@ -8468,7 +11457,8 @@ def resi(
     resi_info : list of dicts
         Metadata of the RESI cluster centers: the metadata of the first
         channel with an entry recording the clustering parameters of
-        each channel appended, see ``lib.append_metadata``.
+        each channel (and their ``paths``) appended, see
+        ``lib.append_metadata``.
 
     Raises
     ------
@@ -8528,6 +11518,7 @@ def resi(
             radius_z=radius_z,
             min_locs=min_locs,
             apply_fa=apply_fa,
+            paths=paths,
             save_clustered_locs=save_clustered_locs,
             save_cluster_centers=save_cluster_centers,
             resi_path=resi_path,
@@ -8545,6 +11536,7 @@ def _resi(
     radius_z: list[float] | None = None,
     min_locs: list[int] = 10,
     apply_fa: bool = True,
+    paths: list[str] | None = None,
     save_clustered_locs: bool = False,
     save_cluster_centers: bool = False,
     resi_path: str | None = None,
@@ -8627,6 +11619,8 @@ def _resi(
         entry["Clustering radius z (nm) for each channel"] = [
             float(r) for r in radius_z
         ]
+    if paths is not None:
+        entry["Paths to RESI channels"] = list(paths)
     new_info = lib.append_metadata(infos[0], entry)
     # Save combined RESI results if output paths are provided
     if resi_path is not None:

@@ -10,6 +10,7 @@ argument parsing, the wiring to the analysis and the output files.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 
@@ -20,6 +21,7 @@ import pytest
 
 from picasso import __main__ as cli
 from picasso import io, transforms
+from tests.test_io import _minflux_table, _write_pmx
 
 
 def _picasso(monkeypatch, *args) -> None:
@@ -110,6 +112,7 @@ def test_thunderstorm_round_trip(locs, locs_path, monkeypatch):
             np.sort(imported[column]), np.sort(locs[column]), atol=0.01
         )
     assert info[0]["Pixelsize"] == 160
+    assert info[0]["File"] == _out(locs_path, ".csv")
 
 
 def test_smap_round_trip(locs, locs_path, monkeypatch):
@@ -118,6 +121,24 @@ def test_smap_round_trip(locs, locs_path, monkeypatch):
     imported, _ = io.load_locs(_out(locs_path, "_sml_locs.hdf5"))
     assert len(imported) == len(locs)
     assert np.allclose(np.sort(imported["x"]), np.sort(locs["x"]), atol=0.01)
+
+
+@pytest.mark.parametrize(
+    "args", [[], ["--average-traces"], ["--origin", "stage"]]
+)
+def test_minflux2hdf_writes_one_file_per_fluorophore(
+    args, tmp_path, monkeypatch
+):
+    path = tmp_path / "minflux.pmx"
+    _write_pmx(path, _minflux_table(), names={1: "Tom20", 2: "2"})
+    _picasso(monkeypatch, "minflux2hdf", path, *args)
+    first, _ = io.load_locs(str(tmp_path / "minflux_Tom20_locs.hdf5"))
+    second, info = io.load_locs(str(tmp_path / "minflux_fluo2_locs.hdf5"))
+    average = "--average-traces" in args
+    assert (len(first), len(second)) == ((2, 1) if average else (5, 1))
+    assert info[-1]["Average traces"] is average
+    stage = "stage" in args
+    assert ("MINFLUX origin x (nm)" in info[-1]) is not stage
 
 
 # ---------------------------------------------------------------------------
@@ -351,7 +372,8 @@ def test_undrift_from_a_drift_file(
     assert np.allclose(undrifted["x"], locs["x"] - 5.0, atol=1e-3)
     assert np.allclose(undrifted["y"], locs["y"] + 3.0, atol=1e-3)
     assert undrift_info[-1]["Step"] == "Apply drift"
-    assert undrift_info[-1]["From File"] == drift_path
+    # recorded by postprocess.apply_drift (io.load_drift keeps the path)
+    assert undrift_info[-1]["Drift file"] == drift_path
 
 
 def test_aim_writes_the_drift(locs, locs_path, monkeypatch):
@@ -470,7 +492,10 @@ def test_cbc_scores_the_first_file(locs_path, two_channels, monkeypatch):
     scored, info = io.load_locs(_out(locs_path, "_cbc.hdf5"))
     assert scored["cbc_same"].median() > 0.9
     assert scored["cbc_far"].abs().max() == 0.0  # no neighbors: undefined
-    assert info[-1]["Scored channel"] == str(locs_path)
+    # the entry postprocess.cbc returns, as saved by Picasso: Render
+    assert info[-1]["Step"] == "CBC"
+    assert info[-1]["CBC columns"] == ["cbc_same", "cbc_far"]
+    assert "Scored channel" not in info[-1]
     assert not os.path.exists(_out(two_channels["same"], "_cbc.hdf5"))
 
 
@@ -568,6 +593,134 @@ def test_cross_pair_statistic(locs_path, two_channels, monkeypatch):
 def test_pair_statistic_requires_files(tmp_path, monkeypatch):
     with pytest.raises(SystemExit, match="No localization files"):
         _picasso(monkeypatch, "rdf", tmp_path / "missing*.hdf5")
+
+
+def test_decorrelation_saves_tables_and_a_plot(locs_path, monkeypatch, capsys):
+    _picasso(monkeypatch, "decorrelation", locs_path, "-px", 8, 16)
+    base = _out(locs_path, "_decorrelation")
+    sizes = pd.read_csv(base + ".csv")
+    assert list(sizes["pixel_size_nm"]) == [8, 16]
+    assert len(pd.read_csv(base + "_curves.csv")) == 50
+    assert os.path.getsize(base + ".png") > 0
+    out = capsys.readouterr().out
+    assert "localizations" in out and "per um^2 of sample" in out
+    assert "WARNING" not in out
+    # 32 nm pixels limit the resolution of the bundled data
+    _picasso(monkeypatch, "decorrelation", locs_path, "-px", 32)
+    out = capsys.readouterr().out
+    assert "WARNING: the resolution is close to twice" in out
+
+
+def test_decorrelation_rejects_bad_arguments(locs_path, monkeypatch):
+    with pytest.raises(SystemExit, match="No pixel size"):
+        _picasso(monkeypatch, "decorrelation", locs_path, "-px", 1e5)
+    with pytest.raises(SystemExit, match="n_radii"):
+        _picasso(
+            monkeypatch, "decorrelation", locs_path, "-px", 8, "--n-radii", 3
+        )
+
+
+def test_dye_performance_of_groups_and_picks(tmp_path, monkeypatch, capsys):
+    from tests.test_postprocess import _docking_sites
+
+    sites = _docking_sites(60, 10_000, destroyed=0.3, seed=7)
+    centers = [
+        (1000.0 * (k % 10) + 500, 1000.0 * (k // 10) + 500) for k in range(60)
+    ]
+    for k, site in enumerate(sites):
+        site["x"] += centers[k][0]
+        site["y"] += centers[k][1]
+        site["group"] = np.int32(k)
+    locs = pd.concat(sites, ignore_index=True)
+    info = [
+        {"Frames": 10_000, "Pixelsize": 130.0, "Width": 100, "Height": 100}
+    ]
+    path = str(tmp_path / "sites.hdf5")
+    io.save_locs(path, locs, info)
+    _picasso(monkeypatch, "dye-performance", path)
+    out = capsys.readouterr().out
+    assert "(60 docking sites)" in out
+    assert "SBR" in out and "localization drop" in out
+    base = _out(path, "_dye_performance")
+    summary = pd.read_csv(base + ".csv")
+    assert summary["n_sites"][0] == 60
+    assert summary["destroyed_sites_percent"][0] > 10
+    assert summary["max_dark_time"][0] == 0
+    table = pd.read_csv(base + "_sites.csv")
+    assert list(table["site"]) == list(range(60))
+    assert {"t_end_frames", "dark_time_frames", "r"} <= set(table.columns)
+    assert os.path.getsize(base + ".png") > 0
+    # the same docking sites as picks
+    ungrouped = str(tmp_path / "ungrouped.hdf5")
+    io.save_locs(ungrouped, locs.drop(columns="group"), info)
+    picks_path = str(tmp_path / "picks.yaml")
+    io.save_picks(picks_path, centers, "Circle", 100.0)
+    _picasso(monkeypatch, "dye-performance", ungrouped, "-p", picks_path)
+    picked = pd.read_csv(_out(ungrouped, "_dye_performance.csv"))
+    for column in ("destroyed_sites_percent", "sbr_mean"):
+        assert picked[column][0] == pytest.approx(summary[column][0])
+    with pytest.raises(SystemExit, match="group"):
+        _picasso(monkeypatch, "dye-performance", ungrouped)
+    with pytest.raises(SystemExit, match="fraction"):
+        _picasso(monkeypatch, "dye-performance", path, "--fraction", 0.7)
+
+
+def test_knn_density_saves_tables_and_a_plot(locs_path, monkeypatch, capsys):
+    _picasso(
+        monkeypatch, "knn-density", locs_path, "-k", 3, "--k-min", 2, "-n", 2
+    )
+    base = _out(locs_path, "_knn_density")
+    curves = pd.read_csv(base + ".csv")
+    assert {"k1_per_nm", "k3_csr_per_nm"} <= set(curves.columns)
+    densities = pd.read_csv(base + "_densities.csv")
+    assert list(densities["estimate"]) == [
+        "k=1",
+        "k=2",
+        "k=3",
+        "pooled k=2-3",
+        "molecules/area",
+    ]
+    assert densities["p_value"][:3].notna().all()
+    assert os.path.getsize(base + ".png") > 0
+    out = capsys.readouterr().out
+    assert "does not contain molecules" in out  # localizations
+    assert "pooled k=2-3" in out
+
+
+def test_knn_density_in_picks_and_3d(locs_path, tmp_path, monkeypatch):
+    locs, info = io.load_locs(str(locs_path))
+    rng = np.random.default_rng(0)
+    locs["z"] = rng.uniform(-100, 100, len(locs)).astype(np.float32)
+    path = str(tmp_path / "locs_3d.hdf5")
+    io.save_locs(path, locs, info)
+    picks_path = str(tmp_path / "picks.yaml")
+    center = [float(locs["x"].median()), float(locs["y"].median())]
+    io.save_picks(picks_path, [center], "Circle", 2000.0)
+    _picasso(
+        monkeypatch,
+        "knn-density",
+        path,
+        "-p",
+        picks_path,
+        "--3d",
+        "--z-range",
+        -100,
+        100,
+        "-n",
+        0,
+        "--r-min",
+        5,
+    )
+    densities = pd.read_csv(_out(path, "_knn_density_densities.csv"))
+    assert "density_per_um3" in densities.columns
+    assert densities["p_value"].isna().all()
+
+
+def test_knn_density_rejects_bad_arguments(locs_path, monkeypatch):
+    with pytest.raises(SystemExit, match="k_min"):
+        _picasso(monkeypatch, "knn-density", locs_path, "-k", 2, "--k-min", 3)
+    with pytest.raises(SystemExit, match="No localization files"):
+        _picasso(monkeypatch, "knn-density", "missing*.hdf5")
 
 
 # ---------------------------------------------------------------------------
@@ -1263,9 +1416,13 @@ def test_spinna_batch_area_from_the_metadata(
     assert row["Area (um^2)"] == 25.0
 
 
-def test_spinna_batch_fits_the_labeling_efficiency(tmp_path, monkeypatch):
+@pytest.mark.parametrize("bootstrap", [False, True])
+def test_spinna_batch_fits_the_labeling_efficiency(
+    bootstrap, tmp_path, monkeypatch
+):
     """Half of A and half of B form heterodimers 10 nm apart, so both
-    labeling efficiencies are 50%."""
+    labeling efficiencies are 50%; with bootstrapping, they are given
+    with their uncertainty."""
     rng = np.random.default_rng(0)
     a = rng.uniform(0, 5000, (400, 2))
     b = np.vstack([a[:200] + [10, 0], rng.uniform(0, 5000, (200, 2))])
@@ -1283,13 +1440,23 @@ def test_spinna_batch_fits_the_labeling_efficiency(tmp_path, monkeypatch):
         "NND_bin": 4,
         "NND_maxdist": 200,
     }
-    results = _spinna(monkeypatch, tmp_path, row)
+    if bootstrap:
+        path = tmp_path / "params.csv"
+        pd.DataFrame([row]).to_csv(path, index=False)
+        _picasso(monkeypatch, "spinna", "-p", path, "-a", "-b")
+        results = str(tmp_path / "params__fitting_results")
+    else:
+        results = _spinna(monkeypatch, tmp_path, row)
     (summary,) = pd.read_csv(
         os.path.join(results, "summary_results.csv")
     ).to_dict("records")
     for target in "AB":
-        fitted = summary[f"Fitted labeling efficiency (%) for {target}"]
-        assert fitted == pytest.approx(50, abs=15)
+        fitted = str(summary[f"Fitted labeling efficiency (%) for {target}"])
+        mean, *std = fitted.split(" +/- ")
+        assert float(mean) == pytest.approx(50, abs=15)
+        assert len(std) == bootstrap
+        if bootstrap:
+            assert float(std[0]) >= 0
     assert os.path.exists(os.path.join(results, "le_NND_A_B.png"))
 
 
@@ -1361,7 +1528,7 @@ def test_spinna_batch_of_two_targets_with_bootstrap(tmp_path, monkeypatch):
 
 
 def test_spinna_batch_without_rotations(
-    spinna_row, tmp_path, monkeypatch, capsys
+    spinna_row, tmp_path, monkeypatch, caplog
 ):
     from picasso import spinna
 
@@ -1374,8 +1541,9 @@ def test_spinna_batch_without_rotations(
 
     monkeypatch.setattr(spinna, "StructureMixer", RecordingMixer)
     spinna_row["rotation_mode"] = "None"
-    results = _spinna(monkeypatch, tmp_path, spinna_row)
-    assert "Invalid rotation_mode" not in capsys.readouterr().out
+    with caplog.at_level(logging.WARNING, logger="picasso.spinna"):
+        results = _spinna(monkeypatch, tmp_path, spinna_row)
+    assert "Invalid rotation_mode" not in caplog.text
     assert modes == [None]
     (row,) = pd.read_csv(
         os.path.join(results, "summary_results.csv"), keep_default_na=False
@@ -1387,11 +1555,12 @@ def test_spinna_batch_without_rotations(
     "value, message", [("", False), ("4D", True)], ids=["empty", "invalid"]
 )
 def test_spinna_batch_default_rotations(
-    value, message, spinna_row, tmp_path, monkeypatch, capsys
+    value, message, spinna_row, tmp_path, monkeypatch, caplog
 ):
     spinna_row["rotation_mode"] = value
-    results = _spinna(monkeypatch, tmp_path, spinna_row)
-    assert ("Invalid rotation_mode '4D'" in capsys.readouterr().out) is message
+    with caplog.at_level(logging.WARNING, logger="picasso.spinna"):
+        results = _spinna(monkeypatch, tmp_path, spinna_row)
+    assert ("Invalid rotation_mode '4D'" in caplog.text) is message
     (row,) = pd.read_csv(os.path.join(results, "summary_results.csv")).to_dict(
         "records"
     )
@@ -1457,3 +1626,549 @@ def test_a_failed_drift_correction_does_not_stop_localize(
     assert (tmp_path / "a_locs.hdf5").exists()
     assert (tmp_path / "b_locs.hdf5").exists()
     assert capsys.readouterr().out.count("Drift correction failed") == 2
+
+
+def _copy_testdata(tmp_path) -> str:
+    """The bundled test movie copied into ``tmp_path``."""
+    import shutil
+
+    data = os.path.join(os.path.dirname(__file__), "data")
+    for ext in (".raw", ".yaml"):
+        shutil.copy(
+            os.path.join(data, "testdata" + ext), tmp_path / ("movie" + ext)
+        )
+    return str(tmp_path / "movie.raw")
+
+
+def test_localize_sums_the_scan_frames_of_a_ptu_file(tmp_path, monkeypatch):
+    from tests.test_io_ptu import _install_fake_ptufile, _spot_scan
+
+    _install_fake_ptufile(monkeypatch, _spot_scan())
+    movie = tmp_path / "scan.ptu"
+    movie.write_bytes(b"")  # read by the fake ptufile
+    _picasso(
+        monkeypatch,
+        "localize",
+        movie,
+        "--frame-sum-window",
+        4,
+        "-g",
+        20,
+        "-a",
+        "lq",
+        "-d",
+        0,
+    )
+    locs, info = io.load_locs(_out(str(movie), "_locs.hdf5"))
+    assert len(locs) == 2  # one spot in each of the two sums of 4
+    assert info[0]["Frame Sum Window"] == 4
+    assert info[0]["Frame Sum Stride"] == 4
+    assert info[0]["Photon Counting"] is True
+
+
+def test_localize_writes_one_file_per_microtime_gate(tmp_path, monkeypatch):
+    from tests.test_io_ptu import _install_fake_ptufile, _spot_scan
+
+    # 8 microtime bins of 0.04 ns, split into two gates of 4 bins
+    _install_fake_ptufile(monkeypatch, _spot_scan())
+    movie = tmp_path / "scan.ptu"
+    movie.write_bytes(b"")  # read by the fake ptufile
+    _picasso(
+        monkeypatch,
+        "localize",
+        movie,
+        "--frame-sum-window",
+        4,
+        "--microtime-gate",
+        0,
+        0.16,
+        "--microtime-gate",
+        0.16,
+        0.32,
+        "-g",
+        8,
+        "-a",
+        "lq",
+        "-d",
+        0,
+    )
+    for gate, (start, end) in enumerate([(0.0, 0.16), (0.16, 0.32)], 1):
+        out = tmp_path / f"scan_Detector_1_gate_{gate}_locs.hdf5"
+        locs, info = io.load_locs(str(out))
+        # the spot at (12.6, 11.3) px, in each of the two sums of 4
+        near = (abs(locs["x"] / 130 - 12.6) < 1) & (
+            abs(locs["y"] / 130 - 11.3) < 1
+        )
+        assert set(locs["frame"][near]) == {0, 1}
+        assert info[0]["Channel"] == f"Detector 1 gate {gate}"
+        assert info[0]["Microtime Gate (ns)"] == [start, end]
+    assert not (tmp_path / "scan_locs.hdf5").exists()
+
+
+@pytest.mark.parametrize(
+    "option",
+    [
+        ["--frame-sum-window", 2],
+        ["--frame-sum-stride", 2],
+        ["--microtime-gate", 0, 10],
+    ],
+)
+def test_localize_refuses_to_sum_camera_frames(tmp_path, monkeypatch, option):
+    movie = _copy_testdata(tmp_path)
+    with pytest.raises(SystemExit, match="photon-counting movies"):
+        _picasso(monkeypatch, "localize", movie, *option, "-px", 160)
+    assert not os.path.exists(_out(movie, "_locs.hdf5"))
+
+
+def test_localize_multi_emitter(tmp_path, monkeypatch):
+    movie = _copy_testdata(tmp_path)
+    _picasso(
+        monkeypatch,
+        "localize",
+        movie,
+        "--multi-emitter",
+        "--psf-sigma",
+        131,
+        "--snr-threshold",
+        8,
+        "-px",
+        160,
+        "-d",
+        0,
+    )
+    locs, info = io.load_locs(_out(movie, "_locs.hdf5"))
+    assert len(locs)
+    assert {"significance", "n_emitters"} <= set(locs.columns)
+    entry = next(e for e in info if e.get("Step") == "Fit multi-emitter")
+    assert entry["PSF Sigma (nm)"] == pytest.approx(131.0)
+    assert entry["SNR Threshold"] == 8.0
+    assert entry["Pixelsize"] == 160
+
+
+def test_localize_3d_takes_the_magnification_factor(tmp_path, monkeypatch):
+    """--magnification-factor overrides the calibration's own (0.79): z
+    scales with it, and the metadata records it."""
+    from tests.conftest import CALIB_3D
+
+    movie = _copy_testdata(tmp_path)
+    calibration = str(tmp_path / "3d_calib.yaml")
+    io.save_calibration(calibration, dict(CALIB_3D))
+    z = {}
+    for factor in (0.79, 0.5):
+        _picasso(
+            monkeypatch,
+            "localize",
+            movie,
+            "-a",
+            "lq-3d",
+            "-zc",
+            calibration,
+            "-mf",
+            factor,
+            "-px",
+            160,
+            "-d",
+            0,
+            "--suffix",
+            f"_{factor}",
+        )
+        locs, info = io.load_locs(_out(movie, f"_{factor}_locs.hdf5"))
+        entry = next(e for e in info if e.get("Step") == "Fit 3D")
+        assert entry["Magnification factor"] == factor
+        z[factor] = locs["z"].to_numpy()
+    np.testing.assert_allclose(z[0.5], z[0.79] * 0.5 / 0.79, rtol=1e-5)
+
+
+def test_localize_multi_emitter_elliptical_gives_z(tmp_path, monkeypatch):
+    from tests.conftest import CALIB_3D
+
+    movie = _copy_testdata(tmp_path)
+    calibration = str(tmp_path / "3d_calib.yaml")
+    io.save_calibration(calibration, dict(CALIB_3D))
+    _picasso(
+        monkeypatch,
+        "localize",
+        movie,
+        "--multi-emitter",
+        "--psf-model",
+        "elliptical",
+        "--psf-sigma",
+        131,
+        "-zc",
+        calibration,
+        "-mf",
+        0.6,
+        "-px",
+        160,
+        "-d",
+        0,
+    )
+    locs, info = io.load_locs(_out(movie, "_locs.hdf5"))
+    assert len(locs)
+    assert {"z", "lpz"} <= set(locs.columns)
+    # a sigma in x and one in y per emitter
+    assert (locs["sx"] != locs["sy"]).any()
+    entry = next(e for e in info if e.get("Step") == "Fit multi-emitter")
+    assert entry["PSF Model"] == "elliptical"
+    z_entry = next(e for e in info if e.get("Step") == "Fit 3D")
+    assert z_entry["Magnification factor"] == 0.6
+    assert z_entry["Calibration path"] == calibration
+    assert z_entry["Z fit method"] == "gaussmle"
+
+
+@pytest.mark.parametrize("gpu", [False, True])
+def test_localize_multi_emitter_fits_z_on_the_gpu(tmp_path, monkeypatch, gpu):
+    """--fit-z-gpu moves the z fit of --psf-model elliptical to the GPU."""
+    from picasso import zfit
+    from tests.conftest import CALIB_3D
+
+    devices = []
+    fit_z = zfit.zfit
+
+    def zfit_on(*args, gpu=False, **kwargs):
+        devices.append(gpu)
+        # serially on the CPU, which stands in for the GPU
+        return fit_z(*args, **(kwargs | {"parallel": False}))
+
+    monkeypatch.setattr(zfit, "CUDA_AVAILABLE", True)
+    monkeypatch.setattr(zfit, "zfit", zfit_on)
+    movie = _copy_testdata(tmp_path)
+    calibration = str(tmp_path / "3d_calib.yaml")
+    io.save_calibration(calibration, dict(CALIB_3D))
+    _picasso(
+        monkeypatch,
+        "localize",
+        movie,
+        "--multi-emitter",
+        "--psf-model",
+        "elliptical",
+        "--psf-sigma",
+        131,
+        "-zc",
+        calibration,
+        "-mf",
+        0.6,
+        *(["--fit-z-gpu"] if gpu else []),
+        "-px",
+        160,
+        "-d",
+        0,
+    )
+    assert devices == [gpu]
+    locs, _ = io.load_locs(_out(movie, "_locs.hdf5"))
+    assert "z" in locs.columns
+
+
+def test_localize_multi_emitter_spline_gives_z(tmp_path, monkeypatch):
+    from tests.test_multi_emitter import _spline_calibration
+
+    movie = _copy_testdata(tmp_path)
+    calibration = str(tmp_path / "spline_calib.hdf5")
+    io.save_spline_calibration(calibration, _spline_calibration("spline-3d"))
+    _picasso(
+        monkeypatch,
+        "localize",
+        movie,
+        "--multi-emitter",
+        "--psf-model",
+        "spline",
+        "-sc",
+        calibration,
+        "--peak-search-z",
+        -200,
+        0,
+        200,
+        "--fit-region-size",
+        9,
+        "-px",
+        160,
+        "-d",
+        0,
+    )
+    locs, info = io.load_locs(_out(movie, "_locs.hdf5"))
+    assert len(locs)
+    assert {"z", "lpz"} <= set(locs.columns)
+    assert "sx" not in locs.columns
+    entry = next(e for e in info if e.get("Step") == "Fit multi-emitter")
+    assert entry["PSF Model"] == "spline"
+    assert entry["Peak Search z (nm)"] == [-200.0, 0.0, 200.0]
+    assert entry["Fit Region Size"] == 9
+    assert entry["Spline calibration path"] == calibration
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["-a", "lq"],
+        # z needs the sigmas in x and y of --psf-model elliptical
+        ["-zc", "calibration.yaml"],
+        ["--psf-model", "spherical", "-zc", "calibration.yaml"],
+        # a spline calibration is the PSF of --psf-model spline only
+        ["-sc", "spline.hdf5"],
+        ["--psf-model", "spline"],
+        ["--psf-model", "spline", "-sc", "a.hdf5", "-sc", "b.hdf5"],
+        ["--psf-model", "spline", "-sc", "spline.hdf5", "-zc", "c.yaml"],
+        # the fit region of a Gaussian follows its sigma
+        ["--fit-region-size", 11],
+        ["--regions-separately", "-r", 0, 0, 16, 32, "-r", 16, 0, 32, 32],
+    ],
+)
+def test_localize_multi_emitter_refuses(tmp_path, monkeypatch, options):
+    movie = _copy_testdata(tmp_path)
+    with pytest.raises(SystemExit, match="multi-emitter"):
+        _picasso(
+            monkeypatch,
+            "localize",
+            movie,
+            "--multi-emitter",
+            *options,
+            "-px",
+            160,
+        )
+
+
+class _FakeEstimate:
+    """Records the calls to ``localize.estimate_min_net_gradient`` and
+    returns a fixed estimate."""
+
+    def __init__(self, monkeypatch, value=1234.4):
+        from picasso import localize
+
+        self.calls = []
+        self.value = value
+        monkeypatch.setattr(localize, "estimate_min_net_gradient", self)
+
+    def __call__(self, movie, **kwargs):
+        self.calls.append((movie, kwargs))
+        return {
+            "min_net_gradient": self.value,
+            "background": 100.0,
+            "background_width": 50.0,
+            "frames": np.arange(40),
+        }
+
+
+def _min_net_gradient(path):
+    """The minimum net gradient the localizations at ``path`` were
+    identified with."""
+    _, info = io.load_locs(_out(path, "_locs.hdf5"))
+    return next(e for e in info if "Min. Net Gradient" in e)[
+        "Min. Net Gradient"
+    ]
+
+
+class TestLocalizeAutoGradient:
+    def test_auto_or_an_integer(self):
+        import argparse
+
+        assert cli._gradient_arg("auto") == "auto"
+        assert cli._gradient_arg(" Auto ") == "auto"
+        assert cli._gradient_arg("3000") == 3000
+        with pytest.raises(argparse.ArgumentTypeError, match="'auto'"):
+            cli._gradient_arg("fast")
+
+    def test_the_estimate_of_the_movie_is_used(
+        self, tmp_path, monkeypatch, capsys
+    ):
+        from picasso import localize
+
+        path = _copy_testdata(tmp_path)
+        movie, _ = io.load_movie(path)
+        estimate = localize.estimate_min_net_gradient(movie, box=7)
+        expected = round(estimate["min_net_gradient"])
+        _picasso(
+            monkeypatch, "localize", path, "-g", "auto", "-d", 0, "-px", 160
+        )
+        assert _min_net_gradient(path) == expected
+        assert f"Min. net gradient estimated: {expected} " in (
+            capsys.readouterr().out
+        )
+
+    def test_one_per_roi_is_estimated_in_its_own_roi(
+        self, tmp_path, monkeypatch
+    ):
+        fake = _FakeEstimate(monkeypatch)
+        path = _copy_testdata(tmp_path)
+        _picasso(
+            monkeypatch,
+            "localize",
+            path,
+            "--roi", 0, 0, 32, 16,
+            "--roi", 0, 16, 32, 32,
+            "-g", "auto",
+            "-g", 3000,
+            "-fb", 10, 59,
+            "-d", 0,
+            "-px", 160,
+        )  # fmt: skip
+        ((_, kwargs),) = fake.calls
+        assert kwargs["roi"] == [[[0, 0], [32, 16]]]
+        assert kwargs["frame_bounds"] == [[10, 59]]
+        assert kwargs["box"] == 7
+        assert _min_net_gradient(path) == [1234, 3000]
+
+    def test_a_single_one_is_estimated_in_all_rois(
+        self, tmp_path, monkeypatch
+    ):
+        fake = _FakeEstimate(monkeypatch)
+        path = _copy_testdata(tmp_path)
+        _picasso(
+            monkeypatch,
+            "localize",
+            path,
+            "--roi", 0, 0, 32, 16,
+            "--roi", 0, 16, 32, 32,
+            "-g", "auto",
+            "-d", 0,
+            "-px", 160,
+        )  # fmt: skip
+        ((_, kwargs),) = fake.calls
+        assert kwargs["roi"] == [[[0, 0], [32, 16]], [[0, 16], [32, 32]]]
+        assert _min_net_gradient(path) == 1234
+
+    def test_the_filtered_movie_is_searched(self, tmp_path, monkeypatch):
+        from picasso import localize
+
+        fake = _FakeEstimate(monkeypatch)
+        path = _copy_testdata(tmp_path)
+        _picasso(
+            monkeypatch,
+            "localize",
+            path,
+            "-g", "auto",
+            "--gaussian-filter", 1.0,
+            "-d", 0,
+            "-px", 160,
+        )  # fmt: skip
+        ((movie, _),) = fake.calls
+        assert isinstance(movie, localize.GaussianFilteredMovie)
+
+    def test_not_estimated_for_the_wavelet_identification(
+        self, tmp_path, monkeypatch
+    ):
+        fake = _FakeEstimate(monkeypatch)
+        path = _copy_testdata(tmp_path)
+        _picasso(
+            monkeypatch,
+            "localize",
+            path,
+            "-g", "auto",
+            "--identification-method", "wavelet",
+            "-d", 0,
+            "-px", 160,
+        )  # fmt: skip
+        assert fake.calls == []
+        assert os.path.exists(_out(path, "_locs.hdf5"))
+
+
+# ---------------------------------------------------------------------------
+# Pick similar
+# ---------------------------------------------------------------------------
+
+PICK_SIZE = 1.5 * 130.0  # nm, the bundled localizations' pixel size
+
+
+class TestPickSimilar:
+    def test_by_ranges(self, locs_path, monkeypatch, capsys):
+        _picasso(
+            monkeypatch,
+            "pick-similar",
+            locs_path,
+            "-d", PICK_SIZE,
+            "--rmsd-range", 0, 100,
+            "--save-candidates",
+        )  # fmt: skip
+        out = _out(locs_path, "_pick_similar.yaml")
+        picks, shape, size = io.load_picks(out)
+        assert len(picks) == 9  # the origami
+        assert (shape, size) == ("Circle", PICK_SIZE)
+        candidates = pd.read_csv(
+            _out(locs_path, "_pick_similar_candidates.csv")
+        )
+        assert list(candidates.columns) == ["x", "y", "n_locs", "rmsd"]
+        np.testing.assert_allclose(picks, candidates[["x", "y"]].to_numpy())
+        # the default minimum: 1% of the frames
+        assert "with at least 10 localizations" in capsys.readouterr().out
+
+    def test_the_ranges_select(self, locs_path, monkeypatch):
+        _picasso(
+            monkeypatch,
+            "pick-similar",
+            locs_path,
+            "-d", PICK_SIZE,
+            "--n-locs-range", 50, 80,
+            "--min-n-locs", 2,
+            "--save-candidates",
+        )  # fmt: skip
+        picks, _, _ = io.load_picks(_out(locs_path, "_pick_similar.yaml"))
+        candidates = pd.read_csv(
+            _out(locs_path, "_pick_similar_candidates.csv")
+        )
+        expected = candidates.query("50 <= n_locs <= 80")
+        assert 0 < len(picks) == len(expected) < len(candidates)
+
+    def test_seed_picks(self, locs_path, tmp_path, monkeypatch):
+        seeds = tmp_path / "seeds.yaml"
+        io.save_picks(
+            str(seeds), [(715.0, 715.0), (2015.0, 2015.0)], "Circle", PICK_SIZE
+        )
+        _picasso(
+            monkeypatch, "pick-similar", locs_path, "-p", seeds, "-s", 100
+        )
+        out = _out(locs_path, "_pick_similar.yaml")
+        picks, shape, size = io.load_picks(out)
+        assert len(picks) == 9
+        np.testing.assert_allclose(picks[:2], [(715, 715), (2015, 2015)])
+        assert (shape, size) == ("Circle", PICK_SIZE)
+
+    def test_one_file_per_class(self, locs_path, monkeypatch):
+        classes = pd.DataFrame(
+            {
+                "n_candidates": [5, 4],
+                "n_locs": [60.0, 40.0],
+                "rmsd": [21.0, 23.0],
+                "n_locs_min": [50.0, 0.0],
+                "n_locs_max": [80.0, 49.0],
+                "rmsd_min": [0.0, 0.0],
+                "rmsd_max": [100.0, 100.0],
+            }
+        )
+
+        def fake_classes(candidates):
+            labels = np.where(candidates["n_locs"] >= 50, 0, 1)
+            return labels, classes
+
+        from picasso import postprocess
+
+        monkeypatch.setattr(postprocess, "structure_classes", fake_classes)
+        _picasso(
+            monkeypatch,
+            "pick-similar",
+            locs_path,
+            "-d", PICK_SIZE,
+            "--classes",
+            "--min-n-locs", 2,
+            "--save-candidates",
+        )  # fmt: skip
+        candidates = pd.read_csv(
+            _out(locs_path, "_pick_similar_candidates.csv")
+        )
+        # the classes are numbered from 1 (0: none)
+        assert set(candidates["class"]) <= {1, 2}
+        for number, query in ((1, "50 <= n_locs <= 80"), (2, "n_locs <= 49")):
+            picks, _, _ = io.load_picks(
+                _out(locs_path, f"_pick_similar_class{number}.yaml")
+            )
+            assert len(picks) == len(candidates.query(query))
+
+    @pytest.mark.parametrize(
+        "options",
+        [
+            ["-d", PICK_SIZE],
+            ["-d", PICK_SIZE, "--classes", "--rmsd-range", 0, 1],
+            ["--rmsd-range", 0, 1],
+        ],
+    )
+    def test_refuses(self, locs_path, monkeypatch, options):
+        with pytest.raises(SystemExit):
+            _picasso(monkeypatch, "pick-similar", locs_path, *options)

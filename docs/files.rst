@@ -17,10 +17,13 @@ Picasso accepts several types of raw movie files:
 - MetaMorph ``.stk``;
 - Imaris ``.ims``;
 - with the optional ``czi``/``lif`` extras (Python ≥ 3.12), Zeiss ``.czi``
-  and Leica ``.lif``.
+  and Leica ``.lif``;
+- with the optional ``ptu`` extra (Python ≥ 3.12), PicoQuant ``.ptu``
+  confocal image scans, whose pixels count detected photons (see
+  :ref:`PicoQuant .ptu files <localize-ptu>`).
 
-For TIFF-family, ``.nd2`` and ``.stk`` movies the metadata is normally read
-directly from the file. Raw binary files carry no metadata, so
+For TIFF-family, ``.nd2``, ``.stk`` and ``.ptu`` movies the metadata is
+normally read directly from the file. Raw binary files carry no metadata, so
 ``Picasso: Localize`` asks for it (``Frames``, ``Width``, ``Height``,
 ``Pixelsize``, etc.) if sidecar ``.yaml`` file is not found; it does the same for other movies whose metadata cannot
 be parsed, with the field of view dimensions pre-filled when they can be read.

@@ -5,8 +5,8 @@ saving a model - with the refusals of bad or missing input, the cancel
 paths of the file dialogs and the round trip from a model trained in the
 dialog to the predictions made with it.
 
-The bundled default model is not used (it does not unpickle with every
-scikit-learn version); the models here are trained on synthetic picks
+The default model on Zenodo is not used (it does not unpickle with
+every scikit-learn version); the models here are trained on synthetic picks
 of single and double dots in a few hundred milliseconds.
 
 :author: Rafal Kowalewski, 2026
@@ -295,6 +295,14 @@ def _pick_classes(locs) -> list[int]:
 # ---------------------------------------------------------------------------
 
 
+def test_training_uses_the_largest_of_several_pick_diameters():
+    parse = gui_nanotron.train_dialog.parse_pick_diameter
+    assert parse([{"Pick Diameter (nm)": [100.0, 180.0, 140.0]}]) == 180.0
+    assert parse([{"Pick Diameter (nm)": 120.0}]) == 120.0
+    # a mix of shapes records no diameter
+    assert parse([{"Pick Shape": ["Circle", "Box"]}]) is None
+
+
 def test_opening_picked_localizations_renders_them_and_counts_picks(
     window, locs_path
 ):
@@ -468,47 +476,6 @@ def test_a_failed_model_load_keeps_the_previous_model(
     assert [box.text() for box in _class_boxes(window)] == list(
         CLASSES.values()
     )
-
-
-def test_an_unloadable_default_model_is_not_marked_loaded(
-    qt_offscreen, dialogs, monkeypatch, tmp_path
-):
-    """The default model (off by default) is read from the working
-    directory; the bundled one may not unpickle with the installed
-    scikit-learn."""
-    folder = tmp_path / "picasso" / "model"
-    folder.mkdir(parents=True)
-    (folder / "default_model.sav").write_text("not a pickled model")
-    io.save_info(str(folder / "default_model.yaml"), [_model_info()])
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(gui_nanotron, "default_model", True)
-
-    window = gui_nanotron.Window()
-    try:
-        assert not window.model_loaded
-        assert _class_boxes(window) == []
-        assert window.status_bar.currentMessage() == "Load model."
-    finally:
-        window.close()
-
-
-def test_the_default_model_is_loaded_when_present(
-    qt_offscreen, dialogs, monkeypatch, tmp_path, mlp
-):
-    folder = tmp_path / "picasso" / "model"
-    folder.mkdir(parents=True)
-    _save_model(folder / "default_model.sav", mlp, _model_info())
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(gui_nanotron, "default_model", True)
-
-    window = gui_nanotron.Window()
-    try:
-        assert window.model_loaded
-        assert [box.text() for box in _class_boxes(window)] == list(
-            CLASSES.values()
-        )
-    finally:
-        window.close()
 
 
 # ---------------------------------------------------------------------------

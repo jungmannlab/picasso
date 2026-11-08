@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 import sys
 import copy
+import contextlib
 import logging
 import threading
 import time
@@ -21,8 +22,8 @@ import warnings
 import os.path
 from math import ceil
 from collections import Counter
-from functools import partial
-from typing import Callable, Literal
+from functools import partial, wraps
+from typing import Callable, Generator, Literal
 from PIL import Image
 
 import matplotlib
@@ -37,6 +38,7 @@ from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 from matplotlib.figure import Figure
 from matplotlib.patches import Rectangle
+from matplotlib.widgets import RectangleSelector
 from scipy.ndimage import gaussian_filter
 from sklearn.metrics.pairwise import euclidean_distances
 from sklearn.cluster import KMeans
@@ -71,8 +73,10 @@ from .render_worker import (  # noqa: F401
 from . import idle
 from . import render_link
 from . import render_spt
+from . import render_undo
 from .convert_units import ConvertUnitsDialog
 from .grid_settings import GridGroupBox
+from .scalebar_settings import ScaleBarGroupBox
 from .overlay_style import OverlayStyleWidget
 from .rotation import RotationWindow, source_key
 from .app import run_gui
@@ -171,6 +175,7 @@ KEEP_NON_OVERLAPPING_KEY = "Keep non-overlapping after alignment"
 # key (in the Render section of the user settings) of whether File >
 # Remove all localizations asks for confirmation first
 CONFIRM_REMOVE_LOCS_KEY = "Confirm removing all localizations"
+CTRL_Z_NOTICE_KEY = "Show Ctrl+Z notice"
 POLYGON_POINTER_SIZE = 16  # must be even
 # shortest drag (display pixels, in x and y) that still yields a box
 # pick, so that a stray click does not create one of zero area
@@ -309,6 +314,22 @@ def confirm_remove_locs_setting() -> bool:
     return _render_bool_setting(CONFIRM_REMOVE_LOCS_KEY, False)
 
 
+def ctrl_z_notice_setting() -> bool:
+    """Whether pressing Ctrl+Z tells that it undoes rather than
+    selecting the Zoom tool, as before Picasso 1.0 (see
+    ``Window.explain_ctrl_z``).
+
+    Reads ``Show Ctrl+Z notice`` from the ``Render`` section of the
+    user settings; a missing key is written with the default (True).
+
+    Returns
+    -------
+    show : bool
+        True if the notice is shown.
+    """
+    return _render_bool_setting(CTRL_Z_NOTICE_KEY, True)
+
+
 def check_pick(f: Callable) -> Callable:
     """Decorator verifying if there is at least one pick."""
 
@@ -342,12 +363,12 @@ def check_picks(f: Callable) -> Callable:
 
 
 def check_pick_shapes(*shapes: str) -> Callable:
-    """Decorator factory verifying that the current pick shape is one of
+    """Decorator factory verifying that every pick has one of
     ``shapes``."""
 
     def decorator(f: Callable) -> Callable:
         def wrapper(*args):
-            if args[0]._pick_shape not in shapes:
+            if any(shape not in shapes for shape in args[0]._pick_shapes):
                 QtWidgets.QMessageBox.warning(
                     args[0],
                     "Pick Error",
@@ -364,6 +385,34 @@ def check_pick_shapes(*shapes: str) -> Callable:
 
 #: Decorator verifying if the picks are circular.
 check_circular_picks = check_pick_shapes("Circle")
+
+
+def records_undo_step(label: str, **overlays: bool) -> Callable:
+    """Decorator factory recording a ``View`` method as one step to
+    undo, see ``View.undo_step``, which takes ``label`` and
+    ``overlays``."""
+
+    def decorator(f: Callable) -> Callable:
+        @wraps(f)
+        def wrapper(self, *args, **kwargs):
+            with self.undo_step(label, **overlays):
+                return f(self, *args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+def _describe_pick_shapes(shape: str | list[str]) -> str:
+    """Name the shape of picks in a message, e.g., "rectangular picks"
+    or "picks of different shapes"; ``shape`` is one shape or one per
+    pick, see ``io.load_picks``."""
+    if isinstance(shape, str):
+        return f"{shape.lower()} picks"
+    shapes = sorted(set(shape))
+    if len(shapes) == 1:
+        return f"{shapes[0].lower()} picks"
+    return "picks of different shapes (" + ", ".join(shapes).lower() + ")"
 
 
 class FloatEdit(QtWidgets.QLineEdit):
@@ -410,9 +459,12 @@ class PickHistWindow(lib.GenericPlotWindow):
         pooled_locs: pd.DataFrame,
         fit_result_len: dict,
         fit_result_dark: dict,
+        damage: dict | None = None,
+        picked: tuple[pd.DataFrame, list[dict]] | None = None,
     ) -> None:
         """Plot two histograms for experimental data and exponential
-        fits.
+        fits and, if given, the docking site damage and the picked
+        localizations over time.
 
         Parameters
         ----------
@@ -424,8 +476,23 @@ class PickHistWindow(lib.GenericPlotWindow):
         fit_result_dark : dict
             Cumulative exponential fit results for dark times, see
             ``fit_cum_exp``.
+        damage : dict or None, optional
+            Result of ``postprocess.docking_site_damage``. Default is
+            None.
+        picked : tuple or None, optional
+            The picked localizations and their metadata, shown over
+            time (``postprocess.plot_localization_rate``). Default is
+            None.
         """
-        self._plot_args = (pooled_locs, fit_result_len, fit_result_dark)
+        self._plot_args = (
+            pooled_locs,
+            fit_result_len,
+            fit_result_dark,
+            damage,
+            picked,
+        )
+        if (damage is not None or picked is not None) and self.height() < 800:
+            self.resize(self.width(), 900)  # two rows of plots
         self._draw()
         self.canvas.draw()
         self.plotted = True
@@ -434,12 +501,25 @@ class PickHistWindow(lib.GenericPlotWindow):
         """Draw the last plotted data with the current plot style."""
         if self._plot_args is None:
             return
-        pooled_locs, fit_result_len, fit_result_dark = self._plot_args
+        (pooled_locs, fit_result_len, fit_result_dark, damage, picked) = (
+            self._plot_args
+        )
+        extra = damage is not None or picked is not None
         with self.plot_context():
             self.figure.clear()
-            self.axes1 = self.figure.add_subplot(121)
-            self.axes2 = self.figure.add_subplot(122)
+            rows = 2 if extra else 1
+            self.axes1 = self.figure.add_subplot(rows, 2, 1)
+            self.axes2 = self.figure.add_subplot(rows, 2, 2)
             self._draw_axes(pooled_locs, fit_result_len, fit_result_dark)
+            if damage is not None:
+                postprocess.plot_docking_site_damage(
+                    damage, ax=self.figure.add_subplot(2, 2, 3)
+                )
+            if picked is not None:
+                with contextlib.suppress(KeyError):  # no number of frames
+                    postprocess.plot_localization_rate(
+                        *picked, ax=self.figure.add_subplot(2, 2, 4)
+                    )
 
     def _draw_axes(
         self,
@@ -480,6 +560,468 @@ class PickHistWindow(lib.GenericPlotWindow):
         self.figure.suptitle("Binding kinetics per pick")
 
 
+class PickCandidatesWindow(lib.GenericPlotWindow):
+    """Pick circular structures by their number of localizations and
+    RMSD, without seed picks.
+
+    The candidate picks (``postprocess.pick_similar_candidates``) of one
+    channel are shown in a 2D histogram of their number of localizations
+    and RMSD. The ranges of the two - drawn as a rectangle on the
+    histogram, typed in, or those of a class of
+    ``postprocess.structure_classes`` - select the candidates that
+    ``Add picks`` adds to the picks of the view.
+
+    Parameters
+    ----------
+    view : picasso.gui.render.View
+        The view whose localizations are scanned and which receives the
+        picks.
+    channel : int
+        Index of the channel.
+
+    Attributes
+    ----------
+    candidates : pd.DataFrame or None
+        The candidates found last, see
+        ``postprocess.pick_similar_candidates``.
+    diameter : float or None
+        Pick diameter (nm) the candidates were found with, which the
+        added picks take.
+    classes : pd.DataFrame or None
+        The classes found last, see ``postprocess.structure_classes``.
+    """
+
+    TITLE = "Pick by localizations and RMSD"
+    HELP_URL = docs_url("render/menu-tools.html#render-pick-by-n-locs-rmsd")
+    #: Default minimum number of localizations of a candidate, as a
+    #: fraction of the frames: above the background, whose candidates
+    #: would otherwise outnumber the structures (see
+    #: ``postprocess.structure_classes``).
+    MIN_N_LOCS_FRACTION = 0.01
+    #: Upper limit of the bins of each axis of the 2D histogram.
+    MAX_BINS = 100
+
+    def __init__(self, view: QtWidgets.QWidget, channel: int) -> None:
+        name = os.path.basename(view.locs_paths[channel])
+        super().__init__(f"{self.TITLE}: {name}", "render")
+        self.view = view
+        self.channel = channel
+        self.candidates = None
+        self.diameter = None
+        self.classes = None
+        self.selector = None
+        self.range_patch = None
+        self.redraw = self.plot
+        self.resize(900, 750)
+
+        controls = QtWidgets.QWidget()
+        rows = QtWidgets.QVBoxLayout(controls)
+        rows.setContentsMargins(0, 0, 0, 0)
+        self.layout().insertWidget(0, controls)
+        # the plot takes the height the controls do not need
+        self.layout().setStretchFactor(self.canvas, 1)
+        candidates_row = QtWidgets.QHBoxLayout()
+        ranges_row = QtWidgets.QHBoxLayout()
+        picks_row = QtWidgets.QHBoxLayout()
+        for row in (candidates_row, ranges_row, picks_row):
+            rows.addLayout(row)
+
+        # the candidates
+        candidates_row.addWidget(lib.HelpButton(self.HELP_URL))
+        min_label = QtWidgets.QLabel("Min. localizations:")
+        min_tip = (
+            "Minimum number of localizations of a candidate pick. The\n"
+            "background forms many candidates of a few localizations,\n"
+            "which can outnumber the structures. The default is 1% of\n"
+            "the frames."
+        )
+        min_label.setToolTip(min_tip)
+        candidates_row.addWidget(min_label)
+        self.min_n_locs = QtWidgets.QSpinBox()
+        self.min_n_locs.setRange(2, int(1e9))
+        self.min_n_locs.setToolTip(min_tip)
+        n_frames = lib.get_from_metadata(view.infos[channel], "Frames")
+        self.min_n_locs.setValue(
+            max(2, int(self.MIN_N_LOCS_FRACTION * (n_frames or 0)))
+        )
+        candidates_row.addWidget(self.min_n_locs)
+        self.find_button = QtWidgets.QPushButton("Find candidates")
+        self.find_button.setToolTip(
+            "Scan the field of view with circular picks of the pick\n"
+            "diameter of the Tools settings (Ctrl+T), each moved to the\n"
+            "center of mass of its localizations, as Pick similar does."
+        )
+        self.find_button.clicked.connect(self.find_candidates)
+        candidates_row.addWidget(self.find_button)
+        self.diameter_label = QtWidgets.QLabel()
+        candidates_row.addWidget(self.diameter_label)
+        candidates_row.addStretch(1)
+
+        # the ranges
+        ranges_row.addWidget(QtWidgets.QLabel("Localizations:"))
+        self.n_locs_min = QtWidgets.QSpinBox()
+        self.n_locs_max = QtWidgets.QSpinBox()
+        for spinbox in (self.n_locs_min, self.n_locs_max):
+            spinbox.setRange(0, int(1e9))
+            spinbox.setKeyboardTracking(False)
+        ranges_row.addWidget(self.n_locs_min)
+        ranges_row.addWidget(QtWidgets.QLabel("to"))
+        ranges_row.addWidget(self.n_locs_max)
+        ranges_row.addSpacing(16)
+        ranges_row.addWidget(QtWidgets.QLabel("RMSD (nm):"))
+        self.rmsd_min = QtWidgets.QDoubleSpinBox()
+        self.rmsd_max = QtWidgets.QDoubleSpinBox()
+        for spinbox in (self.rmsd_min, self.rmsd_max):
+            spinbox.setRange(0, 1e6)
+            spinbox.setDecimals(1)
+            spinbox.setKeyboardTracking(False)
+        ranges_row.addWidget(self.rmsd_min)
+        ranges_row.addWidget(QtWidgets.QLabel("to"))
+        ranges_row.addWidget(self.rmsd_max)
+        ranges_row.addStretch(1)
+        for spinbox in self._range_spinboxes():
+            spinbox.setToolTip(
+                "Range (inclusive) of the candidates to pick. Draw a\n"
+                "rectangle on the histogram to set both."
+            )
+            spinbox.valueChanged.connect(self.on_range_changed)
+
+        # the classes and the picks
+        self.classes_button = QtWidgets.QPushButton("Find classes")
+        self.classes_button.setToolTip(
+            "Cluster the candidates by their number of localizations and\n"
+            "RMSD (OPTICS) and give each class the ranges of its median\n"
+            "+/- one standard deviation."
+        )
+        self.classes_button.clicked.connect(self.find_classes)
+        picks_row.addWidget(self.classes_button)
+        self.class_combo = QtWidgets.QComboBox()
+        self.class_combo.setToolTip("Set the ranges to those of a class.")
+        self.class_combo.setSizeAdjustPolicy(
+            QtWidgets.QComboBox.SizeAdjustPolicy.AdjustToContents
+        )
+        self.class_combo.activated.connect(self.on_class_selected)
+        picks_row.addWidget(self.class_combo)
+        picks_row.addStretch(1)
+        self.status_label = QtWidgets.QLabel()
+        picks_row.addWidget(self.status_label)
+        self.add_button = QtWidgets.QPushButton("Add picks")
+        self.add_button.setToolTip(
+            "Add the candidates within the ranges to the picks, as\n"
+            "circles of the diameter they were found with."
+        )
+        self.add_button.clicked.connect(self.add_picks)
+        picks_row.addWidget(self.add_button)
+
+        # in the window, as the canvas does not take the keyboard focus
+        cancel = QtGui.QShortcut(
+            QtGui.QKeySequence(QtCore.Qt.Key.Key_Escape), self
+        )
+        cancel.activated.connect(self.cancel_selection)
+        self._update_widgets()
+        self.plot()
+
+    # ------------------------------------------------------------------
+    # candidates and classes
+    # ------------------------------------------------------------------
+
+    def find_candidates(self) -> None:
+        """Find the candidate picks of the channel with the pick diameter
+        of the Tools settings, on a worker thread."""
+        view = self.view
+        locs = view.locs[self.channel]
+        info = view.infos[self.channel]
+        tools = view.window.tools_settings_dialog
+        diameter = float(tools.pick_diameter.value())
+        min_n_locs = self.min_n_locs.value()
+
+        def compute(progress: lib.TaskProgress) -> pd.DataFrame:
+            return postprocess.pick_similar_candidates(
+                locs,
+                info,
+                pick_size=diameter,
+                min_n_locs=min_n_locs,
+                progress=progress,
+            )
+
+        def apply(candidates: pd.DataFrame) -> None:
+            self.set_candidates(candidates, diameter)
+
+        lib.run_task(compute, "Finding candidate picks", self, apply)
+
+    def set_candidates(
+        self, candidates: pd.DataFrame, diameter: float
+    ) -> None:
+        """Show ``candidates`` found with picks of ``diameter`` (nm), with
+        ranges that span all of them."""
+        self.candidates = candidates
+        self.diameter = diameter
+        self.classes = None
+        if len(candidates):
+            self.set_ranges(
+                (candidates["n_locs"].min(), candidates["n_locs"].max()),
+                (candidates["rmsd"].min(), candidates["rmsd"].max()),
+            )
+        self._update_widgets()
+        self.plot()
+
+    def find_classes(self) -> None:
+        """Find the classes of the candidates and select the first."""
+        if self.candidates is None or len(self.candidates) < 2:
+            self.status_label.setText("Too few candidates for classes.")
+            return
+        candidates = self.candidates
+        _, classes = lib.run_with_status(
+            lambda: postprocess.structure_classes(candidates),
+            "Finding classes...",
+            self,
+        )
+        self.classes = classes
+        self._update_widgets()
+        if len(classes):
+            self.select_class(0)
+        else:
+            self.status_label.setText("No classes found.")
+        self.plot()
+
+    def select_class(self, index: int) -> None:
+        """Set the ranges to those of class ``index``."""
+        row = self.classes.iloc[index]
+        self.set_ranges(
+            (row["n_locs_min"], row["n_locs_max"]),
+            (row["rmsd_min"], row["rmsd_max"]),
+        )
+        self.class_combo.setCurrentIndex(index)
+
+    def on_class_selected(self, index: int) -> None:
+        if self.classes is not None and 0 <= index < len(self.classes):
+            self.select_class(index)
+
+    # ------------------------------------------------------------------
+    # ranges
+    # ------------------------------------------------------------------
+
+    def _range_spinboxes(self) -> tuple[QtWidgets.QAbstractSpinBox, ...]:
+        return (self.n_locs_min, self.n_locs_max, self.rmsd_min, self.rmsd_max)
+
+    def ranges(self) -> tuple[tuple[int, int], tuple[float, float]]:
+        """The ranges of the number of localizations and of the RMSD
+        (nm), inclusive."""
+        return (
+            (self.n_locs_min.value(), self.n_locs_max.value()),
+            (self.rmsd_min.value(), self.rmsd_max.value()),
+        )
+
+    def set_ranges(
+        self,
+        n_locs_range: tuple[float, float],
+        rmsd_range: tuple[float, float],
+    ) -> None:
+        """Set the ranges: the integers within ``n_locs_range`` and
+        ``rmsd_range`` (nm) widened to the decimals shown, so that the
+        candidates within them stay within."""
+        values = (
+            int(np.ceil(n_locs_range[0])),
+            int(np.floor(n_locs_range[1])),
+            np.floor(rmsd_range[0] * 10) / 10,
+            np.ceil(rmsd_range[1] * 10) / 10,
+        )
+        for spinbox, value in zip(self._range_spinboxes(), values):
+            spinbox.blockSignals(True)
+            spinbox.setValue(value)
+            spinbox.blockSignals(False)
+        self.on_range_changed()
+
+    def on_range_changed(self) -> None:
+        self._update_status()
+        self._draw_range()
+
+    def selected(self) -> pd.DataFrame:
+        """The candidates within the ranges."""
+        if self.candidates is None:
+            return pd.DataFrame(columns=["x", "y", "n_locs", "rmsd"])
+        (n_low, n_high), (r_low, r_high) = self.ranges()
+        c = self.candidates
+        keep = c["n_locs"].between(n_low, n_high) & c["rmsd"].between(
+            r_low, r_high
+        )
+        return c[keep]
+
+    def on_rect_select(self, press, release) -> None:
+        """Set the ranges to the rectangle drawn on the histogram."""
+        x0, x1 = sorted((press.xdata, release.xdata))
+        y0, y1 = sorted((press.ydata, release.ydata))
+        self.set_ranges((x0, x1), (max(y0, 0.0), y1))
+
+    # ------------------------------------------------------------------
+    # picks
+    # ------------------------------------------------------------------
+
+    def add_picks(self) -> None:
+        """Add the candidates within the ranges as circular picks."""
+        selected = self.selected()
+        if not len(selected):
+            self.status_label.setText("No candidates within the ranges.")
+            return
+        positions = list(zip(selected["x"], selected["y"]))
+        view = self.view
+        with view.undo_step(self.TITLE, picks=True):
+            view.add_picks(positions, "Circle", self.diameter)
+        view.update_pick_info_short()
+        self.status_label.setText(f"Added {len(positions):,} picks.")
+
+    # ------------------------------------------------------------------
+    # display
+    # ------------------------------------------------------------------
+
+    def _update_widgets(self) -> None:
+        found = self.candidates is not None and len(self.candidates) > 0
+        for widget in (*self._range_spinboxes(), self.add_button):
+            widget.setEnabled(found)
+        self.classes_button.setEnabled(found)
+        self.class_combo.clear()
+        if self.classes is not None:
+            for index, row in self.classes.iterrows():
+                self.class_combo.addItem(
+                    f"Class {index + 1}: {int(row['n_candidates']):,} "
+                    f"candidates, {row['n_locs']:,.0f} localizations, "
+                    f"{row['rmsd']:.1f} nm"
+                )
+        self.class_combo.setEnabled(self.class_combo.count() > 0)
+        if self.diameter is None:
+            self.diameter_label.setText("")
+        else:
+            self.diameter_label.setText(
+                f"Pick diameter: {self.diameter:g} nm (Tools settings)"
+            )
+        self._update_status()
+
+    def _update_status(self) -> None:
+        if self.candidates is None:
+            self.status_label.setText("")
+            return
+        self.status_label.setText(
+            f"{len(self.selected()):,} of {len(self.candidates):,} "
+            "candidates in range"
+        )
+
+    def plot(self) -> None:
+        """Draw the 2D histogram of the candidates, the ranges and the
+        classes."""
+        self.figure.clear()
+        self.range_patch = None
+        with self.plot_context():
+            axes = self.figure.add_subplot(111)
+            style = self.plot_style
+            style.style_axes(axes)
+            style.label(axes, "Number of localizations", "RMSD (nm)")
+            candidates = self.candidates
+            if candidates is None or not len(candidates):
+                text = (
+                    "No candidates found."
+                    if candidates is not None
+                    else "Finding candidates..."
+                )
+                axes.text(
+                    0.5,
+                    0.5,
+                    text,
+                    ha="center",
+                    va="center",
+                    transform=axes.transAxes,
+                )
+                self.canvas.draw_idle()
+                return
+            n_locs = candidates["n_locs"].to_numpy(np.float64)
+            rmsd = candidates["rmsd"].to_numpy(np.float64)
+            bins_x = lib.calculate_optimal_bins(n_locs, self.MAX_BINS)
+            bins_y = lib.calculate_optimal_bins(rmsd, self.MAX_BINS)
+            counts, _, _ = np.histogram2d(n_locs, rmsd, bins=(bins_x, bins_y))
+            image = axes.pcolormesh(
+                bins_x,
+                bins_y,
+                np.ma.masked_equal(counts.T, 0),
+                norm=style.norm(),
+                cmap=style.cmap,
+                shading="flat",
+                rasterized=True,
+            )
+            if style.show_colorbar:
+                style.style_colorbar(
+                    self.figure.colorbar(image, ax=axes),
+                    label="Candidates per bin",
+                )
+            style.title(
+                self.figure,
+                f"{len(candidates):,} candidate picks of "
+                f"{self.diameter:g} nm",
+            )
+            self._draw_classes(axes)
+        self.selector = RectangleSelector(
+            axes,
+            self.on_rect_select,
+            useblit=True,
+            props=dict(fill=True, **style.selection),
+        )
+        self.selectors = [self.selector]
+        self._draw_range()
+
+    def _draw_classes(self, axes) -> None:
+        """Outline the ranges of the classes, numbered."""
+        if self.classes is None:
+            return
+        color = self.plot_style.theme_colors["text"]
+        for index, row in self.classes.iterrows():
+            x0, x1 = row["n_locs_min"], row["n_locs_max"]
+            y0, y1 = row["rmsd_min"], row["rmsd_max"]
+            axes.add_patch(
+                Rectangle(
+                    (x0, y0),
+                    x1 - x0,
+                    y1 - y0,
+                    fill=False,
+                    edgecolor=color,
+                    linestyle="--",
+                    linewidth=self.plot_style.line_width,
+                )
+            )
+            axes.annotate(
+                str(index + 1),
+                (x1, y1),
+                color=color,
+                ha="left",
+                va="bottom",
+            )
+
+    def _draw_range(self) -> None:
+        """Show the ranges as a rectangle on the histogram."""
+        if not self.figure.axes or self.candidates is None:
+            return
+        axes = self.figure.axes[0]
+        if self.range_patch is not None:
+            self.range_patch.remove()
+        (x0, x1), (y0, y1) = self.ranges()
+        self.range_patch = axes.add_patch(
+            Rectangle(
+                (x0, y0),
+                x1 - x0,
+                y1 - y0,
+                fill=True,
+                **self.plot_style.selection,
+            )
+        )
+        self.canvas.draw_idle()
+
+    def cancel_selection(self) -> None:
+        """Stop drawing the rectangle, without setting the ranges
+        (Esc), as in Filter's histograms."""
+        selector = self.selector
+        if selector is None or selector._eventpress is None:
+            return
+        selector._eventpress = None
+        selector.clear()
+
+
 class ApplyDialog(lib.Dialog):
     """Apply expressions to manipulate localizations display.
 
@@ -507,8 +1049,8 @@ class ApplyDialog(lib.Dialog):
     ``spiral 200 3``
         Plot each localization over time in a spiral with radius 200
         nm and 3 turns.
-    ``uspiral``
-        Undo the last spiral action.
+
+    File > Undo takes an expression back, see ``View.undo``.
     """
 
     DOCS_URL = docs_url(
@@ -552,7 +1094,7 @@ class ApplyDialog(lib.Dialog):
             "- 'flip x z' to exchange x- and z-axes.\n"
             "- 'spiral R N' to plot each localization over time in a spiral\n"
             "  with radius R nm and N turns.\n"
-            "- 'uspiral' to undo the last spiral action."
+            "File > Undo takes an expression back."
         )
         layout.addWidget(exp_label, 2, 1)
         self.cmd = QtWidgets.QLineEdit()
@@ -1415,7 +1957,7 @@ class DatasetDialog(lib.Dialog):
         """Delete the drift-correction data of channel ``i``, if
         any was provided."""
         view = self.window.view
-        for items in (view._drift, view._driftfiles, view.currentdrift):
+        for items in (view._drift, view._driftfiles):
             if i < len(items):
                 del items[i]
 
@@ -1466,7 +2008,8 @@ class DatasetDialog(lib.Dialog):
         # remove the channel from test clustering dialog
         self.window.test_clusterer_dialog.channels.removeItem(i)
         self.window.tools_settings_dialog.remove_move_channel(i)
-        self.window.view.clear_move_undo()
+        # the steps to undo refer to the channels by their index
+        self.window.view.clear_undo_history()
 
     def close_file(self, i: int | str, render=True) -> None:
         """Close a given channel (defined by its index of name) and
@@ -3821,6 +4364,109 @@ class LinkDialog(lib.Dialog):
         )
 
 
+class AlignChannelsDialog(lib.Dialog):
+    """Choose how ``View.align`` finds the shifts between the channels,
+    see ``postprocess.align``.
+
+    Attributes
+    ----------
+    method : QComboBox
+        The method, by its name in ``METHODS``. Picked structures can be
+        chosen only if there are picks.
+    max_shift : QDoubleSpinBox
+        Largest shift (nm) between two channels searched for by the
+        displacements between localizations; shown only for that
+        method.
+    """
+
+    #: Names of the methods of ``postprocess.align`` in the dialog
+    METHODS = {
+        "Cross-correlation of images (RCC)": "rcc",
+        "Picked structures": "picked",
+        "Displacements between localizations": "points",
+    }
+    #: Method and largest shift chosen last in this session (the picked
+    #: structures are preselected whenever there are picks)
+    last_method = "rcc"
+    last_max_shift = 500.0
+
+    def __init__(self, window: QtWidgets.QMainWindow, has_picks: bool) -> None:
+        super().__init__(window)
+        self.setWindowTitle("Align channels")
+        vbox = QtWidgets.QVBoxLayout(self)
+        grid = QtWidgets.QGridLayout()
+        method_label = QtWidgets.QLabel("Method:")
+        grid.addWidget(method_label, 0, 0)
+        self.method = QtWidgets.QComboBox()
+        tooltips = (
+            "Cross-correlation of the rendered images of the channels\n"
+            "(redundant cross-correlation, 2D).",
+            "Centers of mass of the localizations of each channel in the\n"
+            "picks, e.g., of gold particles or DNA origami (2D or 3D).",
+            "Peak of the displacements between the localizations of each\n"
+            "pair of channels, fitted with an uncertainty, which is saved\n"
+            "in the metadata (2D). The channels must share structures.",
+        )
+        for k, (name, tooltip) in enumerate(zip(self.METHODS, tooltips)):
+            self.method.addItem(name)
+            self.method.setItemData(
+                k, tooltip, QtCore.Qt.ItemDataRole.ToolTipRole
+            )
+        if not has_picks:  # picked structures need picks
+            self.method.model().item(1).setEnabled(False)
+        grid.addWidget(self.method, 0, 1)
+        self.max_shift_label = QtWidgets.QLabel("Max. shift (nm):")
+        self.max_shift_label.setToolTip(
+            "Largest shift between two channels that is searched for.\n"
+            "Larger values find larger shifts but are slower."
+        )
+        grid.addWidget(self.max_shift_label, 1, 0)
+        self.max_shift = QtWidgets.QDoubleSpinBox()
+        self.max_shift.setRange(1, 1e5)
+        self.max_shift.setDecimals(0)
+        self.max_shift.setSingleStep(100)
+        self.max_shift.setValue(self.last_max_shift)
+        grid.addWidget(self.max_shift, 1, 1)
+        vbox.addLayout(grid)
+        self.method.currentTextChanged.connect(self._show_method_widgets)
+        default = "picked" if has_picks else self.last_method
+        self.method.setCurrentIndex(list(self.METHODS.values()).index(default))
+        self._show_method_widgets()
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel,
+            QtCore.Qt.Orientation.Horizontal,
+            self,
+        )
+        vbox.addWidget(buttons)
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+
+    def _show_method_widgets(self) -> None:
+        """Show the largest shift only for the displacements between
+        localizations."""
+        points = self.METHODS[self.method.currentText()] == "points"
+        self.max_shift_label.setVisible(points)
+        self.max_shift.setVisible(points)
+
+    @staticmethod
+    def getParams(
+        parent: QtWidgets.QWidget, has_picks: bool
+    ) -> tuple[str, float, bool]:
+        """Create the dialog and return the method of
+        ``postprocess.align``, the largest shift (nm) and whether it was
+        accepted."""
+        dialog = AlignChannelsDialog(parent, has_picks)
+        accepted = dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted
+        method = AlignChannelsDialog.METHODS[dialog.method.currentText()]
+        max_shift = dialog.max_shift.value()
+        if accepted:
+            if method != "picked":
+                AlignChannelsDialog.last_method = method
+            AlignChannelsDialog.last_max_shift = max_shift
+        return method, max_shift, accepted
+
+
 class SMLMDialog(lib.Dialog):
     """Choose inputs for SMLM clusterer.
 
@@ -4770,7 +5416,7 @@ class TestClustererDialog(lib.Dialog):
         """Check if region of interest has changed since the last
         rendering."""
         pick = self.window.view._picks[0]
-        pick_size = self.window.view._pick_size
+        pick_size = self.window.view._pick_sizes[0]
         if pick != self.pick or pick_size != self.pick_size:
             self.pick = pick
             self.pick_size = pick_size
@@ -5656,30 +6302,52 @@ class InfoDialog(lib.Dialog):
         Shows the mean dark time (frames) in all picks.
     dark_std : QLabel
         Shows the std dark time (frames) in all picks.
+    decorrelation_pixel_size : QDoubleSpinBox
+        Pixel size (nm) of the decorrelation analysis; 0 scans pixel
+        sizes from 2 to 64 nm.
+    destroyed_sites : QLabel
+        Shows the estimated percentage of destroyed docking sites, see
+        ``postprocess.docking_site_damage``.
+    decorrelation_resolution : QLabel
+        Shows the decorrelation resolution (nm) of the selected channel.
+    decorrelation_used_pixel : QLabel
+        Shows the pixel size (nm) of the decorrelation resolution.
+    decorrelation_result : dict
+        Result of ``postprocess.decorrelation`` of the selected channel,
+        empty if not calculated yet.
     fit_precision : QLabel
-        Shows median localization precision (nm) of the channel chosen
-        in self.fit_precision_channel.
-    fit_precision_channel : QComboBox
-        Chooses the channel for self.fit_precision; hidden with a
-        single channel.
+        Shows median localization precision (nm) of the selected
+        channel.
     frc_plot_window : FRCPlotWindow(QDialog)
         Window displaying the FRC curve.
     frc_result : dict
-        Summary of FRC calculation (FRC curve, frequencies and
-        resolution).
+        Summary of the FRC calculation of the selected channel (FRC
+        curve, frequencies and resolution), empty if not calculated yet.
     influx_rate : FloatEdit(QLineEdit)
         Contains the calculated or input influx rate (1/frames).
+    loc_drop : QLabel
+        Shows the decrease (%) of the number of picked localizations
+        over the measurement, see ``postprocess.localization_rate_drop``.
     locs_label : QLabel
         Shows the number of locs in the current FOV.
     lp : float
-        NeNA localization precision (nm). None, if not calculated yet.
+        NeNA localization precision (nm) of the selected channel. None,
+        if not calculated yet.
     max_dark_time : QSpinBox
         Contains the maximum gap between localizations (frames) to be
         considered as belonging to the same group of linked locs.
+    precision_channel : QComboBox
+        Chooses the channel whose precisions and resolutions are shown
+        and calculated; hidden with a single channel.
     precision_grid : QGridLayout
-        Contains all the info about the fit precision.
+        Contains the precisions and resolutions.
     nena_button : QPushButton
         Calculates nearest neighbor based analysis fit precision.
+    nena_label : QLabel
+        Shows self.lp.
+    nena_result : dict
+        Summary of the NeNA calculation of the selected channel. Empty,
+        if not calculated yet.
     n_localization_mean : QLabel
         Shows the mean number of locs in all picks.
     n_localization_std : QLabel
@@ -5709,6 +6377,11 @@ class InfoDialog(lib.Dialog):
     rmsd_z_std : QLabel
         Shows the std root mean square displacement in all picks in
         z axis.
+    sbr_mean : QLabel
+        Shows the mean signal-to-background ratio of the picked
+        localizations in the centers of binding events.
+    sbr_std : QLabel
+        Shows the std of the signal-to-background ratio.
     units_per_pick : QSpinBox
         Contains the number of binding sites per pick.
     wh_label : QLabel
@@ -5732,6 +6405,7 @@ class InfoDialog(lib.Dialog):
         self.nena_result = {}
         self.frc_result = {}
         self.frc_rois_window = None
+        self.decorrelation_result = {}
         self.change_fov = ChangeFOV(self.window)
 
         # Scroll area
@@ -5827,73 +6501,140 @@ class InfoDialog(lib.Dialog):
         fov_buttons_layout.addWidget(self.load_fov_button)
         self.load_fov_button.clicked.connect(self.change_fov.load_fov)
 
-        # Precision
-        precision_groupbox = lib.CollapsibleGroupBox("Precision")
+        # Precision and resolution: one channel selector for all values
+        precision_groupbox = lib.CollapsibleGroupBox(
+            "Precision and resolution"
+        )
         vbox.addWidget(precision_groupbox)
         self.precision_grid = QtWidgets.QGridLayout(precision_groupbox.content)
-        med_lp_label = QtWidgets.QLabel("Median localization precision:")
-        med_lp_label.setToolTip(
-            "Median localization precision (mean of the medians of lpx\n"
-            "and lpy) of the channel selected below."
-        )
-        self.precision_grid.addWidget(med_lp_label, 0, 0)
-        self.fit_precision = QtWidgets.QLabel("-")
-        self.precision_grid.addWidget(self.fit_precision, 0, 1)
+        grid = self.precision_grid
+        self.precision_channel_label = QtWidgets.QLabel("Channel:")
+        grid.addWidget(self.precision_channel_label, 0, 0)
         # the channel selector is shown only with several channels
-        self.fit_precision_channel = QtWidgets.QComboBox()
-        self.fit_precision_channel.setToolTip(
-            "Channel whose median localization precision is shown."
+        self.precision_channel = QtWidgets.QComboBox()
+        self.precision_channel.setToolTip(
+            "Channel whose precision and resolution are shown and"
+            " calculated."
         )
-        self.fit_precision_channel.currentIndexChanged.connect(
+        self.precision_channel.currentIndexChanged.connect(
             self.update_fit_precision
         )
-        self.fit_precision_channel.setVisible(False)
-        self.precision_grid.addWidget(self.fit_precision_channel, 1, 0, 1, 2)
+        grid.addWidget(self.precision_channel, 0, 1, 1, 3)
+        self.precision_channel_label.setVisible(False)
+        self.precision_channel.setVisible(False)
+        # per-channel results, keyed by (id(locs), len(locs)): the
+        # median precision, (NeNA result, precision), FRC and
+        # decorrelation results
         self._fit_precision_cache = {}
+        self._nena_cache = {}
+        self._frc_cache = {}
+        self._decorrelation_cache = {}
+
+        med_lp_label = QtWidgets.QLabel("Median loc. precision:")
+        med_lp_label.setToolTip(
+            "Median localization precision: mean of the medians of lpx\n"
+            "and lpy of all localizations of the channel."
+        )
+        grid.addWidget(med_lp_label, 1, 0)
+        self.fit_precision = QtWidgets.QLabel("-")
+        grid.addWidget(self.fit_precision, 1, 1)
+
         nena_label = QtWidgets.QLabel("NeNA precision:")
         nena_label.setToolTip(
-            "Experimental estimate of the average localization precision.\n"
+            "Experimental estimate of the average localization precision\n"
+            "from all localizations of the channel.\n"
             "See Endesfelder et al. Histochemistry and cell biology, 2014."
         )
-        self.precision_grid.addWidget(nena_label, 2, 0)
+        grid.addWidget(nena_label, 2, 0)
         self.nena_label = QtWidgets.QLabel("-")
-        self.precision_grid.addWidget(self.nena_label, 2, 1)
-        self.nena_button = QtWidgets.QPushButton("Calculate NeNA")
-        self.nena_button.setToolTip("Click to calculate NeNA precision.")
+        grid.addWidget(self.nena_label, 2, 1)
+        self.nena_button = QtWidgets.QPushButton("Calculate")
+        self.nena_button.setToolTip("Calculate the NeNA precision.")
         # clicked passes its checked state, which is not an on_done
         self.nena_button.clicked.connect(lambda: self.calculate_nena_lp())
-        self.precision_grid.addWidget(self.nena_button, 3, 0)
-        show_nena_plot_button = QtWidgets.QPushButton("Show NeNA plot")
-        show_nena_plot_button.setToolTip("Display NeNA fit.")
+        grid.addWidget(self.nena_button, 2, 2)
+        show_nena_plot_button = QtWidgets.QPushButton("Plot")
+        show_nena_plot_button.setToolTip("Display the NeNA fit.")
         show_nena_plot_button.clicked.connect(self.show_nena_plot)
-        self.precision_grid.addWidget(show_nena_plot_button, 3, 1)
+        grid.addWidget(show_nena_plot_button, 2, 3)
 
-        # FRC
-        frc_groupbox = lib.CollapsibleGroupBox("FRC (uses current FOV)")
-        vbox.addWidget(frc_groupbox)
-        self.frc_grid = QtWidgets.QGridLayout(frc_groupbox.content)
-        frc_label = QtWidgets.QLabel("FRC resolution (nm):")
+        frc_label = QtWidgets.QLabel("FRC resolution (FOV):")
         frc_label.setToolTip(
-            "Experimental resolution estimate using Fourier Ring "
-            "Correlation.\n"
+            "Experimental resolution estimate using Fourier Ring\n"
+            "Correlation of the localizations in the current field of\n"
+            "view.\n"
             "See Nieuwenhuizen et al. Nature Methods, 2013."
         )
-        self.frc_grid.addWidget(frc_label, 0, 0)
+        grid.addWidget(frc_label, 3, 0)
         self.frc_resolution = QtWidgets.QLabel("-")
-        self.frc_grid.addWidget(self.frc_resolution, 0, 1)
-        self.save_images_check = QtWidgets.QCheckBox("Save rendered images")
-        self.save_images_check.setToolTip(
-            "Save 2 rendered images as .tif files?"
+        grid.addWidget(self.frc_resolution, 3, 1)
+        calculate_frc_button = QtWidgets.QPushButton("Calculate")
+        calculate_frc_button.setToolTip(
+            "Calculate the FRC resolution in the current field of view."
         )
-        self.frc_grid.addWidget(self.save_images_check, 1, 0, 1, 2)
-        calculate_frc_button = QtWidgets.QPushButton("Calculate FRC")
-        calculate_frc_button.setToolTip("Click to calculate FRC resolution.")
         calculate_frc_button.clicked.connect(self.calculate_frc_resolution)
-        self.frc_grid.addWidget(calculate_frc_button, 2, 0)
-        show_frc_button = QtWidgets.QPushButton("Show FRC plot")
-        show_frc_button.setToolTip("Display FRC fit.")
+        grid.addWidget(calculate_frc_button, 3, 2)
+        show_frc_button = QtWidgets.QPushButton("Plot")
+        show_frc_button.setToolTip("Display the FRC curve.")
         show_frc_button.clicked.connect(self.show_frc_plot)
-        self.frc_grid.addWidget(show_frc_button, 2, 1)
+        grid.addWidget(show_frc_button, 3, 3)
+        self.save_images_check = QtWidgets.QCheckBox("Save FRC images")
+        self.save_images_check.setToolTip(
+            "Save the 2 images rendered for the FRC as .tif files."
+        )
+        grid.addWidget(self.save_images_check, 4, 1, 1, 3)
+
+        decorrelation_label = QtWidgets.QLabel("Decorrelation (FOV):")
+        decorrelation_label.setToolTip(
+            "Resolution estimated from all localizations in the current\n"
+            "field of view at once by decorrelation analysis, at the\n"
+            "pixel size that gives the smallest value.\n"
+            "See Descloux et al. Nature Methods, 2019."
+        )
+        grid.addWidget(decorrelation_label, 5, 0)
+        self.decorrelation_resolution = QtWidgets.QLabel("-")
+        grid.addWidget(self.decorrelation_resolution, 5, 1)
+        calculate_decorrelation_button = QtWidgets.QPushButton("Calculate")
+        calculate_decorrelation_button.setToolTip(
+            "Calculate the decorrelation resolution in the current field"
+            " of view."
+        )
+        calculate_decorrelation_button.clicked.connect(
+            lambda: self.calculate_decorrelation()
+        )
+        grid.addWidget(calculate_decorrelation_button, 5, 2)
+        show_decorrelation_button = QtWidgets.QPushButton("Plot")
+        show_decorrelation_button.setToolTip(
+            "Display the decorrelation functions and the resolution at each"
+            " pixel size."
+        )
+        show_decorrelation_button.clicked.connect(self.show_decorrelation_plot)
+        grid.addWidget(show_decorrelation_button, 5, 3)
+        decorrelation_pixel_label = QtWidgets.QLabel("Pixel size (nm):")
+        decorrelation_pixel_label.setToolTip(
+            "Pixel size at which the localizations are rendered for the\n"
+            "decorrelation. 'Scan' renders them at pixel sizes from 2 to\n"
+            "64 nm and reports the smallest resolution, as advised by\n"
+            "Descloux et al., 2021: large pixels limit the resolution to\n"
+            "about twice the pixel size, small pixels leave gaps between\n"
+            "sparse localizations."
+        )
+        decorrelation_pixel_label.setIndent(20)
+        grid.addWidget(decorrelation_pixel_label, 6, 0)
+        self.decorrelation_pixel_size = QtWidgets.QDoubleSpinBox()
+        self.decorrelation_pixel_size.setRange(0.0, 1000.0)
+        self.decorrelation_pixel_size.setDecimals(1)
+        self.decorrelation_pixel_size.setSingleStep(1.0)
+        self.decorrelation_pixel_size.setSpecialValueText("Scan")
+        self.decorrelation_pixel_size.setValue(0.0)
+        grid.addWidget(self.decorrelation_pixel_size, 6, 1)
+        # pixel size of the resolution shown, which a scan chooses
+        self.decorrelation_used_pixel = QtWidgets.QLabel()
+        self.decorrelation_used_pixel.setToolTip(
+            "Pixel size (nm) at which the decorrelation resolution shown"
+            " was found."
+        )
+        grid.addWidget(self.decorrelation_used_pixel, 6, 2, 1, 2)
 
         # FRC in several random ROIs, for the uncertainty; collapsed by
         # default to keep the dialog compact
@@ -5902,7 +6643,7 @@ class InfoDialog(lib.Dialog):
             expanded=False,
             summary="Resolution uncertainty",
         )
-        self.frc_grid.addWidget(self.frc_rois_groupbox, 3, 0, 1, 2)
+        grid.addWidget(self.frc_rois_groupbox, 7, 0, 1, 4)
         rois_grid = QtWidgets.QGridLayout(self.frc_rois_groupbox.content)
         rois_grid.setContentsMargins(0, 0, 0, 0)
         frc_rois_label = QtWidgets.QLabel("FRC resolution, ROIs (nm):")
@@ -6073,6 +6814,42 @@ class InfoDialog(lib.Dialog):
         self.picks_grid.addWidget(self.dark_mean, row, 1)
         self.dark_std = QtWidgets.QLabel()
         self.picks_grid.addWidget(self.dark_std, row, 2)
+        # dye performance of picked docking sites (Steen et al., 2024)
+        row = self.picks_grid.rowCount()
+        sbr_label = QtWidgets.QLabel("SBR:")
+        sbr_label.setToolTip(
+            "Signal-to-background ratio of the localizations in the\n"
+            "centers of binding events of at least three frames: the\n"
+            "photons within one camera pixel around the localization\n"
+            "over the background (Steen et al., 2024). Mean and std over\n"
+            "the localizations."
+        )
+        self.picks_grid.addWidget(sbr_label, row, 0)
+        self.sbr_mean = QtWidgets.QLabel()
+        self.picks_grid.addWidget(self.sbr_mean, row, 1)
+        self.sbr_std = QtWidgets.QLabel()
+        self.picks_grid.addWidget(self.sbr_std, row, 2)
+        row = self.picks_grid.rowCount()
+        loc_drop_label = QtWidgets.QLabel("Localization drop (%):")
+        loc_drop_label.setToolTip(
+            "Decrease of the number of picked localizations from the\n"
+            "first to the last 20% of the frames (Steen et al., 2024)."
+        )
+        self.picks_grid.addWidget(loc_drop_label, row, 0)
+        self.loc_drop = QtWidgets.QLabel()
+        self.picks_grid.addWidget(self.loc_drop, row, 1)
+        row = self.picks_grid.rowCount()
+        destroyed_label = QtWidgets.QLabel("Destroyed sites (%):")
+        destroyed_label.setToolTip(
+            "Estimated percentage of docking sites destroyed during the\n"
+            "measurement, from the time after the last binding event of\n"
+            "each pick relative to its mean dark time (Steen et al.,\n"
+            "2024). Assumes one docking site per pick; see Show fitted\n"
+            "binding kinetics."
+        )
+        self.picks_grid.addWidget(destroyed_label, row, 0)
+        self.destroyed_sites = QtWidgets.QLabel()
+        self.picks_grid.addWidget(self.destroyed_sites, row, 1)
         row = self.picks_grid.rowCount()
         nunits_label = QtWidgets.QLabel("No. of units per pick:")
         nunits_label.setToolTip("Input the number of binding sites per pick.")
@@ -6116,7 +6893,9 @@ class InfoDialog(lib.Dialog):
         self.pick_hist_window = PickHistWindow()
         pick_hists = QtWidgets.QPushButton("Show fitted binding kinetics")
         pick_hists.setToolTip(
-            "Show histograms with fitted mean bright and dark times per pick."
+            "Show histograms with fitted mean bright and dark times per\n"
+            "pick, the ratios used for the destroyed docking sites and the\n"
+            "localizations over time."
         )
         pick_hists.clicked.connect(self.open_pick_hist)
         self.picks_grid.addWidget(
@@ -6132,24 +6911,58 @@ class InfoDialog(lib.Dialog):
         hint = self.container.sizeHint()
         lib.adjust_widget_size(self, hint)
 
+    def _sync_channels(self) -> None:
+        """Sync self.precision_channel with the loaded channels, keeping
+        the selected channel across reordering and closing."""
+        view = self.window.view
+        checks = self.window.dataset_dialog.checks
+        names = [
+            checks[i].text() if i < len(checks) else os.path.basename(path)
+            for i, path in enumerate(view.locs_paths)
+        ]
+        combo = self.precision_channel
+        current_names = [combo.itemText(i) for i in range(combo.count())]
+        if names != current_names:
+            current = combo.currentText()
+            combo.blockSignals(True)
+            combo.clear()
+            combo.addItems(names)
+            if current in names:
+                combo.setCurrentIndex(names.index(current))
+            combo.blockSignals(False)
+        combo.setVisible(len(names) > 1)
+        self.precision_channel_label.setVisible(len(names) > 1)
+
+    def selected_channel(self) -> int | None:
+        """Index of the channel chosen in self.precision_channel, None
+        if no localizations are loaded."""
+        self._sync_channels()
+        channel = self.precision_channel.currentIndex()
+        if channel < 0 or channel >= len(self.window.view.locs):
+            return None
+        return channel
+
     def calculate_frc_resolution(self) -> None:
-        """Calculate FRC resolution in a given channel."""
-        channel = self.window.view.get_channel("Calculate FRC resolution")
+        """Calculate FRC resolution of the selected channel in the
+        current field of view. NeNA, which sets the bin size, is reused
+        if known (see ``known_nena``)."""
+        channel = self.selected_channel()
         if channel is not None:
             locs = self.window.view.locs[channel]
             info = self.window.view.infos[channel]
+            lp = self.known_nena(channel)
 
             # make sure the viewport is not too large
-            median_lp = self.window.view.median_lp
-            max_size = 10_000 * (median_lp / 2)
+            bin_size = (lp or self.window.view.median_lp) / 2
+            max_size = 10_000 * bin_size
             height, width = render.viewport_size(self.window.view.viewport)
             if height > max_size and width > max_size:
                 text = (
                     "The current FOV is large and will likely lead to a long "
                     "computation time and high memory usage (current FOV "
                     "leads to an image of size "
-                    f"{int(width/(median_lp/2)):,} x "
-                    f"{int(height/(median_lp/2)):,} pixels).\n\n"
+                    f"{int(width/bin_size):,} x "
+                    f"{int(height/bin_size):,} pixels).\n\n"
                     "Please consider reducing the FOV size before"
                     " calculating the FRC resolution.\n\nDo you want to "
                     "proceed?"
@@ -6179,21 +6992,29 @@ class InfoDialog(lib.Dialog):
             else:
                 path = None
 
+            if lp is None:
+                nena_result, lp = postprocess.nena(locs, info)
+                self._record_nena(locs, info, nena_result, lp)
             # calculate frc
-            self.frc_result = postprocess.frc(
-                locs, info, viewport=self.window.view.viewport
+            # the size was confirmed above
+            frc_result = postprocess.frc(
+                locs,
+                info,
+                viewport=self.window.view.viewport,
+                lp=lp,
+                max_image_size=None,
             )
             if path:  # save images
                 base, ext = os.path.splitext(path)
-                image1 = Image.fromarray(self.frc_result["images"][0])
+                image1 = Image.fromarray(frc_result["images"][0])
                 image1.save(f"{base}_1{ext}")
-                image2 = Image.fromarray(self.frc_result["images"][1])
+                image2 = Image.fromarray(frc_result["images"][1])
                 image2.save(f"{base}_2{ext}")
-            res_nm = self.frc_result["resolution"]
-            if res_nm is None:
+            self._frc_cache[(id(locs), len(locs))] = frc_result
+            self.update_fit_precision()
+            if frc_result["resolution"] is None:
                 # The FRC curve never crosses the 1/7 threshold, e.g. when the
                 # viewport holds too few localizations to resolve anything.
-                self.frc_resolution.setText("n/a")
                 QtWidgets.QMessageBox.information(
                     self,
                     "FRC resolution",
@@ -6202,15 +7023,11 @@ class InfoDialog(lib.Dialog):
                     "localizations. Check that your NeNA value seems "
                     "reasonable - FRC pixel size is taken from NeNA",
                 )
-            else:
-                self.frc_resolution.setText(f"{res_nm:.2f} nm")
 
     def calculate_frc_rois(self) -> None:
         """Calculate FRC resolution in random ROIs of the whole image
-        and open the review window."""
-        channel = self.window.view.get_channel(
-            "Calculate FRC resolution in ROIs"
-        )
+        of the selected channel and open the review window."""
+        channel = self.selected_channel()
         if channel is None:
             return
         locs = self.window.view.locs[channel]
@@ -6226,6 +7043,7 @@ class InfoDialog(lib.Dialog):
             self.frc_rois_window = None
         roi_size = 1000 * self.frc_roi_size.value()
         min_locs = self.frc_min_locs.value()
+        lp = self.known_nena(channel)
 
         def compute(progress: lib.TaskProgress) -> dict:
             return postprocess.frc_rois(
@@ -6235,8 +7053,14 @@ class InfoDialog(lib.Dialog):
                 n_rois=n_rois,
                 roi_size=roi_size,
                 min_locs=min_locs,
+                lp=lp,
                 progress=progress,
             )
+
+        def apply(result: dict) -> None:
+            if lp is None:  # calculated now; no curve to plot from it
+                self._record_nena(locs, info, {}, result["lp"])
+            self._show_frc_rois_result(locs, info, viewport, n_rois, result)
 
         def failed(error: Exception) -> None:
             if isinstance(error, (ValueError, RuntimeError)):
@@ -6248,9 +7072,7 @@ class InfoDialog(lib.Dialog):
             compute,
             "Calculating FRC in ROIs",
             self,
-            lambda result: self._show_frc_rois_result(
-                locs, info, viewport, n_rois, result
-            ),
+            apply,
             on_failed=failed,
         )
 
@@ -6285,9 +7107,20 @@ class InfoDialog(lib.Dialog):
                 " uncertainty estimate is less reliable.",
             )
 
+    def _frc_rois_shown(self) -> bool:
+        """Whether the FRC ROIs review window holds the localizations of
+        the selected channel."""
+        channel = self.selected_channel()
+        return (
+            channel is not None
+            and self.frc_rois_window is not None
+            and self.frc_rois_window.locs is self.window.view.locs[channel]
+        )
+
     def show_frc_rois(self) -> None:
-        """Show the review window of the FRC ROIs."""
-        if self.frc_rois_window is None:
+        """Show the review window of the FRC ROIs of the selected
+        channel, calculating them first if needed."""
+        if not self._frc_rois_shown():
             self.calculate_frc_rois()
         else:
             self.frc_rois_window.show()
@@ -6295,43 +7128,49 @@ class InfoDialog(lib.Dialog):
 
     def update_fit_precision(self) -> None:
         """Sync the channel selector with the loaded channels and show
-        the median localization precision of the selected channel.
+        the precisions and resolutions of the selected channel.
 
         Medians are cached per localizations object, so redraws do not
-        recompute them.
+        recompute them. NeNA is shown if it was calculated for the
+        current localizations of the channel, or if it is the last step
+        in their metadata. FRC and decorrelation resolutions are shown
+        if they were calculated for the current localizations of the
+        channel, in the field of view of their calculation.
         """
         view = self.window.view
-        checks = self.window.dataset_dialog.checks
-        names = [
-            checks[i].text() if i < len(checks) else os.path.basename(path)
-            for i, path in enumerate(view.locs_paths)
-        ]
-        combo = self.fit_precision_channel
-        current_names = [combo.itemText(i) for i in range(combo.count())]
-        if names != current_names:
-            # keep the selected channel across reordering and closing
-            current = combo.currentText()
-            combo.blockSignals(True)
-            combo.clear()
-            combo.addItems(names)
-            if current in names:
-                combo.setCurrentIndex(names.index(current))
-            combo.blockSignals(False)
-        combo.setVisible(len(names) > 1)
-
+        self._sync_channels()
         if view.has_spilled_locs:
             return  # moved to disk while idle: unchanged since shown
-        channel = combo.currentIndex()
-        if channel < 0 or channel >= len(view.locs):
+        channel = self.selected_channel()
+        if channel is None:
             self.fit_precision.setText("-")
+            self._show_nena({}, None)
+            self._show_frc({})
+            self._show_decorrelation({})
+            self.frc_rois_resolution.setText("-")
             return
         locs = view.locs[channel]
         key = (id(locs), len(locs))
         # drop entries of channels that are gone or were replaced
         alive = {(id(locs_), len(locs_)) for locs_ in view.locs}
-        self._fit_precision_cache = {
-            k: v for k, v in self._fit_precision_cache.items() if k in alive
-        }
+        for name in (
+            "_fit_precision_cache",
+            "_nena_cache",
+            "_frc_cache",
+            "_decorrelation_cache",
+        ):
+            cache = getattr(self, name)
+            setattr(self, name, {k: v for k, v in cache.items() if k in alive})
+        self._show_nena(
+            self._nena_cache.get(key, ({}, None))[0],
+            self.known_nena(channel),
+        )
+        self._show_frc(self._frc_cache.get(key, {}))
+        self._show_decorrelation(self._decorrelation_cache.get(key, {}))
+        if self._frc_rois_shown():
+            self.frc_rois_window.update_summary()
+        else:
+            self.frc_rois_resolution.setText("-")
         if key not in self._fit_precision_cache:
             if len(locs) and {"lpx", "lpy"} <= set(locs.columns):
                 lp = np.mean([np.median(locs["lpx"]), np.median(locs["lpy"])])
@@ -6344,10 +7183,104 @@ class InfoDialog(lib.Dialog):
         else:
             self.fit_precision.setText("-")
 
+    def _show_nena(self, nena_result: dict, lp: float | None) -> None:
+        """Set the NeNA result and precision (nm) of the selected
+        channel and display the latter."""
+        self.nena_result = nena_result
+        self.lp = lp
+        self.nena_label.setText("-" if lp is None else f"{lp:.3} nm")
+
+    def _show_frc(self, frc_result: dict) -> None:
+        """Set the FRC result of the selected channel and display its
+        resolution."""
+        self.frc_result = frc_result
+        if not frc_result:
+            text = "-"
+        elif frc_result["resolution"] is None:
+            text = "n/a"
+        else:
+            text = f"{frc_result['resolution']:.2f} nm"
+        self.frc_resolution.setText(text)
+
+    def _show_decorrelation(self, result: dict) -> None:
+        """Set the decorrelation result of the selected channel and
+        display its resolution."""
+        self.decorrelation_result = result
+        pixel_text = ""
+        if not result:
+            text = "-"
+        elif np.isfinite(result["resolution"]):
+            text = f"{result['resolution']:.2f} nm"
+            pixel_text = f"used: {result['pixel_size']:.3g} nm"
+        else:
+            text = "n/a"
+        self.decorrelation_resolution.setText(text)
+        self.decorrelation_used_pixel.setText(pixel_text)
+
+    def known_nena(self, channel: int) -> float | None:
+        """NeNA precision (nm) of a channel if it is known for its
+        current localizations: calculated in this dialog, or the last
+        step in their metadata.
+
+        Parameters
+        ----------
+        channel : int
+            Index of the channel.
+
+        Returns
+        -------
+        lp : float or None
+            NeNA precision (nm), None if not known.
+        """
+        locs = self.window.view.locs[channel]
+        cached = self._nena_cache.get((id(locs), len(locs)))
+        if cached is not None:
+            return cached[1]
+        info = self.window.view.infos[channel]
+        if info and "NeNA (nm)" in info[-1]:
+            return float(info[-1]["NeNA (nm)"])
+        return None
+
+    def _record_nena(
+        self,
+        locs: pd.DataFrame,
+        info: list[dict],
+        nena_result: dict,
+        lp: float,
+    ) -> None:
+        """Keep a calculated NeNA for later use, save it to metadata and
+        show it if its channel is selected.
+
+        Parameters
+        ----------
+        locs : pd.DataFrame
+            Localizations NeNA was calculated for.
+        info : list of dicts
+            Their metadata, changed in place.
+        nena_result : dict
+            Summary of the NeNA calculation, empty if not available.
+        lp : float
+            NeNA precision (nm).
+        """
+        self._nena_cache[(id(locs), len(locs))] = (nena_result, lp)
+        if not any(locs_ is locs for locs_ in self.window.view.locs):
+            return  # replaced meanwhile: the metadata is of new locs
+        # a repeated calculation with no other step in between replaces
+        # the previous entry
+        nena_info = {
+            **lib.step_info("Render : NeNA"),
+            "NeNA (nm)": float(lp),
+        }
+        if info and "NeNA (nm)" in info[-1]:
+            info[-1] = nena_info
+        else:
+            info.append(nena_info)
+        self.update_fit_precision()
+
     def calculate_nena_lp(
         self, on_done: Callable[[], None] | None = None
     ) -> None:
-        """Calculate NeNA precision in a given channel.
+        """Calculate NeNA precision of the selected channel.
 
         Parameters
         ----------
@@ -6355,7 +7288,7 @@ class InfoDialog(lib.Dialog):
             Called once the result is shown, since the calculation runs
             on a worker thread. Default None.
         """
-        channel = self.window.view.get_channel("Calculate NeNA precision")
+        channel = self.selected_channel()
         if channel is None:
             return
         locs = self.window.view.locs[channel]
@@ -6365,19 +7298,7 @@ class InfoDialog(lib.Dialog):
             return postprocess.nena(locs, info, progress=progress)
 
         def apply(result: tuple) -> None:
-            self.nena_result, self.lp = result  # nm
-            self.nena_label.setText(f"{self.lp:.3} nm")
-
-            # save NeNA to metadata; a repeated calculation with no other
-            # step in between replaces the previous entry
-            nena_info = {
-                **lib.step_info("Render : NeNA"),
-                "NeNA (nm)": float(self.lp),
-            }
-            if info and "NeNA (nm)" in info[-1]:
-                info[-1] = nena_info
-            else:
-                info.append(nena_info)
+            self._record_nena(locs, info, *result)  # nm
             if on_done is not None:
                 on_done()
 
@@ -6395,6 +7316,96 @@ class InfoDialog(lib.Dialog):
         """Calculate number of units in each pick."""
         influx = self.influx_rate.value()
         return 1 / (influx * dark)
+
+    def calculate_decorrelation(
+        self, on_done: Callable[[], None] | None = None
+    ) -> None:
+        """Calculate the decorrelation resolution of the localizations
+        of the selected channel in the current field of view on a worker
+        thread, see ``postprocess.decorrelation``.
+
+        Parameters
+        ----------
+        on_done : callable, optional
+            Called once the result is shown, since the calculation runs
+            on a worker thread. Default None.
+        """
+        title = "Decorrelation resolution"
+        channel = self.selected_channel()
+        if channel is None:
+            return
+        locs = self.window.view.locs[channel]
+        info = self.window.view.infos[channel]
+        viewport = self.window.view.viewport
+        pixel_size = self.decorrelation_pixel_size.value() or None
+
+        def compute(progress: lib.TaskProgress) -> dict:
+            return postprocess.decorrelation(
+                locs,
+                info,
+                viewport=viewport,
+                pixel_size=pixel_size,
+                progress=progress,
+            )
+
+        def apply(result: dict) -> None:
+            self._decorrelation_cache[(id(locs), len(locs))] = result
+            self.update_fit_precision()
+            if np.isfinite(result["resolution"]):
+                if result["pixel_size_limited"]:
+                    QtWidgets.QMessageBox.information(
+                        self,
+                        title,
+                        "The resolution is close to twice the smallest pixel"
+                        f" size rendered ({result['pixel_size']:.3g} nm), so"
+                        " it may be limited by the pixel size. Zoom in to"
+                        " render smaller pixels (images are at most 8,192"
+                        " pixels on a side) or set a smaller pixel size.",
+                    )
+            else:
+                QtWidgets.QMessageBox.information(
+                    self,
+                    title,
+                    "No decorrelation function has a peak, so no resolution"
+                    " can be given, e.g., because the pixels are too large"
+                    " for the resolution or the field of view holds too few"
+                    " localizations. Try other pixel sizes, a larger field"
+                    " of view or more localizations.",
+                )
+            if on_done is not None:
+                on_done()
+
+        def failed(error: Exception) -> None:
+            if isinstance(error, ValueError):  # e.g., the FOV is too small
+                QtWidgets.QMessageBox.warning(self, title, str(error))
+            else:  # unexpected, report as usual
+                sys.excepthook(type(error), error, error.__traceback__)
+
+        lib.run_task(
+            compute,
+            "Calculating decorrelation resolution",
+            self,
+            apply,
+            on_failed=failed,
+            title=title,
+        )
+
+    def show_decorrelation_plot(self) -> None:
+        """Show the decorrelation plot window, calculating the
+        resolution first if needed."""
+        if not self.decorrelation_result:
+            self.calculate_decorrelation(
+                on_done=self._show_decorrelation_window
+            )
+        else:
+            self._show_decorrelation_window()
+
+    def _show_decorrelation_window(self) -> None:
+        """Plot the decorrelation result in a new window."""
+        # keep a reference to the window to prevent garbage collection
+        self.decorrelation_window = DecorrelationPlotWindow(self)
+        self.decorrelation_window.plot(self.decorrelation_result)
+        self.decorrelation_window.show()
 
     def show_frc_plot(self) -> None:
         """Show FRC plot window."""
@@ -6415,6 +7426,8 @@ class InfoDialog(lib.Dialog):
 
     def _show_nena_window(self) -> None:
         """Plot the NeNA result in a new window."""
+        if not self.nena_result:  # another channel selected meanwhile
+            return
         # keep a reference to the window to prevent garbage collection
         self.nena_window = NenaPlotWindow(self)
         self.nena_window.plot(self.nena_result)
@@ -6481,6 +7494,27 @@ class FRCPlotWindow(lib.GenericPlotWindow):
         self.canvas.draw()
 
 
+class DecorrelationPlotWindow(lib.GenericPlotWindow):
+    """Plot the decorrelation resolution, see
+    ``postprocess.plot_decorrelation``."""
+
+    def __init__(self, info_dialog: InfoDialog) -> None:
+        super().__init__("Decorrelation Plot", "render")
+        self.info_dialog = info_dialog
+        self.resize(1000, 500)
+
+    def plot(self, decorrelation_result: dict) -> None:
+        def draw() -> None:
+            with self.plot_context():
+                postprocess.plot_decorrelation(
+                    decorrelation_result, self.figure
+                )
+
+        draw()
+        self.redraw = draw
+        self.canvas.draw()
+
+
 class FRCRoisWindow(QtWidgets.QWidget):
     """Review the FRC resolutions calculated in several ROIs.
 
@@ -6501,6 +7535,7 @@ class FRCRoisWindow(QtWidgets.QWidget):
     ) -> None:
         super().__init__()
         self.info_dialog = info_dialog
+        self.locs = locs
         self.result = result
         self.setWindowTitle("FRC in ROIs")
         this_directory = os.path.dirname(os.path.realpath(__file__))
@@ -6640,7 +7675,12 @@ class FRCRoisWindow(QtWidgets.QWidget):
                 "NeNA "
                 f"{self.result['lp']:.2f} nm"
             )
-        self.info_dialog.frc_rois_resolution.setText(text)
+        # the Info dialog shows the ROIs of the selected channel only
+        dialog = self.info_dialog
+        channel = dialog.selected_channel()
+        view_locs = dialog.window.view.locs
+        if channel is not None and view_locs[channel] is self.locs:
+            dialog.frc_rois_resolution.setText(text)
 
     def update_plots(self) -> None:
         """Redraw the ROI overview and the selected ROI's FRC curve."""
@@ -6905,6 +7945,11 @@ class MaskSettingsDialog(lib.Dialog):
         Container for all widgets in the scroll area.
     disp_px_size : QSpinBox
         Contains the display pixel size in nm.
+    fill_holes : QCheckBox
+        If checked, the holes of the computed mask are filled.
+    grow : QDoubleSpinBox
+        Distance in nm by which the computed mask grows (negative:
+        shrinks).
     index_infos : list
         Metadata of ``index_locs``, as ``masking.mask_locs`` returned
         it.
@@ -6933,9 +7978,18 @@ class MaskSettingsDialog(lib.Dialog):
         Contains the blur value in nm.
     mask_thresh : QDoubleSpinBox
         Contains the threshold value for masking.
+    min_area : QDoubleSpinBox
+        Smallest area (um^2) of a region of the computed mask that is
+        kept.
+    n_largest : QSpinBox
+        Number of the largest regions of the computed mask kept; 0
+        keeps all.
     paths : list
         Contains paths to all localizations loaded when starting the
         dialog.
+    picks_button : QPushButton
+        Used for adding the regions of the current mask as polygon
+        picks.
     plots : list of QLabel
         Used for displaying the 4 plots (histogram, blurred, mask,
         masked).
@@ -7049,6 +8103,55 @@ class MaskSettingsDialog(lib.Dialog):
         threshold_layout.addWidget(show_hist_button)
         threshold_layout.addWidget(lib.HelpButton(self.DOCS_URL))
 
+        # refine the thresholded mask, in this order
+        self.fill_holes = QtWidgets.QCheckBox("Fill holes")
+        self.fill_holes.setToolTip(
+            "Fill the holes of the mask, i.e., the areas it encloses."
+        )
+        self.fill_holes.toggled.connect(self.mask_image)
+        settings_grid.addWidget(self.fill_holes, 2, 0, 1, 2)
+        min_area_label = QtWidgets.QLabel("Min. area (\u00b5m\u00b2):")
+        min_area_label.setToolTip(
+            "Remove the regions of the mask smaller than this, e.g.,\n"
+            "specks of background. Regions touching at an edge or a\n"
+            "corner are one region."
+        )
+        settings_grid.addWidget(min_area_label, 2, 2)
+        self.min_area = QtWidgets.QDoubleSpinBox()
+        self.min_area.setRange(0, 1e6)
+        self.min_area.setDecimals(2)
+        self.min_area.setSingleStep(1)
+        self.min_area.setKeyboardTracking(False)
+        self.min_area.valueChanged.connect(self.mask_image)
+        settings_grid.addWidget(self.min_area, 2, 3)
+        n_largest_label = QtWidgets.QLabel("Keep largest regions:")
+        n_largest_label.setToolTip(
+            "Keep only this number of the largest regions of the mask,\n"
+            "e.g., 1 for the largest cell. 'All' keeps all regions."
+        )
+        settings_grid.addWidget(n_largest_label, 3, 0)
+        self.n_largest = QtWidgets.QSpinBox()
+        self.n_largest.setRange(0, 9999)
+        self.n_largest.setSpecialValueText("All")
+        self.n_largest.setKeyboardTracking(False)
+        self.n_largest.valueChanged.connect(self.mask_image)
+        settings_grid.addWidget(self.n_largest, 3, 1)
+        grow_label = QtWidgets.QLabel("Grow / shrink (nm):")
+        grow_label.setToolTip(
+            "Grow the mask by this distance in all directions, or\n"
+            "shrink it for a negative value, e.g., to stay away from the\n"
+            "edges of the cells. The image border is not an edge.\n"
+            "Applied after the options to the left and above."
+        )
+        settings_grid.addWidget(grow_label, 3, 2)
+        self.grow = QtWidgets.QDoubleSpinBox()
+        self.grow.setRange(-1e5, 1e5)
+        self.grow.setDecimals(0)
+        self.grow.setSingleStep(100)
+        self.grow.setKeyboardTracking(False)
+        self.grow.valueChanged.connect(self.mask_image)
+        settings_grid.addWidget(self.grow, 3, 3)
+
         display_groupbox = QtWidgets.QGroupBox("Display")
         display_groupbox.setToolTip(
             "The images can be zoomed in/out (Ctrl/Cmd + scrolling)\n"
@@ -7121,6 +8224,18 @@ class MaskSettingsDialog(lib.Dialog):
         self.save_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.save_button.clicked.connect(self.save_locs)
         mask_grid.addWidget(self.save_button, 2, 1, 1, 2)
+
+        self.picks_button = QtWidgets.QPushButton("Add as polygon picks")
+        self.picks_button.setToolTip(
+            "Add each region of the mask as a polygon pick, e.g., to\n"
+            "analyze each cell separately. The outline is smoothed by\n"
+            "up to one pixel of the mask; a hole is joined to the\n"
+            "outline by a cut, which adds no area."
+        )
+        self.picks_button.setEnabled(False)
+        self.picks_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
+        self.picks_button.clicked.connect(self.add_mask_picks)
+        mask_grid.addWidget(self.picks_button, 3, 0)
 
         self.cached_oversampling = 0
         self.cached_blur = 0
@@ -7233,6 +8348,23 @@ class MaskSettingsDialog(lib.Dialog):
                 title="Mask",
             )
             self.save_button.setEnabled(True)
+            self.picks_button.setEnabled(True)
+
+    def add_mask_picks(self) -> None:
+        """Add each region of the mask as a polygon pick in the main
+        window, see ``masking.mask_to_polygons``."""
+        polygons = masking.mask_to_polygons(
+            self.mask, field_of_view=(self.x_max, self.y_max)
+        )
+        if not polygons:
+            QtWidgets.QMessageBox.warning(
+                self, "Empty mask", "The mask has no regions to pick."
+            )
+            return
+        view = self.window.view
+        with view.undo_step("Add mask as picks", picks=True):
+            view.add_picks(polygons, "Polygon")
+        view.update_pick_info_short()
 
     def mask_image(self) -> None:
         """Calculate binary mask based on threshold."""
@@ -7251,13 +8383,37 @@ class MaskSettingsDialog(lib.Dialog):
                 self.mask_thresh.setValue(thresh)
             else:
                 self.mask_thresh.setValue(0)
-        self.mask = mask
+        self.mask = self.refine_mask(mask)
         self.save_mask_button.setEnabled(True)
         self.save_button.setEnabled(True)
+        self.picks_button.setEnabled(True)
+        n_regions = len(masking.label_components(self.mask)[1])
         self.plots[2].setPixmap(
             self.render_to_pixmap(self.mask, cmap="Greys_r"),
-            title="Mask",
+            title=f"Mask ({n_regions} region{'s' * (n_regions != 1)})",
         )
+
+    def refine_mask(self, mask: np.ndarray) -> np.ndarray:
+        """Refine a thresholded mask as set: fill its holes, remove the
+        small regions, keep the largest ones and grow or shrink it, in
+        this order (see ``masking``). Returns the mask in its dtype."""
+        dtype = mask.dtype
+        pixel_size = self.disp_px_size.value()  # nm
+        if self.fill_holes.isChecked():
+            mask = masking.fill_holes(mask)
+        if self.min_area.value() or self.n_largest.value():
+            mask = masking.keep_components(
+                mask,
+                min_area=self.min_area.value() * 1e6,  # nm^2
+                n_largest=self.n_largest.value() or None,
+                pixel_size=pixel_size,
+            )
+        grow = self.grow.value()
+        if grow > 0:
+            mask = masking.dilate(mask, grow, pixel_size=pixel_size)
+        elif grow < 0:
+            mask = masking.erode(mask, -grow, pixel_size=pixel_size)
+        return mask.astype(dtype, copy=False)
 
     def update_plots(self) -> None:
         """Plot in all 4 axes: 2D histogram, blurred image, mask and
@@ -7314,6 +8470,10 @@ class MaskSettingsDialog(lib.Dialog):
                 "Blur (nm)": self.mask_blur.value(),
                 "Threshold": self.mask_thresh.value(),
                 "Threshold method": self.thresh_method.currentText(),
+                "Fill holes": self.fill_holes.isChecked(),
+                "Min. area (um^2)": self.min_area.value(),
+                "Largest regions kept": self.n_largest.value() or "all",
+                "Grow (nm)": self.grow.value(),
             },
         )
         self.index_locs.append(locs_in)  # locs in the mask
@@ -7495,7 +8655,8 @@ class MaskSettingsDialog(lib.Dialog):
         image = np.float32(image)
         # adjust contrast and convert to 8 bits
         image -= image.min()
-        image /= image.max()
+        if image.max() > 0:  # e.g., an empty mask stays black
+            image /= image.max()
         image = render.to_8bit(image.astype(np.float32))
         # get colormap and paint the image
         cmap = self.cmap if cmap is None else cmap
@@ -7518,7 +8679,10 @@ class PickToolCircleSettings(QtWidgets.QWidget):
         self.grid = QtWidgets.QGridLayout(self)
         self.window = window
         diameter_label = QtWidgets.QLabel("Diameter (nm):")
-        diameter_label.setToolTip("Diameter of the circular pick.")
+        diameter_label.setToolTip(
+            "Diameter of new circular picks. Every pick keeps the\n"
+            "diameter it was drawn with."
+        )
         self.grid.addWidget(diameter_label, 0, 0)
         self.pick_diameter = QtWidgets.QDoubleSpinBox()
         self.pick_diameter.setRange(0.1, 99999999)
@@ -7530,6 +8694,12 @@ class PickToolCircleSettings(QtWidgets.QWidget):
             tools_settings_dialog.on_pick_dimension_changed
         )
         self.grid.addWidget(self.pick_diameter, 0, 1)
+        self.apply_to_all = QtWidgets.QPushButton("Apply to all")
+        self.apply_to_all.setToolTip("Give all circular picks this diameter.")
+        self.apply_to_all.clicked.connect(
+            lambda: window.view.resize_picks("Circle")
+        )
+        self.grid.addWidget(self.apply_to_all, 0, 2)
         self.grid.setRowStretch(1, 1)
 
 
@@ -7545,7 +8715,10 @@ class PickToolRectangleSettings(QtWidgets.QWidget):
         self.window = window
         self.grid = QtWidgets.QGridLayout(self)
         width_label = QtWidgets.QLabel("Width (nm):")
-        width_label.setToolTip("Width of the rectangular pick.")
+        width_label.setToolTip(
+            "Width of new rectangular picks. Every pick keeps the\n"
+            "width it was drawn with."
+        )
         self.grid.addWidget(width_label, 0, 0)
         self.pick_width = QtWidgets.QDoubleSpinBox()
         self.pick_width.setRange(0.1, 99999999.0)
@@ -7557,6 +8730,12 @@ class PickToolRectangleSettings(QtWidgets.QWidget):
             tools_settings_dialog.on_pick_dimension_changed
         )
         self.grid.addWidget(self.pick_width, 0, 1)
+        self.apply_to_all = QtWidgets.QPushButton("Apply to all")
+        self.apply_to_all.setToolTip("Give all rectangular picks this width.")
+        self.apply_to_all.clicked.connect(
+            lambda: window.view.resize_picks("Rectangle")
+        )
+        self.grid.addWidget(self.apply_to_all, 0, 2)
         self.grid.setRowStretch(1, 1)
 
 
@@ -7572,7 +8751,10 @@ class PickToolSquareSettings(QtWidgets.QWidget):
         self.window = window
         self.grid = QtWidgets.QGridLayout(self)
         side_label = QtWidgets.QLabel("Side length (nm):")
-        side_label.setToolTip("Side lengths of the square pick.")
+        side_label.setToolTip(
+            "Side length of new square picks. Every pick keeps the\n"
+            "side length it was drawn with."
+        )
         self.grid.addWidget(side_label, 0, 0)
         self.pick_side_length = QtWidgets.QDoubleSpinBox()
         self.pick_side_length.setRange(0.1, 99999999.0)
@@ -7584,6 +8766,12 @@ class PickToolSquareSettings(QtWidgets.QWidget):
             tools_settings_dialog.on_pick_dimension_changed
         )
         self.grid.addWidget(self.pick_side_length, 0, 1)
+        self.apply_to_all = QtWidgets.QPushButton("Apply to all")
+        self.apply_to_all.setToolTip("Give all square picks this side length.")
+        self.apply_to_all.clicked.connect(
+            lambda: window.view.resize_picks("Square")
+        )
+        self.grid.addWidget(self.apply_to_all, 0, 2)
         self.grid.setRowStretch(1, 1)
 
 
@@ -7737,19 +8925,19 @@ class ToolsSettingsDialog(lib.Dialog):
     pick_annotation : QCheckBox
         Tick to display picks' indeces.
     pick_diameter : QDoubleSpinBox
-        Contains the diameter of circular picks (nm)).
+        Contains the diameter of new circular picks (nm).
     pick_shape : QComboBox
-        Contains the str with the shape of picks (circle, rectangle,
-        polygon, square, box or brush).
+        Contains the str with the shape of new picks (circle,
+        rectangle, polygon, square, box or brush).
     pick_side_length : QDoubleSpinBox
-        Contains the side length of square picks (nm).
+        Contains the side length of new square picks (nm).
     pick_similar_range : QDoubleSpinBox
         Contains the standard deviation range used by Pick similar.
     pick_style : OverlayStyleWidget
         Appearance of the picks, including the color of a pick being
         drawn.
     pick_width : QDoubleSpinBox
-        Contains the width of rectangular picks (nm).
+        Contains the width of new rectangular picks (nm).
     point_picks : QCheckBox
         Tick to display circular picks as 3-pixels-wide points.
     """
@@ -7793,10 +8981,6 @@ class ToolsSettingsDialog(lib.Dialog):
         pick_stack = QtWidgets.QStackedWidget()
         pick_grid.addWidget(pick_stack, 1, 0, 1, 2)
         self.pick_shape.currentIndexChanged.connect(pick_stack.setCurrentIndex)
-        # the index blocks are built for the current pick shape and size
-        self.pick_shape.currentIndexChanged.connect(
-            self.on_pick_dimension_changed
-        )
 
         # Circle
         self.pick_circle_settings = PickToolCircleSettings(window, self)
@@ -7849,8 +9033,9 @@ class ToolsSettingsDialog(lib.Dialog):
             )
         )
         self.pick_shape.setToolTip(
-            "Circle and Square are placed with a single click and share\n"
-            "one size; Rectangle is a band of a fixed width drawn along\n"
+            "Shape of new picks; picks of different shapes and sizes\n"
+            "can be mixed. Circle and Square are placed with a single\n"
+            "click; Rectangle is a band of a fixed width drawn along\n"
             "its center axis; Polygon is drawn vertex by vertex; Box is\n"
             "dragged out to any size; Brush is painted freehand, and\n"
             "overlapping strokes merge into one pick."
@@ -7905,13 +9090,6 @@ class ToolsSettingsDialog(lib.Dialog):
             "translation is saved in the metadata."
         )
         self._update_move_channels_label()
-        self.move_undo_button = QtWidgets.QPushButton("Undo last move")
-        self.move_undo_button.setToolTip(
-            "Undo the last move of a channel done with the Move tool."
-        )
-        self.move_undo_button.setEnabled(False)
-        self.move_undo_button.clicked.connect(self.window.view.undo_move)
-        move_grid.addWidget(self.move_undo_button, 1, 0, 1, 3)
 
         # how the tools are drawn, one tab per tool; collapsed by
         # default to keep the dialog compact
@@ -8085,11 +9263,6 @@ class ToolsSettingsDialog(lib.Dialog):
             "\n".join(paths[i] for i in channels if i < len(paths))
         )
 
-    def update_move_undo(self) -> None:
-        """Enable the Move tool's undo button if there is a move to
-        undo."""
-        self.move_undo_button.setEnabled(bool(self.window.view._move_undo))
-
     def auto_overlay_color(self) -> QtGui.QColor:
         """Automatic color of the tool overlays: yellow on a dark and
         red on a white background."""
@@ -8163,12 +9336,12 @@ class ToolsSettingsDialog(lib.Dialog):
         self.window.view.update_cursor()
 
     def on_pick_dimension_changed(self, *args) -> None:
-        """Reset index_blocks in self.window.view and update the
-        scene."""
-        self.window.view.index_blocks = [
-            None for _ in self.window.view.index_blocks
-        ]
-        self.update_scene_with_cache()
+        """Update the cursor to the new size of new picks.
+
+        Like the brush width, this does not touch the picks already
+        drawn, each of which keeps its size; see ``View.resize_picks``
+        for applying the size to all of them."""
+        self.window.view.update_cursor()
 
     def update_scene_with_cache(self, *args) -> None:
         """Quick (cached) update of the current view when picks
@@ -8431,10 +9604,12 @@ class CBCDialog(lib.Dialog):
 #: Statistics of ``Postprocess > Spatial statistics``, by key: the
 #: window title, the functions of ``postprocess`` that compute, plot
 #: and tabulate them, the documentation, the suffixes of the saved files
-#: (the functions, and the summary next to them),
-#: the default maximum radius and number of steps, and whether the
-#: statistic takes several channels at once ("multichannel"; otherwise
-#: one channel or a channel and a partner)
+#: (the functions, and the summary next to them), the default maximum
+#: radius and number of steps, whether the statistic takes several
+#: channels at once ("multichannel"; otherwise one channel), whether it
+#: offers a partner channel ("partner"), whether it takes the orders of
+#: the neighbors and a shortest distance instead of the radii
+#: ("neighbors") and, optionally, the size of the plot window ("size")
 SPATIAL_STATISTICS = {
     "ripley_h": {
         "title": "Ripley's H function",
@@ -8447,6 +9622,8 @@ SPATIAL_STATISTICS = {
         "r_max": 500.0,
         "steps": 100,
         "multichannel": False,
+        "partner": True,
+        "neighbors": False,
     },
     "rdf": {
         "title": "Radial distribution function",
@@ -8459,6 +9636,8 @@ SPATIAL_STATISTICS = {
         "r_max": 500.0,
         "steps": 50,
         "multichannel": False,
+        "partner": True,
+        "neighbors": False,
     },
     "nnd": {
         "title": "Nearest neighbor distances",
@@ -8471,6 +9650,23 @@ SPATIAL_STATISTICS = {
         "r_max": 200.0,
         "steps": 40,
         "multichannel": True,
+        "partner": False,
+        "neighbors": False,
+    },
+    "knn": {
+        "title": "Density from k nearest neighbors",
+        "compute": postprocess.knn_density,
+        "plot": postprocess.plot_knn_density,
+        "tables": postprocess._knn_density_tables,
+        "docs": docs_url("render/analysis.html#render-knn-density"),
+        "suffix": "_knn_density",
+        "summary_suffix": "_densities",
+        "r_max": None,  # the histograms extend over the distances
+        "steps": 50,
+        "multichannel": False,
+        "partner": False,
+        "neighbors": True,
+        "size": (1000, 480),
     },
 }
 
@@ -8478,8 +9674,9 @@ SPATIAL_STATISTICS = {
 class SpatialStatisticDialog(lib.Dialog):
     """Choose the channel, regions and parameters of a spatial
     statistic of ``SPATIAL_STATISTICS``, e.g., Ripley's H function
-    (``postprocess.ripley_h``) or the radial distribution function
-    (``postprocess.rdf``).
+    (``postprocess.ripley_h``), the radial distribution function
+    (``postprocess.rdf``) or the density from the k nearest neighbors
+    (``postprocess.knn_density``).
 
     ...
 
@@ -8494,11 +9691,18 @@ class SpatialStatisticDialog(lib.Dialog):
         How the envelope is simulated with a partner channel: random
         shifts of the partner or random labels.
     edge_correction : QCheckBox
-        If checked, Ripley's isotropic edge correction is applied.
+        If checked, Ripley's isotropic edge correction is applied (for
+        the k nearest neighbors, distances beyond the region boundary
+        are censored).
+    k_max, k_min : QSpinBox
+        Highest order of the neighbors, and the lowest order of the
+        pooled density.
     partner : QComboBox
         Second channel for the cross function, or none (data None).
     r_max : QDoubleSpinBox
         Maximum radius in nm.
+    r_min : QDoubleSpinBox
+        Shortest distance to a neighbor used, in nm.
     region : QComboBox
         Regions in which the function is computed: the picks (if any),
         the current view or the whole field of view.
@@ -8557,6 +9761,7 @@ class SpatialStatisticDialog(lib.Dialog):
             self.partner.addItem(check.text(), i)
         grid.addWidget(self.partner, 2, 1)
         self.multichannel = self.statistic["multichannel"]
+        self.neighbors = self.statistic["neighbors"]
         channels_label = QtWidgets.QLabel("Channels:")
         channels_label.setToolTip(
             "Channels whose nearest neighbor distances are compared;\n"
@@ -8584,13 +9789,18 @@ class SpatialStatisticDialog(lib.Dialog):
             hidden = [channels_label, self.channels_list]
             if len(view.locs_paths) < 2:
                 hidden += [channel_label, self.channel]
+            if len(view.locs_paths) < 2 or not self.statistic["partner"]:
                 hidden += [partner_label, self.partner]
         for widget in hidden:
             widget.hide()
 
         region_label = QtWidgets.QLabel("Regions:")
         region_label.setToolTip(
-            "Regions of interest in which the function is computed.\n"
+            "Regions of interest in which the neighbors are searched:\n"
+            "the neighbors of each molecule in the same region. The\n"
+            "distances of all regions are fitted together."
+            if self.neighbors
+            else "Regions of interest in which the function is computed.\n"
             "With picks, it is computed in each pick and averaged. The\n"
             "density is the number of localizations divided by the\n"
             "region's area, so the regions should lie within the sample\n"
@@ -8613,10 +9823,10 @@ class SpatialStatisticDialog(lib.Dialog):
             or region.rectangle is not None
             or region.kind == postprocess._REGION_CIRCLE
             for region in (
-                postprocess._pick_region(
-                    pick, view._pick_shape, view._pick_size
+                postprocess._pick_region(pick, shape, size)
+                for pick, shape, size in zip(
+                    view._picks, view._pick_shapes, view._pick_sizes
                 )
-                for pick in view._picks
             )
         )
 
@@ -8634,7 +9844,8 @@ class SpatialStatisticDialog(lib.Dialog):
         self.r_max = QtWidgets.QDoubleSpinBox()
         self.r_max.setRange(0.1, 1e6)
         self.r_max.setDecimals(1)
-        self.r_max.setValue(self.statistic["r_max"])
+        if self.statistic["r_max"] is not None:
+            self.r_max.setValue(self.statistic["r_max"])
         self.r_max.setSingleStep(10)
         grid.addWidget(self.r_max, 4, 1)
         steps_label = QtWidgets.QLabel(
@@ -8651,20 +9862,69 @@ class SpatialStatisticDialog(lib.Dialog):
         self.steps.setRange(2, 10_000)
         self.steps.setValue(self.statistic["steps"])
         grid.addWidget(self.steps, 5, 1)
+        # the k nearest neighbors replace the radii
+        k_max_label = QtWidgets.QLabel("Neighbors (k):")
+        k_max_label.setToolTip(
+            "Highest order of the neighbors: the density is fitted to\n"
+            "the distances to the 1st, 2nd, ..., k-th nearest neighbors."
+        )
+        grid.addWidget(k_max_label, 6, 0)
+        self.k_max = QtWidgets.QSpinBox()
+        self.k_max.setRange(1, 100)
+        self.k_max.setValue(5)
+        grid.addWidget(self.k_max, 6, 1)
+        k_min_label = QtWidgets.QLabel("Pooled from k:")
+        k_min_label.setToolTip(
+            "Lowest order of the pooled density, which is fitted to the\n"
+            "neighbors from this order to the highest; e.g., 2 leaves\n"
+            "out the nearest neighbors, which are affected the most by\n"
+            "molecules counted twice."
+        )
+        grid.addWidget(k_min_label, 7, 0)
+        self.k_min = QtWidgets.QSpinBox()
+        self.k_min.setRange(1, self.k_max.value())
+        self.k_min.setValue(1)
+        grid.addWidget(self.k_min, 7, 1)
+        self.k_max.valueChanged.connect(self.k_min.setMaximum)
+        r_min_label = QtWidgets.QLabel("Min. distance (nm):")
+        r_min_label.setToolTip(
+            "Shorter distances to the neighbors are left out and the\n"
+            "distributions are fitted to the longer ones, e.g., to\n"
+            "ignore molecules counted twice."
+        )
+        grid.addWidget(r_min_label, 8, 0)
+        self.r_min = QtWidgets.QDoubleSpinBox()
+        self.r_min.setRange(0.0, 1e5)
+        self.r_min.setDecimals(1)
+        self.r_min.setSingleStep(1)
+        grid.addWidget(self.r_min, 8, 1)
+        if self.neighbors:
+            hidden = [r_label, self.r_max, steps_label, self.steps]
+        else:
+            hidden = [k_max_label, self.k_max, k_min_label, self.k_min]
+            hidden += [r_min_label, self.r_min]
+        for widget in hidden:
+            widget.hide()
         simulations_label = QtWidgets.QLabel("Simulations:")
         simulations_label.setToolTip(
-            "Number of simulations for the envelope. For one channel,\n"
+            "Number of simulations of uniformly random points in the\n"
+            "same regions, as many as there are molecules (complete\n"
+            "spatial randomness, CSR), for the p-values and the errors\n"
+            "of the densities. The smallest p-value is\n"
+            "1 / (simulations + 1). 0 skips the simulations."
+            if self.neighbors
+            else "Number of simulations for the envelope. For one channel,\n"
             "uniformly random points in the same regions, as many as\n"
             "there are localizations (complete spatial randomness,\n"
             "CSR); for two channels, see the envelope. A mean function\n"
             "outside the envelope is significant at the pointwise\n"
             "level 2 / (simulations + 1). 0 skips the simulations."
         )
-        grid.addWidget(simulations_label, 6, 0)
+        grid.addWidget(simulations_label, 9, 0)
         self.simulations = QtWidgets.QSpinBox()
         self.simulations.setRange(0, 9_999)
         self.simulations.setValue(99)
-        grid.addWidget(self.simulations, 6, 1)
+        grid.addWidget(self.simulations, 9, 1)
         self.cross_null_label = QtWidgets.QLabel("Envelope:")
         self.cross_null_label.setToolTip(
             "How the two channels are simulated. Random shifts: the\n"
@@ -8677,44 +9937,51 @@ class SpatialStatisticDialog(lib.Dialog):
             "channel clustered more strongly than the other also\n"
             "falls outside of it."
         )
-        grid.addWidget(self.cross_null_label, 7, 0)
+        grid.addWidget(self.cross_null_label, 10, 0)
         self.cross_null = QtWidgets.QComboBox()
         self.cross_null.addItem("Random shifts (independence)", "shift")
         self.cross_null.addItem("Random labels (same distribution)", "labels")
-        grid.addWidget(self.cross_null, 7, 1)
+        grid.addWidget(self.cross_null, 10, 1)
         self.edge_correction = QtWidgets.QCheckBox("Edge correction")
         self.edge_correction.setToolTip(
-            "Ripley's isotropic edge correction: weight each pair by\n"
+            "Neighbors outside the region are not seen: a distance\n"
+            "longer than that to the region boundary is used only as\n"
+            "lying beyond the boundary (censored)."
+            if self.neighbors
+            else "Ripley's isotropic edge correction: weight each pair by\n"
             "the inverse of the fraction of the circle around the\n"
             "localization that lies inside the region, since the\n"
             "neighbors outside of it are not seen."
         )
         self.edge_correction.setChecked(True)
-        grid.addWidget(self.edge_correction, 8, 0, 1, 2)
+        grid.addWidget(self.edge_correction, 11, 0, 1, 2)
         # NNDs are compared with simulations in the same regions instead
         self.edge_correction.setVisible(not self.multichannel)
 
         # 3D
         self.use_z = QtWidgets.QCheckBox("3D (x, y and z)")
         self.use_z.setToolTip(
-            "Compute the function in 3D. Requires z. 3D samples are\n"
+            "Measure the distances in 3D. Requires z. The densities\n"
+            "are then per volume."
+            if self.neighbors
+            else "Compute the function in 3D. Requires z. 3D samples are\n"
             "usually thin, so keep the max. radius below about a third\n"
             "of the z range: larger spheres mostly reach the top or\n"
             "bottom of the region and the function gets noisy."
         )
-        grid.addWidget(self.use_z, 9, 0, 1, 2)
+        grid.addWidget(self.use_z, 12, 0, 1, 2)
         self.z_limits_label = QtWidgets.QLabel("z range:")
         self.z_limits_label.setToolTip(
             "z range over which the regions extend. The volume, and\n"
             "thus the density, depends on it."
         )
-        grid.addWidget(self.z_limits_label, 10, 0)
+        grid.addWidget(self.z_limits_label, 13, 0)
         self.z_limits = QtWidgets.QComboBox()
         self.z_limits.addItem("Localizations in each region", "data")
         self.z_limits.addItem("Manual", "manual")
-        grid.addWidget(self.z_limits, 10, 1)
+        grid.addWidget(self.z_limits, 13, 1)
         self.z_min_label = QtWidgets.QLabel("z min / max (nm):")
-        grid.addWidget(self.z_min_label, 11, 0)
+        grid.addWidget(self.z_min_label, 14, 0)
         z_box = QtWidgets.QHBoxLayout()
         self.z_min = QtWidgets.QDoubleSpinBox()
         self.z_max = QtWidgets.QDoubleSpinBox()
@@ -8725,7 +9992,7 @@ class SpatialStatisticDialog(lib.Dialog):
             z_box.addWidget(spin)
         self.z_min.setToolTip("Bottom of the regions; lower z is ignored.")
         self.z_max.setToolTip("Top of the regions; higher z is ignored.")
-        grid.addLayout(z_box, 11, 1)
+        grid.addLayout(z_box, 14, 1)
         self.simulated_z_label = QtWidgets.QLabel("Simulated z:")
         self.simulated_z_label.setToolTip(
             "z of the simulated points. Uniform: complete spatial\n"
@@ -8736,11 +10003,11 @@ class SpatialStatisticDialog(lib.Dialog):
             "the z distribution, but hides real clustering in z (e.g.,\n"
             "a layer of molecules)."
         )
-        grid.addWidget(self.simulated_z_label, 12, 0)
+        grid.addWidget(self.simulated_z_label, 15, 0)
         self.simulated_z = QtWidgets.QComboBox()
         self.simulated_z.addItem("Uniform over the z range", "uniform")
         self.simulated_z.addItem("Observed z values, shuffled", "observed")
-        grid.addWidget(self.simulated_z, 12, 1)
+        grid.addWidget(self.simulated_z, 15, 1)
         vbox.addLayout(grid)
 
         self.channel.currentIndexChanged.connect(self.on_channel_changed)
@@ -8808,10 +10075,14 @@ class SpatialStatisticDialog(lib.Dialog):
             widget.setVisible(use_z)
         for widget in (self.z_min_label, self.z_min, self.z_max):
             widget.setVisible(use_z and manual)
-        # within a channel, multichannel statistics simulate z, too
+        # within a channel, multichannel statistics simulate z, too;
+        # the k nearest neighbors are compared with uniform z only
         for widget in (self.simulated_z_label, self.simulated_z):
             widget.setVisible(
-                use_z and simulate and (self.multichannel or not cross)
+                use_z
+                and simulate
+                and not self.neighbors
+                and (self.multichannel or not cross)
             )
         for widget in (self.cross_null_label, self.cross_null):
             widget.setVisible(cross and simulate)
@@ -8885,8 +10156,11 @@ class SpatialStatisticDialog(lib.Dialog):
             "partner": dialog.partner.currentData(),
             "cross_null": dialog.cross_null.currentData(),
             "channels": dialog.channels(),
+            "k_max": dialog.k_max.value(),
+            "k_min": dialog.k_min.value(),
+            "r_min": dialog.r_min.value(),
         }
-        if dialog.multichannel:
+        if dialog.multichannel or not dialog.statistic["partner"]:
             params["partner"] = None
         if params["use_z"]:
             if dialog.z_limits.currentData() == "manual":
@@ -8894,7 +10168,8 @@ class SpatialStatisticDialog(lib.Dialog):
                     dialog.z_min.value(),
                     dialog.z_max.value(),
                 )
-            if params["partner"] is None:  # within a channel
+            if params["partner"] is None and not dialog.neighbors:
+                # within a channel
                 params["simulated_z"] = dialog.simulated_z.currentData()
         return params, result == QtWidgets.QDialog.DialogCode.Accepted
 
@@ -8916,12 +10191,14 @@ class SpatialStatisticPlotWindow(lib.GenericPlotWindow):
                 min(400 + 300 * n_channels, 1600),
                 min(250 + 250 * n_channels, 1200),
             )
+        elif "size" in self.statistic:
+            self.resize(*self.statistic["size"])
         self.toolbar.addSeparator()
         save_action = self.toolbar.addAction("Save data")
         save_action.setIcon(theme.icon("export-csv"))
         save_action.setToolTip(
-            "Save the data and its summary (of each region, or of each\n"
-            "pair of channels) as .csv files."
+            "Save the data and its summary (of each region, pair of\n"
+            "channels or order of neighbors) as .csv files."
         )
         save_action.triggered.connect(self.save_data)
         theme.follow_toolbar_style(self.toolbar, save_action)
@@ -8944,7 +10221,7 @@ class SpatialStatisticPlotWindow(lib.GenericPlotWindow):
             + self.statistic["suffix"]
             + (
                 "_cross"
-                if self.result["cross_null"]
+                if self.result.get("cross_null")
                 and not self.statistic["multichannel"]
                 else ""
             )
@@ -8955,9 +10232,9 @@ class SpatialStatisticPlotWindow(lib.GenericPlotWindow):
             self.write_data(path)
 
     def write_data(self, path: str) -> list[str]:
-        """Save the data to ``path`` and its summary (of each region or
-        pair of channels) next to it, ``<path stem>_regions.csv`` or
-        ``<path stem>_summary.csv``; return both paths."""
+        """Save the data to ``path`` and its summary (of each region,
+        pair of channels or order of neighbors) next to it, e.g.,
+        ``<path stem>_regions.csv``; return both paths."""
         curves, summary = self.statistic["tables"](self.result)
         summary_path = (
             os.path.splitext(path)[0]
@@ -9543,6 +10820,7 @@ class RESIDialog(lib.Dialog):
                 radius_z=r_z,
                 min_locs=min_locs,
                 apply_fa=apply_fa,
+                paths=paths,
                 save_clustered_locs=save_clustered_locs,
                 save_cluster_centers=save_cluster_centers,
                 suffix_locs=suffix_locs,
@@ -9551,7 +10829,6 @@ class RESIDialog(lib.Dialog):
                 progress=progress,
             )
             progress.check_canceled()
-            resi_info[-1]["Paths to RESI channels"] = paths
             io.save_locs(resi_path, all_resi, resi_info)
 
         lib.run_task(
@@ -9612,11 +10889,12 @@ class DisplaySettingsDialog(lib.Dialog):
     render_check : QCheckBox
         Tick to activate parameter rendering.
     scalebar : QSpinBox
-        Contains the scale bar's length (nm).
-    scalebar_groupbox : CollapsibleGroupBox
+        Contains the scale bar's length (nm), ``scalebar_groupbox.length``.
+    scalebar_groupbox : ScaleBarGroupBox
         Group with options for customizing scale bar, tick to display.
     scalebar_text : QCheckBox
-        Tick to display scale bar's length (nm).
+        Tick to display scale bar's length (nm),
+        ``scalebar_groupbox.print_length``.
     _silent_disp_px_update : bool
         True if update display pixel size in background.
     """
@@ -9940,35 +11218,14 @@ class DisplaySettingsDialog(lib.Dialog):
         }
 
         # Scalebar
-        self.scalebar_groupbox = lib.CollapsibleGroupBox("Scale bar")
-        self.scalebar_groupbox.setCheckable(True)
-        self.scalebar_groupbox.setChecked(False)
-        self.scalebar_groupbox.toggled.connect(self.update_scene)
+        self.scalebar_groupbox = ScaleBarGroupBox(
+            optimal_length=self.window.view.optimal_scalebar_length
+        )
+        self.scalebar_groupbox.changed.connect(self.update_scene)
         vbox.addWidget(self.scalebar_groupbox)
-        scalebar_grid = QtWidgets.QGridLayout(self.scalebar_groupbox.content)
-        scalebar_length_label = QtWidgets.QLabel("Scale bar length (nm):")
-        scalebar_length_label.setToolTip("Set the length of the scale bar.")
-        scalebar_grid.addWidget(scalebar_length_label, 0, 0)
-        self.scalebar = QtWidgets.QSpinBox()
-        self.scalebar.setRange(1, 100000)
-        self.scalebar.setValue(500)
-        self.scalebar.setKeyboardTracking(False)
-        self.scalebar.valueChanged.connect(self.update_scene)
-        self.scalebar.valueChanged.connect(self._uncheck_optimal_scalebar)
-        scalebar_grid.addWidget(self.scalebar, 0, 1)
-        self.scalebar_text = QtWidgets.QCheckBox("Print scale bar length")
-        self.scalebar_text.setToolTip("Display the length of the scale bar?")
-        self.scalebar_text.stateChanged.connect(self.update_scene)
-        scalebar_grid.addWidget(self.scalebar_text, 1, 0)
-        self.optimal_scalebar_check = QtWidgets.QCheckBox("Automatic length")
-        self.optimal_scalebar_check.setChecked(True)
-        self.optimal_scalebar_check.setToolTip(
-            "Change scale bar to roughly 1/8 of the window's width."
-        )
-        self.optimal_scalebar_check.stateChanged.connect(
-            self.window.view.set_optimal_scalebar
-        )
-        scalebar_grid.addWidget(self.optimal_scalebar_check, 1, 1)
+        self.scalebar = self.scalebar_groupbox.length
+        self.scalebar_text = self.scalebar_groupbox.print_length
+        self.optimal_scalebar_check = self.scalebar_groupbox.auto_length
 
         # Grid
         self.grid_box = GridGroupBox(
@@ -10126,14 +11383,6 @@ class DisplaySettingsDialog(lib.Dialog):
             if not path or error is not None:
                 self.colormap.setCurrentText("magma")
         self.update_scene()
-
-    def _uncheck_optimal_scalebar(self, *args) -> None:
-        """Uncheck the automatic scale bar checkbox when the user
-        manually changes the scale bar length."""
-        if self.optimal_scalebar_check.isChecked():
-            self.optimal_scalebar_check.blockSignals(True)
-            self.optimal_scalebar_check.setChecked(False)
-            self.optimal_scalebar_check.blockSignals(False)
 
     def on_disp_px_changed(self, value: int) -> None:
         """Set new display pixel size, update contrast and update scene
@@ -11128,10 +12377,12 @@ def _read_locs_file(
     path: str,
     pixelsize: float | None = None,
     progress: lib.Progress | Literal["console"] | None = None,
+    *,
+    average_traces: bool = False,
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Read localizations and metadata from a given path, either Picasso
-    (.hdf5), ThunderSTORM (.csv), SMAP (_sml.mat) or PyME (.h5r, .hdf)
-    format.
+    (.hdf5), ThunderSTORM (.csv), SMAP (_sml.mat), PyME (.h5r, .hdf) or
+    MINFLUX (pyMINFLUX .pmx, MINFLUX .csv) format.
 
     Contains no GUI code, so it can run on a background thread, see
     ``LocsLoadWorker``.
@@ -11151,6 +12402,9 @@ def _read_locs_file(
         localizations read (.hdf5 only, which is read in blocks, see
         ``io.load_locs``); raising inside its ``set_value`` aborts the
         read. Default is None.
+    average_traces : bool, optional
+        Whether to read one localization per MINFLUX trace (pyMINFLUX
+        files only, see ``io.import_minflux``). Default is False.
 
     Returns
     -------
@@ -11161,6 +12415,8 @@ def _read_locs_file(
     """
     if path.endswith(".hdf5"):  # standard Picasso localization file
         return io.load_locs(path, pixelsize=pixelsize, progress=progress)
+    elif io.is_minflux_file(path):  # pyMINFLUX .pmx or MINFLUX .csv
+        return io.import_minflux(path, average_traces=average_traces)
     elif path.endswith(".csv"):  # ThunderSTORM localization file
         return io.import_ts(path, pixelsize)
     elif path.endswith(".mat"):  # SMAP localization file
@@ -11169,7 +12425,8 @@ def _read_locs_file(
         return io.import_pyme(path, pixelsize)
     raise ValueError(
         "Unsupported file format. Please load a .hdf5 (Picasso), "
-        ".csv (ThunderSTORM), _sml.mat (SMAP) or .h5r/.hdf (PyME) file."
+        ".csv (ThunderSTORM), _sml.mat (SMAP), .h5r/.hdf (PyME) or "
+        ".pmx/.csv (MINFLUX) file."
     )
 
 
@@ -11193,20 +12450,29 @@ def _read_locs_channels(
     path: str,
     pixelsize: float | None = None,
     progress: lib.Progress | Literal["console"] | None = None,
+    *,
+    average_traces: bool = False,
 ) -> list[tuple[str, pd.DataFrame, list[dict]]]:
     """Read the channel(s) stored in a localization file, see
     ``_read_locs_file``. A PyME file holds one channel per ``probe``
-    value (see ``io.split_pyme_channels``), any other file one channel.
+    value (see ``io.split_pyme_channels``), a pyMINFLUX file one per
+    fluorophore (see ``io.split_minflux_channels``), any other file one
+    channel.
 
     Returns
     -------
     channels : list of tuples
         ``(path, locs, info)`` per channel; the path of a channel split
-        from a PyME file is ``<base>_probe<k><ext>``.
+        from a PyME file is ``<base>_probe<k><ext>``, from a pyMINFLUX
+        file ``<base>_<fluorophore><ext>``.
     """
-    locs, info = _read_locs_file(path, pixelsize, progress=progress)
+    locs, info = _read_locs_file(
+        path, pixelsize, progress=progress, average_traces=average_traces
+    )
     if io.is_pyme_file(path):
         return io.split_pyme_channels(path, locs, info)
+    if io.is_minflux_file(path):
+        return io.split_minflux_channels(path, locs, info)
     return [(path, locs, info)]
 
 
@@ -11253,8 +12519,12 @@ class LocsLoadWorker(QtCore.QObject):
     jobs : list of tuple
         One ``(path, pixelsize)`` tuple per file to load; ``pixelsize``
         is None for files that store it themselves (.hdf5 with a
-        ``Pixelsize`` in the metadata, most PyME files). A PyME file may
-        hold several channels, each emitted via ``loaded``.
+        ``Pixelsize`` in the metadata, most PyME files) and for
+        pyMINFLUX files. A PyME or pyMINFLUX file may hold several
+        channels, each emitted via ``loaded``.
+    average_traces : bool, optional
+        Whether to load one localization per MINFLUX trace from
+        pyMINFLUX files (see ``io.import_minflux``). Default is False.
     """
 
     progress = QtCore.pyqtSignal(int, str)  # index, filename
@@ -11269,9 +12539,15 @@ class LocsLoadWorker(QtCore.QObject):
     warned = QtCore.pyqtSignal(str, str)  # path, warning message(s)
     finished = QtCore.pyqtSignal()
 
-    def __init__(self, jobs: list[tuple[str, float | None]]) -> None:
+    def __init__(
+        self,
+        jobs: list[tuple[str, float | None]],
+        *,
+        average_traces: bool = False,
+    ) -> None:
         super().__init__()
         self.jobs = jobs
+        self.average_traces = average_traces
         self._canceled = False
 
     def cancel(self) -> None:
@@ -11299,7 +12575,10 @@ class LocsLoadWorker(QtCore.QObject):
         io_log.addHandler(records)
         try:
             return _read_locs_channels(
-                path, pixelsize, progress=_LoadProgress(self)
+                path,
+                pixelsize,
+                progress=_LoadProgress(self),
+                average_traces=self.average_traces,
             )
         except _LoadCanceledError:
             raise
@@ -11395,8 +12674,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
     Attributes
     ----------
-    currentdrift : list
-        Contains the most up-to-date drift for each channel.
     custom_cmap : np.array
         Custom colormap loaded from .npy, see ``DisplaySettingsDialog``.
     _drift : list
@@ -11408,6 +12685,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         Important for single channel data with group info (picked or
         clustered locs); contains an integer index for each loc
         defining its color.
+    history : render_undo.History
+        The steps that changed the localizations, for File > Undo and
+        Redo, see ``undo_step``.
     image : np.array
         Unprocessed image of rendered localizations
     index_blocks : list
@@ -11425,9 +12705,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     _mode : {'Zoom', 'Pick', 'Measure', 'Move'}
         Defines current mode (zoom, pick, measure or move), use in
         mouseEvents.
-    _move_undo : list
-        Finished moves of the Move tool, ``(channels, dx, dy)`` in nm,
-        most recent last.
     n_locs : int
         Number of localizations loaded; if multichannel, the sum is
         given.
@@ -11436,18 +12713,25 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     pan_start_x, pan_start_y : float
         x and y coordinates of panning's starting position.
     _picks : list
-        Contains the coordinates of current picks (nm). Each pick is
+        (Property) Contains the coordinates of current picks (nm).
+        Assigned directly, the picks take the shape and size of the pick
+        tool; ``_set_picks`` sets their own. Each pick is
         ``(x, y)`` for circles and squares, ``((x_start, y_start),
         (x_end, y_end))`` center-axis points for rectangles, a list of
         vertices for polygons, the two opposite corners
         ``((x0, y0), (x1, y1))`` for boxes, and a list of
         ``(width, path)`` strokes for brush picks.
     _pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"}
-        Current shape of picks.
+        Shape of the pick tool, i.e., of new picks.
+    _pick_shapes : list of str
+        Shape of each pick in ``_picks``.
     _pick_size : float or None
-        Size of picks in nm; None for polygonal, box and brush picks,
-        which carry their own extent. Diameter for circular picks, side
-        length for square picks and width for rectangular picks.
+        (Property) Size of new picks in nm, from ``ToolsSettingsDialog``;
+        None for polygonal, box and brush picks, which carry their own
+        extent. Diameter for circular picks, side length for square
+        picks and width for rectangular picks.
+    _pick_sizes : list of float or None
+        Size of each pick in ``_picks`` (nm), see ``_pick_size``.
     pixelsizes : list of floats
         (Property) Camera pixel size (nm) of each channel, from its
         metadata (``Pixelsize``).
@@ -11543,7 +12827,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self._brush_last_pos = None  # last point added, in display px
         self._size_hint = (768, 768)
         self.n_locs = 0
-        self._picks = []
+        self._pick_list = []  # see ``_picks``
+        self._pick_shapes = []  # shape of each pick
+        self._pick_sizes = []  # size (nm) of each pick, None if sizeless
         self._points = []
         self._point_sets = []  # finalized measurement sets
         self._measure_following = True  # cursor followed live while True
@@ -11554,28 +12840,27 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         # collection
         self.spatial_statistic_windows: dict[str, QtWidgets.QWidget] = {}
         # Move tool: the channels being dragged, the press position and
-        # the coordinates at the press (nm), the current shift and the
-        # finished moves, (channels, dx, dy), for undo
+        # the coordinates at the press (nm) and the current shift
         self._move_channels = ()
         self._move_start = None
         self._move_origin = None
         self._move_shift = (0.0, 0.0)
         self._move_cursor = None  # display position of the shift label
-        self._move_undo = []
+        self.history = render_undo.History()
         # track the cursor without a pressed button for live measuring
         self.setMouseTracking(True)
         self.index_blocks = []
         self.render_index = []
         self._drift = []
         self._driftfiles = []
-        self.currentdrift = []
         self.x_render_state = False
         self.x_locs = None
         # background loading (see ``LocsLoadWorker``)
         self._load_thread = None
         self._load_worker = None
         self._load_progress = None
-        self._load_queue = []  # (jobs, on_finished) requested while busy
+        # (jobs, on_finished, average_traces) requested while busy
+        self._load_queue = []
         self._load_callback = None
         self._load_fit_in_view = True
         self._load_index = 0  # file currently being read
@@ -11619,6 +12904,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self._link_interactive = False
         # single-particle tracking: tracking, analysis and drawn tracks
         self.spt = render_spt.SPTController(self)
+        # Tools > Pick by localizations and RMSD..., while open
+        self.pick_candidates_window = None
 
     def _load_drift(self, info: list[dict]) -> pd.DataFrame | None:
         drift = None
@@ -11652,6 +12939,28 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             decimals=2,
         )
         return pixelsize if ok else None
+
+    def _prompt_minflux_traces(self, paths: list[str]) -> bool | None:
+        """Ask whether pyMINFLUX files are loaded with every MINFLUX
+        localization or one localization per trace (see
+        ``io.import_minflux``). True for one per trace, None if
+        canceled."""
+        items = [
+            "Every localization",
+            "One per trace (photon-weighted mean)",
+        ]
+        names = ", ".join(os.path.basename(path) for path in paths)
+        item, ok = QtWidgets.QInputDialog.getItem(
+            self,
+            "MINFLUX localizations",
+            f"Load the MINFLUX localizations of {names} as:",
+            items,
+            0,
+            False,
+        )
+        if not ok:
+            return None
+        return item == items[1]
 
     def _reconcile_pixelsizes(self) -> None:
         """Warn once if the loaded channels disagree on the camera pixel
@@ -11717,6 +13026,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         ``LocsLoadWorker``.
         New in v1.0.0: Can read a PyME .h5r/.hdf file, one channel per
         ``probe`` value.
+        New in v1.0.0: Can read a MINFLUX .pmx/.csv file, one channel
+        per fluorophore.
 
         Parameters
         ----------
@@ -11766,7 +13077,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         drift = self._load_drift(info[-1])
         self._drift.append(drift)
         self._driftfiles.append(None)
-        self.currentdrift.append(None)
 
         self._prepare_render_by_property(locs)
 
@@ -11797,9 +13107,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.window.test_clusterer_dialog.channels.addItem(
             os.path.basename(path)
         )
-        # the Move tool's undo stores channel indices
         self.window.tools_settings_dialog.add_move_channel()
-        self.clear_move_undo()
+        # the steps to undo cover the channels loaded when they were
+        # made, and fitting the canvas may have moved those
+        self.clear_undo_history()
 
     def _metadata_pixelsize(self, path: str, info: list[dict]) -> float:
         """Camera pixel size (nm) stored in ``info``. Files written
@@ -11867,11 +13178,22 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """
         if not len(paths):
             return
-        # ask for the camera pixel size of files that do not store it
-        # before loading starts, i.e. while still on the GUI thread
+        paths = sorted(paths)
+        # ask how to load pyMINFLUX files (no pixel size needed) and for
+        # the camera pixel size of files that do not store it before
+        # loading starts, i.e. while still on the GUI thread
+        minflux = {path for path in paths if io.is_minflux_file(path)}
+        average_traces = False
+        if minflux:
+            average_traces = self._prompt_minflux_traces(sorted(minflux))
+            if average_traces is None:  # canceled by the user
+                paths = [path for path in paths if path not in minflux]
+                average_traces = False
         jobs = []
-        for path in sorted(paths):
-            if (
+        for path in paths:
+            if path in minflux:
+                pixelsize = None
+            elif (
                 path.endswith((".csv", ".mat"))
                 or (io.is_pyme_file(path) and io.pyme_pixelsize(path) is None)
                 or _legacy_locs_without_pixelsize(path)
@@ -11886,17 +13208,18 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return
         if self._load_thread is not None:
             # a load is running; start this one when that one is done
-            self._load_queue.append((jobs, on_finished))
+            self._load_queue.append((jobs, on_finished, average_traces))
             return
-        self._start_load(jobs, on_finished)
+        self._start_load(jobs, on_finished, average_traces)
 
     def _start_load(
         self,
         jobs: list[tuple[str, float | None]],
         on_finished: Callable | None,
+        average_traces: bool = False,
     ) -> None:
         """Read the given ``(path, pixelsize)`` jobs on a background
-        thread, see ``LocsLoadWorker``."""
+        thread, see ``LocsLoadWorker`` (also for ``average_traces``)."""
         self._load_fit_in_view = len(self.locs) == 0
         self._load_callback = on_finished
         self._load_index = 0
@@ -11920,7 +13243,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self._load_progress = progress
 
         thread = QtCore.QThread(self)
-        worker = LocsLoadWorker(jobs)
+        worker = LocsLoadWorker(jobs, average_traces=average_traces)
         worker.moveToThread(thread)
         self._load_thread = thread
         self._load_worker = worker
@@ -12025,8 +13348,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if callback is not None and n_loaded:
             callback()
         if self._load_queue:  # files requested while this load ran
-            jobs, on_finished = self._load_queue.pop(0)
-            self._start_load(jobs, on_finished)
+            jobs, on_finished, average_traces = self._load_queue.pop(0)
+            self._start_load(jobs, on_finished, average_traces)
 
     def _show_added_channels(self, first: bool) -> None:
         """Render newly added channels.
@@ -12080,7 +13403,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             # the drift state as it is in the source, not as on disk
             self._drift[-1] = source._drift[i]
             self._driftfiles[-1] = source._driftfiles[i]
-            self.currentdrift[-1] = source.currentdrift[i]
             if not share:
                 self._copy_drift(len(self.locs) - 1)
         if channels:
@@ -12090,13 +13412,16 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """Replace the drift state of ``channel`` with copies."""
         drift = self._drift[channel]
         self._drift[channel] = None if drift is None else drift.copy()
-        self.currentdrift[channel] = copy.deepcopy(self.currentdrift[channel])
 
     def adopt_shared_channels(
         self, source: View, pairs: list[tuple[int, int]]
     ) -> None:
         """Take over channels that a linked window changed (replaced or
         modified in place) and drop everything derived from them.
+
+        The steps to undo no longer match the channels then, so they are
+        forgotten, unless this view is making or undoing a step, of
+        which the change is part.
 
         Parameters
         ----------
@@ -12106,13 +13431,14 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             ``(j, i)``: channel ``j`` of this view is channel ``i`` of
             ``source``.
         """
+        if not self.history.busy:
+            self.clear_undo_history()
         for j, i in pairs:
             locs = source.locs[i]
             self.locs[j] = locs
             self.infos[j] = source.infos[i]
             self._drift[j] = source._drift[i]
             self._driftfiles[j] = source._driftfiles[i]
-            self.currentdrift[j] = source.currentdrift[i]
             # set directly: ``invalidate_locs_index`` would report the
             # change back to the linked windows
             self.index_blocks[j] = None
@@ -12169,7 +13495,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             self.render_index,
             self._drift,
             self._driftfiles,
-            self.currentdrift,
         ):
             permute(items)
         # the cached image holds one plane per channel; render again
@@ -12177,10 +13502,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.median_lp = np.mean(
             [np.median(self.locs[0]["lpx"]), np.median(self.locs[0]["lpy"])]
         )
-        self._move_undo = [
-            (tuple(new_index[i] for i in channels), dx, dy)
-            for channels, dx, dy in self._move_undo
-        ]
+        self.history.reorder(order)
         if getattr(self, "profile_channels", None) is not None:
             self.profile_channels = [
                 new_index[i] for i in self.profile_channels
@@ -12194,7 +13516,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         tools_dialog = window.tools_settings_dialog
         permute(tools_dialog._move_selection)
         tools_dialog._update_move_channels_label()
-        tools_dialog.update_move_undo()
         clusterer = window.test_clusterer_dialog
         current = clusterer.channels.currentIndex()
         clusterer.channels.blockSignals(True)
@@ -12217,10 +13538,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if mask_dialog.save_all.isChecked():
             permute(mask_dialog.index_locs)
             permute(mask_dialog.index_locs_out)
-        for spiral in (window.x_spiral, window.y_spiral):
-            moved = {new_index[i]: v for i, v in spiral.items()}
-            spiral.clear()
-            spiral.update(moved)
         if window.metadata_dialog.isVisible():
             window.show_metadata()
         # linked windows compare the channels position by position to
@@ -12265,21 +13582,169 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             self._load_thread.quit()
             self._load_thread.wait()
 
+    @property
+    def _picks(self) -> list:
+        """The coordinates of the picks (nm), see ``_pick_shapes`` and
+        ``_pick_sizes`` for their shapes and sizes."""
+        return self._pick_list
+
+    @_picks.setter
+    def _picks(self, picks: list) -> None:
+        # assigned directly, the picks take the shape and size of the
+        # pick tool; ``_set_picks`` gives them their own
+        self._set_picks(picks)
+
     def add_pick(
         self,
         position: tuple[float, float],
         update_scene: bool = True,
+        shape: str | None = None,
+        size: float | None = None,
     ) -> None:
-        """Add a pick at a given position."""
-        self._picks.append(position)
+        """Add a pick at a given position.
+
+        Parameters
+        ----------
+        position : tuple
+            Coordinates of the pick (nm) in the format of its shape.
+        update_scene : bool, optional
+            Whether to draw the new pick. Default is True.
+        shape : str, optional
+            Shape of the pick. Default is None, i.e., the shape of the
+            pick tool (``_pick_shape``).
+        size : float, optional
+            Size of the pick in nm, ignored for shapes without a size.
+            Default is None, i.e., the size set for new picks of that
+            shape in ``ToolsSettingsDialog``.
+        """
+        if shape is None:
+            shape = self._pick_shape
+        if shape in lib.PICK_SHAPES_WITHOUT_SIZE:
+            size = None
+        elif size is None:
+            size = self._tool_pick_size(shape)
+        with self.undo_step("Add pick", picks=True):
+            self._picks.append(position)
+            self._pick_shapes.append(shape)
+            self._pick_sizes.append(size)
         self.update_pick_info_short()
         if update_scene:
             self.update_scene(picks_only=True)
 
-    def add_picks(self, positions: list[tuple[float, float]]) -> None:
-        """Add several picks."""
-        for position in positions:
-            self.add_pick(position, update_scene=False)
+    def add_picks(
+        self,
+        positions: list[tuple[float, float]],
+        shape: str | None = None,
+        size: float | list[float] | None = None,
+    ) -> None:
+        """Add several picks of one shape, see ``add_pick``; ``size``
+        may hold the size of each pick."""
+        sizes = size if np.ndim(size) else [size] * len(positions)
+        with self.undo_step("Add picks", picks=True):
+            for position, size_ in zip(positions, sizes):
+                self.add_pick(position, False, shape, size_)
+        self.update_scene(picks_only=True)
+
+    def _set_picks(
+        self,
+        picks: list,
+        shape: str | list[str] | None = None,
+        size: float | list[float | None] | None = None,
+    ) -> None:
+        """Replace all picks.
+
+        Parameters
+        ----------
+        picks : list
+            New picks (nm).
+        shape : str or list of str, optional
+            Shape of the picks, or of each pick. Default is None, i.e.,
+            the shape of the pick tool.
+        size : float or list, optional
+            Size of the picks (nm), or of each pick, see
+            ``lib.pick_shapes_and_sizes``. Default is None, i.e., the
+            size set for new picks.
+        """
+        if shape is None:
+            shape = self._pick_shape
+        if size is None and isinstance(shape, str):
+            size = self._tool_pick_size(shape)
+        shapes, sizes = lib.pick_shapes_and_sizes(picks, shape, size)
+        self._pick_list = list(picks)
+        self._pick_shapes = shapes
+        self._pick_sizes = sizes
+
+    def _keep_picks(self, indices: list[int]) -> None:
+        """Keep only the picks at ``indices``, in this order."""
+        self._pick_list = [self._pick_list[i] for i in indices]
+        self._pick_shapes = [self._pick_shapes[i] for i in indices]
+        self._pick_sizes = [self._pick_sizes[i] for i in indices]
+
+    def _remove_picks_at(self, indices: list[int]) -> None:
+        """Remove the picks at ``indices``."""
+        removed = set(indices)
+        self._keep_picks(
+            [i for i in range(len(self._picks)) if i not in removed]
+        )
+
+    def _pick_args(self, indices: list[int] | None = None) -> dict:
+        """Picks with their shapes and sizes, as the arguments
+        ``picks``, ``pick_shape`` and ``pick_size`` of the functions
+        that take picks (e.g., ``postprocess.picked_locs``): one shape
+        (size) if all picks share it, else one per pick.
+
+        Parameters
+        ----------
+        indices : list of int, optional
+            Picks to describe. Default is None, i.e., all picks.
+
+        Returns
+        -------
+        args : dict
+            ``picks`` (a new list), ``pick_shape`` and ``pick_size``.
+            Without picks, the shape and size of the pick tool.
+        """
+        if indices is None:
+            indices = range(len(self._picks))
+        picks = [self._picks[i] for i in indices]
+        shape, size = lib._compact_pick_shapes_and_sizes(
+            [self._pick_shapes[i] for i in indices],
+            [self._pick_sizes[i] for i in indices],
+        )
+        if shape is None:  # no picks
+            shape, size = self._pick_shape, self._pick_size
+        return dict(picks=picks, pick_shape=shape, pick_size=size)
+
+    def _picks_have_shapes(self, *shapes: str) -> bool:
+        """Whether there are picks and all have one of ``shapes``."""
+        return bool(self._picks) and all(
+            shape in shapes for shape in self._pick_shapes
+        )
+
+    def _circle_pick_index(
+        self, channel: int
+    ) -> spatial_index.RenderIndexPyramid | tuple | None:
+        """The spatial index for the circular picks in ``channel`` (see
+        ``_pick_index``), None without circular picks."""
+        if "Circle" in self._pick_shapes:
+            return self._pick_index(channel)
+        return None
+
+    def resize_picks(self, shape: str) -> None:
+        """Give all picks of ``shape`` the size set for new picks in
+        ``ToolsSettingsDialog``.
+
+        Parameters
+        ----------
+        shape : {"Circle", "Rectangle", "Square"}
+            Shape of the picks to resize.
+        """
+        size = self._tool_pick_size(shape)
+        with self.undo_step("Resize picks", picks=True):
+            self._pick_sizes = [
+                size if shape_ == shape else size_
+                for shape_, size_ in zip(self._pick_shapes, self._pick_sizes)
+            ]
         self.update_scene(picks_only=True)
 
     def add_box_pick(self, end_position: QtCore.QPoint) -> None:
@@ -12339,9 +13804,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """Finish the brush stroke being painted and merge it into the
         picks.
 
-        The strokes of every pick the new one touches are pulled into a
-        single pick, which is appended last. A press and release without
-        a drag paints a dot.
+        The strokes of every brush pick the new one touches are pulled
+        into a single pick, which is appended last. A press and release
+        without a drag paints a dot.
 
         Parameters
         ----------
@@ -12360,18 +13825,19 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         width, X, Y = lib.brush_stroke_arrays(stroke)
         merged = []
         kept = []
-        for pick in self._picks:
-            overlaps = any(
+        for i, (pick, shape) in enumerate(zip(self._picks, self._pick_shapes)):
+            overlaps = shape == "Brush" and any(
                 lib.brush_strokes_overlap(X, Y, X_, Y_, (width + width_) / 2)
                 for width_, X_, Y_ in map(lib.brush_stroke_arrays, pick)
             )
             if overlaps:
                 merged.extend(pick)
             else:
-                kept.append(pick)
+                kept.append(i)
         merged.append(stroke)
-        kept.append(merged)
-        self._picks = kept
+        with self.undo_step("Paint brush stroke", picks=True):
+            self._keep_picks(kept)
+            self.add_pick(merged, update_scene=False, shape="Brush")
 
         self.update_pick_info_short()
         self.update_scene(picks_only=True)
@@ -12382,10 +13848,12 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         update_scene: bool = True,
     ) -> None:
         """Add a point at a given position for measuring distances."""
-        self._points.append(position)
+        with self.undo_step("Add measure point", points=True):
+            self._points.append(position)
         if update_scene:
             self.update_scene()
 
+    @records_undo_step("Add polygon vertex", picks=True)
     def add_polygon_point(
         self,
         point_movie: QtCore.QPoint,
@@ -12393,8 +13861,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     ) -> None:
         """Add a new point to the polygon or closes the current
         polygon."""
-        if len(self._picks) == 0:
-            self._picks.append([point_movie])
+        if not len(self._picks) or self._pick_shapes[-1] != "Polygon":
+            self.add_pick([point_movie], update_scene=False, shape="Polygon")
         else:
             # check if the polygon is to be closed or if a new point is
             # to be added
@@ -12402,7 +13870,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 self._picks[-1].append(point_movie)
             # if the last polygon has been closed, start a new pick
             elif self._picks[-1][0] == self._picks[-1][-1]:
-                self._picks.append([point_movie])
+                self.add_pick(
+                    [point_movie], update_scene=False, shape="Polygon"
+                )
             else:
                 # check the distance between the current point and the
                 # starting point of the currently drawn polygon
@@ -12447,52 +13917,78 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             y_max = viewport[1][0] + y_margin
         return [(y_min, x_min), (y_max, x_max)]
 
-    def align(self) -> None:
-        """Align channels by RCC or from picked localizations."""
-        locs, infos = self.locs, self.infos
-        if len(self._picks) > 0:  # shift from picked
-            if self._pick_shape == "Circle":
-                index_blocks = [
-                    self._pick_index(c) for c in range(len(self.locs))
-                ]
-            else:
-                index_blocks = None
-            picks = self._picks
-            pick_shape, pick_size = self._pick_shape, self._pick_size
-
-            def align():
-                return postprocess.align(
-                    locs,
-                    infos,
-                    method="picked",
-                    picks=picks,
-                    pick_shape=pick_shape,
-                    pick_size=pick_size,
-                    index_blocks=index_blocks,
-                )
-
-        else:  # align using whole images
-
-            def align():
-                return postprocess.align(locs, infos, method="rcc")
-
-        self.locs, infos = lib.run_with_status(
-            align, "Aligning channels...", self
+    def align_channels(self) -> None:
+        """Choose how to align the channels (``AlignChannelsDialog``)
+        and align them, see ``align``."""
+        method, max_shift, ok = AlignChannelsDialog.getParams(
+            self, has_picks=len(self._picks) > 0
         )
-        for channel, info in enumerate(infos):
-            # a new list, the old one may be shared with linked windows
-            self.infos[channel] = info
-        if not keep_non_overlapping_setting():
+        if ok:
+            self.align(method, max_shift)
+
+    def align(
+        self,
+        method: Literal["rcc", "picked", "points"] | None = None,
+        max_shift: float = 500.0,
+    ) -> None:
+        """Align channels by RCC, from picked localizations or from the
+        displacements between the localizations (see
+        ``postprocess.align``; ``max_shift`` in nm for the latter). If
+        ``method`` is None, from the picks if there are any, else by
+        RCC. The localizations outside the region where all aligned
+        channels overlap are removed unless the user settings keep them
+        (see ``keep_non_overlapping_setting``), or if the channels do
+        not overlap."""
+        locs, infos = self.locs, self.infos
+        if method is None:
+            method = "picked" if len(self._picks) > 0 else "rcc"
+        kwargs = {"paths": list(self.locs_paths), "method": method}
+        if method == "picked":  # shift from picked
+            kwargs |= {
+                **self._pick_args(),
+                "index_blocks": [
+                    self._circle_pick_index(c) for c in range(len(self.locs))
+                ],
+            }
+        elif method == "points":
+            kwargs["max_shift"] = max_shift
+        keep = keep_non_overlapping_setting()
+
+        def align():
             try:
-                self.locs = postprocess.remove_non_overlapping_locs(self.locs)
-            except ValueError:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Align channels",
-                    "The aligned channels do not overlap, so all"
-                    " localizations were kept.",
+                result = postprocess.align(
+                    locs, infos, keep_non_overlapping=keep, **kwargs
                 )
-        self.update_scene(resample_locs=True)
+            except ValueError:
+                if keep:
+                    raise
+                # the aligned channels do not overlap: keep them all
+                result = postprocess.align(
+                    locs, infos, keep_non_overlapping=True, **kwargs
+                )
+                return *result, True
+            return *result, False
+
+        try:
+            aligned, infos, all_kept = lib.run_with_status(
+                align, "Aligning channels...", self
+            )
+        except ValueError as error:  # e.g., no shift between the channels
+            QtWidgets.QMessageBox.warning(self, "Align channels", str(error))
+            return
+        with self.undo_step("Align channels"):
+            self.locs = aligned
+            for channel, info in enumerate(infos):
+                # a new list, the old one may be shared with linked windows
+                self.infos[channel] = info
+            self.update_scene(resample_locs=True)
+        if all_kept:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Align channels",
+                "The aligned channels do not overlap, so all"
+                " localizations were kept.",
+            )
 
     @check_pick
     def combine(self) -> None:
@@ -12503,34 +13999,28 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
         See ``self.link`` for more info."""
         channel = self.get_channel()
-        if self._pick_shape == "Circle":
-            index_blocks = self._pick_index(channel)
-        else:
-            index_blocks = None
+        index_blocks = self._circle_pick_index(channel)
         progress = lib.ProgressDialog(
             "Combining localizations in picks", 0, 0, self
         )
         try:
-            self.locs[channel], self.infos[channel] = (
-                postprocess.combine_locs_in_picks(
-                    self.locs[channel],
-                    self.infos[channel],
-                    picks=self._picks,
-                    pick_shape=self._pick_shape,
-                    pick_size=self._pick_size,
-                    index_blocks=index_blocks,
-                    progress=progress,
-                )
+            locs, info = postprocess.combine_locs_in_picks(
+                self.locs[channel],
+                self.infos[channel],
+                **self._pick_args(),
+                index_blocks=index_blocks,
+                progress=progress,
             )
         finally:
             progress.close()
 
-        if "group" in self.locs[channel].columns:
-            self.group_color = render.get_group_color(
-                self.locs[channel], shuffle=True
-            )
-
-        self.update_scene(resample_locs=True)
+        with self.undo_step("Combine localizations in picks"):
+            self.locs[channel], self.infos[channel] = locs, info
+            if "group" in self.locs[channel].columns:
+                self.group_color = render.get_group_color(
+                    self.locs[channel], shuffle=True
+                )
+            self.update_scene(resample_locs=True)
 
     def link(self) -> None:
         """Link localizations, i.e., combine localizations likely
@@ -12576,18 +14066,20 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return results
 
         def apply(results: list[tuple]) -> None:
-            for c, linked_locs, linked_info in results:
-                self.locs[c] = linked_locs
-                # a new list, the old one may be shared with linked windows
-                self.infos[c] = linked_info
-            grouped = [
-                locs for _, locs, _ in results if "group" in locs.columns
-            ]
-            if grouped:
-                self.group_color = render.get_group_color(
-                    grouped[-1], shuffle=True
-                )
-            self.update_scene(resample_locs=True)
+            with self.undo_step("Link localizations"):
+                for c, linked_locs, linked_info in results:
+                    self.locs[c] = linked_locs
+                    # a new list, the old one may be shared with linked
+                    # windows
+                    self.infos[c] = linked_info
+                grouped = [
+                    locs for _, locs, _ in results if "group" in locs.columns
+                ]
+                if grouped:
+                    self.group_color = render.get_group_color(
+                        grouped[-1], shuffle=True
+                    )
+                self.update_scene(resample_locs=True)
             if skipped:
                 names = "\n".join(
                     os.path.basename(self.locs_paths[c]) for c in skipped
@@ -12646,11 +14138,12 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 ),
             )
             return
-        self.locs[channel] = locs
-        # a new list, the old one may be shared with linked windows
-        self.infos[channel] = info
-        self.group_color = render.get_group_color(locs, shuffle=True)
-        self.update_scene(resample_locs=True)
+        with self.undo_step("Select central frames"):
+            self.locs[channel] = locs
+            # a new list, the old one may be shared with linked windows
+            self.infos[channel] = info
+            self.group_color = render.get_group_color(locs, shuffle=True)
+            self.update_scene(resample_locs=True)
 
     def dbscan(self) -> None:
         """Get a channel, parameters and path for DBSCAN."""
@@ -13335,7 +14828,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     @check_pick
     def clear_picks(self) -> None:
         """Delete all picks."""
-        self._picks = []
+        with self.undo_step("Clear picks", picks=True):
+            self._set_picks([], [])
         self.window.info_dialog.n_picks.setText(str(len(self._picks)))
         self.update_scene(picks_only=True)
 
@@ -13364,8 +14858,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             image=image,
             viewport=self.viewport,
             picks=self._picks,
-            pick_shape=self._pick_shape,
-            pick_size=self._pick_size,
+            pick_shape=self._pick_shapes,
+            pick_size=self._pick_sizes,
             point_picks=t_dialog.point_picks.isChecked(),
             annotate_picks=t_dialog.pick_annotation.isChecked(),
             style=t_dialog.pick_overlay_style(),
@@ -13524,39 +15018,33 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             style=style,
         )
 
-    def draw_scalebar(self, image: QtGui.QImage) -> QtGui.QImage:
-        """Draw a scalebar.
+    def draw_scalebar(
+        self, image: QtGui.QImage, force: bool = False
+    ) -> QtGui.QImage:
+        """Draw the scale bar set in the Display Settings, if shown.
 
         Parameters
         ----------
         image : QImage
             Image containing rendered localizations.
+        force : bool, optional
+            If True, draw the scale bar also while it is hidden.
+            Default False.
 
         Returns
         -------
         image : QImage
             Image with the drawn scalebar.
         """
-        color = (
-            QtGui.QColor("white")
-            if not self.window.dataset_dialog.wbackground.isChecked()
-            else QtGui.QColor("black")
+        # the text is as large as the windows' text on screen, see
+        # theme.unscaled_text for exports
+        scalebar_box = self.window.display_settings_dlg.scalebar_groupbox
+        return scalebar_box.draw(
+            image,
+            self.viewport,
+            self.window.dataset_dialog.wbackground.isChecked(),
+            force=force,
         )
-        d_dialog = self.window.display_settings_dlg
-        if d_dialog.scalebar_groupbox.isChecked():
-            image = render.draw_scalebar(
-                image=image,
-                viewport=self.viewport,
-                scalebar_length_nm=d_dialog.scalebar.value(),
-                display_length=d_dialog.scalebar_text.isChecked(),
-                color=color,
-                # as large as the windows' text on screen, see
-                # theme.unscaled_text for exports
-                text_fontsize=theme.scaled_text_size(
-                    render.SCALEBAR_FONT_SIZE
-                ),
-            )
-        return image
 
     def draw_grid(
         self,
@@ -13775,6 +15263,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             full-quality render once the gesture pauses. Default is
             False.
         """
+        if picks_only and getattr(self, "qimage_no_picks", None) is None:
+            picks_only = False  # nothing rendered yet to draw picks over
         if not picks_only:
             # make sure viewport has the same shape as the main window
             self.viewport = self.adjust_viewport_to_view(viewport)
@@ -14365,8 +15855,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
     def dropEvent(self, event: QtGui.QDropEvent) -> None:
         """When a file is dropped onto the window, if the file ends with
-        ``.hdf5`` (or is a PyME ``.h5r``/``.hdf`` file), try loading
-        localizations. If it ends with ``.txt``, try loading a fov file.
+        ``.hdf5`` (or is a PyME ``.h5r``/``.hdf`` or pyMINFLUX ``.pmx``
+        file), try loading localizations. If it ends with ``.txt``, try loading a fov file.
         If it ends with ``.yaml``, try loading pick regions. If it is a
         single ``.png`` or ``.tif`` image, overlay it (see
         ``ImageOverlayDialog``)."""
@@ -14389,9 +15879,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 self.load_screenshot(file, paths[0])
             # load pick regions
             loaded_shape = file.get("Shape", None)
-            if loaded_shape in lib.PICK_SHAPES:
+            if loaded_shape in lib.PICK_SHAPES + (io._MIXED_PICKS_SHAPE,):
                 self.load_picks(paths[0])
-        if extensions == [".csv"]:  # just one csv dropped, thunderstorm
+        if extensions == [".csv"]:  # one csv: ThunderSTORM or MINFLUX
             self.add_multiple(paths)
         elif extensions == [".mat"]:  # just one mat dropped, SMAP
             self.add_multiple(paths)
@@ -14399,7 +15889,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             paths = [
                 path
                 for path, ext in zip(paths, extensions)
-                if ext == ".hdf5" or ext in io.PYME_EXTENSIONS
+                if ext == ".hdf5"
+                or ext in io.PYME_EXTENSIONS
+                or ext in io.MINFLUX_EXTENSIONS
             ]
             self.add_multiple(paths)
 
@@ -14429,7 +15921,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 raise ValueError("Pick number provided too high")
             else:  # calculate new viewport
                 x_min, x_max, y_min, y_max = lib.pick_bounds(
-                    self._picks[pick_no], self._pick_shape, self._pick_size
+                    self._picks[pick_no],
+                    self._pick_shapes[pick_no],
+                    self._pick_sizes[pick_no],
                 )
                 margin_x = MOVE_TO_PICK_MARGIN * (x_max - x_min)
                 margin_y = MOVE_TO_PICK_MARGIN * (y_max - y_min)
@@ -14505,11 +15999,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 scalebar = scalebar_box.isChecked()
                 if not scalebar:
                     spath = os.path.splitext(path)[0] + "_scalebar.png"
-                    scalebar_box.setChecked(True)
-                    self.set_optimal_scalebar(force=True)
-                    qimage_scale = self.draw_scalebar(qimage)
+                    self.set_optimal_scalebar(force=True, silent=True)
+                    qimage_scale = self.draw_scalebar(qimage, force=True)
                     qimage_scale.save(spath)
-                    scalebar_box.setChecked(False)
 
     def get_channel(self, title: str = "Choose a channel") -> int | None:
         """Open an input dialog to ask for a channel. Return the channel
@@ -14778,7 +16270,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 return
             drift = self._read_drift_file(path, channel)
             if drift is not None:
-                self.load_drift_drop(channel, drift.to_numpy())
+                self.load_drift_drop(channel, drift)
 
     def _load_or_report(self, loader, path: str, **kwargs):
         """Load ``path`` with ``loader`` (see
@@ -14831,10 +16323,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             self.window.info_dialog.xy_label.setText(f"{x:.1f} / {y:.1f} nm")
             self.window.info_dialog.wh_label.setText(f"{w:.1f} / {h:.1f} nm")
 
-    def load_drift_drop(self, channel: int, drift: FloatArray2D) -> None:
-        """Attempts to load a drift .txt file (2 or 3 columns) and apply
-        the drift to localizations. If ``channel`` equals the number of
-        loaded channels, the drift is applied to all channels
+    def load_drift_drop(self, channel: int, drift: pd.DataFrame) -> None:
+        """Apply the drift of a dropped .txt file (2 or 3 columns, see
+        ``io.load_drift``) to localizations. If ``channel`` equals the
+        number of loaded channels, the drift is applied to all channels
         sequentially (only if every localization channel and the drift
         file share the same number of frames)."""
         if channel == len(self.locs_paths):  # apply to all sequentially
@@ -14856,14 +16348,16 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                     ),
                 )
                 return
-            for ch in range(len(self.locs_paths)):
-                self._load_drift_drop(ch, drift)
+            with self.undo_step("Apply drift"):  # one step to undo
+                for ch in range(len(self.locs_paths)):
+                    self._load_drift_drop(ch, drift)
         else:
             self._load_drift_drop(channel, drift)
 
-    def _load_drift_drop(self, channel: int, drift: FloatArray2D) -> None:
-        """Apply a loaded drift .txt file (2 or 3 columns) to a single
-        channel after checking its number of frames and dimensions."""
+    def _load_drift_drop(self, channel: int, drift: pd.DataFrame) -> None:
+        """Apply a loaded drift .txt file (2 or 3 columns, see
+        ``io.load_drift``) to a single channel after checking its number
+        of frames and dimensions."""
         n_frames = lib.get_from_metadata(self.infos[channel], "Frames")
         n_dim = 3 if hasattr(self.locs[channel], "z") else 2
         if drift.shape[0] != n_frames or drift.shape[1] != n_dim:
@@ -14879,11 +16373,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 ),
             )
             return
-        # apply drift, convert to df first
-        drift_df = pd.DataFrame(drift[:, :2], columns=["x", "y"])
-        if drift.shape[1] == 3:
-            drift_df["z"] = drift[:, 2]
-        self._apply_drift(channel, drift_df)
+        # as in apply_drift; the metadata record the file (drift.attrs)
+        with self.undo_step("Apply drift"):
+            self._apply_drift(channel, drift)
+            self._driftfiles[channel] = drift.attrs.get("Path")
 
     def _read_picks_file(self, path: str) -> tuple | None:
         """Read a picks .yaml file in nm (see ``io.load_picks``); a file
@@ -14911,20 +16404,24 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if loaded is None:  # canceled
             return
         tools_dlg = self.window.tools_settings_dialog
-        self._picks = []
-        self._pick_shape = None
-        self._picks, self._pick_shape, size = loaded
-        tools_dlg.pick_shape.setCurrentText(self._pick_shape)
-        if self._pick_shape == "Circle":
-            tools_dlg.pick_diameter.setValue(size)
-        elif self._pick_shape == "Rectangle":
-            tools_dlg.pick_width.setValue(size)
-        elif self._pick_shape == "Square":
-            tools_dlg.pick_side_length.setValue(size)
-        elif self._pick_shape == "Brush" and len(self._picks):
+        picks, shape, size = loaded
+        with self.undo_step("Load pick regions", picks=True):
+            self._set_picks(picks, shape, size)
+        # every pick keeps its shape and size; with one shape, the pick
+        # tool takes it, and the size if shared, so new picks match
+        if isinstance(shape, str):
+            tools_dlg.pick_shape.setCurrentText(shape)
+            if np.ndim(size) == 0 and size is not None:
+                self._size_spin_box(shape).setValue(size)
+        brushes = [
+            pick
+            for pick, shape_ in zip(self._picks, self._pick_shapes)
+            if shape_ == "Brush"
+        ]
+        if brushes:
             # brush strokes keep their own widths; seed the spin box
             # with the widest one so the next stroke matches the picks
-            widest = max(stroke[0] for pick in self._picks for stroke in pick)
+            widest = max(stroke[0] for pick in brushes for stroke in pick)
             tools_dlg.brush_width.setValue(widest)
 
         # update Info Dialog
@@ -15035,9 +16532,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             dataset_dialog.update_channel_contrast()
 
     def subtract_picks(self, path: str) -> None:
-        """Clear selected picks that cover the picks loaded from path.
-        Only circular picks can be subtracted; for other shapes, a
-        warning is shown.
+        """Clear selected picks whose centers lie in the picks loaded
+        from path. Only circular picks can be subtracted; for other
+        shapes, a warning is shown.
 
         Parameters
         ----------
@@ -15046,7 +16543,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """
         # not with the check_circular_picks decorator, which would drop
         # the path
-        if self._pick_shape != "Circle":
+        if not self._picks_have_shapes("Circle"):
             QtWidgets.QMessageBox.warning(
                 self,
                 "Pick Error",
@@ -15057,29 +16554,27 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         loaded = self._read_picks_file(path)
         if loaded is None:  # canceled
             return
-        picks, shape, diameter = loaded
+        picks, shape, diameters = loaded
         if shape != "Circle":
             QtWidgets.QMessageBox.warning(
                 self,
                 "Pick Error",
                 "Only circular picks can be subtracted; the file holds "
-                f"{shape.lower()} picks.",
+                f"{_describe_pick_shapes(shape)}.",
             )
             return
-        oldpicks = self._picks.copy()
-
-        # calculate which picks are to stay
-        distances = (
-            np.sum(
-                (euclidean_distances(oldpicks, picks) < diameter / 2) * 1,
-                axis=1,
-            )
-            >= 1
+        if not len(picks):
+            return
+        # each loaded pick covers the centers within its own radius
+        radii = np.broadcast_to(np.asarray(diameters) / 2, (len(picks),))
+        covered = np.any(
+            euclidean_distances(self._picks, picks) < radii[np.newaxis, :],
+            axis=1,
         )
-        self._picks = [i for (i, v) in zip(oldpicks, distances) if not v]
+        with self.undo_step("Subtract pick regions", picks=True):
+            self._keep_picks(np.flatnonzero(~covered).tolist())
 
         self.update_pick_info_short()
-        self.window.tools_settings_dialog.pick_diameter.setValue(diameter)
         self.update_scene(picks_only=True)
 
     def map_to_movie(self, position: QtCore.QPoint) -> QtCore.QPoint:
@@ -15264,6 +16759,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         )
         if not channels:
             return
+        # one step to undo, recorded on the release
+        self.begin_undo_step("Move")
         self._move_channels = channels
         self._move_start = self.map_to_movie(event.pos())
         # the columns are replaced, never modified, while dragging, so
@@ -15296,8 +16793,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.update_scene(interactive=True)
 
     def _mouse_release_move(self, event: QtCore.QEvent) -> None:
-        """Finish dragging: fit the canvas and remember the move for
-        undo."""
+        """Finish dragging: fit the canvas and record the move as a
+        step to undo."""
         if not self._move_channels:
             return
         channels = self._move_channels
@@ -15308,40 +16805,15 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self._move_shift = (0.0, 0.0)
         self._move_cursor = None
         event.accept()
-        if dx == 0 and dy == 0:
-            self.update_cursor()
-            return
-        for i in channels:
-            self._record_manual_shift(i, dx, dy)
-        self._move_undo.append((channels, dx, dy))
-        self.window.tools_settings_dialog.update_move_undo()
-        self.locs_moved(channels)
-
-    def undo_move(self) -> None:
-        """Undo the last move done with the Move tool.
-
-        The undone channels always fit the canvas as it is refitted
-        afterwards (see ``lib.fit_canvas``).
-        """
-        if not self._move_undo or self._move_channels:
-            return
-        channels, dx, dy = self._move_undo.pop()
-        for i in channels:
-            locs = self.locs[i]
-            self._set_channel_xy(
-                i,
-                locs["x"].to_numpy() - np.float32(dx),
-                locs["y"].to_numpy() - np.float32(dy),
-            )
-            self._record_manual_shift(i, -dx, -dy)
-        self.window.tools_settings_dialog.update_move_undo()
-        self.locs_moved(channels)
-
-    def clear_move_undo(self) -> None:
-        """Forget the moves of the Move tool, e.g., when the channels
-        change and the stored channel indices become invalid."""
-        self._move_undo = []
-        self.window.tools_settings_dialog.update_move_undo()
+        try:
+            if dx == 0 and dy == 0:  # nothing moved: no step is recorded
+                self.update_cursor()
+                return
+            for i in channels:
+                self._record_manual_shift(i, dx, dy)
+            self.locs_moved(channels)
+        finally:
+            self.end_undo_step()
 
     def _set_channel_xy(
         self, channel: int, x: lib.FloatArray1D, y: lib.FloatArray1D
@@ -15365,6 +16837,199 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 lib.get_from_metadata(info, key, 0.0) + shift
             )
 
+    # --- Undo and Redo, see render_undo --- #
+
+    @contextlib.contextmanager
+    def undo_step(
+        self, label: str, *, picks: bool = False, points: bool = False
+    ) -> Generator[None, None, None]:
+        """Record the changes of the localizations made inside as one
+        step that File > Undo takes back (see ``picasso.gui.render_undo``).
+
+        Steps inside another step belong to it, e.g., each channel of an
+        action applied to all of them. Nothing is recorded if nothing
+        changed.
+
+        Parameters
+        ----------
+        label : str
+            Name of the action, shown in the tooltips of Undo and Redo.
+        picks : bool, optional
+            If True, the picks are put back as well, for an action that
+            changes them. Default is False: undoing a step leaves the
+            picks as they are, apart from following a translated canvas.
+        points : bool, optional
+            If True, the measured points are put back as well, for an
+            action that changes them. Default is False.
+        """
+        self.begin_undo_step(label, picks=picks, points=points)
+        try:
+            yield
+        finally:
+            self.end_undo_step()
+
+    def begin_undo_step(
+        self, label: str, *, picks: bool = False, points: bool = False
+    ) -> None:
+        """Begin a step to undo, which ``end_undo_step`` records, e.g.,
+        on the press and on the release of the mouse; see
+        ``undo_step``."""
+        if self.history.begin(label):
+            names = [
+                name
+                for name, taken in (("picks", picks), ("points", points))
+                if taken
+            ]
+            self.history.take(
+                self._history_channels(),
+                self.group_color,
+                self._overlay_state(names),
+            )
+
+    def end_undo_step(self) -> None:
+        """End a step begun with ``begin_undo_step`` and, for the
+        outermost one, record it."""
+        if self.history.end():
+            self.history.record(
+                self._history_channels(),
+                self.group_color,
+                self._overlay_state(self.history.overlays_taken),
+            )
+            self.window.update_undo_actions()
+
+    def _history_channels(self) -> render_undo.Channels:
+        return render_undo.Channels(
+            self.locs, self.infos, self._drift, self._driftfiles
+        )
+
+    def _overlay_state(
+        self, names: tuple[str, ...] | list[str] = ("picks", "points")
+    ) -> dict[str, tuple]:
+        """Copies of the overlays ``names`` that steps put back (see
+        ``render_undo.Step.overlays``): ``"picks"``, the picks, their
+        shapes and sizes, and ``"points"``, the measured points being
+        drawn and the finished sets. Polygons are copied, as drawing
+        them adds to them in place."""
+        state = {}
+        if "picks" in names:
+            state["picks"] = (
+                render_link.copy_picks(self._pick_list),
+                list(self._pick_shapes),
+                list(self._pick_sizes),
+            )
+        if "points" in names:
+            state["points"] = (
+                list(self._points),
+                [list(points) for points in self._point_sets],
+            )
+        return state
+
+    def undo(self) -> bool:
+        """Undo the last step that changed the localizations, the picks
+        or the measured points (File > Undo).
+
+        Returns
+        -------
+        undone : bool
+            Whether a step was undone.
+        """
+        return self._undo_or_redo(redo=False)
+
+    def redo(self) -> bool:
+        """Redo the last step undone (File > Redo); returns whether a
+        step was redone."""
+        return self._undo_or_redo(redo=True)
+
+    def _undo_or_redo(self, redo: bool) -> bool:
+        # not while a step is made, e.g., channels are dragged
+        if self._move_channels or lib_qt.gui_busy():
+            return False
+        change = self.history.redo if redo else self.history.undo
+        title = "Redo" if redo else "Undo"
+        changed = False
+        try:
+            changed = change(
+                self._history_channels(),
+                self.group_color,
+                self._overlay_state(),
+                self._apply_history_step,
+            )
+        except render_undo.StaleHistoryError:
+            QtWidgets.QMessageBox.information(
+                self,
+                title,
+                "The localizations were changed in a way that cannot be"
+                " undone (e.g., by a plugin), so the steps to undo and"
+                " redo were forgotten.",
+            )
+        except io.SpillError as error:
+            QtWidgets.QMessageBox.warning(
+                self,
+                title,
+                f"The step could not be read back from the disk ({error}),"
+                " so the steps to undo and redo were forgotten.",
+            )
+        self.window.update_undo_actions()
+        return changed
+
+    def _apply_history_step(self, step: render_undo.Step) -> None:
+        """Put back what ``step`` holds (see ``undo``) and redraw.
+
+        Picks, measured points and the viewport follow the canvas if the
+        step translated it (see ``fit_canvas``).
+        """
+        offset = self._canvas_offset()
+        for channel, record in step.records.items():
+            if record.table is not None:
+                table = record.table.load()
+                if record.full:
+                    self.locs[channel] = table
+                else:
+                    # new arrays, as for the Move tool
+                    locs = self.locs[channel]
+                    for name in table.columns:
+                        locs[name] = table[name].to_numpy()
+            if record.info is not None:
+                self.infos[channel] = record.info
+            if record.drift is not None:
+                self._drift[channel], self._driftfiles[channel] = record.drift
+        if step.group_color is not render_undo.UNCHANGED:
+            self.group_color = step.group_color
+        if "picks" in step.overlays:
+            picks, shapes, sizes = step.overlays["picks"]
+            self._set_picks(render_link.copy_picks(picks), shapes, sizes)
+            self.update_pick_info_short()
+        if "points" in step.overlays:
+            points, point_sets = step.overlays["points"]
+            self._points = list(points)
+            self._point_sets = [list(p) for p in point_sets]
+        dx, dy = np.subtract(self._canvas_offset(), offset)
+        if dx or dy:
+            self._shift_canvas_overlays(float(dx), float(dy))
+        if not step.changes_locs:
+            self.update_scene(picks_only=True)
+            return
+        for channel in step.records:
+            self.invalidate_locs_index(channel)
+        self.image = None
+        self.update_scene(resample_locs=True)
+
+    def clear_undo_history(self) -> None:
+        """Forget the steps to undo and redo, e.g., when channels are
+        added or closed."""
+        self.history.clear()
+        self.window.update_undo_actions()
+
+    def _canvas_offset(self) -> tuple[float, float]:
+        """The canvas offset (nm) of the first channel, whose frame
+        picks and measured points are in, see ``lib.fit_canvas``."""
+        if not self.infos:
+            return (0.0, 0.0)
+        return tuple(
+            float(lib.get_from_metadata(self.infos[0], key, 0))
+            for key in lib.CANVAS_OFFSET_KEYS
+        )
+
     def fit_canvas(self) -> list[int]:
         """Fit the canvas of all channels to their localizations (see
         ``lib.fit_canvas``). If the channels are translated (the
@@ -15383,15 +17048,18 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             # that of the first channel
             dx, dy = shifts[0]
             if dx or dy:
-                self._translate_overlays(dx, dy)
-                # no viewport yet while the first file is being added
-                if getattr(self, "viewport", None):
-                    self.viewport = render.shift_viewport(
-                        self.viewport, dx, dy
-                    )
+                self._shift_canvas_overlays(dx, dy)
             for i in translated:
                 self.invalidate_locs_index(i)
         return translated
+
+    def _shift_canvas_overlays(self, dx: float, dy: float) -> None:
+        """Move picks, measured points and the viewport by ``(dx, dy)``
+        nm along with the localizations of a translated canvas."""
+        self._translate_overlays(dx, dy)
+        # no viewport yet while the first file is being added
+        if getattr(self, "viewport", None):
+            self.viewport = render.shift_viewport(self.viewport, dx, dy)
 
     def locs_moved(
         self, channels: int | list[int] | tuple[int, ...], sanitize=False
@@ -15436,8 +17104,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     def _translate_overlays(self, dx: float, dy: float) -> None:
         """Move picks and measured points by ``(dx, dy)`` nm along with
         the localizations."""
-        self._picks = lib.translate_picks(
-            self._picks, self._pick_shape, dx, dy
+        self._set_picks(
+            lib.translate_picks(self._picks, self._pick_shapes, dx, dy),
+            self._pick_shapes,
+            self._pick_sizes,
         )
         self._points = [(x + dx, y + dy) for x, y in self._points]
         self._point_sets = [
@@ -16009,8 +17679,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """Ask for the channel, regions and parameters of a spatial
         statistic (a key of ``SPATIAL_STATISTICS``, e.g., Ripley's H
         function or the radial distribution function), compute it on a
-        worker thread and plot it, see ``postprocess.ripley_h`` and
-        ``postprocess.rdf``."""
+        worker thread and plot it, see ``postprocess.ripley_h``,
+        ``postprocess.rdf``, ``postprocess.nnd_distributions`` and
+        ``postprocess.knn_density``."""
         if not self.locs_paths:
             return
         params, ok = SpatialStatisticDialog.getParams(self.window, statistic)
@@ -16062,8 +17733,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         locs = self.locs[channel]
         info = self.infos[channel]
         if params["region"] == "picks":
-            picks = list(self._picks)
-            pick_shape, pick_size = self._pick_shape, self._pick_size
+            pick_args = self._pick_args()
+            picks = pick_args["picks"]
+            pick_shape = pick_args["pick_shape"]
+            pick_size = pick_args["pick_size"]
         elif params["region"] == "view":
             (y_min, x_min), (y_max, x_max) = self.viewport
             picks = [((x_min, y_min), (x_max, y_max))]
@@ -16071,18 +17744,28 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         else:
             picks, pick_shape, pick_size = None, None, None
         kwargs = dict(
-            r_max=params["r_max"],
-            steps=params["steps"],
             n_simulations=params["n_simulations"],
             use_z=params["use_z"],
             z_range=params["z_range"],
-            simulated_z=params["simulated_z"],
-            cross_null=params["cross_null"],
         )
+        if spec["neighbors"]:
+            kwargs.update(
+                k_max=params["k_max"],
+                k_min=params["k_min"],
+                r_min=params["r_min"],
+                edge_correction=params["edge_correction"],
+            )
+        else:
+            kwargs.update(
+                r_max=params["r_max"],
+                steps=params["steps"],
+                simulated_z=params["simulated_z"],
+                cross_null=params["cross_null"],
+            )
         if spec["multichannel"]:
             locs = [self.locs[i] for i in used]
             kwargs["names"] = titles
-        else:
+        elif spec["partner"]:
             kwargs["edge_correction"] = params["edge_correction"]
             kwargs["partner_locs"] = (
                 None if partner is None else self.locs[partner]
@@ -16470,7 +18153,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 )
                 # modify the plot slighly
                 fig.canvas.manager.set_window_title("Trace")
-                pick = self._picks[i]
                 fig.axes[0].set_title(
                     "Scatterplot of Pick "
                     + str(i + 1)
@@ -16511,7 +18193,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 msgBox.exec()
                 reply = msgBox.clickedButton().text()
                 removelist, i = self._handle_pick_selection_reply(
-                    reply, pick, removelist, i
+                    reply, i, removelist, i
                 )
                 plt.close(fig)
                 if i is None:  # cancel
@@ -16519,8 +18201,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 i += 1
 
         # remove picks
-        for pick in removelist:
-            self._picks.remove(pick)
+        with self.undo_step("Select picks", picks=True):
+            self._remove_picks_at(removelist)
 
         self.n_picks = len(self._picks)
 
@@ -16528,7 +18210,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.update_scene()
 
     def _handle_pick_selection_reply(self, reply, pick, removelist, i):
-        """Handle the reply from the pick selection message box."""
+        """Handle the reply from the pick selection message box; ``pick``
+        identifies the shown pick in ``removelist``, e.g., its index."""
         if reply == "Accept":
             if pick in removelist:
                 removelist.remove(pick)
@@ -16546,23 +18229,31 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         return removelist, i
 
     @property
-    def _pick_size(self) -> float:
-        """Return the size of the pick in nm. For circle this is the
-        diameter. For square this is the side length. For rectangle this
-        is the width (perpendicular to the drawing direction). For
-        polygon, box and brush this is None: they carry their own
-        extent. For the width of the next brush stroke, see
-        ``_brush_width``."""
+    def _pick_size(self) -> float | None:
+        """Return the size of new picks of the pick tool's shape in nm,
+        see ``_tool_pick_size``. Every pick keeps its own size, see
+        ``_pick_sizes``."""
+        return self._tool_pick_size(self._pick_shape)
+
+    def _tool_pick_size(self, shape: str) -> float | None:
+        """Return the size of new picks of ``shape`` in nm, as set in
+        ``ToolsSettingsDialog``. For circle this is the diameter. For
+        square this is the side length. For rectangle this is the width
+        (perpendicular to the drawing direction). For polygon, box and
+        brush this is None: they carry their own extent. For the width
+        of the next brush stroke, see ``_brush_width``."""
+        spin_box = self._size_spin_box(shape)
+        return None if spin_box is None else spin_box.value()
+
+    def _size_spin_box(self, shape: str) -> QtWidgets.QDoubleSpinBox | None:
+        """The spin box in ``ToolsSettingsDialog`` with the size of new
+        picks of ``shape``, None for shapes without a size."""
         tools_dialog = self.window.tools_settings_dialog
-        if self._pick_shape == "Circle":
-            pick_size = tools_dialog.pick_diameter.value()
-        elif self._pick_shape == "Square":
-            pick_size = tools_dialog.pick_side_length.value()
-        elif self._pick_shape == "Rectangle":
-            pick_size = tools_dialog.pick_width.value()
-        else:
-            pick_size = None
-        return pick_size
+        return {
+            "Circle": tools_dialog.pick_diameter,
+            "Rectangle": tools_dialog.pick_width,
+            "Square": tools_dialog.pick_side_length,
+        }.get(shape)
 
     @property
     def _brush_width(self) -> float:
@@ -16611,7 +18302,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 params = {"t0": time.time()}
                 i = 0
                 while i < len(self._picks):
-                    pick = self._picks[i]
                     fig = plt.figure(figsize=(5, 5), constrained_layout=True)
                     fig.canvas.manager.set_window_title("Scatterplot of Pick")
                     ax = fig.add_subplot(111)
@@ -16626,7 +18316,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                         ax, all_picked_locs, i, colors, channel, is_multi
                     )
                     x_min, x_max, y_min, y_max = lib.pick_bounds(
-                        pick, self._pick_shape, self._pick_size
+                        self._picks[i],
+                        self._pick_shapes[i],
+                        self._pick_sizes[i],
                     )
                     ax.set_xlabel("X [nm]")
                     ax.set_ylabel("Y [nm]")
@@ -16651,14 +18343,14 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                     msgBox.exec()
                     reply = msgBox.clickedButton().text()
                     removelist, i = self._handle_pick_selection_reply(
-                        reply, pick, removelist, i
+                        reply, i, removelist, i
                     )
                     plt.close(fig)
                     if i is None:  # cancel
                         break
                     i += 1
-        for pick in removelist:
-            self._picks.remove(pick)
+        with self.undo_step("Select picks", picks=True):
+            self._remove_picks_at(removelist)
         self.n_picks = len(self._picks)
         self.update_pick_info_short()
         self.update_scene()
@@ -16670,12 +18362,12 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         colors: list,
         DialogClass,
     ) -> list:
-        """Iterate over picks, show DialogClass for each, return picks to
-        remove."""
+        """Iterate over picks, show DialogClass for each, return the
+        indices of the picks to remove."""
         removelist = []
         flag = 0 if is_multi else 1
         color_arg = colors if is_multi else 1
-        for i, pick in enumerate(self._picks):
+        for i in range(len(self._picks)):
             reply = DialogClass.getParams(
                 all_picked_locs, i, len(self._picks), flag, color_arg
             )
@@ -16684,7 +18376,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             elif reply == 2:
                 break
             else:
-                removelist.append(pick)
+                removelist.append(i)
         return removelist
 
     @check_pick
@@ -16707,8 +18399,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 removelist = self._iterate_plot_dialog_picks(
                     all_picked_locs, is_multi, colors, PlotDialog
                 )
-        for pick in removelist:
-            self._picks.remove(pick)
+        with self.undo_step("Select picks", picks=True):
+            self._remove_picks_at(removelist)
         self.n_picks = len(self._picks)
         self.update_pick_info_short()
         self.update_scene()
@@ -16736,8 +18428,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 removelist = self._iterate_plot_dialog_picks(
                     all_picked_locs, is_multi, colors, PlotDialogIso
                 )
-        for pick in removelist:
-            self._picks.remove(pick)
+        with self.undo_step("Select picks", picks=True):
+            self._remove_picks_at(removelist)
         self.n_picks = len(self._picks)
         self.update_pick_info_short()
         self.update_scene()
@@ -16757,7 +18449,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         )
         if not ok:
             return removelist, saved_locs, clustered_locs
-        for i, pick in enumerate(self._picks):
+        for i in range(len(self._picks)):
             reply = 3
             while reply == 3:
                 if "z" in all_picked_locs[0].columns:
@@ -16781,7 +18473,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             elif reply == 2:
                 break
             else:
-                removelist.append(pick)
+                removelist.append(i)
         return removelist, saved_locs, clustered_locs
 
     def _save_cluster_results(
@@ -16805,7 +18497,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         saved_locs = pd.concat(saved_locs, ignore_index=True)
         pick_info = {
             **lib.step_info("Render"),
-            "Pick Shape": self._pick_shape,
+            "Pick Shape": self._pick_shape_info(),
         }
         # writes the size entry the current shape actually has, in nm;
         # polygons and boxes carry their own extent
@@ -16877,8 +18569,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             )
         if saved_locs:
             self._save_cluster_results(saved_locs, clustered_locs, channel)
-        for pick in removelist:
-            self._picks.remove(pick)
+        with self.undo_step("Cluster in pick", picks=True):
+            self._remove_picks_at(removelist)
         self.n_picks = len(self._picks)
         self.update_pick_info_short()
         self.update_scene()
@@ -16920,19 +18612,19 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     def _find_picks_outside_range(
         self, loccount, channels: list, minlocs: int, maxlocs: int
     ) -> list:
-        """Return picks whose localization count falls outside
-        [minlocs, maxlocs] in any channel."""
+        """Return the indices of picks whose localization count falls
+        outside [minlocs, maxlocs] in any channel."""
         progress = lib.ProgressDialog(
             "Removing picks..", 0, len(self._picks) - 1, self
         )
         progress.set_value(0)
         progress.show()
         removelist = []
-        for i, pick in enumerate(self._picks):
+        for i in range(len(self._picks)):
             for channel_idx, channel in enumerate(channels):
                 n_locs = loccount[channel_idx, i]
                 if n_locs > maxlocs or n_locs < minlocs:
-                    removelist.append(pick)
+                    removelist.append(i)
                     break
             progress.set_value(i)
         progress.close()
@@ -16978,8 +18670,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 removelist = self._find_picks_outside_range(
                     loccount, channels, minlocs, maxlocs
                 )
-                for pick in removelist:
-                    self._picks.remove(pick)
+                with self.undo_step("Filter picks by count", picks=True):
+                    self._remove_picks_at(removelist)
                 self.n_picks = len(self._picks)
                 self.update_pick_info_short()
         self.update_scene()
@@ -16992,49 +18684,68 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         3x3 block neighborhood around each pick; every other shape is
         counted through ``picked_locs``.
         """
-        if self._pick_shape != "Circle":
-            picked_locs = self.picked_locs(channel, add_group=False)
-            if len(picked_locs) == len(self._picks):
-                return np.array([len(_) for _ in picked_locs], dtype=int)
+        loccount = np.zeros(len(self._picks), dtype=int)
+        circles = [
+            i for i, shape in enumerate(self._pick_shapes) if shape == "Circle"
+        ]
+        others = [
+            i for i, shape in enumerate(self._pick_shapes) if shape != "Circle"
+        ]
+        if others:
+            progress = lib.ProgressDialog(
+                "Creating localization list", 0, 0, self
+            )
+            try:
+                picked_locs = postprocess.picked_locs(
+                    self.locs[channel],
+                    self.infos[channel],
+                    **self._pick_args(others),
+                    add_group=False,
+                    progress=progress,
+                )
+            finally:
+                progress.close()
             # ``picked_locs`` skips polygons that are not closed yet;
             # those hold no localizations
-            is_closed = np.array(
-                [
-                    lib.get_pick_polygon_corners(pick)[0] is not None
-                    for pick in self._picks
-                ]
-            )
-            loccount = np.zeros(len(self._picks), dtype=int)
-            loccount[is_closed] = [len(_) for _ in picked_locs]
+            counted = [
+                i
+                for i in others
+                if self._pick_shapes[i] != "Polygon"
+                or lib.get_pick_polygon_corners(self._picks[i])[0] is not None
+            ]
+            loccount[counted] = [len(_) for _ in picked_locs]
+        if not circles:
             return loccount
 
         progress = lib.ProgressDialog(
-            "Counting in picks..", 0, len(self._picks) - 1, self
+            "Counting in picks..", 0, len(circles) - 1, self
         )
         progress.set_value(0)
         progress.show()
-        r = self._pick_size / 2
-        loccount = np.zeros(len(self._picks), dtype=int)
         index = self._pick_index(channel)
         if isinstance(index, spatial_index.RenderIndexPyramid):
             xs = self.locs[channel]["x"].to_numpy()
             ys = self.locs[channel]["y"].to_numpy()
-            for i, (x, y) in enumerate(self._picks):
+            for k, i in enumerate(circles):
+                x, y = self._picks[i]
+                r = self._pick_sizes[i] / 2
                 loccount[i] = len(
                     spatial_index.query_circle(index, xs, ys, x, y, r)
                 )
-                progress.set_value(i)
+                progress.set_value(k)
             progress.close()
             return loccount
         # no pyramid for the channel: pick-size specific index blocks
         index_blocks = index
+        block_size = index_blocks[1]
         locs_xy = index_blocks[0][["x", "y"]].to_numpy().T
-        for i, pick in enumerate(self._picks):
-            x, y = pick
+        for k, i in enumerate(circles):
+            x, y = self._picks[i]
+            r = self._pick_sizes[i] / 2
             # extract locs at a given region - numba version
             block_locs_xy = postprocess.get_block_locs_at(
-                int(x / r),
-                int(y / r),
+                int(x / block_size),
+                int(y / block_size),
                 locs_xy,
                 index_blocks[4],
                 index_blocks[5],
@@ -17043,13 +18754,27 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             )
             pick_locs_xy = lib.locs_in_circle(x, y, block_locs_xy, r)
             loccount[i] = pick_locs_xy.shape[1]
-            progress.set_value(i)
+            progress.set_value(k)
         progress.close()
         return loccount
 
+    def _index_block_size(self) -> float | None:
+        """The block size of the index for picking: half the size of the
+        largest circular or square pick (of the pick tool without such
+        picks), None if neither the picks nor the tool need one."""
+        halves = [
+            size / 2
+            for shape, size in zip(self._pick_shapes, self._pick_sizes)
+            if shape in ("Circle", "Square")
+        ]
+        if not halves and self._pick_shape in ("Circle", "Square"):
+            halves = [self._pick_size / 2]
+        return max(halves) if halves else None
+
     def index_locs(self, channel: int) -> None:
         """Indexes localizations from a given channel in a grid with
-        grid size equal to half the pick size.
+        grid size equal to half the size of the largest pick, see
+        ``_index_block_size``.
 
         Only circular and square picks are indexed: both reach at most
         half their size in x and y, so the 3x3 block neighborhood around
@@ -17058,11 +18783,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         This is the fallback of ``_pick_index``: channels with a render
         pyramid are picked through it and never indexed here.
         """
-        if self._pick_shape not in ("Circle", "Square"):
+        size = self._index_block_size()
+        if size is None:
             return None
         locs = self.locs[channel]
         info = self.infos[channel]
-        size = self._pick_size / 2
         index_blocks = lib.run_with_status(
             lambda: postprocess.get_index_blocks(locs, info, size),
             "Indexing localizations...",
@@ -17071,9 +18796,14 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.index_blocks[channel] = index_blocks
 
     def get_index_blocks(self, channel: int) -> tuple:
-        """Call ``self.index_locs`` if not calculated earlier. Return
-        indexed localizations from a given channel."""
-        if self.index_blocks[channel] is None:
+        """Call ``self.index_locs`` if not calculated earlier or if the
+        blocks are smaller than the picks need. Return indexed
+        localizations from a given channel."""
+        index_blocks = self.index_blocks[channel]
+        size = self._index_block_size()
+        if index_blocks is None or (
+            size is not None and index_blocks[1] < size
+        ):
             self.index_locs(channel)
         return self.index_blocks[channel]
 
@@ -17166,10 +18896,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         Returns
         -------
         areas : FloatArray1D
-            Areas of all picks. For circular and square picks all values
-            are the same.
+            Areas of all picks, without polygons that are not closed.
         """
-        areas = lib.pick_areas(self._picks, self._pick_shape, self._pick_size)
+        areas = lib.pick_areas(
+            self._picks, self._pick_shapes, self._pick_sizes
+        )
         return areas * 1e-6  # nm^2 to um^2
 
     def pick_fiducials(self) -> None:
@@ -17179,10 +18910,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if channel is None:
             return
 
-        if self._pick_shape != "Circle":
-            message = "Please select circular pick before picking fiducials."
-            QtWidgets.QMessageBox.warning(self, "Warning", message)
-            return
         if len(self._picks):
             message = "Please remove all picks before picking fiducials."
             QtWidgets.QMessageBox.warning(self, "Warning", message)
@@ -17201,13 +18928,16 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             QtWidgets.QMessageBox.warning(self, "Warning", message)
             return
 
-        # the box (nm) found around the fiducials becomes the diameter
+        # the box (nm) found around the fiducials becomes the diameter,
+        # also of the next circular picks
+        self.window.tools_settings_dialog.pick_shape.setCurrentText("Circle")
         self.window.tools_settings_dialog.pick_diameter.setValue(box)
-        self.add_picks(picks)
+        with self.undo_step("Pick fiducials", picks=True):
+            self.add_picks(picks, shape="Circle", size=box)
 
     def plot_profile(self) -> None:
         """Plot the profile of the current rectangular pick."""
-        if self._pick_shape != "Rectangle" or len(self._picks) != 1:
+        if len(self._picks) != 1 or self._pick_shapes[0] != "Rectangle":
             message = "Please select one rectangular pick to plot the profile."
             QtWidgets.QMessageBox.warning(self, "Warning", message)
             return
@@ -17230,9 +18960,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             picked_locs = postprocess.picked_locs(
                 self.locs[channel],
                 self.infos[channel],
-                picks=self._picks,
-                pick_shape=self._pick_shape,
-                pick_size=self._pick_size,
+                **self._pick_args(),
             )[0]
             self.profiles.append(picked_locs["y_pick_rot"].to_numpy())
 
@@ -17342,40 +19070,73 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         localizations they contain and all take the median length of the
         current picks; their similarity is judged by the RMSD along and
         across that axis. Box picks all take the median width and height
-        of the current picks. Std is defined in ``ToolsSettingsDialog``.
+        of the current picks. Circular, square and rectangular picks of
+        different sizes are searched for with their median size, which
+        the new picks take. Std is defined in ``ToolsSettingsDialog``.
         """
+        if len(set(self._pick_shapes)) > 1:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Pick Error",
+                "Pick similar needs picks of one shape.",
+            )
+            return
         channel = self.get_channel("Pick similar")
         if channel is not None:
             std_range = (
                 self.window.tools_settings_dialog.pick_similar_range.value()
             )
+            pick_shape = self._pick_shapes[0]
             # rectangular and box picks need index blocks of a size
             # that depends on the pick extent, so they are built in
             # pick_similar
             index_blocks = (
                 None
-                if self._pick_shape in ("Rectangle", "Box")
+                if pick_shape in ("Rectangle", "Box")
                 else self._pick_index(channel)
             )
             locs, info = self.locs[channel], self.infos[channel]
-            picks = self._picks
-            pick_shape, pick_size = self._pick_shape, self._pick_size
+            pick_args = self._pick_args()
             new_picks = lib.run_with_status(
                 lambda: postprocess.pick_similar(
                     locs=locs,
                     info=info,
-                    picks=picks,
-                    pick_shape=pick_shape,
-                    pick_size=pick_size,
+                    **pick_args,
                     std_range=std_range,
                     index_blocks=index_blocks,
                 ),
                 "Picking similar...",
                 self.window,
             )
-            # add picks
-            self._picks = []
-            self.add_picks(new_picks)
+            # the current picks come first and keep their sizes, the new
+            # ones take the median size
+            n_picks = len(self._picks)
+            sizes = list(self._pick_sizes)
+            if pick_shape not in lib.PICK_SHAPES_WITHOUT_SIZE:
+                median = float(np.median(sizes))
+                sizes += [median] * (len(new_picks) - n_picks)
+            else:
+                sizes += [None] * (len(new_picks) - n_picks)
+            with self.undo_step("Pick similar", picks=True):
+                self._set_picks(new_picks, pick_shape, sizes)
+            self.update_pick_info_short()
+            self.update_scene(picks_only=True)
+
+    def pick_by_n_locs_rmsd(self) -> None:
+        """Open the window that picks structures by their number of
+        localizations and RMSD, without seed picks, and find the
+        candidate picks of the chosen channel (see
+        ``PickCandidatesWindow``)."""
+        channel = self.get_channel(PickCandidatesWindow.TITLE)
+        if channel is None:
+            return
+        old = self.pick_candidates_window
+        if old is not None and not sip.isdeleted(old):
+            old.close()
+        window = PickCandidatesWindow(self, channel)
+        self.pick_candidates_window = window
+        window.show()
+        window.find_candidates()
 
     def _display_indices(
         self,
@@ -17498,17 +19259,12 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         this runs on the GUI thread; the picking itself can then run on
         a worker thread, see ``lib.run_task``.
         """
-        index_blocks = None
-        if self._pick_shape == "Circle":
-            index_blocks = self._pick_index(channel)
         return dict(
             locs=self.locs[channel],
             info=self.infos[channel],
-            picks=list(self._picks),
-            pick_shape=self._pick_shape,
-            pick_size=self._pick_size,
+            **self._pick_args(),
             add_group=add_group,
-            index_blocks=index_blocks,
+            index_blocks=self._circle_pick_index(channel),
         )
 
     def remove_picks(self, position: tuple[float, float]) -> None:
@@ -17520,40 +19276,31 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             Specifies x and y coordinates.
         """
         x, y = position
-        if self._pick_shape == "Circle":
-            # circles are removed when clicked within one diameter of
-            # their center rather than strictly inside them, which keeps
-            # small picks clickable when zoomed out
-            d2 = self._pick_size**2
-            new_picks = [
-                pick
-                for pick in self._picks
-                if (x - pick[0]) ** 2 + (y - pick[1]) ** 2 > d2
-            ]
-        else:
-            new_picks = [
-                pick
-                for pick in self._picks
-                if not lib.point_in_pick(
-                    x, y, pick, self._pick_shape, self._pick_size
-                )
-            ]
-
-        # delete picks and add new_picks
-        self._picks = []
-        if len(new_picks) == 0:  # no picks left
-            self.update_pick_info_short()
-            self.update_scene(picks_only=True)
-        else:
-            self.add_picks(new_picks)
+        hit = []
+        for i, (pick, shape, size) in enumerate(
+            zip(self._picks, self._pick_shapes, self._pick_sizes)
+        ):
+            if shape == "Circle":
+                # circles are removed when clicked within one diameter of
+                # their center rather than strictly inside them, which
+                # keeps small picks clickable when zoomed out
+                if (x - pick[0]) ** 2 + (y - pick[1]) ** 2 <= size**2:
+                    hit.append(i)
+            elif lib.point_in_pick(x, y, pick, shape, size):
+                hit.append(i)
+        with self.undo_step("Remove pick", picks=True):
+            self._remove_picks_at(hit)
+        self.update_pick_info_short()
+        self.update_scene(picks_only=True)
 
     @check_pick
     def remove_picked_locs(self) -> None:
         """Get channel for removing picked localizations."""
         channel = self.get_channel_all_seq("Remove picked localizations")
         if channel is len(self.locs_paths):  # apply to all channels
-            for channel in range(len(self.locs)):
-                self._remove_picked_locs(channel)
+            with self.undo_step("Remove localizations in picks"):
+                for channel in range(len(self.locs)):
+                    self._remove_picked_locs(channel)
         elif channel is not None:  # apply to a single channel
             self._remove_picked_locs(channel)
 
@@ -17568,35 +19315,37 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         channel : int
             Index of the channel were localizations are removed.
         """
-        # a new list, the old one may be shared with linked windows
-        self.locs[channel], self.infos[channel] = (
-            postprocess.remove_locs_in_picks(
-                self.locs[channel],
-                self.infos[channel],
-                picks=self._picks,
-                pick_shape=self._pick_shape,
-                pick_size=self._pick_size,
-                index_blocks=self._pick_index(channel),
+        with self.undo_step("Remove localizations in picks"):
+            # a new list, the old one may be shared with linked windows
+            self.locs[channel], self.infos[channel] = (
+                postprocess.remove_locs_in_picks(
+                    self.locs[channel],
+                    self.infos[channel],
+                    **self._pick_args(),
+                    index_blocks=self._circle_pick_index(channel),
+                )
             )
-        )
-        self.update_scene(resample_locs=True)
+            self.update_scene(resample_locs=True)
 
+    @records_undo_step("Remove polygon vertex", picks=True)
     def remove_polygon_point(self) -> None:
         """Remove the last point from the last polygon. If there is
-        only one point in the polygon, the whole polygon is removed."""
-        if len(self._picks) == 0:
+        only one point in the polygon, the whole polygon is removed.
+        Nothing happens if the last pick is not a polygon."""
+        if not len(self._picks) or self._pick_shapes[-1] != "Polygon":
             return
         else:  # if a polygon is present
+            last = len(self._picks) - 1
             # if no point are present in the last polygon, remove the
             # point from the last polygon
             if len(self._picks[-1]) == 0:
-                self._picks.pop()  # remove the last polygon
+                self._remove_picks_at([last])  # remove the last polygon
                 # remove the last point of the previous polygon:
-                if len(self._picks):
+                if len(self._picks) and self._pick_shapes[-1] == "Polygon":
                     self._picks[-1].pop()
             # if there is only one point, remove the polygon
             elif len(self._picks[-1]) == 1:
-                self._picks.pop()
+                self._remove_picks_at([last])
             else:  # remove the last point only
                 self._picks[-1].pop()
             self.update_pick_info_short()
@@ -17604,8 +19353,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
 
     def remove_points(self) -> None:
         """Remove all distance measurement points and sets."""
-        self._points = []
-        self._point_sets = []
+        with self.undo_step("Clear measurements", points=True):
+            self._points = []
+            self._point_sets = []
         self._measure_following = True
         self._measure_cursor = None
         self.update_cursor()
@@ -17626,7 +19376,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     def remove_last_measure_set(self) -> None:
         """Delete the most recently finalized measurement set."""
         if self._point_sets:
-            self._point_sets.pop()
+            with self.undo_step("Remove measurement", points=True):
+                self._point_sets.pop()
             self.update_scene()
 
     def render_scene(
@@ -17964,36 +19715,54 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """Defines what happens when window is resized."""
         self.update_scene()
 
-    def _add_shape_specific_info(self, pick_info: dict) -> None:
-        """Add shape-specific information to pick_info dictionary.
+    def _pick_shape_info(
+        self, indices: list[int] | None = None
+    ) -> str | list[str]:
+        """The shape of the picks (all, or those at ``indices``) for the
+        metadata: one shape if they share it, else one per pick."""
+        return self._pick_args(indices)["pick_shape"]
+
+    def _add_shape_specific_info(
+        self, pick_info: dict, indices: list[int] | None = None
+    ) -> None:
+        """Add shape-specific information to pick_info dictionary: the
+        size of the picks, one value if they share it, else one per
+        pick (the size of picks of different shapes is "Pick Size
+        (nm)").
 
         Parameters
         ----------
         pick_info : dict
             Dictionary to update with shape-specific info.
+        indices : list of int, optional
+            Picks described. Default is None, i.e., all picks.
         """
-        picksize_nm = self._pick_size  # None for polygons, boxes, brush
-        if self._pick_shape == "Circle":
-            pick_info["Pick Diameter (nm)"] = picksize_nm
-        elif self._pick_shape == "Rectangle":
-            pick_info["Pick Width (nm)"] = picksize_nm
-        elif self._pick_shape == "Square":
-            pick_info["Pick Side Length (nm)"] = picksize_nm
+        args = self._pick_args(indices)
+        shape, size = args["pick_shape"], args["pick_size"]
+        if shape == "Circle":
+            pick_info["Pick Diameter (nm)"] = size
+        elif shape == "Rectangle":
+            pick_info["Pick Width (nm)"] = size
+        elif shape == "Square":
+            pick_info["Pick Side Length (nm)"] = size
+        elif not isinstance(shape, str) and size is not None:
+            pick_info["Pick Size (nm)"] = size
         # if polygon pick and the last not closed, ignore the last pick
         if (
             "Number of picks" in pick_info
-            and self._pick_shape == "Polygon"
+            and len(self._picks)
+            and self._pick_shapes[-1] == "Polygon"
             and self._picks[-1][0] != self._picks[-1][-1]
         ):
             pick_info["Number of picks"] -= 1
 
-    def _picks_dict(self, picks: list | None = None) -> dict:
+    def _picks_dict(self, indices: list[int] | None = None) -> dict:
         """The dictionary describing pick regions (nm), in the format of
         the picks .yaml files, see ``io.picks_dict``.
 
         Parameters
         ----------
-        picks : list, optional
+        indices : list of int, optional
             Picks to describe. Default is None, i.e., all current picks.
 
         Returns
@@ -18001,12 +19770,13 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         regions : dict
             Pick shape, size (in nm) and positions.
         """
-        if picks is None:
-            picks = self._picks
-        return io.picks_dict(picks, self._pick_shape, self._pick_size)
+        args = self._pick_args(indices)
+        return io.picks_dict(
+            args["picks"], args["pick_shape"], args["pick_size"]
+        )
 
     def _add_picks_to_info(
-        self, pick_info: dict, picks: list | None = None
+        self, pick_info: dict, indices: list[int] | None = None
     ) -> None:
         """Add the pick regions to ``pick_info`` if the user settings ask
         for it (``Save picks in metadata``, disabled by default).
@@ -18015,12 +19785,12 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         ----------
         pick_info : dict
             Dictionary to update with the pick regions.
-        picks : list, optional
+        indices : list of int, optional
             Picks to save. Default is None, i.e., all current picks.
         """
         if not io._save_picks_in_metadata():
             return
-        pick_info["Picks"] = self._picks_dict(picks)
+        pick_info["Picks"] = self._picks_dict(indices)
 
     def _build_base_pick_info(
         self, channels_combined: list | None = None
@@ -18038,13 +19808,17 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             Base pick_info dictionary.
         """
         areas = self.pick_areas()
-        if self._pick_shape in ["Circle", "Square"]:
+        args = self._pick_args()
+        if (
+            args["pick_shape"] in ("Circle", "Square")
+            and np.ndim(args["pick_size"]) == 0
+        ):
             areas_ = [areas[0]]  # save only one value (repeated)
         else:
             areas_ = areas
         pick_info = {
             **lib.step_info("Render : Pick"),
-            "Pick Shape": self._pick_shape,
+            "Pick Shape": args["pick_shape"],
             "Pick Areas (um^2)": [float(_) for _ in areas_],
             "Area (um^2)": float(np.sum(areas)),
             "Number of picks": len(self._picks),
@@ -18095,11 +19869,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             for i, pick_locs in enumerate(locs):
                 pick_info = {
                     **lib.step_info("Render : Pick"),
-                    "Pick Shape": self._pick_shape,
+                    "Pick Shape": self._pick_shape_info([i]),
                     "Area (um^2)": float(areas[i]),
                 }
-                self._add_shape_specific_info(pick_info)
-                self._add_picks_to_info(pick_info, [self._picks[i]])
+                self._add_shape_specific_info(pick_info, [i])
+                self._add_picks_to_info(pick_info, [i])
                 io.save_locs(
                     os.path.splitext(path)[0] + f"_{i}.hdf5",
                     pick_locs,
@@ -18157,16 +19931,17 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             for i, pick_locs in enumerate(locs):
                 pick_info = {
                     **lib.step_info("Render : Pick"),
-                    "Pick Shape": self._pick_shape,
+                    "Pick Shape": self._pick_shape_info([i]),
                     "Area (um^2)": float(areas[i]),
                     "Channels combined": self.locs_paths,
                 }
-                self._add_shape_specific_info(pick_info)
-                self._add_picks_to_info(pick_info, [self._picks[i]])
+                self._add_shape_specific_info(pick_info, [i])
+                self._add_picks_to_info(pick_info, [i])
+                # the first channel's, as in save_picked_locs_multi
                 io.save_locs(
                     os.path.splitext(path)[0] + f"_{i}.hdf5",
                     pick_locs,
-                    self.infos[channel] + [pick_info],
+                    self.infos[0] + [pick_info],
                 )
 
     def save_pick_properties(self, path: str, channel: int) -> None:
@@ -18263,7 +20038,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """
         if len(self._picks) == 0:
             return
-        io.save_picks(path, self._picks, self._pick_shape, self._pick_size)
+        args = self._pick_args()
+        io.save_picks(
+            path, args["picks"], args["pick_shape"], args["pick_size"]
+        )
 
     def activate_render_property(self) -> None:
         """Assign localizations by color to render a chosen property."""
@@ -18353,32 +20131,26 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.update_cursor()
 
     def on_pick_shape_changed(self) -> None:
-        """If a new shape is chosen, ask the user to delete current
-        picks, assign attributes and update scene."""
+        """Switch the pick tool to the shape chosen in
+        ``ToolsSettingsDialog``. The picks drawn so far stay, as picks of
+        different shapes can be mixed; only a polygon that is not closed
+        yet is dropped."""
         t_dialog = self.window.tools_settings_dialog
         current_text = t_dialog.pick_shape.currentText()
         if current_text == self._pick_shape:
             return
-        if len(self._picks):
-            qm = QtWidgets.QMessageBox()
-            qm.setWindowTitle("Changing pick shape")
-            ret = qm.question(
-                self,
-                "",
-                "This action will delete any existing picks. Continue?",
-                qm.StandardButton.Yes | qm.StandardButton.No,
-            )
-            if ret == qm.StandardButton.No:
-                shape_index = t_dialog.pick_shape.findText(self._pick_shape)
-                self.window.tools_settings_dialog.pick_shape.setCurrentIndex(
-                    shape_index
-                )
-                return
         self._pick_shape = current_text
-        self._picks = []
-        # a stroke half-painted with the old shape must not survive
+        if (
+            len(self._picks)
+            and self._pick_shapes[-1] == "Polygon"
+            and lib.get_pick_polygon_corners(self._picks[-1])[0] is None
+        ):
+            self._remove_picks_at([len(self._picks) - 1])
+        # a pick half-drawn with the old shape must not survive
         self._brush_stroke_ongoing = False
         self._brush_stroke = []
+        self._rectangle_pick_ongoing = False
+        self._box_pick_ongoing = False
         self.update_cursor()
         self.update_scene(picks_only=True)
         self.update_pick_info_short()
@@ -18397,20 +20169,27 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """
         self.zoom(width / self.display_width())
 
+    def optimal_scalebar_length(self) -> int | None:
+        """Automatic scale bar length (nm): approx. 1/8 of the current
+        viewport's width, rounded; None without a view."""
+        if getattr(self, "viewport", None) is None:
+            return None
+        return render.optimal_scalebar_length(
+            render.viewport_width(self.viewport)
+        )
+
     def set_optimal_scalebar(
         self, force: bool = False, silent: bool = False
     ) -> None:
         """Set scalebar to approx. 1/8 of the current viewport's width."""
-        optimal_scalebar_checked = (
-            self.window.display_settings_dlg.optimal_scalebar_check.isChecked()
-        )
-        if force or optimal_scalebar_checked:
-            width = render.viewport_width(self.viewport)
-            scalebar = render.optimal_scalebar_length(width)
-            scalebar_spinbox = self.window.display_settings_dlg.scalebar
-            scalebar_spinbox.blockSignals(True)
-            scalebar_spinbox.setValue(scalebar)
-            scalebar_spinbox.blockSignals(False)
+        scalebar_box = self.window.display_settings_dlg.scalebar_groupbox
+        if force or scalebar_box.auto_length.isChecked():
+            length = self.optimal_scalebar_length()
+            if length is None:
+                return
+            scalebar_box.length.blockSignals(True)
+            scalebar_box.length.setValue(length)
+            scalebar_box.length.blockSignals(False)
             if not silent:
                 self.update_scene()
 
@@ -18484,12 +20263,13 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return results
 
         def apply(results: list[tuple]) -> None:
-            for c, locs, new_info, drift in results:
-                self.locs[c] = locs
-                self.infos[c] = new_info
-                self.invalidate_locs_index(c)
-                self.add_drift(c, drift)
-            self.update_scene(resample_locs=True)
+            with self.undo_step("Undrift by AIM"):
+                for c, locs, new_info, drift in results:
+                    self.locs[c] = locs
+                    self.infos[c] = new_info
+                    self.invalidate_locs_index(c)
+                    self.add_drift(c, drift)
+                self.update_scene(resample_locs=True)
             if len(channels) == 1:
                 self.show_drift()
 
@@ -18533,15 +20313,16 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return results
 
         def apply(results: list[tuple]) -> None:
-            for c, locs, new_info, drift in results:
-                self.locs[c] = locs
-                # a new list, the old one may be shared with linked windows
-                self.infos[c] = new_info
-                self.invalidate_locs_index(c)
-                self.add_drift(c, drift)
-                self._drift[c] = drift
-                self.currentdrift[c] = copy.copy(drift)
-            self.update_scene(resample_locs=True)
+            with self.undo_step("Undrift by RCC"):
+                for c, locs, new_info, drift in results:
+                    self.locs[c] = locs
+                    # a new list, the old one may be shared with linked
+                    # windows
+                    self.infos[c] = new_info
+                    self.invalidate_locs_index(c)
+                    self.add_drift(c, drift)
+                    self._drift[c] = drift
+                self.update_scene(resample_locs=True)
             if len(channels) == 1:
                 self.show_drift()
 
@@ -18629,18 +20410,14 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         undrift_z : bool
             Whether to also undrift in z (ignored for 2D data).
         """
-        pick_shape, pick_size = self._pick_shape, self._pick_size
-        picks = list(self._picks)
+        pick_args = self._pick_args()
+        has_circles = "Circle" in self._pick_shapes
         jobs = [  # channel, locs, info, index
             (
                 channel,
                 self.locs[channel],
                 self.infos[channel],
-                (
-                    self._cached_render_index(channel)
-                    if pick_shape == "Circle"
-                    else None
-                ),
+                self._cached_render_index(channel) if has_circles else None,
             )
             for channel in channels
         ]
@@ -18649,7 +20426,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         def compute(progress: lib.TaskProgress) -> list[tuple]:
             results = []
             for channel, locs, info, index in jobs:
-                if pick_shape == "Circle" and index is None:
+                if has_circles and index is None:
                     index = _build_render_index_in_task(locs, info, progress)
                     built.append((channel, locs, index))
                     progress.check_canceled()
@@ -18657,9 +20434,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                     postprocess.undrift_from_fiducials(
                         locs=locs,
                         info=info,
-                        picks=picks,
-                        pick_size=pick_size,
-                        pick_shape=pick_shape,
+                        **pick_args,
                         undrift_z=undrift_z,
                         index_blocks=index,
                         progress=progress,
@@ -18669,12 +20444,13 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return results
 
         def apply(results: list[tuple]) -> None:
-            for channel, locs, new_info, drift in results:
-                self.locs[channel] = locs
-                self.infos[channel] = new_info
-                self.invalidate_locs_index(channel)
-                self.add_drift(channel, drift)
-            self.update_scene(resample_locs=True)
+            with self.undo_step("Undrift from picked"):
+                for channel, locs, new_info, drift in results:
+                    self.locs[channel] = locs
+                    self.infos[channel] = new_info
+                    self.invalidate_locs_index(channel)
+                    self.add_drift(channel, drift)
+                self.update_scene(resample_locs=True)
 
         def keep_indices() -> None:
             for channel, locs, index in built:
@@ -18703,40 +20479,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             index = self.window.link_render_index(self.locs[channel])
         return index
 
-    def undo_drift(self) -> None:
-        """Get a channel to undo drift."""
-        channel = self.get_channel("Undo drift")
-        if channel is None:
-            return
-        if self.currentdrift[channel] is None:
-            QtWidgets.QMessageBox.information(
-                self,
-                "Undo drift",
-                "No drift correction to undo. Please undrift first.",
-            )
-            return
-        self._undo_drift(channel)
-
-    def _undo_drift(self, channel: int) -> None:
-        """Delete the latest drift in a given channel.
-
-        Parameters
-        ----------
-        channel : int
-            Channel index to undo drift.
-        """
-        drift = self.currentdrift[channel]
-        drift["x"] = -drift["x"]
-        drift["y"] = -drift["y"]
-        if "z" in drift.columns:
-            drift["z"] = -drift["z"]
-        self.locs[channel], _ = postprocess.apply_drift(
-            self.locs[channel], self.infos[channel], drift=drift
-        )
-        self.invalidate_locs_index(channel)
-        self.add_drift(channel, drift)
-        self.update_scene(resample_locs=True)
-
     def add_drift(self, channel: int, drift: pd.DataFrame) -> None:
         """Assign attributes and save .txt drift file.
 
@@ -18764,7 +20506,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 else:
                     self._drift[channel]["z"] = drift["z"]
 
-        self.currentdrift[channel] = copy.copy(drift)
         io.save_drift(driftfile, self._drift[channel])
 
     def apply_drift(self) -> None:
@@ -18782,29 +20523,31 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 drift = self._read_drift_file(path, channel)
                 if drift is None:  # canceled
                     return
-                self._apply_drift(channel, drift)
-                self._driftfiles[channel] = path
+                with self.undo_step("Apply drift"):
+                    self._apply_drift(channel, drift)
+                    self._driftfiles[channel] = path
 
     def _apply_drift(self, channel: int, drift: pd.DataFrame) -> None:
         """Shift localizations in a given channel based on drift from a
         .txt file. The drift is recorded in the metadata on saving
         (``Last driftfile``)."""
-        # a new list, the old one may be shared with linked windows
-        self.locs[channel], self.infos[channel] = postprocess.apply_drift(
-            self.locs[channel], self.infos[channel], drift=drift
-        )
-        self._drift[channel] = drift
-        self.currentdrift[channel] = copy.copy(drift)
-        self.invalidate_locs_index(channel)
-        self.update_scene(resample_locs=True)
+        with self.undo_step("Apply drift"):
+            # a new list, the old one may be shared with linked windows
+            self.locs[channel], self.infos[channel] = postprocess.apply_drift(
+                self.locs[channel], self.infos[channel], drift=drift
+            )
+            self._drift[channel] = drift
+            self.invalidate_locs_index(channel)
+            self.update_scene(resample_locs=True)
 
     def sync_groups(self) -> None:
         """Remove localizations whose group field is not found in all
         channels."""
         if len(self.locs_paths) < 2:
             return
-        self.locs = lib.sync_groups(self.locs)
-        self.update_scene(resample_locs=True)
+        with self.undo_step("Synchronize groups"):
+            self.locs = lib.sync_groups(self.locs)
+            self.update_scene(resample_locs=True)
 
     def unfold_groups_square(self) -> None:
         """Shifts grouped localizations onto a square grid with a chosen
@@ -18858,16 +20601,18 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if not ok:
             return
 
-        self.locs[0], self.infos[0] = lib.unfold_localizations_square(
-            locs,
-            self.infos[0],
-            n_square=n_square,
-            spacing=spacing,
-        )
-        if remove_group:  # discard groups and reset picks
-            self.locs[0].drop(columns="group", inplace=True)
-            self._picks = []
-        self.update_scene(resample_locs=True)
+        # the picks are used up, so they come back with Undo
+        with self.undo_step("Unfold groups", picks=True):
+            self.locs[0], self.infos[0] = lib.unfold_localizations_square(
+                locs,
+                self.infos[0],
+                n_square=n_square,
+                spacing=spacing,
+            )
+            if remove_group:  # discard groups and reset picks
+                self.locs[0].drop(columns="group", inplace=True)
+                self._set_picks([], [])
+            self.update_scene(resample_locs=True)
         self.fit_in_view()
 
     def _update_cursor_circle(self, size: float) -> None:
@@ -19004,24 +20749,34 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             lib.start_phase(progress, "Fitting kinetics", 0)
             fit_result_len = lib.fit_cum_exp(new_locs["len"].to_numpy())
             fit_result_dark = lib.fit_cum_exp(new_locs["dark"].to_numpy())
-            return stats, fit_result_len, fit_result_dark
+            dye = postprocess.dye_performance(
+                picked_locs,
+                info,
+                max_dark_time=max_dark_time,
+                progress=progress,
+            )
+            return stats, fit_result_len, fit_result_dark, dye
 
         lib.run_task(
             compute,
             "Creating localization list",
             self,
-            lambda result: self._show_pick_info_long(is_3d, *result),
+            lambda result: self._show_pick_info_long(is_3d, info, *result),
         )
 
     def _show_pick_info_long(
         self,
         is_3d: bool,
+        info: list[dict],
         stats: tuple,
         fit_result_len: dict,
         fit_result_dark: dict,
+        dye: dict,
     ) -> None:
         """Display pick statistics computed by
-        ``update_pick_info_long``."""
+        ``update_pick_info_long`` for localizations with the metadata
+        ``info``; ``dye`` is the result of
+        ``postprocess.dye_performance``."""
         N, n_events, rmsd, rmsd_z, length, dark, new_locs = stats
         info_dialog = self.window.info_dialog
         # mean and std number of locs per pick
@@ -19042,6 +20797,22 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         # mean and std dark time
         info_dialog.dark_mean.setText(f"{np.nanmean(dark):.2f}")
         info_dialog.dark_std.setText(f"{np.nanstd(dark):.2f}")
+        # dye performance, "-" where it could not be computed
+        sbr, damage = dye["sbr"], dye["damage"]
+        drop = dye["localization_drop"]
+        has_sbr = sbr is not None and np.isfinite(sbr).any()
+        info_dialog.sbr_mean.setText(
+            f"{np.nanmean(sbr):.2f}" if has_sbr else "-"
+        )
+        info_dialog.sbr_std.setText(f"{np.nanstd(sbr):.2f}" if has_sbr else "")
+        info_dialog.loc_drop.setText(
+            "-" if drop is None else f"{100 * drop:.1f}"
+        )
+        info_dialog.destroyed_sites.setText(
+            "-"
+            if damage is None
+            else f"{100 * damage['fraction_destroyed']:.1f}"
+        )
         info_dialog.pick_info = {
             "pooled dark": lib.estimate_kinetic_rate(
                 new_locs["dark"].to_numpy()
@@ -19051,7 +20822,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         }
         info_dialog.update_n_units()
         info_dialog.pick_hist_window.plot(
-            new_locs, fit_result_len, fit_result_dark
+            new_locs,
+            fit_result_len,
+            fit_result_dark,
+            damage=damage,
+            picked=None if dye["locs"] is None else (dye["locs"], info),
         )
 
     def update_pick_info_short(self) -> None:
@@ -19274,12 +21049,6 @@ class Window(QtWidgets.QMainWindow):
         Instance of the class for displaying rendered localizations.
     window_rot : RotationWindow
         Instance of the class for displaying 3D data with rotation.
-    x_spiral : dict[int, np.array]
-        x displacement (nm) of the last spiral action in
-        ``ApplyDialog``, keyed by channel index.
-    y_spiral : dict[int, np.array]
-        y displacement (nm) of the last spiral action in
-        ``ApplyDialog``, keyed by channel index.
     """
 
     DOCS_URL = docs_url("render.html")
@@ -19287,6 +21056,9 @@ class Window(QtWidgets.QMainWindow):
     #: linked windows opened from another window; referenced here so
     #: they stay alive while open, also after being unlinked
     _secondary_windows = []
+
+    #: whether File > Undo is being triggered by its shortcut
+    _undo_by_key = False
 
     def __init__(
         self,
@@ -19487,9 +21259,6 @@ class Window(QtWidgets.QMainWindow):
         # [position, R, G, B] stops in [0, 1]. Populated from
         # ~/.picasso/settings.yaml in load_user_settings.
         self.custom_colormaps_stops: dict[str, list[list[float]]] = {}
-        # x/y coordinates before the last spiral action, keyed by channel
-        self.x_spiral: dict[int, np.ndarray] = {}
-        self.y_spiral: dict[int, np.ndarray] = {}
 
         # set up dialogs
         self.display_settings_dlg = DisplaySettingsDialog(self)
@@ -19571,6 +21340,31 @@ class Window(QtWidgets.QMainWindow):
         save_picks_action.triggered.connect(self.save_picks)
         load_picks_action = file_menu.addAction("Load pick regions...")
         load_picks_action.triggered.connect(self.load_picks)
+
+        # enabled while there is a step to undo/redo
+        file_menu.addSeparator()
+        self.undo_action = file_menu.addAction("Undo")
+        self.undo_action.setShortcut(QtGui.QKeySequence.StandardKey.Undo)
+        self.undo_action.triggered.connect(self._undo)
+        # Ctrl+Z selected the Zoom tool before Picasso 1.0, so pressing it
+        # explains the change (explain_ctrl_z) until turned off, also with
+        # nothing to undo: then the hidden action below takes the
+        # shortcut, which a disabled action leaves free
+        self.undo_action.installEventFilter(self)
+        if getattr(self, "_ctrl_z_notice_action", None) is not None:
+            self.removeAction(self._ctrl_z_notice_action)  # rebuilt UI
+            self._ctrl_z_notice_action.deleteLater()
+        self._ctrl_z_notice_action = QtGui.QAction("Undo", self)
+        self._ctrl_z_notice_action.setShortcut(
+            QtGui.QKeySequence.StandardKey.Undo
+        )
+        self._ctrl_z_notice_action.triggered.connect(
+            lambda: self.explain_ctrl_z(None)
+        )
+        self.addAction(self._ctrl_z_notice_action)
+        self.redo_action = file_menu.addAction("Redo")
+        self.redo_action.setShortcut(QtGui.QKeySequence.StandardKey.Redo)
+        self.redo_action.triggered.connect(self.view.redo)
 
         file_menu.addSeparator()
         export_current_action = file_menu.addAction("Export current view...")
@@ -19668,6 +21462,16 @@ class Window(QtWidgets.QMainWindow):
         fit_in_view_action.setShortcuts(["Ctrl+W", "Home"])
         fit_in_view_action.triggered.connect(self.view.fit_in_view)
         view_menu.addAction(fit_in_view_action)
+        save_fov_action = view_menu.addAction("Save FOV...")
+        save_fov_action.setShortcut("Ctrl+Shift+B")
+        save_fov_action.setToolTip(
+            "Save the current field of view as a .txt file (nm)"
+        )
+        save_fov_action.triggered.connect(self.save_fov)
+        load_fov_action = view_menu.addAction("Load FOV...")
+        load_fov_action.setShortcut("Ctrl+B")
+        load_fov_action.setToolTip("Load a field of view from a .txt file")
+        load_fov_action.triggered.connect(self.info_dialog.change_fov.load_fov)
 
         view_menu.addSeparator()
         info_action = view_menu.addAction("Show info...")
@@ -19708,23 +21512,25 @@ class Window(QtWidgets.QMainWindow):
         zoom_tool_action = tools_actiongroup.addAction(
             QtGui.QAction("Zoom", tools_menu, checkable=True)
         )
-        zoom_tool_action.setShortcut("Ctrl+Z")
+        # the tools have plain keys, like W/A/S/D for moving (Ctrl+Z is
+        # File > Undo); the others keep their older Ctrl shortcuts
+        zoom_tool_action.setShortcut("Z")
         tools_menu.addAction(zoom_tool_action)
         zoom_tool_action.setChecked(True)
         pick_tool_action = tools_actiongroup.addAction(
             QtGui.QAction("Pick", tools_menu, checkable=True)
         )
-        pick_tool_action.setShortcut("Ctrl+P")
+        pick_tool_action.setShortcuts(["P", "Ctrl+P"])
         tools_menu.addAction(pick_tool_action)
         measure_tool_action = tools_actiongroup.addAction(
             QtGui.QAction("Measure", tools_menu, checkable=True)
         )
-        measure_tool_action.setShortcut("Ctrl+M")
+        measure_tool_action.setShortcuts(["M", "Ctrl+M"])
         tools_menu.addAction(measure_tool_action)
         move_tool_action = tools_actiongroup.addAction(
             QtGui.QAction("Move", tools_menu, checkable=True)
         )
-        move_tool_action.setShortcut("Ctrl+G")
+        move_tool_action.setShortcuts(["G", "Ctrl+G"])
         move_tool_action.setToolTip(
             "Drag the localizations of the channel selected in the Tools\n"
             "settings (Ctrl+T) to change their x and y coordinates."
@@ -19744,6 +21550,15 @@ class Window(QtWidgets.QMainWindow):
         pick_similar_action.setIcon(theme.icon("pick-similar"))
         pick_similar_action.setShortcut("Ctrl+Shift+P")
         pick_similar_action.triggered.connect(self.view.pick_similar)
+
+        pick_candidates_action = tools_menu.addAction(
+            f"{PickCandidatesWindow.TITLE}..."
+        )
+        pick_candidates_action.setToolTip(
+            "Pick similar structures without seed picks: by ranges of the\n"
+            "number of localizations and RMSD of the candidate picks."
+        )
+        pick_candidates_action.triggered.connect(self.view.pick_by_n_locs_rmsd)
 
         clear_picks_action = tools_menu.addAction("Clear picks")
         clear_picks_action.triggered.connect(self.view.clear_picks)
@@ -19833,9 +21648,6 @@ class Window(QtWidgets.QMainWindow):
         )
         undrift_action = postprocess_menu.addAction("Undrift by RCC...")
         undrift_action.triggered.connect(self.view.undrift_rcc)
-        drift_action = postprocess_menu.addAction("Undo drift")
-        drift_action.setIcon(theme.icon("undo"))
-        drift_action.triggered.connect(self.view.undo_drift)
         show_drift_action = postprocess_menu.addAction("Show drift")
         show_drift_action.setIcon(theme.icon("profile"))
         show_drift_action.triggered.connect(self.view.show_drift)
@@ -19869,11 +21681,9 @@ class Window(QtWidgets.QMainWindow):
         event_cores_action.triggered.connect(
             self.view.select_binding_event_cores
         )
-        align_action = postprocess_menu.addAction(
-            "Align channels (RCC or from picked)"
-        )
+        align_action = postprocess_menu.addAction("Align channels...")
         align_action.setIcon(theme.icon("align"))
-        align_action.triggered.connect(self.view.align)
+        align_action.triggered.connect(self.view.align_channels)
         stitch_action = postprocess_menu.addAction("Stitch tiles...")
         stitch_action.triggered.connect(self.view.stitch)
         combine_action = postprocess_menu.addAction(
@@ -19953,6 +21763,16 @@ class Window(QtWidgets.QMainWindow):
         nnd_action.triggered.connect(
             lambda: self.view.spatial_statistic("nnd")
         )
+        knn_action = spatial_menu.addAction(
+            "Density from k nearest neighbors..."
+        )
+        knn_action.setToolTip(
+            "Density fitted to the distances to the k nearest neighbors,"
+            " and whether the molecules are randomly distributed."
+        )
+        knn_action.triggered.connect(
+            lambda: self.view.spatial_statistic("knn")
+        )
 
         self.load_user_settings()
         # the Render keys the settings file does not name yet are
@@ -20003,6 +21823,9 @@ class Window(QtWidgets.QMainWindow):
                 (save_picked_action, "save-picked", "Save picked"),
                 (export_current_action, "export-view", "Export view"),
                 None,
+                (self.undo_action, "undo"),
+                (self.redo_action, "redo"),
+                None,
                 (zoom_tool_action, "tool-zoom"),
                 (pick_tool_action, "tool-pick"),
                 (measure_tool_action, "tool-measure"),
@@ -20037,6 +21860,7 @@ class Window(QtWidgets.QMainWindow):
             menu.setDisabled(True)
         for action in self.data_actions:
             action.setEnabled(False)
+        self.update_undo_actions()
 
         self._plugins_loaded = plugins_loaded
         # reconnect the rebuilt view and dialogs (``remove_locs``)
@@ -20090,6 +21914,16 @@ class Window(QtWidgets.QMainWindow):
         settings["Render"][
             "Grid3D"
         ] = self.window_rot.display_settings_dlg.grid_box.settings()
+        settings["Render"]["ScaleBar"] = (
+            self.display_settings_dlg.scalebar_groupbox.settings(
+                include_length=False
+            )
+        )
+        settings["Render"]["ScaleBar3D"] = (
+            self.window_rot.display_settings_dlg.scalebar_groupbox.settings(
+                include_length=False
+            )
+        )
         settings["Render"][
             "Tracks"
         ] = self.display_settings_dlg.tracks_box.settings()
@@ -20136,6 +21970,8 @@ class Window(QtWidgets.QMainWindow):
                 )
                 if not ok:
                     return
+            if getattr(self.view, "qimage", None) is None:
+                self.view.update_scene()  # nothing drawn yet
             # exported with the text sizes they always had, not those of
             # the windows: compose the view again for the export
             with theme.unscaled_text():
@@ -20152,16 +21988,17 @@ class Window(QtWidgets.QMainWindow):
         """Save the current view to ``path`` and, without a scale bar
         shown, a copy with a scale bar (see ``export_current``)."""
         if not scalebar:
-            self.display_settings_dlg.scalebar_groupbox.setChecked(True)
-            self.view.set_optimal_scalebar(force=True)
-            qimage_scale = self.view.draw_scalebar(self.view.qimage)
+            self.view.set_optimal_scalebar(force=True, silent=True)
+            # a copy: the view's image stays without the scale bar
+            qimage_scale = self.view.draw_scalebar(
+                self.view.qimage.copy(), force=True
+            )
             new_path, ext = os.path.splitext(path)
             new_path = new_path + "_scalebar" + ext
             if path.endswith(".pdf"):
                 render.export_qimage_to_pdf(qimage_scale, new_path, dpi=dpi)
             else:
                 qimage_scale.save(new_path)
-            self.display_settings_dlg.scalebar_groupbox.setChecked(False)
         self.save_qimage_to_path(path, self.view.qimage, dpi=dpi)
 
     def save_qimage_to_path(
@@ -20384,12 +22221,15 @@ class Window(QtWidgets.QMainWindow):
         self.export_current_info(path, **kwargs)
 
         # export an extra image with scalebar if necessary
-        if not self.display_settings_dlg.scalebar_groupbox.isChecked():
-            qimage_scale = render.draw_scalebar(
-                image=qimage,
-                viewport=kwargs["viewport"],
-                scalebar_length_nm=self.display_settings_dlg.scalebar.value(),
-            )
+        scalebar_box = self.display_settings_dlg.scalebar_groupbox
+        if not scalebar_box.isChecked():
+            with theme.unscaled_text():
+                qimage_scale = scalebar_box.draw(
+                    qimage,
+                    kwargs["viewport"],
+                    self.dataset_dialog.wbackground.isChecked(),
+                    force=True,
+                )
             new_path, ext = os.path.splitext(path)
             new_path = new_path + "_scalebar" + ext
             self.save_qimage_to_path(new_path, qimage_scale, dpi=dpi)
@@ -20775,6 +22615,14 @@ class Window(QtWidgets.QMainWindow):
         self.window_rot.display_settings_dlg.grid_box.load_settings(
             render_settings.get("Grid3D")
         )
+        # the look of the scale bars of the 2D and 3D windows; each
+        # session starts with the automatic length
+        self.display_settings_dlg.scalebar_groupbox.load_settings(
+            render_settings.get("ScaleBar"), include_length=False
+        )
+        self.window_rot.display_settings_dlg.scalebar_groupbox.load_settings(
+            render_settings.get("ScaleBar3D"), include_length=False
+        )
         # the look of the tracks of single-particle tracking
         self.display_settings_dlg.tracks_box.load_settings(
             render_settings.get("Tracks")
@@ -20792,11 +22640,19 @@ class Window(QtWidgets.QMainWindow):
                 channels = range(len(self.view.locs_paths))
             else:
                 channels = [channel]
-            for channel in channels:
-                self._apply_cmd(cmd, channel)
+            # one step to undo for all channels
+            with self.view.undo_step(f"Apply expression: {cmd.strip()}"):
+                for channel in channels:
+                    self._apply_cmd(cmd, channel)
 
     def _apply_cmd(self, cmd: str, channel: int) -> None:
         """Apply the expression ``cmd`` to the given ``channel``."""
+        with self.view.undo_step(f"Apply expression: {cmd.strip()}"):
+            self._apply_cmd_unrecorded(cmd, channel)
+
+    def _apply_cmd_unrecorded(self, cmd: str, channel: int) -> None:
+        """Apply the expression ``cmd`` to the given ``channel``, as
+        part of the step to undo of ``_apply_cmd``."""
         input = cmd.split()
         if input[0] == "flip" and len(input) == 3:
             # Distinguish flipping in xy and z
@@ -20837,38 +22693,27 @@ class Window(QtWidgets.QMainWindow):
             x = self.view.locs[channel]["frame"] / scale_time
             dx = (x * np.cos(x) / scale_x * radius).to_numpy()
             dy = (x * np.sin(x) / scale_x * radius).to_numpy()
-            # the displacement is stored rather than the coordinates,
-            # since a spiral beyond the canvas grows it, which
-            # translates the localizations
-            self.x_spiral[channel] = dx
-            self.y_spiral[channel] = dy
 
             self.view.locs[channel]["x"] = self.view.locs[channel]["x"] + dx
             self.view.locs[channel]["y"] = self.view.locs[channel]["y"] + dy
 
-        elif input[0] == "uspiral":
-            try:
-                locs = self.view.locs[channel]
-                locs["x"] = locs["x"] - self.x_spiral.pop(channel)
-                locs["y"] = locs["y"] - self.y_spiral.pop(channel)
-                self.display_settings_dlg.render_check.setChecked(False)
-            except KeyError:
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Uspiral error",
-                    "Localizations have not been spiraled yet.",
-                )
         else:
             locs = self.view.locs[channel]
             code = compile(cmd, "<expression>", "exec")
+            # copies of the columns the expression names: one changed in
+            # place (e.g., "x += 100") must not change the arrays that
+            # the step to undo keeps (pandas 2 writes into them)
+            names = set(code.co_names).intersection(locs.columns)
+            copies = {name: locs[name].copy() for name in names}
             columns = {name: locs[name] for name in locs.columns}
+            columns.update(copies)
             exec(code, columns)
-            # write back the columns the expression names: a column
-            # changed in place (e.g., "x += 100") is a copy from pandas 3
-            # on (Copy-on-Write) and a rebound one (e.g., "x = x * 2")
-            # never changed the localizations
-            for name in set(code.co_names).intersection(locs.columns):
-                locs[name] = columns[name]
+            # write back the named columns that changed, in place or
+            # rebound (e.g., "x = x * 2")
+            for name in names:
+                value = columns[name]
+                if value is not copies[name] or not value.equals(locs[name]):
+                    locs[name] = value
         # localizations moved beyond the canvas grow it instead of
         # being removed when saving; the columns are replaced with
         # copies since the expression may have changed them in place
@@ -20886,8 +22731,9 @@ class Window(QtWidgets.QMainWindow):
 
     def open_file_dialog(self) -> None:
         """Open localizations file(s): Picasso (.hdf5), ThunderSTORM
-        (.csv), SMAP (_sml.mat) or PyME (.h5r, .hdf)."""
-        file_filter = "Localizations (*.hdf5 *.csv *.mat *.h5r *.hdf)"
+        (.csv), SMAP (_sml.mat), PyME (.h5r, .hdf) or MINFLUX (.pmx,
+        .csv)."""
+        file_filter = "Localizations (*.hdf5 *.csv *.mat *.h5r *.hdf *.pmx)"
         if self.pwd == []:
             paths, ext = QtWidgets.QFileDialog.getOpenFileNames(
                 self, "Add localizations", filter=file_filter
@@ -20932,7 +22778,7 @@ class Window(QtWidgets.QMainWindow):
             # no pick saved: the 3D view showed the field of view,
             # whose bounds are stored like a box pick
             # not ``clear_picks``, which warns when there are none
-            self.view._picks = []
+            self.view._set_picks([], [])
             self.info_dialog.n_picks.setText("0")
             bounds = info.get("Pick")
             if pick_shape == "Field of view" and bounds is not None:
@@ -20941,37 +22787,32 @@ class Window(QtWidgets.QMainWindow):
             self.window_rot.view_rot.load_saved_rotation(info)
             self.rot_win()
             return
-        self.view._pick_shape = pick_shape
-        if self.view._pick_shape == "Brush":
+        if pick_shape == "Brush":
             # stored as stroke dicts with widths in nm, see
             # ``RotationWindow.save_locs_rotated``
-            self.view._picks = [
-                [
-                    (stroke["Width (nm)"], stroke["Path"])
-                    for stroke in info["Pick"]
-                ]
+            pick = [
+                (stroke["Width (nm)"], stroke["Path"])
+                for stroke in info["Pick"]
             ]
         else:
-            self.view._picks = [info["Pick"]]
-        # keep the shape selector in sync; assigning _pick_shape first
-        # makes ``on_pick_shape_changed`` a no-op, so the pick survives
-        self.tools_settings_dialog.pick_shape.setCurrentText(
-            self.view._pick_shape
-        )
-        if self.view._pick_shape == "Circle":
-            self.tools_settings_dialog.pick_diameter.setValue(
-                info["Pick size (nm)"]
-            )
-        elif self.view._pick_shape == "Rectangle":
-            self.tools_settings_dialog.pick_width.setValue(
-                info["Pick size (nm)"]
-            )
-        elif self.view._pick_shape == "Square":
-            self.tools_settings_dialog.pick_side_length.setValue(
-                info["Pick size (nm)"]
-            )
+            pick = info["Pick"]
+        size = info.get("Pick size (nm)")
+        self.view._set_picks([pick], pick_shape, size)
+        # the pick tool follows, with the pick's size for new picks
+        self.tools_settings_dialog.pick_shape.setCurrentText(pick_shape)
+        spin_box = self.view._size_spin_box(pick_shape)
+        if spin_box is not None:
+            spin_box.setValue(size)
         self.window_rot.view_rot.load_saved_rotation(info)
         self.rot_win()
+
+    def save_fov(self) -> None:
+        """Save the current FOV as a .txt file (see
+        ``ChangeFOV.save_fov``)."""
+        # the dialog's boxes follow the view once it is displayed; sync
+        # them in case a render is still pending
+        self.update_info()
+        self.info_dialog.change_fov.save_fov()
 
     def resize_view_to_fov(self, w: float, h: float) -> None:
         """Resize the main window so that ``view`` has aspect ratio w/h.
@@ -21041,9 +22882,10 @@ class Window(QtWidgets.QMainWindow):
             }
             locs.drop(columns=to_remove, inplace=True)
 
-            self.view.locs[channel] = locs
-            self.view.infos[channel] = info + [new_info]
-            self.view.update_scene(resample_locs=True)
+            with self.view.undo_step("Remove columns"):
+                self.view.locs[channel] = locs
+                self.view.infos[channel] = info + [new_info]
+                self.view.update_scene(resample_locs=True)
 
     def save_pick_properties(self) -> None:
         """Save pick properties in a given channel (or channels)."""
@@ -21129,15 +22971,11 @@ class Window(QtWidgets.QMainWindow):
                             self.view.locs_paths[channel]
                         )
                         out_path = base + suffix + ".hdf5"
-                        info = self.view.infos[channel] + [
-                            {
-                                **lib.step_info("Render"),
-                                "Last driftfile": (
-                                    self.view._driftfiles[channel]
-                                ),
-                            }
-                        ]
-                        io.save_locs(out_path, self.view.locs[channel], info)
+                        io.save_locs(
+                            out_path,
+                            self.view.locs[channel],
+                            self._info_to_save(channel),
+                        )
             # save one channel only
             else:
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
@@ -21150,13 +22988,24 @@ class Window(QtWidgets.QMainWindow):
                     check_ext=".yaml",
                 )
                 if path:
-                    info = self.view.infos[channel] + [
-                        {
-                            **lib.step_info("Render"),
-                            "Last driftfile": self.view._driftfiles[channel],
-                        }
-                    ]
-                    io.save_locs(path, self.view.locs[channel], info)
+                    io.save_locs(
+                        path,
+                        self.view.locs[channel],
+                        self._info_to_save(channel),
+                    )
+
+    def _info_to_save(self, channel: int) -> list[dict]:
+        """Metadata of a channel to save: as its steps returned it,
+        followed by the drift file Render wrote or applied last, if
+        any, which is read back when the file is loaded (``Last
+        driftfile``, see ``View._load_drift``)."""
+        info = self.view.infos[channel]
+        driftfile = self.view._driftfiles[channel]
+        if driftfile is None:
+            return info
+        return info + [
+            {**lib.step_info("Render"), "Last driftfile": driftfile}
+        ]
 
     def save_picked_locs(self) -> None:
         """Save picked localizations in a given channel (or all
@@ -21315,6 +23164,93 @@ class Window(QtWidgets.QMainWindow):
         """
         if self.link_group is not None:
             self.link_group.notify(self, key)
+
+    def update_undo_actions(self) -> None:
+        """Enable File > Undo and Redo if there is a step to undo or
+        redo, named in their tooltips."""
+        history = self.view.history
+        for action, label, text in (
+            (self.undo_action, history.undo_label, "Undo"),
+            (self.redo_action, history.redo_label, "Redo"),
+        ):
+            action.setEnabled(label is not None)
+            if label:
+                text = f"{text}: {label}"
+            shortcut = action.shortcut().toString(
+                QtGui.QKeySequence.SequenceFormat.NativeText
+            )
+            action.setToolTip(f"{text} ({shortcut})" if shortcut else text)
+        self._ctrl_z_notice_action.setEnabled(not self.undo_action.isEnabled())
+
+    def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
+        # File > Undo is triggered by its shortcut, see _undo
+        if (
+            obj is getattr(self, "undo_action", None)
+            and event.type() == QtCore.QEvent.Type.Shortcut
+        ):
+            self._undo_by_key = True
+        return super().eventFilter(obj, event)
+
+    def _undo(self) -> None:
+        """File > Undo; pressed as Ctrl+Z, see ``explain_ctrl_z``."""
+        # the native menu bar of macOS triggers the action itself, without
+        # a shortcut event; Ctrl (Cmd) is held then, unlike for a click
+        held = QtGui.QGuiApplication.queryKeyboardModifiers()
+        by_key = self._undo_by_key or bool(
+            held & QtCore.Qt.KeyboardModifier.ControlModifier
+        )
+        self._undo_by_key = False
+        label = self.view.history.undo_label
+        if self.view.undo() and by_key:
+            self.explain_ctrl_z(label)
+
+    def explain_ctrl_z(self, label: str | None) -> None:
+        """Tell, when Ctrl+Z is pressed, that it undoes the last step
+        rather than selecting the Zoom tool, as before Picasso 1.0, which
+        is now Z. Not shown if ``Show Ctrl+Z notice`` is False in the
+        user settings; ticking "Don't show again" sets it to False.
+
+        Parameters
+        ----------
+        label : str or None
+            Name of the step undone, None if there was nothing to undo.
+        """
+        if not ctrl_z_notice_setting():
+            return
+        native = QtGui.QKeySequence.SequenceFormat.NativeText
+        undo_key = self.undo_action.shortcut().toString(native)
+        redo_key = self.redo_action.shortcut().toString(native)
+        if label is None:
+            done = "There was nothing to undo."
+        else:
+            done = (
+                f'It undid "{label}"; {redo_key} (File > Redo) puts it'
+                " back."
+            )
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Icon.Information)
+        box.setWindowTitle("Undo")
+        box.setText(
+            f"{undo_key} undoes the last step that changed the"
+            f" localizations, the picks or the measurements (File > Undo)."
+            f" {done}\n\nThe Zoom tool, which {undo_key} selected before"
+            " Picasso 1.0, is now selected with Z."
+        )
+        box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
+        zoom_button = box.addButton(
+            "Select Zoom tool", QtWidgets.QMessageBox.ButtonRole.ActionRole
+        )
+        dont_show = QtWidgets.QCheckBox("Don't show again")
+        box.setCheckBox(dont_show)
+        box.exec()
+        if dont_show.isChecked():
+            settings = io.load_user_settings()
+            if isinstance(settings["Render"], dict):
+                settings["Render"][CTRL_Z_NOTICE_KEY] = False
+                io.save_user_settings(settings)
+        if box.clickedButton() is zoom_button:
+            tools = self.tools_actiongroup.actions()
+            next(a for a in tools if a.text() == "Zoom").trigger()
 
     def link_channels_changed(self, changes: list[tuple]) -> None:
         """Pass changed channels on to the linked windows sharing them;
@@ -21606,7 +23542,7 @@ class Window(QtWidgets.QMainWindow):
             )
             return
         if len(self.view._picks) == 1:
-            if self.view._pick_shape == "Polygon":
+            if self.view._pick_shapes[0] == "Polygon":
                 if self.view._picks[0][0] != self.view._picks[0][-1]:
                     raise ValueError("Polygon pick not finished.")
             source = "pick"

@@ -21,7 +21,7 @@ import sys
 import warnings
 from copy import deepcopy
 from typing import Any, TypeAlias, Literal, Protocol, runtime_checkable
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from asyncio import Future
 
 import numba
@@ -55,6 +55,7 @@ __all__ = [
     "unfold_localizations_square",
     # regions
     "PICK_SHAPES",
+    "pick_shapes_and_sizes",
     "pick_areas",
     "locs_at",
     "locs_in_rectangle",
@@ -91,14 +92,15 @@ _dialogs = []
 REQUIRED_COLUMNS = ["frame", "x", "y", "z", "lpx", "lpy", "lpz"]
 
 #: Shapes that a pick region can take. "Circle" and "Square" are placed
-#: by a single click and share one global size; "Rectangle" is an
-#: oriented band of a global width drawn along its center axis;
-#: "Polygon", "Box" and "Brush" carry their own extent and have no
-#: global size.
+#: by a single click and have a size (diameter, side length);
+#: "Rectangle" is an oriented band of a given width drawn along its
+#: center axis; "Polygon", "Box" and "Brush" carry their own extent and
+#: have no size. Picks of different shapes and sizes can be mixed, see
+#: ``pick_shapes_and_sizes``.
 PICK_SHAPES = ("Circle", "Rectangle", "Polygon", "Square", "Box", "Brush")
 
-#: Pick shapes whose extent is defined per pick rather than by a single
-#: global size, i.e., those for which ``pick_size`` is None.
+#: Pick shapes whose extent is defined by the pick's coordinates rather
+#: than by a size, i.e., those for which ``pick_size`` is None.
 PICK_SHAPES_WITHOUT_SIZE = ("Polygon", "Box", "Brush")
 
 # Type alias
@@ -161,6 +163,7 @@ _QT_NAMES = (
     "CollapsibleGroupBox",
     "remember_expanded_sections",
     "resize_with_sections",
+    "resize_with_contents",
     "ScrollableGroupBox",
     "LogDoubleSpinBox",
     "WrappingLabel",
@@ -1541,7 +1544,7 @@ def _fit_canvas_axis(
 
 
 def translate_picks(
-    picks: list, shape: str | None, dx: float, dy: float
+    picks: list, shape: str | list[str] | None, dx: float, dy: float
 ) -> list:
     """Translate picks by ``(dx, dy)`` nm, e.g., to follow
     localizations moved by ``fit_canvas``.
@@ -1552,8 +1555,9 @@ def translate_picks(
         Picks in the format of the Render window (see
         ``gui.render.View._picks``).
     shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
-            "Brush"} or None
-        Shape of the picks. None is allowed only with no picks.
+            "Brush"}, list of str or None
+        Shape of the picks, or one shape per pick (see
+        ``pick_shapes_and_sizes``). None is allowed only with no picks.
     dx, dy : float
         Translation in nm.
 
@@ -1567,20 +1571,23 @@ def translate_picks(
     def point(p):
         return (p[0] + dx, p[1] + dy)
 
+    def translate(pick, shape):
+        if shape in ("Circle", "Square"):
+            return point(pick)
+        if shape in ("Rectangle", "Box"):
+            return (point(pick[0]), point(pick[1]))
+        if shape == "Polygon":
+            return [point(v) for v in pick]
+        if shape == "Brush":
+            return [(width, [point(p) for p in path]) for width, path in pick]
+        raise ValueError(f"Unrecognized pick shape: {shape}")
+
     if not len(picks):
         return []
-    if shape in ("Circle", "Square"):
-        return [point(p) for p in picks]
-    if shape in ("Rectangle", "Box"):
-        return [(point(a), point(b)) for a, b in picks]
-    if shape == "Polygon":
-        return [[point(v) for v in pick] for pick in picks]
-    if shape == "Brush":
-        return [
-            [(width, [point(p) for p in path]) for width, path in pick]
-            for pick in picks
-        ]
-    raise ValueError(f"Unrecognized pick shape: {shape}")
+    shapes = [shape] * len(picks) if isinstance(shape, str) else shape
+    if shapes is None or len(shapes) != len(picks):
+        raise ValueError("Give one pick shape, or one shape per pick.")
+    return [translate(pick, s) for pick, s in zip(picks, shapes)]
 
 
 def get_colors(n_channels):
@@ -3458,47 +3465,162 @@ def minimize_shifts(
     shifts_x: FloatArray2D,
     shifts_y: FloatArray2D,
     shifts_z: FloatArray2D | None = None,
-) -> tuple[FloatArray1D, FloatArray1D, FloatArray1D | None]:
-    """Minimize shifts in x, y, and z directions. Used for drift
-    correction.
+    *,
+    weights: FloatArray2D | list[FloatArray2D] | None = None,
+    return_covariance: bool = False,
+) -> tuple:
+    """Find the shift of each segment (e.g., of each time segment for
+    undrifting or of each channel for aligning) from the shifts measured
+    between pairs of segments, by least squares. Used for drift
+    correction and channel alignment.
+
+    For each pair i < j, ``shifts_x[i, j]`` (and ``shifts_y``,
+    ``shifts_z``) is the measured shift of segment j relative to segment
+    i, i.e., ``shift_x[j] - shift_x[i]``. The first segment is the
+    reference (shift 0). The entries for i >= j are not used. Each
+    dimension is solved separately.
 
     Parameters
     ----------
     shifts_x, shifts_y : FloatArray2D
-        Shifts in x and y directions, shape (n_channels, n_channels).
+        Shifts in x and y directions, shape (n_segments, n_segments).
+        NaN marks a pair that was not measured, which is left out.
     shifts_z : FloatArray2D, optional
-        Shifts in z direction, shape (n_channels, n_channels). If None,
+        Shifts in z direction, shape (n_segments, n_segments). If None,
         only x and y shifts are minimized.
+    weights : FloatArray2D, list of FloatArray2D or None, optional
+        Weight of each pair, shape (n_segments, n_segments), usually the
+        inverse variance of its measured shift, 1 / sigma^2; or one such
+        array per dimension (x, y and z, in this order). Pairs with
+        weight 0 are left out. If None, all pairs count equally (the
+        result is the same as with equal weights). Default is None.
+    return_covariance : bool, optional
+        If True, the covariance matrix of the shifts of each dimension is
+        returned as well. With ``weights``, it is (A^T W A)^-1, taking
+        the weights as the inverse variances of the measured shifts;
+        without, the variance of the measured shifts is estimated from
+        the residuals of the fit, which needs more pairs than segments
+        minus one (otherwise the covariance is NaN). Default is False.
 
     Returns
     -------
     shift_y, shift_x : FloatArray1D
-        Minimized shifts in y and x direction.
+        Minimized shifts in y and x direction, shape (n_segments,).
     shift_z : FloatArray1D, optional
         Minimized shifts in z direction if ``shifts_z`` is specified.
+    covariances : tuple of FloatArray2D, optional
+        If ``return_covariance``, the covariance matrices of
+        ``shift_y``, ``shift_x`` (and ``shift_z``), each of shape
+        (n_segments, n_segments); the row and column of the reference
+        segment are 0. The square roots of their diagonals are the
+        standard errors of the shifts.
+
+    Raises
+    ------
+    ValueError
+        If the shapes do not match, a weight is negative or NaN, or the
+        measured pairs of a dimension do not connect every segment to
+        the first one.
     """
-    n_channels = shifts_x.shape[0]
-    n_pairs = int(n_channels * (n_channels - 1) / 2)
-    n_dims = 2 if shifts_z is None else 3
-    rij = np.zeros((n_pairs, n_dims))
-    A = np.zeros((n_pairs, n_channels - 1))
-    flag = 0
-    for i in range(n_channels - 1):
-        for j in range(i + 1, n_channels):
-            rij[flag, 0] = shifts_y[i, j]
-            rij[flag, 1] = shifts_x[i, j]
-            if n_dims == 3:
-                rij[flag, 2] = shifts_z[i, j]
-            A[flag, i:j] = 1
-            flag += 1
-    Dj = np.dot(np.linalg.pinv(A), rij)
-    shift_y = np.insert(np.cumsum(Dj[:, 0]), 0, 0)
-    shift_x = np.insert(np.cumsum(Dj[:, 1]), 0, 0)
-    if n_dims == 2:
-        return shift_y, shift_x
+    n_segments = shifts_x.shape[0]
+    # in the order of the returned shifts: y, x, z
+    measured = [shifts_y, shifts_x] + ([] if shifts_z is None else [shifts_z])
+    for shifts in measured:
+        if np.shape(shifts) != (n_segments, n_segments):
+            raise ValueError(
+                "The shifts must have the shape (n_segments, n_segments)."
+            )
+    if weights is None:
+        dim_weights = [None] * len(measured)
     else:
-        shift_z = np.insert(np.cumsum(Dj[:, 2]), 0, 0)
-        return shift_y, shift_x, shift_z
+        if np.ndim(weights) == 2:
+            weights = [weights] * len(measured)
+        elif len(weights) != len(measured):
+            raise ValueError(
+                f"{len(weights)} weight arrays given for {len(measured)} "
+                "dimensions."
+            )
+        else:  # x, y(, z) -> y, x(, z)
+            weights = [weights[1], weights[0], *weights[2:]]
+        dim_weights = []
+        for weights_ in weights:
+            weights_ = np.asarray(weights_, dtype=np.float64)
+            if weights_.shape != (n_segments, n_segments):
+                raise ValueError(
+                    "The weights must have the shape (n_segments, n_segments)."
+                )
+            dim_weights.append(weights_)
+    rows, columns = np.triu_indices(n_segments, 1)
+    n_pairs = len(rows)
+    # unknowns: the steps between consecutive segments, whose cumulative
+    # sums are the shifts; pair (i, j) sums the steps i to j - 1
+    A = np.zeros((n_pairs, n_segments - 1))
+    for flag, (i, j) in enumerate(zip(rows, columns)):
+        A[flag, i:j] = 1
+    # the shifts from the steps
+    to_shifts = np.tril(np.ones((n_segments - 1, n_segments - 1)))
+    results, covariances = [], []
+    for shifts, weights_ in zip(measured, dim_weights):
+        r = np.asarray(shifts, dtype=np.float64)[rows, columns]
+        if weights_ is None:
+            w = np.ones(n_pairs)
+        else:
+            w = weights_[rows, columns]
+            if not (w >= 0).all():
+                raise ValueError("The weights must not be negative or NaN.")
+        valid = np.isfinite(r) & (w > 0)
+        if valid.all() and weights_ is None:
+            steps = np.dot(np.linalg.pinv(A), r)  # the original solution
+        else:
+            if not _pairs_connect(rows[valid], columns[valid], n_segments):
+                raise ValueError(
+                    "The measured pairs do not connect every segment to "
+                    "the first one, so their shifts are undetermined."
+                )
+            A_valid = A[valid]
+            normal = A_valid.T @ (w[valid, None] * A_valid)
+            steps = np.linalg.solve(normal, A_valid.T @ (w[valid] * r[valid]))
+        results.append(np.insert(np.cumsum(steps), 0, 0))
+        if return_covariance:
+            covariance = np.zeros((n_segments, n_segments))
+            if n_segments > 1:
+                A_valid = A[valid]
+                normal = A_valid.T @ (w[valid, None] * A_valid)
+                steps_covariance = np.linalg.inv(normal)
+                if weights_ is None:
+                    # the variance of the measured shifts from the
+                    # residuals
+                    n_free = int(valid.sum()) - (n_segments - 1)
+                    residuals = r[valid] - A_valid @ steps
+                    steps_covariance *= (
+                        residuals @ residuals / n_free if n_free else np.nan
+                    )
+                covariance[1:, 1:] = to_shifts @ steps_covariance @ to_shifts.T
+            covariances.append(covariance)
+    if return_covariance:
+        return *results, tuple(covariances)
+    return tuple(results)
+
+
+def _pairs_connect(
+    rows: IntArray1D,
+    columns: IntArray1D,
+    n_segments: int,
+) -> bool:
+    """Whether the pairs ``(rows[k], columns[k])`` connect every one of
+    ``n_segments`` segments to the first one."""
+    neighbors = [[] for _ in range(n_segments)]
+    for i, j in zip(rows, columns):
+        neighbors[i].append(j)
+        neighbors[j].append(i)
+    reached = {0}
+    queue = [0]
+    while queue:
+        for neighbor in neighbors[queue.pop()]:
+            if neighbor not in reached:
+                reached.add(neighbor)
+                queue.append(neighbor)
+    return len(reached) == n_segments
 
 
 def n_futures_done(futures: list[Future]) -> int:
@@ -3700,22 +3822,20 @@ def _pick_areas_polygon(
     Returns
     -------
     areas : FloatArray1D
-        Pick areas.
+        Pick areas; NaN for polygons that are not closed.
     """
-    areas = []
+    areas = np.full(len(picks), np.nan)
     for i, pick in enumerate(picks):
         if len(pick) < 3 or pick[0] != pick[-1]:  # not a closed polygon
             continue
         X, Y = get_pick_polygon_corners(pick)
-        areas.append(polygon_area(X, Y))
-    areas = np.array(areas)
-    areas = areas[areas > 0]  # remove open polygons
+        areas[i] = polygon_area(X, Y)
     return areas
 
 
 def _pick_areas_rectangle(
     picks: list[list[tuple[float, float]]],
-    w: float,
+    w: float | FloatArray1D,
 ) -> FloatArray1D:
     """Return pick areas for each pick in picks.
 
@@ -3724,18 +3844,19 @@ def _pick_areas_rectangle(
     picks : list
         List of picks, each pick is a list of coordinates of the
         rectangle corners.
-    w : float
-        Pick width.
+    w : float or FloatArray1D
+        Pick width, or the width of each pick.
 
     Returns
     -------
     areas : FloatArray1D
         Pick areas, same units as ``w``.
     """
+    w = np.broadcast_to(np.asarray(w, dtype=np.float64), (len(picks),))
     areas = np.zeros(len(picks))
     for i, pick in enumerate(picks):
         (xs, ys), (xe, ye) = pick
-        areas[i] = w * np.sqrt((xe - xs) ** 2 + (ye - ys) ** 2)
+        areas[i] = w[i] * np.sqrt((xe - xs) ** 2 + (ye - ys) ** 2)
     return areas
 
 
@@ -3850,12 +3971,120 @@ def _brush_bounds(
     return float(x_min), float(x_max), float(y_min), float(y_max)
 
 
+def pick_shapes_and_sizes(
+    picks: list,
+    pick_shape: str | Sequence[str] | None,
+    pick_size: float | Sequence[float | None] | None = None,
+) -> tuple[list[str], list[float | None]]:
+    """Return the shape and the size of every pick, after checking them.
+
+    Functions that take picks accept one shape (``pick_shape``) and one
+    size (``pick_size``) for all picks, or a sequence with one entry per
+    pick, so that picks of different shapes and sizes can be mixed.
+    This resolves both arguments into one entry per pick.
+
+    Parameters
+    ----------
+    picks : list
+        Picks (nm) in the format of their shapes, see
+        ``io.load_picks``.
+    pick_shape : str, sequence of str or None
+        Shape of all picks, one of ``PICK_SHAPES``, or the shape of each
+        pick. None is allowed only with no picks.
+    pick_size : float, sequence of float or None, optional
+        Size of all picks in nm, or the size of each pick: the diameter
+        of circles, the width of rectangles and the side length of
+        squares. Ignored (returned as None) for polygons, boxes and
+        brush picks, which carry their own extent. Default is None.
+
+    Returns
+    -------
+    shapes : list of str
+        Shape of each pick.
+    sizes : list of float or None
+        Size of each pick in nm, None for polygons, boxes and brush
+        picks.
+
+    Raises
+    ------
+    ValueError
+        If a shape is unknown, if a sequence does not hold one entry
+        per pick, or if a circle, rectangle or square has no positive
+        size.
+
+    Examples
+    --------
+    >>> from picasso import lib
+    >>> picks = [(150.0, 80.0), (400.0, 230.0), ((0.0, 0.0), (90.0, 60.0))]
+    >>> lib.pick_shapes_and_sizes(
+    ...     picks, ["Circle", "Circle", "Box"], [100.0, 140.0, None]
+    ... )
+    (['Circle', 'Circle', 'Box'], [100.0, 140.0, None])
+    """
+    n_picks = len(picks)
+    if isinstance(pick_shape, str) or pick_shape is None:
+        if pick_shape is None and n_picks:
+            raise ValueError("The shape of the picks (pick_shape) is needed.")
+        shapes = [pick_shape] * n_picks
+        checked = [pick_shape] if pick_shape is not None else []
+    else:
+        shapes = list(pick_shape)
+        checked = shapes
+        if len(shapes) != n_picks:
+            raise ValueError(
+                f"pick_shape holds {len(shapes)} shapes for {n_picks} picks."
+            )
+    for shape in checked:
+        if shape not in PICK_SHAPES:
+            raise ValueError(
+                f"Unrecognized pick shape: {shape}. Choose one of "
+                f"{PICK_SHAPES}."
+            )
+    if np.ndim(pick_size) == 0:  # one size (or None) for all picks
+        sizes = [pick_size] * n_picks
+    else:
+        sizes = list(pick_size)
+        if len(sizes) != n_picks:
+            raise ValueError(
+                f"pick_size holds {len(sizes)} sizes for {n_picks} picks."
+            )
+    for i, (shape, size) in enumerate(zip(shapes, sizes)):
+        if shape in PICK_SHAPES_WITHOUT_SIZE:
+            sizes[i] = None
+            continue
+        try:
+            value = float(size)
+        except (TypeError, ValueError):
+            value = np.nan
+        if not np.isfinite(value) or value <= 0:
+            raise ValueError(
+                f"{shape} picks need a size (pick_size, positive, in nm), "
+                f"got {size!r}."
+            )
+        sizes[i] = value
+    return shapes, sizes
+
+
+def _compact_pick_shapes_and_sizes(
+    shapes: list[str], sizes: list[float | None]
+) -> tuple[str | list[str] | None, float | list[float | None] | None]:
+    """Reverse ``pick_shapes_and_sizes``: the shape (size) shared by all
+    picks, or the list with one entry per pick if they differ. None for
+    no picks."""
+    if not len(shapes):
+        return None, None
+    shape = shapes[0] if all(_ == shapes[0] for _ in shapes) else list(shapes)
+    size = sizes[0] if all(_ == sizes[0] for _ in sizes) else list(sizes)
+    return shape, size
+
+
 def pick_areas(
     picks: list[tuple],
-    pick_shape: Literal[
-        "Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"
-    ],
-    pick_size: float | None,
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | Sequence[str]
+    ),
+    pick_size: float | Sequence[float | None] | None,
 ) -> FloatArray1D:
     """Get pick areas for each pick in picks.
 
@@ -3863,36 +4092,41 @@ def pick_areas(
     ----------
     picks : list of tuples
         Coordinates of picks in nm.
-    pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"}
-        Shape of picks.
-    pick_size : float or None
-        Size of picks in nm. For circles - diameters. For
-        rectangles - width. For squares - side length. For polygons,
-        boxes and brush picks - ignored.
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
+            "Brush"} or sequence of str
+        Shape of picks, or the shape of each pick (see
+        ``pick_shapes_and_sizes``).
+    pick_size : float, sequence of float or None
+        Size of picks in nm, or the size of each pick. For circles -
+        diameters. For rectangles - width. For squares - side length.
+        For polygons, boxes and brush picks - ignored.
 
     Returns
     -------
     areas : FloatArray1D
-        Pick areas in nm squared.
+        Pick areas in nm squared. Polygons that are not closed are left
+        out, like in ``postprocess.picked_locs``.
     """
-    if pick_shape == "Circle":
-        r = pick_size / 2
-        # same area for all picks
-        areas = np.pi * r**2 * np.ones(len(picks))
-    elif pick_shape == "Rectangle":
-        areas = _pick_areas_rectangle(picks, pick_size)
-    elif pick_shape == "Polygon":
-        areas = _pick_areas_polygon(picks)
-    elif pick_shape == "Square":
-        # same area for all picks
-        areas = pick_size**2 * np.ones(len(picks))
-    elif pick_shape == "Box":
-        areas = _pick_areas_box(picks)
-    elif pick_shape == "Brush":
-        areas = _pick_areas_brush(picks)
-    else:
-        raise ValueError(f"Unknown pick shape: {pick_shape}")
-    return areas
+    shapes, sizes = pick_shapes_and_sizes(picks, pick_shape, pick_size)
+    areas = np.zeros(len(picks))
+    for shape in set(shapes):
+        idx = [i for i, _ in enumerate(shapes) if _ == shape]
+        subset = [picks[i] for i in idx]
+        if shape not in PICK_SHAPES_WITHOUT_SIZE:
+            size = np.array([sizes[i] for i in idx])
+        if shape == "Circle":
+            areas[idx] = np.pi * (size / 2) ** 2
+        elif shape == "Rectangle":
+            areas[idx] = _pick_areas_rectangle(subset, size)
+        elif shape == "Polygon":
+            areas[idx] = _pick_areas_polygon(subset)
+        elif shape == "Square":
+            areas[idx] = size**2
+        elif shape == "Box":
+            areas[idx] = _pick_areas_box(subset)
+        elif shape == "Brush":
+            areas[idx] = _pick_areas_brush(subset)
+    return areas[~np.isnan(areas)]  # without open polygons
 
 
 def pick_bounds(

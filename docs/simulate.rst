@@ -34,7 +34,7 @@ Simulate DNA-PAINT image acquisitions
    ON time in a DNA-PAINT system is dependent on the
    DNA duplex properties. For typical 7-bp imager strands, the ON time is
    ~200-300 ms.
-4. In ``Imager parameters``, fluorophore characteristics such as PSF width and
+4. In ``Imager parameters``, fluorophore characteristics such as the PSF σ (standard deviation) and
    photon budget can be set. Adjusting the ``Power density`` field affects the
    simulation analogously to changing the laser power in an experiment: the
    photon rate is the power density times the ``Photon detection rate``, shown
@@ -132,6 +132,16 @@ file, ready for subsequent localization.
 - For 3D data, check ``Simulate 3D`` and load the 3D calibration with
   ``File > Load 3D calibration...`` (see :ref:`localize-3d-calibration` for
   how to create one).
+- The **ground truth** is saved next to each movie as
+  ``<movie>_ground_truth.hdf5``: a localization file with one row per docking
+  strand and frame in which it emits, holding its true position (``x``,
+  ``y`` and, for 3D data, ``z``, in nm) and the photons it emitted in that
+  frame (``photons``); ``lpx`` and ``lpy`` are 0. Open it in Render next to
+  the localizations fitted to the movie to see what the fit found and
+  missed. The positions are in Localize's frame (the simulation places
+  pixel ``i`` at ``[i, i + 1)`` with y pointing up, Localize puts the pixel
+  centers on integers with y pointing down), so they lie where fitting the
+  movie localizes the strands.
 
 .. dropdown:: Python
    :icon: code
@@ -184,6 +194,18 @@ file, ready for subsequent localization.
           "Camera.Pixelsize": pixelsize, "Pixelsize": pixelsize,
       }
       simulate.save_movie("simulated.raw", movie, info)
+
+      # the ground truth, in nm, as Simulate saves it next to the movie
+      from picasso import io, lib
+
+      truth = simulate.ground_truth_locs(
+          handles, photons, height=imagesize, pixelsize=pixelsize
+      )
+      io.save_locs(
+          "simulated_ground_truth.hdf5",
+          truth,
+          lib.append_metadata(info, lib.step_info("Simulate ground truth")),
+      )
 
 
 .. _simulate-multiplexing:

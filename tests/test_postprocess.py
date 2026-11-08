@@ -14,6 +14,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import pytest
+from scipy import special
 
 from picasso import io, lib, postprocess
 
@@ -161,25 +162,40 @@ class TestIndexBlocks:
     def test_n_block_locs_at_matches_get_block_locs_at(self, locs, info):
         ib = postprocess.get_index_blocks(locs, info, 1.0 * PX)
         _, _, _, _, b_starts, b_ends, K, L = ib
-        # Pick a populated cell (away from boundary, where n_block_locs_at
-        # uses strict inequality and skips the edges)
-        for y_idx in range(2, K - 2):
-            for x_idx in range(2, L - 2):
+        locs_xy = ib[0][["x", "y"]].to_numpy().T
+        # every cell, including the first and last rows and columns of
+        # the grid, counts the localizations that get_block_locs_at
+        # returns there
+        for y_idx in range(K):
+            for x_idx in range(L):
                 n = postprocess._n_block_locs_at(
                     x_idx, y_idx, K, L, b_starts, b_ends
                 )
-                if n == 0:
-                    continue
-                # Expected: sum over the 3x3 cells around (y_idx, x_idx),
-                # excluding boundary rows (n_block_locs_at uses 0 < k < K)
-                expected = 0
-                for k in range(y_idx - 1, y_idx + 2):
-                    if 0 < k < K:
-                        for ll in range(x_idx - 1, x_idx + 2):
-                            if 0 < ll < L:
-                                expected += b_ends[k, ll] - b_starts[k, ll]
+                expected = (
+                    b_ends[
+                        max(y_idx - 1, 0) : y_idx + 2,
+                        max(x_idx - 1, 0) : x_idx + 2,
+                    ].sum()
+                    - b_starts[
+                        max(y_idx - 1, 0) : y_idx + 2,
+                        max(x_idx - 1, 0) : x_idx + 2,
+                    ].sum()
+                )
                 assert int(n) == int(expected)
-                return  # one populated cell is enough
+                if n:
+                    at = postprocess.get_block_locs_at(
+                        x_idx, y_idx, locs_xy, b_starts, b_ends, K, L
+                    )
+                    assert at.shape[1] == int(n)
+
+    def test_n_block_locs_at_off_grid_is_zero(self):
+        # a position whose 3 x 3 neighborhood lies entirely off the grid
+        # counts nothing
+        starts = np.zeros((2, 2), dtype=np.uint32)
+        ends = np.full((2, 2), 3, dtype=np.uint32)
+        assert postprocess._n_block_locs_at(5, 5, 2, 2, starts, ends) == 0
+        # the first row and column count
+        assert postprocess._n_block_locs_at(0, 0, 2, 2, starts, ends) == 12
 
 
 # ---------------------------------------------------------------------------
@@ -260,7 +276,7 @@ class TestPickedLocs:
         assert out == []
 
     def test_invalid_shape_raises(self, locs, info, origami_picks):
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError, match="Unrecognized pick shape"):
             postprocess.picked_locs(
                 locs,
                 info,
@@ -561,6 +577,250 @@ class TestPickSimilar:
                 pick_size=PICK_SIZE,
                 grid_spacing=1.0 * PX,
             )
+
+
+class TestPickSimilarCandidates:
+    @pytest.fixture(scope="class")
+    def candidates(self, locs, info):
+        return postprocess.pick_similar_candidates(
+            locs, info, pick_size=PICK_SIZE
+        )
+
+    def test_the_origamis_are_the_candidates(self, candidates):
+        assert list(candidates.columns) == ["x", "y", "n_locs", "rmsd"]
+        assert candidates["n_locs"].dtype == np.int64
+        picks = list(zip(candidates["x"], candidates["y"]))
+        assert _matches_origamis(picks)
+
+    def test_n_locs_rmsd_and_center_of_the_localizations_within(self):
+        """Clusters far narrower than the pick (no localization near its
+        edge): each candidate is one cluster, at its center of mass, with
+        its size and RMSD."""
+        rng = np.random.default_rng(0)
+        centers = [(800.0, 800.0), (2400.0, 800.0), (800.0, 2400.0)]
+        sizes = [20, 50, 90]
+        xy = np.concatenate(
+            [rng.normal(c, 10.0, (n, 2)) for c, n in zip(centers, sizes)]
+        )
+        locs = pd.DataFrame(
+            {
+                "frame": np.arange(len(xy), dtype=np.uint32),
+                "x": xy[:, 0].astype(np.float32),
+                "y": xy[:, 1].astype(np.float32),
+            }
+        )
+        info = [{"Frames": 160, "Width": 32, "Height": 32, "Pixelsize": 130.0}]
+        candidates = postprocess.pick_similar_candidates(
+            locs, info, pick_size=300.0
+        )
+        assert len(candidates) == 3
+        xy = locs[["x", "y"]].to_numpy(np.float64)
+        for start, n in zip(np.cumsum([0] + sizes[:-1]), sizes):
+            cluster = xy[start : start + n]
+            com = cluster.mean(0)
+            (row,) = candidates[
+                np.hypot(candidates["x"] - com[0], candidates["y"] - com[1])
+                < 1.0
+            ].itertuples()
+            assert (row.x, row.y) == pytest.approx(tuple(com), abs=1e-3)
+            assert row.n_locs == n
+            rmsd = np.sqrt(np.mean(np.sum((cluster - com) ** 2, 1)))
+            assert row.rmsd == pytest.approx(rmsd, rel=1e-5)
+
+    def test_candidates_do_not_overlap(self, locs, info):
+        # a pick size of three origami spacings: many candidates converge
+        # onto the same localizations, which are kept once
+        candidates = postprocess.pick_similar_candidates(
+            locs, info, pick_size=2.5 * PX
+        )
+        xy = candidates[["x", "y"]].to_numpy()
+        distances = np.hypot(*(xy[:, None] - xy[None, :]).transpose(2, 0, 1))
+        np.fill_diagonal(distances, np.inf)
+        assert distances.min() > 2.5 * PX
+
+    def test_min_n_locs(self, locs, info, candidates):
+        threshold = int(candidates["n_locs"].median())
+        fewer = postprocess.pick_similar_candidates(
+            locs, info, pick_size=PICK_SIZE, min_n_locs=threshold
+        )
+        assert len(fewer) < len(candidates)
+        assert fewer["n_locs"].min() >= threshold
+        expected = candidates[candidates["n_locs"] >= threshold]
+        np.testing.assert_allclose(
+            np.sort(fewer["x"]), np.sort(expected["x"]), atol=1e-6
+        )
+
+    def test_progress_over_the_grid_columns(self, locs, info):
+        tracker = RecordingProgress()
+        postprocess.pick_similar_candidates(
+            locs, info, pick_size=PICK_SIZE, progress=tracker
+        )
+        assert_phases(tracker, ["Scanning candidate picks"])
+
+    def test_the_pick_size_must_be_positive(self, locs, info):
+        with pytest.raises(ValueError, match="positive"):
+            postprocess.pick_similar_candidates(locs, info, pick_size=0)
+
+
+class TestPickSimilarInRanges:
+    def test_the_candidates_in_the_ranges_are_picked(self, locs, info):
+        # scanned with the lower bound of n_locs_range
+        candidates = postprocess.pick_similar_candidates(
+            locs, info, pick_size=PICK_SIZE, min_n_locs=50
+        )
+        n_locs_range = (50, 80)
+        rmsd_range = (20.0, None)
+        picks = postprocess.pick_similar(
+            locs,
+            info,
+            pick_size=PICK_SIZE,
+            n_locs_range=n_locs_range,
+            rmsd_range=rmsd_range,
+        )
+        expected = candidates.query("50 <= n_locs <= 80 and rmsd >= 20")
+        assert 0 < len(expected) < len(candidates)
+        assert picks == list(zip(expected["x"], expected["y"]))
+
+    def test_smaller_candidates_do_not_exclude_a_structure(self):
+        """A few localizations next to a structure, scanned first, make
+        a candidate that overlaps it; scanned with the lower bound of
+        n_locs_range, the structure is picked."""
+        rng = np.random.default_rng(0)
+        xy = np.concatenate(
+            [
+                rng.normal((1600.0, 1600.0), 10.0, (200, 2)),
+                [(1360.0, 1597.0), (1360.0, 1600.0), (1360.0, 1603.0)],
+            ]
+        )
+        locs = pd.DataFrame(
+            {
+                "frame": np.arange(len(xy), dtype=np.uint32),
+                "x": xy[:, 0].astype(np.float32),
+                "y": xy[:, 1].astype(np.float32),
+            }
+        )
+        info = [
+            {"Frames": 1000, "Width": 32, "Height": 32, "Pixelsize": 100.0}
+        ]
+        candidates = postprocess.pick_similar_candidates(
+            locs, info, pick_size=300.0
+        )
+        # scanned from 2 localizations, the few exclude the structure
+        assert candidates["n_locs"].tolist() == [3]
+        picks = postprocess.pick_similar(
+            locs, info, pick_size=300.0, n_locs_range=(100, None)
+        )
+        assert len(picks) == 1
+        assert picks[0] == pytest.approx(tuple(xy[:200].mean(axis=0)), abs=1)
+
+    def test_one_range_is_enough(self, locs, info):
+        picks = postprocess.pick_similar(
+            locs, info, pick_size=PICK_SIZE, rmsd_range=(0, 1e3)
+        )
+        assert _matches_origamis(picks)
+
+    def test_seeds_and_ranges_are_exclusive(self, locs, info):
+        with pytest.raises(ValueError, match="not both"):
+            postprocess.pick_similar(
+                locs,
+                info,
+                picks=ORIGAMI_PICKS[:2],
+                pick_size=PICK_SIZE,
+                n_locs_range=(10, 100),
+            )
+
+    def test_seeds_or_ranges_are_needed(self, locs, info):
+        with pytest.raises(ValueError, match="seed picks"):
+            postprocess.pick_similar(locs, info, pick_size=PICK_SIZE)
+
+    @pytest.mark.parametrize("shape", ["Square", ["Circle", "Rectangle"]])
+    def test_circles_only(self, locs, info, shape):
+        with pytest.raises(ValueError, match="circular picks only"):
+            postprocess.pick_similar(
+                locs,
+                info,
+                pick_shape=shape,
+                pick_size=PICK_SIZE,
+                n_locs_range=(10, 100),
+            )
+
+
+def _class_candidates(seed=0):
+    """Candidates of three structure classes, (n_locs, rmsd) of
+    (400, 20 nm), (1500, 45 nm) and (150, 10 nm), and 15 scattered
+    ones."""
+    rng = np.random.default_rng(seed)
+    classes = [(300, 400, 40, 20, 2), (200, 1500, 150, 45, 4)]
+    classes.append((150, 150, 20, 10, 1.5))
+    n_locs = [rng.normal(n, sn, size) for size, n, sn, _, _ in classes]
+    rmsd = [rng.normal(r, sr, size) for size, _, _, r, sr in classes]
+    n_locs.append(rng.uniform(100, 2500, 15))
+    rmsd.append(rng.uniform(5, 60, 15))
+    n_locs = np.concatenate(n_locs)
+    return pd.DataFrame(
+        {
+            "x": rng.uniform(0, 1e4, len(n_locs)),
+            "y": rng.uniform(0, 1e4, len(n_locs)),
+            "n_locs": np.round(n_locs).astype(np.int64),
+            "rmsd": np.concatenate(rmsd),
+        }
+    )
+
+
+class TestStructureClasses:
+    def test_the_classes_are_found_with_their_ranges(self):
+        candidates = _class_candidates()
+        labels, classes = postprocess.structure_classes(candidates)
+        assert len(labels) == len(candidates)
+        assert list(classes.columns) == [
+            "n_candidates",
+            "n_locs",
+            "rmsd",
+            "n_locs_min",
+            "n_locs_max",
+            "rmsd_min",
+            "rmsd_max",
+        ]
+        # the medians within a standard deviation of each class
+        found = classes.sort_values("n_locs")
+        n_locs_off = np.abs(found["n_locs"].to_numpy() - [150, 400, 1500])
+        assert np.all(n_locs_off <= [20, 40, 150])
+        rmsd_off = np.abs(found["rmsd"].to_numpy() - [10, 20, 45])
+        assert np.all(rmsd_off <= [1.5, 2, 4])
+        for index, row in classes.iterrows():
+            members = candidates[labels == index]
+            assert row["n_candidates"] == len(members)
+            n_median = np.median(members["n_locs"])
+            n_std = members["n_locs"].std(ddof=0)
+            assert row["n_locs_min"] == pytest.approx(n_median - n_std)
+            assert row["n_locs_max"] == pytest.approx(n_median + n_std)
+            r_median = np.median(members["rmsd"])
+            r_std = members["rmsd"].std(ddof=0)
+            assert row["rmsd_min"] == pytest.approx(r_median - r_std)
+            assert row["rmsd_max"] == pytest.approx(r_median + r_std)
+
+    def test_the_units_do_not_matter(self):
+        """The inputs are standardized: the RMSD in micrometers gives
+        the same classes."""
+        candidates = _class_candidates()
+        labels, _ = postprocess.structure_classes(candidates)
+        in_um = candidates.assign(rmsd=candidates["rmsd"] / 1000)
+        labels_um, _ = postprocess.structure_classes(in_um)
+        np.testing.assert_array_equal(labels, labels_um)
+
+    def test_std_range(self):
+        labels, narrow = postprocess.structure_classes(_class_candidates())
+        _, wide = postprocess.structure_classes(
+            _class_candidates(), std_range=2.0
+        )
+        np.testing.assert_allclose(
+            wide["n_locs_max"] - wide["n_locs"],
+            2 * (narrow["n_locs_max"] - narrow["n_locs"]),
+        )
+
+    def test_too_few_candidates(self):
+        with pytest.raises(ValueError, match="at least 2 candidates"):
+            postprocess.structure_classes(_class_candidates().iloc[:1])
 
 
 class TestPickSimilarSquare:
@@ -1065,7 +1325,7 @@ class TestRemoveLocsInPicks:
         assert len(out) == len(locs) - n_inside
 
     def test_invalid_shape_raises(self, locs, info):
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError, match="Unrecognized pick shape"):
             postprocess.remove_locs_in_picks(
                 locs.copy(),
                 info,
@@ -1215,6 +1475,26 @@ class TestFrc:
         frc_res = postprocess.frc(locs, info, viewport=viewport, lp=lp)
         assert frc_res["resolution"] == pytest.approx(expected["resolution"])
 
+    def test_too_large_images_raise(self, locs, info, monkeypatch):
+        viewport = ((15 * PX, 15 * PX), (16 * PX, 16 * PX))
+        lp = 1.0  # 2 * PX pixels on a side
+
+        def fail(*args, **kwargs):
+            raise AssertionError("nothing may be rendered")
+
+        monkeypatch.setattr(postprocess.render, "render", fail)
+        with pytest.raises(ValueError, match="max_image_size"):
+            postprocess.frc(
+                locs, info, viewport=viewport, lp=lp, max_image_size=PX
+            )
+
+    def test_max_image_size_none_renders_any_size(self, locs, info):
+        viewport = ((15 * PX, 15 * PX), (16 * PX, 16 * PX))
+        frc_res = postprocess.frc(
+            locs, info, viewport=viewport, max_image_size=None
+        )
+        assert frc_res["resolution"] > 0
+
     def test_does_not_modify_locs(self, locs, info):
         ref = locs.copy()
         postprocess.frc(locs, info, viewport=FRC_VIEWPORT)
@@ -1250,6 +1530,25 @@ class TestFrcRois:
         assert_phases(tracker, ["Calculating NeNA", "Calculating FRC"])
         assert tracker.phases[1].maximum == n
         pd.testing.assert_frame_equal(locs, ref)
+
+    def test_given_lp_skips_nena(self, locs, info, monkeypatch):
+        def no_nena(*args, **kwargs):
+            raise AssertionError("NeNA calculated")
+
+        monkeypatch.setattr(postprocess, "nena", no_nena)
+        tracker = RecordingProgress()
+        result = postprocess.frc_rois(
+            locs,
+            info,
+            viewport=((10 * PX, 10 * PX), (20 * PX, 20 * PX)),
+            n_rois=4,
+            roi_size=260,
+            min_locs=20,
+            lp=12.0,
+            progress=tracker,
+        )
+        assert result["lp"] == 12.0
+        assert_phases(tracker, ["Calculating FRC"])
 
 
 class TestPairCorrelation:
@@ -1489,6 +1788,251 @@ class TestBindingEventCores:
         assert "group" in out.columns
 
 
+def _docking_sites(
+    n_sites: int,
+    n_frames: int,
+    *,
+    destroyed: float = 0.0,
+    tau_dark: float = 200.0,
+    tau_bright: float = 3.0,
+    seed: int = 0,
+) -> list[pd.DataFrame]:
+    """Localizations of DNA-PAINT docking sites, one per list element:
+    binding events with exponential dark and bright times (frames); the
+    fraction ``destroyed`` of the sites stops binding at a uniformly
+    random time."""
+    rng = np.random.default_rng(seed)
+    sites = []
+    for _ in range(n_sites):
+        end = n_frames
+        if rng.uniform() < destroyed:
+            end = rng.uniform(0, n_frames)
+        frames = []
+        t = rng.exponential(tau_dark)
+        while t < end:
+            length = rng.exponential(tau_bright)
+            frames.extend(range(int(t), int(min(t + length, end)) + 1))
+            t += length + rng.exponential(tau_dark)
+        frames = np.unique(np.clip(frames, 0, n_frames - 1))
+        sites.append(_site_locs(frames, rng))
+    return sites
+
+
+def _site_locs(frames, rng=None) -> pd.DataFrame:
+    """Localizations of one docking site in ``frames``."""
+    rng = np.random.default_rng(0) if rng is None else rng
+    n = len(frames)
+    return pd.DataFrame(
+        {
+            "frame": np.asarray(frames, dtype=np.uint32),
+            "x": rng.normal(0, 3, n).astype(np.float32),
+            "y": rng.normal(0, 3, n).astype(np.float32),
+            "photons": np.full(n, 1000, dtype=np.float32),
+            "sx": np.full(n, 120, dtype=np.float32),
+            "sy": np.full(n, 120, dtype=np.float32),
+            "bg": np.full(n, 20, dtype=np.float32),
+            "lpx": np.full(n, 3, dtype=np.float32),
+            "lpy": np.full(n, 3, dtype=np.float32),
+        }
+    )
+
+
+class TestDockingSiteDamage:
+    N_FRAMES = 10_000
+    INFO = [{"Frames": N_FRAMES, "Pixelsize": 130.0}]
+
+    def test_intact_sites(self):
+        sites = _docking_sites(600, self.N_FRAMES, seed=1)
+        result = postprocess.docking_site_damage(sites, self.INFO)
+        assert result["n_sites"] == 600
+        # r follows an exponential distribution with mean 1
+        assert result["mu"] == pytest.approx(1.0, abs=0.1)
+        assert np.nanmean(result["r"]) == pytest.approx(1.0, abs=0.1)
+        assert result["r_cutoff"] == pytest.approx(4 * result["mu"])
+        assert abs(result["fraction_destroyed"]) < 0.02
+        assert result["fraction_destroyed"] == pytest.approx(
+            result["fraction_above_cutoff"] - np.exp(-4)
+        )
+        np.testing.assert_allclose(np.nanmedian(result["dark"]), 200, rtol=0.1)
+        assert result["counts"].sum() == 600
+        assert len(result["edges"]) == len(result["counts"]) + 1
+
+    def test_destroyed_sites(self):
+        sites = _docking_sites(600, self.N_FRAMES, destroyed=0.3, seed=2)
+        result = postprocess.docking_site_damage(sites, self.INFO)
+        # sites destroyed within the last 4 dark times stay below the
+        # cut-off: about 0.3 * (1 - 4 * 200 / 10,000)
+        assert result["fraction_destroyed"] == pytest.approx(0.276, abs=0.05)
+        drop = postprocess.localization_rate_drop(pd.concat(sites), self.INFO)
+        assert drop == pytest.approx(0.3 * 0.8 / 0.9, abs=0.07)
+
+    def test_sites_without_a_mean_dark_time(self):
+        sites = _docking_sites(50, self.N_FRAMES, seed=3)
+        one_event = _site_locs([10, 11])
+        sites += [sites[0].iloc[:0], one_event]
+        result = postprocess.docking_site_damage(sites, self.INFO)
+        assert result["n_sites"] == 50
+        assert np.isnan(result["r"][-2:]).all()
+        assert np.isnan(result["t_end"][-2])
+        assert result["t_end"][-1] == self.N_FRAMES - 1 - 11
+        with pytest.raises(ValueError, match="mean dark time"):
+            postprocess.docking_site_damage([one_event], self.INFO)
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            (dict(max_dark_time=-1), "max_dark_time"),
+            (dict(cutoff=0.0), "cutoff"),
+            (dict(bin_width=0.0), "bin_width"),
+        ],
+    )
+    def test_invalid_parameters(self, kwargs, match):
+        with pytest.raises(ValueError, match=match):
+            postprocess.docking_site_damage([], self.INFO, **kwargs)
+
+    def test_needs_the_number_of_frames(self):
+        with pytest.raises(KeyError, match="Frames"):
+            postprocess.docking_site_damage([], [{}])
+
+    def test_plot(self):
+        sites = _docking_sites(100, self.N_FRAMES, destroyed=0.2, seed=4)
+        result = postprocess.docking_site_damage(sites, self.INFO)
+        fig = postprocess.plot_docking_site_damage(result)
+        (ax,) = fig.axes
+        # the bulk, not the destroyed sites far beyond
+        x_max = max(10, 2.5 * result["r_cutoff"])
+        assert ax.get_xlim() == pytest.approx((0, x_max))
+        assert x_max < result["edges"][-1]
+        labels = ax.get_legend_handles_labels()[1]
+        assert labels[0] == f"{result['n_sites']} sites"
+        assert "destroyed" in labels[-1]
+
+    def test_cdf_mean_is_unbiased_for_few_events(self):
+        rng = np.random.default_rng(5)
+        estimates = [
+            postprocess._exponential_cdf_mean(rng.exponential(100.0, 20))
+            for _ in range(300)
+        ]
+        assert np.mean(estimates) == pytest.approx(100, rel=0.04)
+        assert np.isnan(postprocess._exponential_cdf_mean(np.array([5.0])))
+        # missing dark times (-1) are ignored
+        assert postprocess._exponential_cdf_mean(
+            np.array([-1.0, 4.0, 4.0])
+        ) == pytest.approx(4.0)
+
+
+class TestDyePerformance:
+    """``dye_performance``, as in Render's Info dialog and
+    ``picasso dye-performance``."""
+
+    N_FRAMES = TestDockingSiteDamage.N_FRAMES
+    INFO = TestDockingSiteDamage.INFO
+
+    def test_all_values(self):
+        sites = _docking_sites(100, self.N_FRAMES, seed=6)
+        result = postprocess.dye_performance(sites, self.INFO)
+        assert result["errors"] == {}
+        pooled = result["locs"]
+        # a group per pick, so that binding events stay within a pick
+        assert pooled["group"].nunique() == 100
+        # the SBR of the centers of binding events (1000 photons, sx =
+        # sy = 120 nm, 130 nm pixels, bg = 20)
+        scale = 65 / np.sqrt(2) / 120
+        expected = 1000 * special.erf(scale) ** 2 / 20
+        np.testing.assert_allclose(result["sbr"], expected, rtol=1e-5)
+        cores, _ = postprocess.select_binding_event_cores(pooled, r_max=np.inf)
+        assert len(result["sbr"]) == len(cores)
+        assert result["damage"]["n_sites"] == 100
+        assert result[
+            "localization_drop"
+        ] == postprocess.localization_rate_drop(pooled, self.INFO)
+
+    def test_without_a_gaussian_fit(self):
+        """Without sx and sy (e.g., spline fits) there is no SBR; picks
+        without enough binding events have no damage."""
+        locs = _site_locs(np.arange(10)).drop(columns=["sx", "sy"])
+        info = [{"Frames": 100, "Pixelsize": 130.0}]
+        result = postprocess.dye_performance([locs], info, max_dark_time=3)
+        assert result["sbr"] is None and result["damage"] is None
+        assert result["localization_drop"] == pytest.approx(1.0)
+        assert "sx, sy" in result["errors"]["sbr"]
+        assert "mean dark time" in result["errors"]["damage"]
+        empty = postprocess.dye_performance([locs.iloc[:0]], info)
+        assert empty["locs"] is None
+        assert set(empty["errors"]) == {"sbr", "localization_drop", "damage"}
+
+
+class TestLocalizationRateDrop:
+    INFO = [{"Frames": 1000}]
+
+    def test_compares_the_first_and_last_fifth(self):
+        frames = np.concatenate([np.arange(200), np.arange(800, 1000, 2)])
+        locs = pd.DataFrame({"frame": np.concatenate([frames, [500]])})
+        drop = postprocess.localization_rate_drop(locs, self.INFO)
+        assert drop == pytest.approx(0.5)
+        drop = postprocess.localization_rate_drop(
+            locs, self.INFO, fraction=0.5
+        )
+        assert drop == pytest.approx(1 - 101 / 200)  # frame 500 is late
+
+    def test_increase_is_negative(self):
+        locs = pd.DataFrame({"frame": [0, 900, 950]})
+        assert postprocess.localization_rate_drop(locs, self.INFO) == -1.0
+
+    @pytest.mark.parametrize("fraction", [0.0, 0.6])
+    def test_invalid_fraction(self, fraction):
+        locs = pd.DataFrame({"frame": [0]})
+        with pytest.raises(ValueError, match="fraction"):
+            postprocess.localization_rate_drop(
+                locs, self.INFO, fraction=fraction
+            )
+
+    def test_needs_localizations_at_the_start(self):
+        locs = pd.DataFrame({"frame": [900]})
+        with pytest.raises(ValueError, match="first 20%"):
+            postprocess.localization_rate_drop(locs, self.INFO)
+
+    def test_plot(self):
+        frames = np.concatenate([np.arange(200), np.arange(800, 1000, 2)])
+        locs = pd.DataFrame({"frame": frames})
+        fig = postprocess.plot_localization_rate(locs, self.INFO, n_bins=10)
+        (ax,) = fig.axes
+        # mean localizations per bin of 100 frames: 100 and 50
+        levels = ax.collections[-1].get_segments()
+        assert [segment[0][1] for segment in levels] == [100, 50]
+        assert "drop 50.0%" in ax.get_legend_handles_labels()[1][-1]
+        with pytest.raises(ValueError, match="n_bins"):
+            postprocess.plot_localization_rate(locs, self.INFO, n_bins=0)
+
+
+class TestSignalToBackground:
+    INFO = [{"Pixelsize": 130.0}]
+
+    def test_photons_in_one_pixel_over_the_background(self):
+        sx, sy = 110.0, 150.0
+        # the Gaussian integrated over a pixel centered on its peak
+        t = np.linspace(-65, 65, 4001)
+        gx = np.exp(-(t**2) / (2 * sx**2)) / (np.sqrt(2 * np.pi) * sx)
+        gy = np.exp(-(t**2) / (2 * sy**2)) / (np.sqrt(2 * np.pi) * sy)
+        fraction = np.trapezoid(gx, t) * np.trapezoid(gy, t)
+        locs = pd.DataFrame(
+            {
+                "photons": [1000.0, 1000.0, 1000.0],
+                "sx": [sx] * 3,
+                "sy": [sy] * 3,
+                "bg": [20.0, 0.0, -1.0],
+            }
+        )
+        sbr = postprocess.signal_to_background(locs, self.INFO)
+        assert sbr[0] == pytest.approx(1000 * fraction / 20, rel=1e-6)
+        assert np.isnan(sbr[1:]).all()
+
+    def test_needs_a_gaussian_fit(self):
+        locs = pd.DataFrame({"photons": [1.0], "bg": [1.0]})
+        with pytest.raises(ValueError, match="sx, sy"):
+            postprocess.signal_to_background(locs, self.INFO)
+
+
 class TestDarkTimes:
     def test_dark_times_min_positive(self, locs, info):
         linked, _ = postprocess.link(locs.copy(), info)
@@ -1573,6 +2117,22 @@ class TestEvaluatePicks:
         # Returned new_locs must have length and dark columns
         for col in ("len", "dark"):
             assert col in new_locs.columns
+
+    def test_empty_picks_are_nan(self, locs, info, origami_picks):
+        """Empty picks were left as uninitialized memory (np.empty),
+        which showed huge numbers in Render's Info dialog."""
+        pl = postprocess.picked_locs(
+            locs,
+            info,
+            picks=origami_picks[:2],
+            pick_shape="Circle",
+            pick_size=PICK_SIZE,
+        )
+        pl.insert(1, pl[0].iloc[:0])
+        stats = postprocess.evaluate_picks(pl, info, max_dark_time=3)
+        for values in stats[:6]:
+            assert np.isnan(values[1])
+        assert stats[0][0] == len(pl[0]) and stats[0][2] == len(pl[2])
 
 
 class TestCombineLocsInPicks:
@@ -1966,6 +2526,123 @@ class TestAlign:
         with pytest.raises(ValueError, match="only used with"):
             postprocess.align(locs, infos, picks=origami_picks)
 
+    @staticmethod
+    def _halves(locs, shift_x, shift_y):
+        """The localizations split at random into two channels, the
+        second shifted by ``(shift_x, shift_y)`` nm."""
+        rng = np.random.default_rng(0)
+        second = rng.uniform(size=len(locs)) < 0.5
+        a = locs[~second].copy()
+        b = locs[second].copy()
+        b["x"] += shift_x
+        b["y"] += shift_y
+        return a, b
+
+    def test_align_from_points(self, info):
+        rng = np.random.default_rng(2)
+        sites = rng.uniform(0, 20_000, (1000, 2))
+        a = self._sites_channel(sites, (0.0, 0.0), rng)
+        b = self._sites_channel(sites, (25.3, -8.1), rng)
+        b_before = b.copy()
+        aligned, infos, (shift_x, shift_y) = postprocess.align_from_points(
+            [a, b], [info, info], return_shifts=True
+        )
+        assert shift_x[0] == shift_y[0] == 0
+        entry = infos[1][-1]
+        error_x = entry["Shift x uncertainty (nm)"]
+        error_y = entry["Shift y uncertainty (nm)"]
+        assert 0 < error_x < 0.3 and 0 < error_y < 0.3
+        assert shift_x[1] == pytest.approx(25.3, abs=4 * error_x)
+        assert shift_y[1] == pytest.approx(-8.1, abs=4 * error_y)
+        np.testing.assert_allclose(
+            aligned[1]["x"].to_numpy(), b["x"].to_numpy() - shift_x[1]
+        )
+        assert entry["Method"] == "Points"
+        assert entry["Max. shift (nm)"] == 500.0
+        assert entry["Shift x (nm)"] == pytest.approx(shift_x[1])
+        assert infos[0][-1]["Shift x uncertainty (nm)"] == 0
+        pd.testing.assert_frame_equal(b, b_before)  # not modified
+
+    def test_align_points_matches_align_from_points(self, locs_copy, info):
+        a, b = self._halves(locs_copy, -40.0, 12.0)
+        aligned, infos, shifts = postprocess.align(
+            [a, b],
+            [info, info],
+            method="points",
+            max_shift=300.0,
+            return_shifts=True,
+        )
+        expected, expected_infos, expected_shifts = (
+            postprocess.align_from_points(
+                [a, b], [info, info], max_shift=300.0, return_shifts=True
+            )
+        )
+        for out, exp in zip(aligned, expected):
+            pd.testing.assert_frame_equal(out, exp)
+        for shift, exp in zip(shifts, expected_shifts, strict=True):
+            np.testing.assert_array_equal(shift, exp)
+        assert infos[1][-1]["Max. shift (nm)"] == 300.0
+
+    @staticmethod
+    def _sites_channel(sites, shift, rng):
+        """Ten localizations (6 nm precision) at each of ``sites``,
+        shifted by ``shift`` nm, and random ones."""
+        points = np.repeat(sites, 10, axis=0) + rng.normal(
+            0, 6, (10 * len(sites), 2)
+        )
+        points = np.vstack([points, rng.uniform(0, 20_000, (2000, 2))])
+        points = points + shift
+        return pd.DataFrame(
+            {
+                "frame": np.zeros(len(points), dtype=np.uint32),
+                "x": points[:, 0].astype(np.float32),
+                "y": points[:, 1].astype(np.float32),
+            }
+        )
+
+    def test_align_from_points_without_common_structures(self, info):
+        """A pair of channels without common structures is left out; the
+        shifts are found through the other pairs."""
+        rng = np.random.default_rng(1)
+        sites, other = rng.uniform(0, 20_000, (2, 1000, 2))
+        channels = [
+            self._sites_channel(sites, (0.0, 0.0), rng),
+            pd.concat(
+                [
+                    self._sites_channel(sites, (20.0, 5.0), rng),
+                    self._sites_channel(other, (20.0, 5.0), rng),
+                ]
+            ),
+            self._sites_channel(other, (-15.0, 30.0), rng),
+        ]
+        _, infos, (shift_x, shift_y) = postprocess.align_from_points(
+            channels, [info] * 3, return_shifts=True
+        )
+        np.testing.assert_allclose(shift_x, [0, 20, -15], atol=0.5)
+        np.testing.assert_allclose(shift_y, [0, 5, 30], atol=0.5)
+        # the third channel inherits the uncertainty of the second
+        errors = [entry[-1]["Shift x uncertainty (nm)"] for entry in infos]
+        assert errors[2] > errors[1] > 0
+        with pytest.raises(ValueError, match="could not be found"):
+            postprocess.align_from_points(
+                [channels[0], channels[2]], [info] * 2
+            )
+
+    def test_align_from_points_invalid_arguments(self, locs_copy, info):
+        with pytest.raises(ValueError, match="max_shift"):
+            postprocess.align_from_points(
+                [locs_copy, locs_copy], [info, info], max_shift=0
+            )
+        with pytest.raises(ValueError, match="two channels"):
+            postprocess.align_from_points([locs_copy], [info])
+        with pytest.raises(ValueError, match="only used with"):
+            postprocess.align(
+                [locs_copy, locs_copy],
+                [info, info],
+                method="points",
+                picks=[(0.0, 0.0)],
+            )
+
     def test_align_rcc_converges(self, locs_copy, info):
         a = locs_copy
         b = a.copy()
@@ -2061,7 +2738,7 @@ class TestAlign:
     def test_align_from_picked_invalid_shape_raises(
         self, locs_copy, info, origami_picks
     ):
-        with pytest.raises(AssertionError):
+        with pytest.raises(ValueError, match="Unrecognized pick shape"):
             postprocess.align_from_picked(
                 [locs_copy, locs_copy.copy()],
                 [info, info],
@@ -3503,3 +4180,452 @@ class TestNndDistributions:
             )
         with pytest.raises(ValueError, match="r_max"):
             postprocess.nnd_distributions(a, self.INFO, r_max=0)
+
+
+class TestKnnCsrDistributions:
+    @pytest.mark.parametrize("dim, density", [(2, 1e-4), (3, 1e-6)])
+    @pytest.mark.parametrize("k", [1, 2, 5])
+    def test_pdf_is_the_derivative_of_the_cdf(self, k, dim, density):
+        r = np.linspace(0.0, 400.0, 40_001)
+        pdf = postprocess.knn_csr_pdf(r, density, k=k, dim=dim)
+        cdf = postprocess.knn_csr_cdf(r, density, k=k, dim=dim)
+        integral = np.concatenate(
+            [[0.0], np.cumsum((pdf[1:] + pdf[:-1]) / 2 * np.diff(r))]
+        )
+        np.testing.assert_allclose(integral, cdf, atol=1e-6)
+        assert cdf[-1] == pytest.approx(1.0, abs=1e-6)
+
+    def test_nearest_neighbor(self):
+        r = np.array([10.0, 50.0, 100.0])
+        density = 1e-4  # 100 per um^2
+        np.testing.assert_allclose(
+            postprocess.knn_csr_cdf(r, density),
+            1 - np.exp(-density * np.pi * r**2),
+        )
+        np.testing.assert_allclose(
+            postprocess.knn_csr_pdf(r, density),
+            2 * np.pi * density * r * np.exp(-density * np.pi * r**2),
+        )
+        np.testing.assert_allclose(
+            postprocess.knn_csr_cdf(r, 1e-6, dim=3),
+            1 - np.exp(-1e-6 * 4 / 3 * np.pi * r**3),
+        )
+
+    def test_scalars_and_negative_distances(self):
+        assert isinstance(postprocess.knn_csr_pdf(20.0, 1e-4), float)
+        assert postprocess.knn_csr_pdf(-1.0, 1e-4) == 0.0
+        assert postprocess.knn_csr_cdf(-1.0, 1e-4) == 0.0
+        # no overflow for distant neighbors
+        assert postprocess.knn_csr_pdf(1e6, 1e-4, k=3) == 0.0
+
+    def test_invalid_parameters(self):
+        with pytest.raises(ValueError, match="density"):
+            postprocess.knn_csr_pdf(1.0, 0.0)
+        with pytest.raises(ValueError, match="k must"):
+            postprocess.knn_csr_cdf(1.0, 1e-4, k=0)
+        with pytest.raises(ValueError, match="k must"):
+            postprocess.knn_csr_cdf(1.0, 1e-4, k=1.5)
+        with pytest.raises(ValueError, match="dim"):
+            postprocess.knn_csr_pdf(1.0, 1e-4, dim=1)
+
+
+class TestKnnDensity:
+    INFO = TestRipleyH.INFO
+    SIZE = 10_000.0
+
+    def _random(self, n, seed, z=False):
+        rng = np.random.default_rng(seed)
+        locs = _ripley_locs(*rng.uniform(0, self.SIZE, size=(2, n)))
+        if z:
+            locs["z"] = rng.uniform(-400, 400, n)
+        return locs
+
+    def test_random_molecules_give_the_count_density(self):
+        locs = self._random(10_000, 0)
+        result = postprocess.knn_density(locs, self.INFO, n_simulations=19)
+        count_density = 10_000 / self.SIZE**2
+        assert result["count_density"] == pytest.approx(count_density)
+        np.testing.assert_allclose(
+            result["densities"], count_density, rtol=0.03
+        )
+        assert result["density"] == pytest.approx(count_density, rel=0.02)
+        np.testing.assert_array_equal(result["k"], [1, 2, 3, 4, 5])
+        assert result["n_molecules"] == 10_000
+        # the distances of each order are exact or censored
+        np.testing.assert_array_equal(
+            result["n_distances"] + result["n_censored"], 10_000
+        )
+        assert (result["n_censored"] > 0).all()
+        # standard errors of about 1 / sqrt(k n)
+        relative_se = result["densities_se"] / result["densities"]
+        assert ((relative_se > 0.002) & (relative_se < 0.02)).all()
+        assert np.median(result["p_values"]) > 0.2
+        # the histograms follow the fitted distributions
+        edges = result["edges"]
+        for i, k in enumerate(result["k"]):
+            cumulative = np.cumsum(result["histograms"][i] * np.diff(edges))
+            expected = postprocess.knn_csr_cdf(
+                edges[1:], result["densities"][i], k=k
+            )
+            np.testing.assert_allclose(cumulative, expected, atol=0.01)
+
+    def test_edge_correction_removes_the_bias_in_small_picks(self):
+        locs = self._random(20_000, 1)
+        centers = np.linspace(1000, 9000, 5)
+        picks = [(x, y) for x in centers for y in centers]
+        kwargs = dict(
+            picks=picks, pick_shape="Circle", pick_size=1500, n_simulations=0
+        )
+        corrected = postprocess.knn_density(locs, self.INFO, **kwargs)
+        uncorrected = postprocess.knn_density(
+            locs, self.INFO, edge_correction=False, **kwargs
+        )
+        count_density = corrected["count_density"]
+        np.testing.assert_allclose(
+            corrected["densities"], count_density, rtol=0.05
+        )
+        # neighbors outside the picks are missed, more so for larger k
+        assert uncorrected["densities"][0] < 0.96 * count_density
+        assert (np.diff(uncorrected["densities"]) < 0).all()
+        assert not uncorrected["n_censored"].any()
+        assert not uncorrected["edge_correction"]
+        n_picked = sum(
+            len(pick)
+            for pick in postprocess.picked_locs(
+                locs,
+                self.INFO,
+                picks=picks,
+                pick_shape="Circle",
+                pick_size=1500,
+            )
+        )
+        assert corrected["n_molecules"] == n_picked
+        assert corrected["n_regions"] == 25
+
+    def test_clustered_molecules(self):
+        rng = np.random.default_rng(2)
+        centers = rng.uniform(500, self.SIZE - 500, size=(1000, 2))
+        xy = np.repeat(centers, 5, axis=0) + rng.normal(0, 20, (5000, 2))
+        result = postprocess.knn_density(
+            _ripley_locs(*xy.T), self.INFO, n_simulations=19
+        )
+        densities = result["densities"]
+        assert densities[0] > 5 * result["count_density"]
+        # the fifth neighbor lies in another cluster
+        assert densities[4] < 0.2 * densities[3]
+        np.testing.assert_allclose(result["p_values"], 1 / 20)
+
+    def test_r_min_leaves_out_short_distances(self):
+        locs = self._random(10_000, 3)
+        result = postprocess.knn_density(
+            locs, self.INFO, r_min=30, n_simulations=0
+        )
+        np.testing.assert_allclose(
+            result["densities"], 10_000 / self.SIZE**2, rtol=0.03
+        )
+        # about 25 % of the nearest neighbors are closer than 30 nm
+        assert 0.65 < result["n_distances"][0] / 10_000 < 0.8
+        assert result["r_min"] == 30
+        assert (result["histograms"][:, result["edges"][1:] <= 30] == 0).all()
+
+    def test_pooled_orders(self):
+        rng = np.random.default_rng(4)
+        centers = rng.uniform(500, self.SIZE - 500, size=(2000, 2))
+        xy = np.repeat(centers, 2, axis=0) + rng.normal(0, 10, (4000, 2))
+        locs = _ripley_locs(*xy.T)
+        all_orders = postprocess.knn_density(locs, self.INFO, n_simulations=0)
+        without_pairs = postprocess.knn_density(
+            locs, self.INFO, k_min=2, n_simulations=0
+        )
+        # the pooled fit lies between the fits of its orders
+        assert (
+            without_pairs["densities"][1:].min()
+            <= without_pairs["density"]
+            <= without_pairs["densities"][1:].max()
+        )
+        assert without_pairs["density"] < all_orders["density"]
+        assert without_pairs["k_min"] == 2
+
+    def test_3d(self):
+        locs = self._random(10_000, 5, z=True)
+        result = postprocess.knn_density(
+            locs, self.INFO, use_z=True, n_simulations=0
+        )
+        count_density = 10_000 / (self.SIZE**2 * 800)
+        assert result["count_density"] == pytest.approx(
+            count_density, rel=0.01
+        )
+        np.testing.assert_allclose(
+            result["densities"], count_density, rtol=0.04
+        )
+        uncorrected = postprocess.knn_density(
+            locs,
+            self.INFO,
+            use_z=True,
+            edge_correction=False,
+            n_simulations=0,
+        )
+        assert (uncorrected["densities"] < 0.95 * count_density).all()
+        with pytest.raises(ValueError, match="requires z"):
+            postprocess.knn_density(
+                locs.drop(columns="z"), self.INFO, use_z=True
+            )
+
+    def test_simulations(self):
+        locs = self._random(2000, 6)
+        first = postprocess.knn_density(locs, self.INFO, n_simulations=9)
+        second = postprocess.knn_density(locs, self.INFO, n_simulations=9)
+        np.testing.assert_array_equal(first["p_values"], second["p_values"])
+        assert first["n_simulations"] == 9
+        assert ((first["p_values"] >= 0.1) & (first["p_values"] <= 1)).all()
+        none = postprocess.knn_density(locs, self.INFO, n_simulations=0)
+        assert none["p_values"] is None
+        assert none["densities_se"] is None and none["density_se"] is None
+        np.testing.assert_array_equal(none["densities"], first["densities"])
+
+    def test_regions_without_neighbors(self):
+        locs = _ripley_locs([1000.0, 1050.0, 5000.0], [1000.0, 1000.0, 5000.0])
+        picks = [(1000, 1000), (5000, 5000), (8000, 8000)]
+        result = postprocess.knn_density(
+            locs,
+            self.INFO,
+            picks=picks,
+            pick_shape="Circle",
+            pick_size=1000,
+            k_max=2,
+            n_simulations=0,
+        )
+        assert result["n_molecules"] == 3
+        assert result["n_distances"][0] == 2
+        assert np.isnan(result["densities"][1])  # no second neighbors
+        with pytest.raises(ValueError, match="No region contains"):
+            postprocess.knn_density(
+                locs,
+                self.INFO,
+                picks=[(8000, 8000)],
+                pick_shape="Circle",
+                pick_size=1000,
+            )
+        with pytest.raises(ValueError, match="r_min"):
+            postprocess.knn_density(
+                locs,
+                self.INFO,
+                picks=picks,
+                pick_shape="Circle",
+                pick_size=1000,
+                r_min=100,
+            )
+
+    def test_warns_for_localizations(self):
+        locs = self._random(500, 7).drop(columns="n_events")
+        with pytest.warns(UserWarning, match="not molecules"):
+            postprocess.knn_density(locs, self.INFO, n_simulations=0)
+
+    def test_plot_and_tables(self):
+        result = postprocess.knn_density(
+            self._random(2000, 8), self.INFO, r_min=10, n_simulations=4
+        )
+        fig = postprocess.plot_knn_density(result)
+        assert len(fig.axes) == 2
+        assert "4 simulations" in fig.get_suptitle()
+        curves, summary = postprocess._knn_density_tables(result)
+        assert len(curves) == 50
+        assert {"k1_per_nm", "k1_csr_per_nm", "k5_csr_per_nm"} <= set(
+            curves.columns
+        )
+        assert list(summary["estimate"]) == [
+            "k=1",
+            "k=2",
+            "k=3",
+            "k=4",
+            "k=5",
+            "pooled k=1-5",
+            "molecules/area",
+        ]
+        np.testing.assert_allclose(
+            summary["density_per_um2"][:5], result["densities"] * 1e6
+        )
+        assert summary["n_distances"].dtype == "Int64"
+
+    @pytest.mark.parametrize(
+        "kwargs, match",
+        [
+            (dict(k_max=0), "k_max"),
+            (dict(k_min=3, k_max=2), "k_min"),
+            (dict(r_min=-1.0), "r_min"),
+            (dict(r_min=50.0, r_max=40.0), "r_max"),
+            (dict(steps=0), "steps"),
+            (dict(n_simulations=-1), "n_simulations"),
+            (dict(use_z=True, z_range=(1.0, 0.0)), "z_range"),
+        ],
+    )
+    def test_invalid_parameters(self, kwargs, match):
+        locs = self._random(100, 9, z=True)
+        with pytest.raises(ValueError, match=match):
+            postprocess.knn_density(locs, self.INFO, **kwargs)
+
+
+def _filaments(precision: float, seed: int = 0, size: float = 5000.0):
+    """Localizations (nm) along 40 random straight filaments in a
+    ``size`` x ``size`` field, 0.6 molecules per nm, each localized 8
+    times with ``precision``."""
+    rng = np.random.default_rng(seed)
+    xs, ys = [], []
+    for _ in range(40):
+        x0, y0 = rng.uniform(0, size, 2)
+        angle = rng.uniform(0, np.pi)
+        t = rng.uniform(-0.75 * size, 0.75 * size, int(0.9 * size))
+        x = np.repeat(x0 + t * np.cos(angle), 8)
+        y = np.repeat(y0 + t * np.sin(angle), 8)
+        xs.append(x + rng.normal(0, precision, len(x)))
+        ys.append(y + rng.normal(0, precision, len(y)))
+    x, y = np.concatenate(xs), np.concatenate(ys)
+    inside = (x > 0) & (x < size) & (y > 0) & (y < size)
+    n = int(inside.sum())
+    locs = pd.DataFrame(
+        {
+            "frame": rng.integers(0, 1000, n).astype(np.uint32),
+            "x": x[inside].astype(np.float32),
+            "y": y[inside].astype(np.float32),
+            "lpx": np.full(n, precision, np.float32),
+            "lpy": np.full(n, precision, np.float32),
+        }
+    )
+    info = [{"Width": 50, "Height": 50, "Pixelsize": 100.0, "Frames": 1000}]
+    return locs, info
+
+
+class TestDecorrelation:
+    @pytest.fixture(scope="class")
+    def sharp(self):
+        locs, info = _filaments(4.0)
+        return locs, info, postprocess.decorrelation(locs, info)
+
+    def test_resolution_follows_the_precision_and_the_frc(self, sharp):
+        locs, info, result = sharp
+        blurred_locs, _ = _filaments(12.0)
+        blurred = postprocess.decorrelation(blurred_locs, info)
+        assert blurred["resolution"] / result["resolution"] == pytest.approx(
+            3.0, rel=0.3
+        )
+        for data, precision, res in (
+            (locs, 4.0, result),
+            (blurred_locs, 12.0, blurred),
+        ):
+            frc = postprocess.frc(
+                data, info, viewport=((0, 0), (5000, 5000)), lp=precision
+            )
+            assert res["resolution"] == pytest.approx(
+                frc["resolution"], rel=0.15
+            )
+
+    def test_smallest_resolution_over_the_pixel_sizes(self, sharp):
+        locs, info, result = sharp
+        np.testing.assert_allclose(
+            result["pixel_sizes"], postprocess.DECORRELATION_PIXEL_SIZES
+        )
+        assert result["resolution"] == np.nanmin(result["resolutions"])
+        best = list(result["pixel_sizes"]).index(result["pixel_size"])
+        assert result["resolutions"][best] == result["resolution"]
+        assert len(result["results"]) == len(result["pixel_sizes"])
+        # large pixels: about twice the pixel size (sampling limited)
+        assert result["resolutions"][-1] == pytest.approx(
+            2 * result["pixel_sizes"][-1], rel=0.3
+        )
+        assert result["n_locs"] == len(locs)
+        assert not len(result["skipped_pixel_sizes"])
+        # smaller pixels than the best were rendered
+        assert not result["pixel_size_limited"]
+
+    def test_too_large_pixels_limit_the_resolution(self, sharp):
+        locs, info, _ = sharp
+        result = postprocess.decorrelation(locs, info, pixel_size=16.0)
+        assert result["resolution"] == pytest.approx(32.0, rel=0.3)
+        assert result["pixel_size_limited"]
+        fig = postprocess.plot_decorrelation(result)
+        assert "limited by the pixel size" in fig.get_suptitle()
+
+    def test_one_pixel_size(self, sharp):
+        locs, info, _ = sharp
+        result = postprocess.decorrelation(
+            locs,
+            info,
+            viewport=((0, 0), (2500, 2500)),
+            pixel_size=4.0,
+            n_radii=30,
+            n_filters=5,
+        )
+        np.testing.assert_array_equal(result["pixel_sizes"], [4.0])
+        assert result["results"][0]["curves"].shape == (6, 30)
+        assert result["pixel_size"] == 4.0
+        assert result["n_locs"] < len(locs)
+
+    def test_pixel_sizes_outside_the_image_limits_are_skipped(self, sharp):
+        locs, info, _ = sharp
+        result = postprocess.decorrelation(
+            locs, info, pixel_size=[2.0, 8.0, 200.0], max_image_size=1024
+        )
+        # 5000 nm / 2 nm > 1024 pixels; 5000 nm / 200 nm < 32 pixels
+        np.testing.assert_array_equal(result["pixel_sizes"], [8.0])
+        np.testing.assert_array_equal(
+            result["skipped_pixel_sizes"], [2.0, 200.0]
+        )
+        with pytest.raises(ValueError, match="No pixel size"):
+            postprocess.decorrelation(locs, info, pixel_size=200.0)
+        with pytest.raises(ValueError, match="positive"):
+            postprocess.decorrelation(locs, info, pixel_size=[4.0, -1.0])
+        with pytest.raises(ValueError, match="empty"):
+            postprocess.decorrelation(locs, info, viewport=((0, 0), (0, 1000)))
+
+    def test_bilinear_rendering(self):
+        x = np.array([10.0, 13.0])
+        y = np.array([10.0, 10.0])
+        image = postprocess._render_bilinear(x, y, 0.0, 0.0, 4.0, (8, 8))
+        assert image.sum() == pytest.approx(2.0)
+        # at a pixel center (10 nm = center of pixel 2): one pixel
+        assert image[2, 2] == pytest.approx(1.0 + 0.25)
+        # 13 nm lies 3/4 of the way from pixel 2 to pixel 3
+        assert image[2, 3] == pytest.approx(0.75)
+
+    def test_sample_area_and_density(self):
+        # a dense 1 x 1 um square of localizations
+        grid = np.arange(0.5, 1000.0, 1.0)
+        x, y = (v.ravel() for v in np.meshgrid(grid, grid))
+        assert postprocess._sample_area(x, y) == pytest.approx(1e6, rel=0.03)
+        locs = pd.DataFrame(
+            {"frame": np.zeros(len(x), np.uint32), "x": x, "y": y}
+        )
+        info = [{"Width": 10, "Height": 10, "Pixelsize": 100.0}]
+        result = postprocess.decorrelation(locs, info, pixel_size=16.0)
+        assert result["density"] == pytest.approx(1e6, rel=0.03)
+
+    def test_no_resolution_without_structure(self):
+        rng = np.random.default_rng(0)
+        x, y = rng.uniform(0, 5000, (2, 2000))
+        locs = pd.DataFrame(
+            {"frame": np.zeros(2000, np.uint32), "x": x, "y": y}
+        )
+        info = [{"Width": 50, "Height": 50, "Pixelsize": 100.0}]
+        result = postprocess.decorrelation(locs, info, pixel_size=[16.0])
+        assert np.isnan(result["resolution"])
+        assert np.isnan(result["pixel_size"])
+        fig = postprocess.plot_decorrelation(result)
+        assert "n/a" in fig.get_suptitle()
+
+    def test_plot_and_tables(self, sharp):
+        _, _, result = sharp
+        fig = postprocess.plot_decorrelation(result)
+        assert len(fig.axes) == 2  # curves and resolution by pixel size
+        assert f"{result['resolution']:.1f} nm" in fig.get_suptitle()
+        sizes, curves = postprocess._decorrelation_tables(result)
+        assert list(sizes.columns) == [
+            "pixel_size_nm",
+            "resolution_nm",
+            "cutoff",
+            "amplitude",
+        ]
+        assert len(sizes) == len(result["pixel_sizes"])
+        assert curves.shape == (50, 12)  # frequency, unfiltered, 10 filters
+        # an image result plots on one panel
+        image_result = result["results"][0]
+        assert len(postprocess.plot_decorrelation(image_result).axes) == 1

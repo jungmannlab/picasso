@@ -12,7 +12,7 @@ legend, minimap and rotation widgets, plus PDF/SVG export.
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Literal, TYPE_CHECKING
+from typing import Callable, Literal, TYPE_CHECKING
 
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -47,6 +47,19 @@ LINE_STYLES = ("Solid", "Dashed", "Dotted", "Dash-dot")
 SCALEBAR_FONT_SIZE = 20
 LEGEND_FONT_SIZE = 16
 ROTATION_ANGLES_FONT_SIZE = 12
+#: Positions of the scale bar in the image, see ``draw_scalebar``.
+SCALEBAR_POSITIONS = (
+    "bottom right",
+    "bottom center",
+    "bottom left",
+    "top right",
+    "top center",
+    "top left",
+)
+#: Where the scale bar's length is printed, see ``draw_scalebar``.
+SCALEBAR_LABEL_POSITIONS = ("above", "below")
+#: Units of the scale bar's length, see ``draw_scalebar``.
+SCALEBAR_UNITS = ("nm", "um", "auto")
 
 
 @dataclass(frozen=True)
@@ -337,19 +350,42 @@ def get_rectangle_pick_polygon(
     return p
 
 
+def _pick_labels(picks: list, labels: list[int] | None) -> list[str]:
+    """The text annotating each pick: its index in ``picks``, or in the
+    full list of picks a subset of which is drawn."""
+    if labels is None:
+        labels = range(len(picks))
+    return [str(_) for _ in labels]
+
+
+def _per_pick_sizes(
+    picks: list,
+    pick_size: float | list[float],
+    image: QtGui.QImage,
+    viewport: tuple[tuple[float, float], tuple[float, float]],
+) -> lib.FloatArray1D:
+    """The size of each pick (one size for all picks, or one per pick)
+    in display pixels."""
+    sizes = np.asarray(pick_size, dtype=np.float64)
+    sizes = np.broadcast_to(sizes, (len(picks),))
+    return sizes * image.width() / viewport_width(viewport)
+
+
 def _draw_picks_circle(
     image: QtGui.QImage,
     viewport: list[tuple[float, float], tuple[float, float]],  # nm
     picks: list[tuple],  # pick coords in nm
-    pick_size: float,  # diameter in nm
+    pick_size: float | list[float],  # diameter(s) in nm
     point_picks: bool = False,
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
     style: OverlayStyle | None = None,
+    labels: list[int] | None = None,  # annotations, default: indices
 ) -> QtGui.QImage:
     """Draw circular picks onto the image of rendered localizations.
     See ``draw_picks`` for more details."""
     style = _overlay_style(style, color)
+    labels = _pick_labels(picks, labels)
     painter = style.painter(image)
     if point_picks:  # draw circular picks as points
         painter.setBrush(QtGui.QBrush(style.qcolor()))
@@ -358,10 +394,10 @@ def _draw_picks_circle(
             cx, cy = map_to_view(*pick, image.size(), viewport)
             painter.drawEllipse(QtCore.QPoint(cx, cy), 3, 3)
             if annotate_picks:
-                painter.drawText(cx + 20, cy + 20, str(i))
+                painter.drawText(cx + 20, cy + 20, labels[i])
 
     else:  # draw circles
-        d = int(pick_size * image.width() / viewport_width(viewport))
+        diameters = _per_pick_sizes(picks, pick_size, image, viewport)
         fill = style.fill()
         if fill is not None:
             painter.setBrush(fill)
@@ -376,10 +412,11 @@ def _draw_picks_circle(
                 continue
 
             # convert from nm to display pixels
+            d = int(diameters[i])
             cx, cy = map_to_view(*pick, image.size(), viewport)
             painter.drawEllipse(int(cx - d / 2), int(cy - d / 2), d, d)
             if annotate_picks:
-                painter.drawText(int(cx + d / 2), int(cy + d / 2), str(i))
+                painter.drawText(int(cx + d / 2), int(cy + d / 2), labels[i])
     painter.end()
     return image
 
@@ -388,15 +425,17 @@ def _draw_picks_rectangle(
     image: QtGui.QImage,
     viewport: tuple[tuple[float, float], tuple[float, float]],  # nm
     picks: list[tuple],  # picks in nm
-    pick_size: float,  # width in nm
+    pick_size: float | list[float],  # width(s) in nm
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
     style: OverlayStyle | None = None,
+    labels: list[int] | None = None,  # annotations, default: indices
 ) -> QtGui.QImage:
     """Draw rectangular picks onto the image of rendered
     localizations. See ``draw_picks`` for more details."""
     style = _overlay_style(style, color)
-    w = pick_size * image.width() / viewport_width(viewport)
+    labels = _pick_labels(picks, labels)
+    widths = _per_pick_sizes(picks, pick_size, image, viewport)
     painter = style.painter(image)
     fill = style.fill()
     if fill is not None:
@@ -407,14 +446,14 @@ def _draw_picks_rectangle(
         end_x, end_y = map_to_view(*pick[1], image.size(), viewport)
         # draw a rectangle
         polygon, most_right = get_rectangle_pick_polygon(
-            start_x, start_y, end_x, end_y, w, return_most_right=True
+            start_x, start_y, end_x, end_y, widths[i], return_most_right=True
         )
         painter.drawPolygon(polygon)
         if style.center_line:
             # draw a straight line across the pick, over the fill
             painter.drawLine(start_x, start_y, end_x, end_y)
         if annotate_picks:
-            painter.drawText(int(most_right[0]), int(most_right[1]), str(i))
+            painter.drawText(int(most_right[0]), int(most_right[1]), labels[i])
     painter.end()
     return image
 
@@ -426,10 +465,12 @@ def _draw_picks_polygon(
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
     style: OverlayStyle | None = None,
+    labels: list[int] | None = None,  # annotations, default: indices
 ) -> QtGui.QImage:
     """Draw polygon picks onto the image of rendered localizations. See
     ``draw_picks`` for more details."""
     style = _overlay_style(style, color)
+    labels = _pick_labels(picks, labels)
     painter = style.painter(image)
     fill = style.fill()
     for i, pick in enumerate(picks):
@@ -462,7 +503,7 @@ def _draw_picks_polygon(
             painter.drawText(
                 cx + int(POLYGON_POINTER_SIZE / 2) + 10,
                 cy + int(POLYGON_POINTER_SIZE / 2) + 10,
-                str(i),
+                labels[i],
             )
     painter.end()
     return image
@@ -472,14 +513,16 @@ def _draw_picks_square(
     image: QtGui.QImage,
     viewport: tuple[tuple[float, float], tuple[float, float]],  # nm
     picks: list[tuple],  # picks in nm
-    pick_size: float,  # side length in nm
+    pick_size: float | list[float],  # side length(s) in nm
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
     style: OverlayStyle | None = None,
+    labels: list[int] | None = None,  # annotations, default: indices
 ) -> QtGui.QImage:
     """Draw square picks onto the image of rendered localizations."""
     style = _overlay_style(style, color)
-    w = int(pick_size * image.width() / viewport_width(viewport))
+    labels = _pick_labels(picks, labels)
+    side_lengths = _per_pick_sizes(picks, pick_size, image, viewport)
     painter = style.painter(image)
     fill = style.fill()
     if fill is not None:
@@ -495,13 +538,14 @@ def _draw_picks_square(
             continue
 
         # convert from nm to display pixels
+        w = int(side_lengths[i])
         cx, cy = map_to_view(*pick, image.size(), viewport)
         painter.drawRect(int(cx - w / 2), int(cy - w / 2), w, w)
 
         # annotate picks
         if annotate_picks:
             painter.drawText(
-                int(cx + w / 2) + 10, int(cy + w / 2) + 10, str(i)
+                int(cx + w / 2) + 10, int(cy + w / 2) + 10, labels[i]
             )
     painter.end()
     return image
@@ -514,10 +558,12 @@ def _draw_picks_box(
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
     style: OverlayStyle | None = None,
+    labels: list[int] | None = None,  # annotations, default: indices
 ) -> QtGui.QImage:
     """Draw box picks onto the image of rendered localizations. See
     ``draw_picks`` for more details."""
     style = _overlay_style(style, color)
+    labels = _pick_labels(picks, labels)
     painter = style.painter(image)
     fill = style.fill()
     if fill is not None:
@@ -541,7 +587,7 @@ def _draw_picks_box(
 
         # annotate picks
         if annotate_picks:
-            painter.drawText(x1 + 10, y1 + 10, str(i))
+            painter.drawText(x1 + 10, y1 + 10, labels[i])
     painter.end()
     return image
 
@@ -609,11 +655,13 @@ def _draw_picks_brush(
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
     style: OverlayStyle | None = None,
+    labels: list[int] | None = None,  # annotations, default: indices
 ) -> QtGui.QImage:
     """Draw brush picks onto the image of rendered localizations, by
     default as a translucent highlight with a solid outline. See
     ``draw_picks`` for more details."""
     style = _overlay_style(style, color)
+    labels = _pick_labels(picks, labels)
     fill = style.fill(default_opacity=BRUSH_FILL_ALPHA / 255)
     painter = style.painter(image)
     painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
@@ -641,7 +689,7 @@ def _draw_picks_brush(
             width, X, Y = lib.brush_stroke_arrays(pick[-1])
             cx, cy = map_to_view(X[-1], Y[-1], image.size(), viewport)
             r = int(width / 2 * image.width() / viewport_width(viewport))
-            painter.drawText(cx + r + 10, cy + r + 10, str(i))
+            painter.drawText(cx + r + 10, cy + r + 10, labels[i])
     painter.end()
     return image
 
@@ -650,11 +698,12 @@ def _draw_picks_brush(
 def draw_picks(
     image: QtGui.QImage,
     viewport: tuple[tuple[float, float], tuple[float, float]],  # nm
-    pick_shape: Literal[
-        "Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"
-    ],
+    pick_shape: (
+        Literal["Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"]
+        | list[str]
+    ),
     picks: list[tuple],  # pick coords in nm
-    pick_size: float | None,  # diameter in nm
+    pick_size: float | list[float | None] | None,  # diameter in nm
     point_picks: bool = False,
     annotate_picks: bool = False,
     color: QtGui.QColor | None = None,  # default: yellow
@@ -670,20 +719,23 @@ def draw_picks(
     viewport : tuple
         Current field of view in nm, ``((y_min, x_min),
         (y_max, x_max))``.
-    pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", "Brush"}
-        Shape of the picks to be drawn.
+    pick_shape : {"Circle", "Rectangle", "Polygon", "Square", "Box", \
+            "Brush"} or list of str
+        Shape of the picks to be drawn, or the shape of each pick (see
+        ``lib.pick_shapes_and_sizes``).
     picks : list of tuples
         List of picks, where each pick is a tuple specifying the pick
         coordinates. Note: this must match the format of the given pick
         shape.
-    pick_size : float or None
-        Size of the picks in nm. For "Circle", this is the
-        diameter; for "Rectangle", this is the width; for "Square", this
-        is the side length. This parameter is ignored for "Polygon",
-        "Box" and "Brush" picks, which carry their own extent.
+    pick_size : float, list of float or None
+        Size of the picks in nm, or the size of each pick. For "Circle",
+        this is the diameter; for "Rectangle", this is the width; for
+        "Square", this is the side length. This parameter is ignored for
+        "Polygon", "Box" and "Brush" picks, which carry their own
+        extent.
     point_picks : bool, optional
-        If True and pick_shape is "Circle", draw picks as points instead
-        of circles. Default is False.
+        If True, draw circular picks as points instead of circles.
+        Default is False.
     annotate_picks : bool, optional
         If True, annotate each pick with its index in the picks list.
         Default is False.
@@ -706,66 +758,80 @@ def draw_picks(
         If ``pick_shape`` is not recognized.
     """
     image = image.copy()
+    if isinstance(pick_shape, str):
+        if pick_shape not in lib.PICK_SHAPES:
+            raise ValueError(f"Unknown pick shape: {pick_shape}")
+        return _draw_picks_of_shape(
+            image,
+            viewport,
+            pick_shape,
+            picks,
+            pick_size,
+            None,
+            point_picks,
+            annotate_picks,
+            color,
+            style,
+        )
+    if len(pick_shape) != len(picks):
+        raise ValueError("Give one pick shape, or one shape per pick.")
+    sizes = np.broadcast_to(np.asarray(pick_size, dtype=object), len(picks))
+    for shape in lib.PICK_SHAPES:
+        idx = [i for i, _ in enumerate(pick_shape) if _ == shape]
+        if idx:
+            image = _draw_picks_of_shape(
+                image,
+                viewport,
+                shape,
+                [picks[i] for i in idx],
+                [sizes[i] for i in idx],
+                idx,
+                point_picks,
+                annotate_picks,
+                color,
+                style,
+            )
+    unknown = set(pick_shape) - set(lib.PICK_SHAPES)
+    if unknown:
+        raise ValueError(f"Unknown pick shape: {unknown.pop()}")
+    return image
+
+
+def _draw_picks_of_shape(
+    image: QtGui.QImage,
+    viewport: tuple[tuple[float, float], tuple[float, float]],  # nm
+    pick_shape: str,
+    picks: list[tuple],
+    pick_size: float | list[float] | None,
+    labels: list[int] | None,
+    point_picks: bool,
+    annotate_picks: bool,
+    color: QtGui.QColor | None,
+    style: OverlayStyle | None,
+) -> QtGui.QImage:
+    """Draw picks of one shape onto ``image`` (in place), annotated with
+    ``labels`` (default: their indices). See ``draw_picks``."""
+    kwargs = dict(
+        viewport=viewport,
+        picks=picks,
+        annotate_picks=annotate_picks,
+        color=color,
+        style=style,
+        labels=labels,
+    )
     if pick_shape == "Circle":
         return _draw_picks_circle(
-            image,
-            viewport=viewport,
-            picks=picks,
-            pick_size=pick_size,
-            point_picks=point_picks,
-            annotate_picks=annotate_picks,
-            color=color,
-            style=style,
+            image, pick_size=pick_size, point_picks=point_picks, **kwargs
         )
     elif pick_shape == "Rectangle":
-        return _draw_picks_rectangle(
-            image,
-            viewport=viewport,
-            picks=picks,
-            pick_size=pick_size,
-            annotate_picks=annotate_picks,
-            color=color,
-            style=style,
-        )
+        return _draw_picks_rectangle(image, pick_size=pick_size, **kwargs)
     elif pick_shape == "Polygon":
-        return _draw_picks_polygon(
-            image,
-            viewport=viewport,
-            picks=picks,
-            annotate_picks=annotate_picks,
-            color=color,
-            style=style,
-        )
+        return _draw_picks_polygon(image, **kwargs)
     elif pick_shape == "Square":
-        return _draw_picks_square(
-            image,
-            viewport=viewport,
-            picks=picks,
-            pick_size=pick_size,
-            annotate_picks=annotate_picks,
-            color=color,
-            style=style,
-        )
+        return _draw_picks_square(image, pick_size=pick_size, **kwargs)
     elif pick_shape == "Box":
-        return _draw_picks_box(
-            image,
-            viewport=viewport,
-            picks=picks,
-            annotate_picks=annotate_picks,
-            color=color,
-            style=style,
-        )
-    elif pick_shape == "Brush":
-        return _draw_picks_brush(
-            image,
-            viewport=viewport,
-            picks=picks,
-            annotate_picks=annotate_picks,
-            color=color,
-            style=style,
-        )
-    else:
-        raise ValueError(f"Unknown pick shape: {pick_shape}")
+        return _draw_picks_box(image, **kwargs)
+    return _draw_picks_brush(image, **kwargs)
 
 
 @adjust_viewport_decorator
@@ -879,8 +945,15 @@ def draw_scalebar(
     color: QtGui.QColor | None = None,  # default: white
     display_height: int = 10,
     margin: tuple[int, int] = (35, 20),
-    text_spacer: int = 40,
     text_fontsize: int = SCALEBAR_FONT_SIZE,
+    *,
+    position: str = "bottom right",
+    label_position: Literal["above", "below"] = "above",
+    units: Literal["nm", "um", "auto"] = "nm",
+    font_family: str | None = None,
+    bold: bool = False,
+    italic: bool = False,
+    background_opacity: float = 0.0,
 ) -> QtGui.QImage:
     """Draw a scalebar into rendered localizations (QImage).
 
@@ -894,68 +967,232 @@ def draw_scalebar(
     scalebar_length_nm : int or float
         Scale bar length in nm.
     display_length : bool, optional
-        Whether to display scalebar length in nm. Default is True.
+        Whether to display scalebar length. Default is True.
     color : QColor, optional
         Color of the scalebar and text. Default is white.
     display_height : int, optional
         Thickness of the scalebar in display pixels. Default is 10.
     margin : tuple of int, optional
-        Margins from the right and bottom edges in display pixels.
-        Default is (35, 20).
-    text_spacer : int, optional
-        Spacing between the scalebar and the displayed length text in
-        display pixels. Only used if display_length is True. Default is
-        40.
+        Distances of the scale bar and its length from the nearest
+        vertical and horizontal edges of the image in display pixels.
+        The first is not used by the centered positions. Default is
+        (35, 20).
     text_fontsize : int, optional
         Font size of the displayed length text in display pixels. Only
         used if display_length is True. Default is 20.
+    position : str, optional
+        Where the scale bar is drawn, one of ``SCALEBAR_POSITIONS``,
+        e.g., "top left". Default is "bottom right".
+    label_position : {"above", "below"}, optional
+        Whether the length is printed above or below the bar. Only used
+        if display_length is True. Default is "above".
+    units : {"nm", "um", "auto"}, optional
+        Unit of the displayed length: nm, µm, or µm from 1 µm on and nm
+        below ("auto"). Only used if display_length is True. Default is
+        "nm".
+    font_family : str, optional
+        Font family of the displayed length, e.g., "Arial". If None or
+        unknown, the application's default font is used. Default is
+        None.
+    bold : bool, optional
+        Whether the displayed length is bold. Default is False.
+    italic : bool, optional
+        Whether the displayed length is italic. Default is False.
+    background_opacity : float, optional
+        Opacity of a box behind the scale bar and its length, from 0
+        (no box) to 1. The box is black behind a light and white behind
+        a dark scale bar. Default is 0.
 
     Returns
     -------
     image : QImage
         Image with the drawn scalebar.
+
+    Raises
+    ------
+    ValueError
+        If ``position``, ``label_position`` or ``units`` is unknown.
     """
+    painter = QtGui.QPainter(image)
+    try:
+        _paint_scalebar(
+            painter,
+            image.width(),
+            image.height(),
+            viewport,
+            scalebar_length_nm,
+            display_length=display_length,
+            color=color,
+            display_height=display_height,
+            margin=margin,
+            text_fontsize=text_fontsize,
+            position=position,
+            label_position=label_position,
+            units=units,
+            font_family=font_family,
+            bold=bold,
+            italic=italic,
+            background_opacity=background_opacity,
+        )
+    finally:
+        painter.end()
+    return image
+
+
+def _format_scalebar_length(
+    length_nm: int | float,
+    units: Literal["nm", "um", "auto"] = "nm",
+) -> str:
+    """Text printed next to a scale bar, e.g., ``"500 nm"`` or
+    ``"1.5 µm"``.
+
+    Parameters
+    ----------
+    length_nm : int or float
+        Length of the scale bar in nm.
+    units : {"nm", "um", "auto"}, optional
+        Unit of the text: nm, µm, or µm from 1 µm on and nm below
+        ("auto"). Default is "nm".
+
+    Returns
+    -------
+    text : str
+        The length with its unit.
+    """
+    if units == "um" or (units == "auto" and length_nm >= 1000):
+        return f"{round(length_nm / 1000, 3):.10g} µm"
+    return f"{round(length_nm, 3):.10g} nm"
+
+
+def _paint_scalebar(
+    painter: QtGui.QPainter,
+    width: int,
+    height: int,
+    viewport: tuple[tuple[float, float], tuple[float, float]],
+    scalebar_length_nm: int | float,
+    *,
+    display_length: bool = True,
+    color: QtGui.QColor | None = None,
+    display_height: int = 10,
+    margin: tuple[int, int] = (35, 20),
+    text_fontsize: int = SCALEBAR_FONT_SIZE,
+    position: str = "bottom right",
+    label_position: Literal["above", "below"] = "above",
+    units: Literal["nm", "um", "auto"] = "nm",
+    font_family: str | None = None,
+    bold: bool = False,
+    italic: bool = False,
+    background_opacity: float = 0.0,
+) -> None:
+    """Paint a scale bar with ``painter`` onto a device of ``width`` x
+    ``height`` display pixels that shows ``viewport`` (nm), e.g., the
+    viewport of a widget. See ``draw_scalebar`` for the parameters; the
+    painter's state is restored afterwards."""
+    if position not in SCALEBAR_POSITIONS:
+        raise ValueError(
+            f"Unknown position {position!r}, use one of "
+            f"{', '.join(SCALEBAR_POSITIONS)}."
+        )
+    if label_position not in SCALEBAR_LABEL_POSITIONS:
+        raise ValueError(
+            f"Unknown label_position {label_position!r}, use one of "
+            f"{', '.join(SCALEBAR_LABEL_POSITIONS)}."
+        )
+    if units not in SCALEBAR_UNITS:
+        raise ValueError(
+            f"Unknown units {units!r}, use one of {', '.join(SCALEBAR_UNITS)}."
+        )
     if color is None:
         color = QtGui.QColor("white")
-    painter = QtGui.QPainter(image)
+    color = QtGui.QColor(color)
+    painter.save()
     painter.setPen(QtGui.QPen(QtCore.Qt.PenStyle.NoPen))
-    painter.setBrush(QtGui.QBrush(color))
 
-    # the viewport's width (nm) spans the image's width (display pixels)
+    # the viewport's width (nm) spans the device's width (display
+    # pixels)
     length_displaypxl = int(
-        round(image.width() * scalebar_length_nm / viewport_width(viewport))
+        round(width * scalebar_length_nm / viewport_width(viewport))
     )
 
-    # draw a rectangle
-    x = image.width() - length_displaypxl - margin[0]
-    y = image.height() - display_height - margin[1]
-    painter.drawRect(x, y, length_displaypxl, display_height)
-
-    # display scalebar's length, centered above the bar; the offsets
-    # are for the default font size and grow with larger text
+    # the length's text and its height, with a small gap to the bar
+    text_height = gap = 0
     if display_length:
         font = painter.font()
+        if font_family:
+            font.setFamily(font_family)
         font.setPixelSize(text_fontsize)
+        font.setBold(bold)
+        font.setItalic(italic)
         painter.setFont(font)
-        painter.setPen(color)
-        text = f"{str(scalebar_length_nm)} nm"
-        ratio = text_fontsize / SCALEBAR_FONT_SIZE
-        text_advance = QtGui.QFontMetrics(font).horizontalAdvance(text)
-        text_width = max(length_displaypxl + 2 * text_spacer, text_advance)
-        # keep long text inside the right edge of the image
-        center = min(
-            x + length_displaypxl / 2, image.width() - 2 - text_advance / 2
+        text = _format_scalebar_length(scalebar_length_nm, units)
+        metrics = QtGui.QFontMetrics(font)
+        text_advance = metrics.horizontalAdvance(text)
+        text_height = metrics.height()
+        gap = max(1, round(0.1 * text_fontsize))
+
+    # the bar with its text keeps the margins from the nearest edges
+    vertical, horizontal = position.split()
+    block_height = display_height + text_height + gap
+    if vertical == "top":
+        block_top = margin[1]
+    else:
+        block_top = height - block_height - margin[1]
+    if display_length and label_position == "above":
+        y = block_top + text_height + gap
+    else:
+        y = block_top
+    if horizontal == "left":
+        x = margin[0]
+    elif horizontal == "center":
+        x = int(round((width - length_displaypxl) / 2))
+    else:
+        x = width - length_displaypxl - margin[0]
+
+    # the text is centered on the bar, but kept inside the device
+    if display_length:
+        center = x + length_displaypxl / 2
+        center = min(center, width - 2 - text_advance / 2)
+        center = max(center, 2 + text_advance / 2)
+        text_left = int(round(center - text_advance / 2))
+        text_top = (
+            y - gap - text_height
+            if label_position == "above"
+            else y + display_height + gap
         )
+
+    if background_opacity > 0:
+        background = QtGui.QColor(
+            "black" if color.lightness() >= 128 else "white"
+        )
+        background.setAlphaF(min(1.0, float(background_opacity)))
+        left, right = x, x + length_displaypxl
+        if display_length:
+            left = min(left, text_left)
+            right = max(right, text_left + text_advance)
+        padding = max(3, round(0.25 * (text_fontsize or display_height)))
+        painter.setBrush(QtGui.QBrush(background))
+        painter.drawRect(
+            left - padding,
+            block_top - padding,
+            right - left + 2 * padding,
+            block_height + 2 * padding,
+        )
+
+    # draw a rectangle
+    painter.setBrush(QtGui.QBrush(color))
+    painter.drawRect(x, y, length_displaypxl, display_height)
+
+    if display_length:
+        painter.setPen(color)
         painter.drawText(
-            int(round(center - text_width / 2)),
-            y - int(round(25 * ratio)),
-            text_width,
-            int(round(text_spacer * ratio)),
+            text_left,
+            text_top,
+            text_advance,
+            text_height,
             QtCore.Qt.AlignmentFlag.AlignHCenter,
             text,
         )
-    painter.end()
-    return image
+    painter.restore()
 
 
 def draw_legend(
@@ -1075,6 +1312,7 @@ def _colorbar_layout(
     margin: int = 12,
     tick_length: int = 8,
     tick_spacer: int = 4,
+    format_tick: Callable[[float], str] | None = None,
 ) -> dict:
     """Lay out a color bar: its size and everything needed to paint it.
 
@@ -1117,6 +1355,9 @@ def _colorbar_layout(
     tick_spacer : int, optional
         Spacing between the tick marks and the tick text in display
         pixels. Default is 4.
+    format_tick : callable, optional
+        Text of the tick at a value. Default is None, i.e., a sensible
+        number of digits (``_format_tick``).
 
     Returns
     -------
@@ -1147,7 +1388,7 @@ def _colorbar_layout(
         ticks = [
             (
                 (value - min_value) / (max_value - min_value),
-                _format_tick(value),
+                (format_tick or _format_tick)(value),
             )
             for value in values
         ]

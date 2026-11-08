@@ -148,6 +148,22 @@ def test_track_in_place(window, qt_offscreen, track_params):
     assert box.isChecked()  # the tracks are shown
 
 
+def test_tracking_is_undone(window, qt_offscreen, track_params):
+    view = window.view
+    before = view.locs[0]
+    n_info = len(view.infos[0])
+    _track(window, qt_offscreen)
+    tracked = view.locs[0].copy()
+    assert view.history.undo_label == "Track particles"
+    view.undo()  # File > Undo
+    assert view.locs[0] is before
+    assert len(view.infos[0]) == n_info
+    assert not spt.is_tracked(view.locs[0], view.infos[0])
+    view.redo()
+    pd.testing.assert_frame_equal(view.locs[0], tracked)
+    assert spt.is_tracked(view.locs[0], view.infos[0])
+
+
 def test_tracked_and_linked_channels_are_skipped(
     window, qt_offscreen, track_params, messages, tmp_path, monkeypatch
 ):

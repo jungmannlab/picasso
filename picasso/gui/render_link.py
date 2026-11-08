@@ -37,8 +37,8 @@ Rendering
 Display
     Scale bar, grid, minimap, background color and legend.
 Picks
-    Pick shape and size, or the picks themselves (which include their
-    shape and size).
+    Shape and size of new picks (the pick tool), or the picks
+    themselves (each with its own shape and size).
 Slicing
     Slicing on/off, slice thickness and slice position; the position is
     matched in nm, since the slice bins depend on each window's data.
@@ -75,6 +75,7 @@ from PyQt6 import QtCore, QtWidgets
 
 from .. import io, lib, render
 from .grid_settings import GridGroupBox
+from .scalebar_settings import ScaleBarGroupBox
 
 
 @dataclass(frozen=True)
@@ -178,7 +179,7 @@ CATEGORIES = (
         "scalebar",
         "Scale bar",
         "Display",
-        "Scale bar visibility, length and label.",
+        "Scale bar visibility, length and appearance.",
     ),
     LinkCategory(
         "grid",
@@ -202,7 +203,7 @@ CATEGORIES = (
         "pick_geometry",
         "Pick shape and size",
         "Picks",
-        "Pick shape and dimensions.",
+        "Shape and size of new picks.",
     ),
     LinkCategory(
         "picks",
@@ -258,15 +259,7 @@ WATCHED_WIDGETS = {
             "render_check",
         ),
     ),
-    "scalebar": (
-        "display_settings_dlg",
-        (
-            "scalebar_groupbox",
-            "scalebar",
-            "scalebar_text",
-            "optimal_scalebar_check",
-        ),
-    ),
+    "scalebar": ("display_settings_dlg", ("scalebar_groupbox",)),
     "grid": ("display_settings_dlg", ("grid_box",)),
     "background_legend": ("dataset_dialog", ("wbackground", "legend")),
     "slicer": (
@@ -292,14 +285,14 @@ def widget_signal(widget: QtCore.QObject):
     ----------
     widget : QObject
         A checkbox, group box, spin box, combo box, slider, button
-        group or grid group box.
+        group, or grid or scale bar group box.
 
     Returns
     -------
     signal : pyqtBoundSignal
         The widget's change signal.
     """
-    if isinstance(widget, GridGroupBox):
+    if isinstance(widget, (GridGroupBox, ScaleBarGroupBox)):
         return widget.changed
     if isinstance(widget, QtWidgets.QButtonGroup):
         return widget.buttonToggled
@@ -392,7 +385,8 @@ def matching_channels(
 
 def picks_signature(view) -> tuple:
     """Cheap fingerprint of a view's picks that changes whenever picks
-    are added, removed, replaced or (polygons) extended in place.
+    are added, removed, replaced, resized or (polygons) extended in
+    place.
 
     Parameters
     ----------
@@ -402,16 +396,17 @@ def picks_signature(view) -> tuple:
     Returns
     -------
     signature : tuple
-        Pick shape, number of picks and each pick's identity and, for
-        picks stored as lists, length.
+        Number of picks, each pick's identity and, for picks stored as
+        lists, length, and the shape and size of each pick.
     """
     return (
-        view._pick_shape,
         len(view._picks),
         tuple(
             (id(pick), len(pick) if isinstance(pick, list) else -1)
             for pick in view._picks
         ),
+        tuple(view._pick_shapes),
+        tuple(view._pick_sizes),
     )
 
 
@@ -814,14 +809,11 @@ class LinkGroup(QtCore.QObject):
 
     @staticmethod
     def _apply_scalebar(src, dst) -> None:
-        s = src.display_settings_dlg
-        d = dst.display_settings_dlg
-        mirror_widget(s.scalebar_groupbox, d.scalebar_groupbox)
-        mirror_widget(s.scalebar_text, d.scalebar_text)
-        # a manual length unchecks "Automatic length", so it goes first
-        if not s.optimal_scalebar_check.isChecked():
-            mirror_widget(s.scalebar, d.scalebar)
-        mirror_widget(s.optimal_scalebar_check, d.optimal_scalebar_check)
+        s = src.display_settings_dlg.scalebar_groupbox
+        d = dst.display_settings_dlg.scalebar_groupbox
+        # an automatic length follows each window's own zoom
+        d.load_settings(s.settings())
+        d.setChecked(s.isChecked())
 
     @staticmethod
     def _apply_grid(src, dst) -> None:
@@ -843,10 +835,11 @@ class LinkGroup(QtCore.QObject):
             d.update_viewport()
 
     def _apply_picks(self, src, dst) -> None:
-        # set the shape first, such that the shape combo box does not
-        # ask to delete the other window's picks
-        dst.view._pick_shape = src.view._pick_shape
-        dst.view._picks = copy_picks(src.view._picks)
+        dst.view._set_picks(
+            copy_picks(src.view._picks),
+            src.view._pick_shapes,
+            src.view._pick_sizes,
+        )
         self.apply("pick_geometry", src, dst)
         self._pick_signatures[dst] = picks_signature(dst.view)
         dst.view.update_pick_info_short()

@@ -196,6 +196,13 @@ changed:
        :ref:`render-grid`.
    * - ``Tools > Filter picks by number of localizations...``
      - ``Tools > Filter picks by count...``
+   * - Render, ``Postprocess > Undo drift``
+     - ``File > Undo`` (Ctrl+Z), which takes back the last step that changed
+       the localizations, e.g., a drift correction, see :ref:`render-undo`.
+   * - Render, *Apply expression*: ``uspiral`` to reverse ``spiral R N``
+     - ``File > Undo``.
+   * - Render, ``Tools > Zoom`` (Ctrl+Z)
+     - :kbd:`Z`; Ctrl+Z is ``File > Undo``.
    * - Brush picks: a right click undoes the last stroke
      - A right click removes the pick under the cursor, as for the other pick
        shapes, see :doc:`render/picking`.
@@ -351,12 +358,16 @@ metadata need the new ones:
   (were ``Maximum Distance`` and ``Maximum Transient Dark Time``).
 - ``undrift``: ``Segmentation`` (RCC) as before, and no ``Drift X`` and
   ``Drift Y`` (the drift is saved in the drift file). With ``--from-file``,
-  the step is ``Apply drift`` with ``From File``.
+  the step is ``Apply drift`` with ``Drift file`` (was ``From File``).
 - ``undrift-fiducials``: two entries, one for the RCC before picking the
   fiducials (``Segmentation``, was ``pre-RCC segmentation``) and one for the
   fiducials (``Number of picks``, ``Pick shape`` and ``Pick diameter (nm)``,
   was ``Pick radius (nm)``).
 - ``density``: ``Radius (nm)`` (was ``Radius``).
+- ``localize``: the 3D calibration is the ``Calibration path`` of the
+  ``Fit 3D`` entry (was ``Z Calibration Path``). Without a z fit, the
+  corrections of ``--affine-calibration`` are recorded in an
+  ``Affine correction`` entry of their own (were added to the fit's entry).
 - ``align``: the shift subtracted from each file (``Shift x (nm)``,
   ``Shift y (nm)``) and the method, besides ``Files``.
 - ``dbscan``, ``hdbscan`` and ``smlm-cluster``: the cluster centers have one
@@ -706,7 +717,8 @@ The Picasso windows save the metadata these functions return, so some files
 record their steps differently:
 
 - Picasso: Localize records the identification (``Identify``) and the fit
-  (``Fit 2D``, or the joint fit of several channels) in entries of their own,
+  (``Fit 2D``, ``Fit 3D spline`` for a 3D spline calibration, or the joint
+  fit of several channels) in entries of their own,
   followed by the lateral corrections, the z fit and the drift correction,
   instead of one ``Localize`` entry. The fit is named by its code (e.g.,
   ``gaussmle``) and the 3D calibration by the ``Calibration path`` of the
@@ -1182,6 +1194,8 @@ and ``min_blur_width`` in nm, as ``disp_px_size`` already was:
 - **Overlays.** ``render.draw_scalebar`` and ``draw_points`` lost
   ``pixelsize`` and take nm; ``render.optimal_scalebar_length`` takes the
   width of the image in nm instead of ``(pixelsize, width)``.
+  ``render.draw_scalebar`` also lost ``text_spacer``: the gap between the
+  bar and its length follows the font size.
 - **Imaris export.** ``ext.bitplane.numpy_to_imaris`` takes the rendered
   pixel size ``disp_px_size`` (nm) instead of ``oversampling`` and
   ``pixelsize``.
@@ -1424,6 +1438,13 @@ attributes of the Render window need these:
        ``_pick_size``), ``View.map_to_movie``, ``max_movie_width`` and
        ``max_movie_height``, the drift (camera pixels)
      - The same in nm
+   * - ``View._pick_shape``, ``View._pick_size`` (the shape and size of
+       all picks)
+     - The shape and size of new picks (the pick tool). Picks can differ
+       in shape and size: those of each pick are in ``View._pick_shapes``
+       and ``View._pick_sizes``, and ``View._pick_args()`` returns the
+       ``picks``, ``pick_shape`` and ``pick_size`` arguments of the
+       functions that take picks
    * - A plugin that changes ``View.locs[channel]`` sets
        ``View.index_blocks[channel] = None``
      - ``View.invalidate_locs_index(channel)``, which also drops the new
@@ -1456,7 +1477,7 @@ releases; check GUI plugins against each release (see :doc:`versioning`).
 **Commands of plugins** (``register_cli``) cannot take the name of a command
 of Picasso. The commands new in 1.0 (e.g., ``track``, ``diffusion``,
 ``cbc``, ``ripley-h``, ``rdf``, ``nnd``, ``stitch``, ``pyme2hdf``,
-``hdf2pyme`` and ``convert-units``) are refused as plugin commands, and a
+``hdf2pyme``, ``minflux2hdf`` and ``convert-units``) are refused as plugin commands, and a
 plugin command named like an old command name (``pc``, ``nneighbor``,
 ``groupprops``, ...) is never reached, because Picasso renames it before
 running it. Rename such commands.

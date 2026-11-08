@@ -24,6 +24,7 @@ import tempfile
 import threading
 import warnings
 import weakref
+from collections.abc import Sequence
 from typing import Callable, Literal, TYPE_CHECKING
 
 import tifffile
@@ -41,11 +42,12 @@ from . import lib, __version__, docs_url
 from .ext import bitplane
 from .ext.bitplane import IMSFile
 
-# Optional vendor readers for Zeiss .czi and Leica .lif movies. Both are
-# Christoph Gohlke's BSD-licensed libraries (same author as tifffile)
-# and require Python >= 3.12, so they are optional dependencies (extras
-# ``czi`` / ``lif``). When absent, the corresponding extensions are
-# simply not advertised and the loaders raise a helpful ImportError.
+# Optional vendor readers for Zeiss .czi and Leica .lif movies and
+# PicoQuant .ptu confocal scans. All are Christoph Gohlke's BSD-licensed
+# libraries (same author as tifffile) and require Python >= 3.12, so
+# they are optional dependencies (extras ``czi`` / ``lif`` / ``ptu``).
+# When absent, the corresponding extensions are simply not advertised
+# and the loaders raise a helpful ImportError.
 try:
     import czifile
 except ImportError:
@@ -54,6 +56,10 @@ try:
     import liffile
 except ImportError:
     liffile = None
+try:
+    import ptufile
+except ImportError:
+    ptufile = None
 
 __all__ = [
     # localizations
@@ -105,6 +111,8 @@ __all__ = [
     "split_pyme_channels",
     "export_pyme",
     "export_pyme_multi",
+    "import_minflux",
+    "split_minflux_channels",
     "export_txt_imagej",
     "export_txt_nis",
     "export_xyz_chimera",
@@ -140,11 +148,15 @@ TIFF_EXTENSIONS = (".tif", ".tiff", ".btf", ".tf8", ".tf2", ".lsm")
 # reader libraries are importable (see the guarded imports above).
 CZI_EXTENSIONS = (".czi",) if czifile is not None else ()
 LIF_EXTENSIONS = (".lif",) if liffile is not None else ()
+# PicoQuant .ptu (TCSPC photon data of confocal image scans) is advertised
+# only when ptufile is importable, like .czi and .lif.
+PTU_EXTENSIONS = (".ptu",) if ptufile is not None else ()
 MOVIE_EXTENSIONS = (
     (".raw", ".ims", ".nd2", ".stk")
     + TIFF_EXTENSIONS
     + CZI_EXTENSIONS
     + LIF_EXTENSIONS
+    + PTU_EXTENSIONS
 )
 # Localizations per block when reading an .hdf5 file, see
 # ``_read_locs_dataset``. Blocks make long reads reportable and
@@ -1609,10 +1621,233 @@ def load_lif_all(path: str) -> tuple[list[LIFMovie], list[list[dict]]]:
     return movies, infos
 
 
+# Movie formats whose pixel values count detected photons. Only these
+# frames can be summed (``frame_sum_window`` of ``load_movie``): a camera
+# frame carries an offset (the baseline) in every frame, so a sum of raw
+# camera counts is not a count of photons.
+_PHOTON_COUNTING_EXTENSIONS = (".ptu",)
+
+
+def _frame_sum_parameters(window: int, stride: int | None) -> tuple[int, int]:
+    """Validate ``frame_sum_window`` / ``frame_sum_stride`` and return
+    ``(window, stride)``; a stride of None is the window (consecutive sums
+    that do not overlap)."""
+    for name, value in (
+        ("frame_sum_window", window),
+        ("frame_sum_stride", stride),
+    ):
+        if value is None and name == "frame_sum_stride":
+            continue
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, np.integer))
+            or value < 1
+        ):
+            raise ValueError(
+                f"{name} must be a positive integer, got {value!r}."
+            )
+    window = int(window)
+    stride = window if stride is None else int(stride)
+    if stride > window:
+        raise ValueError(
+            f"frame_sum_stride ({stride}) must not exceed frame_sum_window "
+            f"({window}): the scan frames between two sums would be "
+            "skipped."
+        )
+    return window, stride
+
+
+def _microtime_gate_parameters(
+    gates: Sequence[tuple[float, float]] | None,
+) -> list[tuple[float, float]]:
+    """Validate ``microtime_gates`` and return them as a list of
+    ``(start, end)`` floats in ns; None is an empty list (no gates)."""
+    if gates is None:
+        return []
+    try:
+        gates = [tuple(gate) for gate in gates]
+    except TypeError:
+        raise ValueError(
+            "microtime_gates must be a sequence of (start, end) pairs in "
+            f"ns, got {gates!r}."
+        ) from None
+    checked = []
+    for gate in gates:
+        if len(gate) != 2 or not all(
+            isinstance(_, (int, float, np.integer, np.floating))
+            and not isinstance(_, bool)
+            and np.isfinite(_)
+            for _ in gate
+        ):
+            raise ValueError(
+                "Each microtime gate must be a (start, end) pair of numbers "
+                f"in ns, got {gate!r}."
+            )
+        start, end = float(gate[0]), float(gate[1])
+        if not 0 <= start < end:
+            raise ValueError(
+                f"A microtime gate must satisfy 0 <= start < end, got "
+                f"({start:g}, {end:g}) ns."
+            )
+        checked.append((start, end))
+    return checked
+
+
+def _check_photon_options(
+    path: str,
+    window: int,
+    stride: int | None,
+    gates: Sequence[tuple[float, float]] | None,
+) -> None:
+    """Validate frame summing and microtime gates, and refuse both for
+    movies whose pixels are not photon counts (see
+    ``_PHOTON_COUNTING_EXTENSIONS``)."""
+    ext = os.path.splitext(path)[1].lower()
+    if ext in _PHOTON_COUNTING_EXTENSIONS:
+        _frame_sum_parameters(window, stride)
+        _microtime_gate_parameters(gates)
+        return
+    if window != 1 or stride not in (None, 1):
+        raise ValueError(
+            "Frame summing (frame_sum_window, frame_sum_stride) is only "
+            "available for photon-counting movies (.ptu), not for "
+            f"{ext or 'this'} files: camera frames carry an offset "
+            "(the baseline) in every frame, so a sum of their raw counts "
+            "is not a count of photons."
+        )
+    if gates:
+        raise ValueError(
+            "Microtime gates (microtime_gates) are only available for "
+            "photon-counting movies recorded with time-correlated single "
+            f"photon counting (.ptu), not for {ext or 'this'} files."
+        )
+
+
+def _sanitize_filename(name: str) -> str:
+    """Turn a channel name into a filename-safe suffix, e.g., of the
+    files of one channel of a multichannel movie."""
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", str(name)).strip("_") or "channel"
+
+
+def _require_ptufile() -> None:
+    """Raise a helpful ImportError when ptufile is not installed."""
+    if ptufile is None:
+        raise ImportError(
+            "Reading .ptu files requires the optional 'ptufile' package "
+            "(needs Python >= 3.12). Install it with: "
+            "pip install picassosr[ptu]"
+        )
+
+
+def load_ptu(
+    path: str,
+    prompt_info: Callable[[list[str]], str] | None = None,
+    *,
+    frame_sum_window: int = 1,
+    frame_sum_stride: int | None = None,
+    microtime_gates: Sequence[tuple[float, float]] | None = None,
+) -> tuple[PTUMovie, list[dict]]:
+    """Load a PicoQuant PTU confocal image scan and its metadata.
+
+    Each pixel counts the photons detected in it, integrated over the
+    microtime or over a microtime gate (see ``PTUMovie``). A file with
+    several channels (detectors, or detectors x microtime gates) is
+    reduced to one of them via ``prompt_info`` (defaulting to the first
+    channel otherwise).
+
+    Parameters
+    ----------
+    path : str
+        The path to the PTU file.
+    prompt_info : Callable, optional
+        Called with the list of detector names to select one.
+    frame_sum_window : int, optional
+        Number of consecutive scan frames summed into one frame. Default
+        1 (every scan frame is a frame).
+    frame_sum_stride : int, optional
+        Number of scan frames between the starts of two consecutive
+        sums, at most ``frame_sum_window``. None (default) uses
+        ``frame_sum_window``, i.e., sums that do not overlap; 1 gives a
+        sliding window.
+    microtime_gates : sequence of (float, float), optional
+        Microtime gates as ``(start, end)`` in ns after the sync pulse,
+        e.g., one per laser of pulsed interleaved excitation (PIE). Each
+        detector then gives one channel per gate, holding only the
+        photons within it. None (default) uses all photons.
+
+    Returns
+    -------
+    movie : PTUMovie
+        A movie object providing array-like access to the frames.
+    info : list[dict]
+        A list containing a dictionary with metadata about the movie.
+    """
+    _check_path_length(path)
+    _require_ptufile()
+    movie = PTUMovie(
+        path,
+        prompt_info=prompt_info,
+        frame_sum_window=frame_sum_window,
+        frame_sum_stride=frame_sum_stride,
+        microtime_gates=microtime_gates,
+    )
+    return movie, [movie.info()]
+
+
+def load_ptu_all(
+    path: str,
+    *,
+    frame_sum_window: int = 1,
+    frame_sum_stride: int | None = None,
+    microtime_gates: Sequence[tuple[float, float]] | None = None,
+) -> tuple[list[PTUMovie], list[list[dict]]]:
+    """Load every channel of a PicoQuant PTU image scan as its own movie:
+    one per detector that recorded photons, or, with microtime gates, one
+    per detector and gate.
+
+    Parameters
+    ----------
+    path : str
+        The path to the PTU file.
+    frame_sum_window, frame_sum_stride : int, optional
+        Frame summing, see ``load_ptu``.
+    microtime_gates : sequence of (float, float), optional
+        Microtime gates in ns, see ``load_ptu``.
+
+    Returns
+    -------
+    movies : list of PTUMovie
+        One movie object per channel, detector by detector and, within a
+        detector, gate by gate.
+    infos : list of lists of dicts
+        Per-channel metadata, each carrying a ``"Channel"`` key.
+    """
+    _check_path_length(path)
+    _require_ptufile()
+    channels = PTUMovie.channel_names(path, microtime_gates)
+    movies = []
+    infos = []
+    for i in range(len(channels)):
+        movie = PTUMovie(
+            path,
+            channel=i,
+            frame_sum_window=frame_sum_window,
+            frame_sum_stride=frame_sum_stride,
+            microtime_gates=microtime_gates,
+        )
+        movies.append(movie)
+        infos.append([movie.info()])
+    return movies, infos
+
+
 def load_movie(
     path: str,
     prompt_info=None,
     progress: lib.Progress | Literal["console"] | None = None,
+    *,
+    frame_sum_window: int = 1,
+    frame_sum_stride: int | None = None,
+    microtime_gates: Sequence[tuple[float, float]] | None = None,
 ) -> tuple[AbstractPicassoMovie, list[dict]]:
     """Load a movie file based on its extension and returns the movie
     object and its metadata.
@@ -1634,6 +1869,23 @@ def load_movie(
         ``load_tif``, "Indexing <file>" and "Reading <file>" over the
         pages of each file; the other formats open effectively
         instantly and report nothing. Default is None.
+    frame_sum_window : int, optional
+        Photon-counting movies (.ptu) only: number of consecutive scan
+        frames summed into one frame of the returned movie, for scans
+        too dim to localize frame by frame. Default 1 (no summing).
+    frame_sum_stride : int, optional
+        Photon-counting movies (.ptu) only: number of scan frames
+        between the starts of two consecutive sums, at most
+        ``frame_sum_window``. None (default) uses ``frame_sum_window``,
+        so that the sums do not overlap and every photon is used once;
+        1 gives a sliding window.
+    microtime_gates : sequence of (float, float), optional
+        Photon-counting movies (.ptu) only: microtime gates as
+        ``(start, end)`` in ns after the sync pulse, e.g., one per laser
+        of pulsed interleaved excitation (PIE). Each detector then gives
+        one channel per gate, holding only the photons within it
+        (``prompt_info`` selects the channel). None (default) uses all
+        photons.
 
     Returns
     -------
@@ -1645,13 +1897,18 @@ def load_movie(
     Raises
     ------
     ValueError
-        If the file extension is not a supported movie format.
+        If the file extension is not a supported movie format, or if
+        frames are to be summed or gated for a movie whose pixel values
+        are not photon counts.
     """
     _check_path_length(path)
     base, ext = os.path.splitext(path)
     ext = ext.lower()
     # validated here, so that a bad argument fails for every format
     lib.normalize_progress(progress)
+    _check_photon_options(
+        path, frame_sum_window, frame_sum_stride, microtime_gates
+    )
     if ext == ".raw":
         return load_raw(path, prompt_info=prompt_info)
     elif ext in TIFF_EXTENSIONS:
@@ -1666,6 +1923,14 @@ def load_movie(
         return load_czi(path, prompt_info=prompt_info)
     elif ext == ".lif":
         return load_lif(path, prompt_info=prompt_info)
+    elif ext == ".ptu":
+        return load_ptu(
+            path,
+            prompt_info=prompt_info,
+            frame_sum_window=frame_sum_window,
+            frame_sum_stride=frame_sum_stride,
+            microtime_gates=microtime_gates,
+        )
     else:
         raise ValueError(
             f"Unsupported movie format: {ext}. Supported formats are"
@@ -1677,13 +1942,19 @@ def load_movie_all(
     path: str,
     prompt_info=None,
     progress: lib.Progress | Literal["console"] | None = None,
+    *,
+    frame_sum_window: int = 1,
+    frame_sum_stride: int | None = None,
+    microtime_gates: Sequence[tuple[float, float]] | None = None,
 ) -> tuple[list[AbstractPicassoMovie], list[list[dict]]] | None:
     """Load every channel of a movie file as independent movies.
 
     Mirrors ``load_movie`` but returns parallel lists - one entry per
-    channel. Multi-channel formats (.ims, .czi, .lif, .nd2) expose all of
-    their channels; single-channel formats return one-element lists. Each
-    ``info[0]`` carries a ``"Channel"`` key identifying the channel.
+    channel. Multi-channel formats (.ims, .czi, .lif, .nd2, and .ptu with
+    one channel per detector, or per detector and microtime gate) expose
+    all of their channels;
+    single-channel formats return one-element lists. Each ``info[0]``
+    carries a ``"Channel"`` key identifying the channel.
 
     Parameters
     ----------
@@ -1700,6 +1971,12 @@ def load_movie_all(
         single-channel formats, i.e., TIFF movies report "Indexing
         <file>" and "Reading <file>" over the pages of each file; the
         multi-channel formats report nothing. Default is None.
+    frame_sum_window, frame_sum_stride : int, optional
+        Photon-counting movies (.ptu) only: frame summing, see
+        ``load_movie``.
+    microtime_gates : sequence of (float, float), optional
+        Photon-counting movies (.ptu) only: microtime gates in ns, see
+        ``load_movie``.
 
     Returns
     -------
@@ -1714,6 +1991,9 @@ def load_movie_all(
     _check_path_length(path)
     ext = os.path.splitext(path)[1].lower()
     lib.normalize_progress(progress)  # fails early on a bad argument
+    _check_photon_options(
+        path, frame_sum_window, frame_sum_stride, microtime_gates
+    )
     if ext == ".ims":
         return load_ims_all(path)
     elif ext == ".czi":
@@ -1722,6 +2002,13 @@ def load_movie_all(
         return load_lif_all(path)
     elif ext == ".nd2":
         return load_nd2_all(path, prompt_info=prompt_info)
+    elif ext == ".ptu":
+        return load_ptu_all(
+            path,
+            frame_sum_window=frame_sum_window,
+            frame_sum_stride=frame_sum_stride,
+            microtime_gates=microtime_gates,
+        )
     else:
         # Single-channel formats: wrap load_movie into one-element lists.
         result = load_movie(path, prompt_info=prompt_info, progress=progress)
@@ -2173,14 +2460,34 @@ def load_structures(path: str) -> tuple[list[spinna.Structure], list[str]]:
     return structures, targets
 
 
+# "Shape" of a picks file whose picks have different shapes; its
+# "Picks" list then describes each pick on its own, see ``picks_dict``
+_MIXED_PICKS_SHAPE = "Mixed"
+
+# per shape: the key holding one pick's coordinates in a picks file
+# with picks of different shapes, and the key of the pick size
+_MIXED_PICK_KEYS = {
+    "Circle": ("Center", "Diameter"),
+    "Rectangle": ("Center-Axis-Points", "Width"),
+    "Polygon": ("Vertices", None),
+    "Square": ("Center", "Side Length"),
+    "Box": ("Corners", None),
+    "Brush": ("Strokes", None),
+}
+
+
 def load_picks(
     path: str, pixelsize: float | None = None
-) -> tuple[list, str, float | None]:
+) -> tuple[list, str | list[str], float | list[float | None] | None]:
     """Load pick regions saved by Picasso Render.
 
     Positions and sizes are returned in nm. Files written before Picasso
     1.0 store the positions in camera pixels; they are converted with
     ``pixelsize`` (see ``picasso.legacy``).
+
+    Picks of different shapes or sizes come with one shape or size per
+    pick, which every function taking picks accepts (see
+    ``lib.pick_shapes_and_sizes``).
 
     Parameters
     ----------
@@ -2197,30 +2504,32 @@ def load_picks(
         window: centers for circles and squares, pairs of end points for
         rectangles, vertex lists for polygons, corner pairs for boxes and
         lists of ``(width, path)`` strokes for brush picks.
-    shape : str
-        The shape of the picks, one of ``lib.PICK_SHAPES``.
-    size : float or None
+    shape : str or list of str
+        The shape of the picks, one of ``lib.PICK_SHAPES``, or the shape
+        of each pick if they differ.
+    size : float, list or None
         The size of the picks in nm: the diameter of circles, the width
-        of rectangles, the side length of squares. None for polygonal,
-        box and brush picks (size not defined).
+        of rectangles, the side length of squares; the size of each pick
+        (None for those without a size) if they differ. None for
+        polygonal, box and brush picks (size not defined).
 
     Raises
     ------
     ValueError
         If the file is not recognized as a picks file, if the pick
         shape is unknown, or if a shape that needs a size does not
-        carry one.
+        carry a positive one.
     MissingPixelsizeError
         If the file was written before Picasso 1.0 and ``pixelsize`` is
         None.
+    FileFormatError
+        If the file is in a newer major format version, see
+        ``check_format_version``.
 
     Examples
     --------
     >>> from picasso import io
     >>> picks, shape, diameter = io.load_picks("movie_locs_picks.yaml")
-    FileFormatError
-        If the file is in a newer major format version, see
-        ``check_format_version``.
     """
     _check_path_length(path)
     assert path.endswith(".yaml"), "Picks should be stored in a .yaml file."
@@ -2254,19 +2563,32 @@ def load_picks(
             )
         regions = legacy.picks_to_nm(regions, pixelsize)
 
+    if shape == _MIXED_PICKS_SHAPE:
+        picks, shapes, sizes = [], [], []
+        for entry in regions.get("Picks", []):
+            pick, size = _pick_from_entry(entry)
+            picks.append(pick)
+            shapes.append(entry["Shape"])
+            sizes.append(size)
+        shape, size = lib._compact_pick_shapes_and_sizes(shapes, sizes)
+        if shape is None:  # no picks: one shape per pick
+            shape = []
+        lib.pick_shapes_and_sizes(picks, shape, size)  # e.g., a size of 0
+        return picks, shape, size
+
     # assign loaded picks and pick size
     if shape == "Circle":
         picks = regions["Centers"]
-        size = _pick_size_from_regions(regions, "Diameter")
+        size = _pick_size_from_regions(regions, "Diameter", len(picks))
     elif shape == "Rectangle":
         picks = regions["Center-Axis-Points"]
-        size = _pick_size_from_regions(regions, "Width")
+        size = _pick_size_from_regions(regions, "Width", len(picks))
     elif shape == "Polygon":
         picks = regions["Vertices"]
         size = None
     elif shape == "Square":
         picks = regions["Centers"]
-        size = _pick_size_from_regions(regions, "Side Length")
+        size = _pick_size_from_regions(regions, "Side Length", len(picks))
     elif shape == "Box":
         # each box carries its own extent, so there is no size
         picks = regions["Corners"]
@@ -2283,15 +2605,35 @@ def load_picks(
         size = None
     else:
         raise ValueError(f"Unrecognized pick shape: {shape}")
+    lib.pick_shapes_and_sizes(picks, shape, size)  # e.g., a size of 0
     return picks, shape, size
 
 
-def _pick_size_from_regions(regions: dict, key: str) -> float:
+def _pick_from_entry(entry: dict) -> tuple[list, float | None]:
+    """Return one pick (nm) and its size from an entry of the "Picks"
+    list of a picks file with picks of different shapes."""
+    shape = entry.get("Shape")
+    if shape not in _MIXED_PICK_KEYS:
+        raise ValueError(f"Unrecognized pick shape: {shape}")
+    key, size_key = _MIXED_PICK_KEYS[shape]
+    pick = entry[key]
+    if shape == "Brush":
+        pick = [(stroke["Width (nm)"], stroke["Path"]) for stroke in pick]
+    size = None
+    if size_key is not None:
+        size = _pick_size_from_regions(entry, size_key)
+    return pick, size
+
+
+def _pick_size_from_regions(
+    regions: dict, key: str, n_picks: int | None = None
+) -> float | list[float]:
     """Return a pick size from a loaded picks file, in nm.
 
     Sizes are stored in nm under ``"<key> (nm)"`` (files written before
     Picasso 0.6 stored them in camera pixels under the bare ``key``,
-    which ``legacy.picks_to_nm`` renames).
+    which ``legacy.picks_to_nm`` renames): one number for all picks, or
+    a list with the size of each pick.
 
     Parameters
     ----------
@@ -2299,39 +2641,63 @@ def _pick_size_from_regions(regions: dict, key: str) -> float:
         Contents of the picks .yaml file, in nm.
     key : str
         Name of the size entry, e.g., "Diameter".
+    n_picks : int, optional
+        Number of picks in the file, which a list of sizes must match.
+        Default is None (no list expected).
 
     Returns
     -------
-    size : float
-        Pick size in nm.
+    size : float or list of float
+        Pick size in nm, or the size of each pick.
 
     Raises
     ------
     ValueError
-        If the entry is not present.
+        If the entry is not present, or a list of sizes does not hold
+        one size per pick.
     """
-    if f"{key} (nm)" in regions:
-        return float(regions[f"{key} (nm)"])
-    raise ValueError(
-        f"Picks file is missing the pick size entry '{key} (nm)'."
-    )
+    if f"{key} (nm)" not in regions:
+        raise ValueError(
+            f"Picks file is missing the pick size entry '{key} (nm)'."
+        )
+    size = regions[f"{key} (nm)"]
+    if isinstance(size, list) and n_picks is not None:
+        if len(size) != n_picks:
+            raise ValueError(
+                f"Picks file lists {len(size)} sizes ('{key} (nm)') for "
+                f"{n_picks} picks."
+            )
+        return [float(_) for _ in size]
+    return float(size)
 
 
-def picks_dict(picks: list, shape: str, size: float | None = None) -> dict:
+def picks_dict(
+    picks: list,
+    shape: str | list[str],
+    size: float | list[float | None] | None = None,
+) -> dict:
     """The dictionary describing pick regions, in the format of a picks
     .yaml file (see ``load_picks``).
+
+    Picks of one shape are stored with one list of positions and their
+    size: one number, or a list with the size of each pick if the sizes
+    differ. Picks of different shapes are stored with ``"Shape":
+    "Mixed"`` and a ``"Picks"`` list, where each pick has its own shape,
+    position and size.
 
     Parameters
     ----------
     picks : list
         Picks in the format of the Render window (positions in nm), see
         ``load_picks``.
-    shape : str
-        The shape of the picks, one of ``lib.PICK_SHAPES``.
-    size : float, optional
-        The size of the picks in nm: the diameter of circles, the width
-        of rectangles, the side length of squares. Not needed (ignored)
-        for polygons, boxes and brush picks. Default is None.
+    shape : str or list of str
+        The shape of the picks, one of ``lib.PICK_SHAPES``, or the shape
+        of each pick.
+    size : float, list or None, optional
+        The size of the picks in nm, or the size of each pick: the
+        diameter of circles, the width of rectangles, the side length of
+        squares. Not needed (ignored) for polygons, boxes and brush
+        picks. Default is None.
 
     Returns
     -------
@@ -2341,45 +2707,67 @@ def picks_dict(picks: list, shape: str, size: float | None = None) -> dict:
     Raises
     ------
     ValueError
-        If the shape is unknown or a shape that needs a size has none.
+        If a shape is unknown or a shape that needs a size has none.
     """
-    if shape not in lib.PICK_SHAPES:
-        raise ValueError(f"Unrecognized pick shape: {shape}")
-    if shape in ("Circle", "Rectangle", "Square") and size is None:
-        raise ValueError(f"{shape} picks need a size.")
+    shapes, sizes = lib.pick_shapes_and_sizes(picks, shape, size)
+    if isinstance(shape, str):
+        # no picks: a size is still needed for the file to load
+        if not len(picks) and shape not in lib.PICK_SHAPES_WITHOUT_SIZE:
+            lib.pick_shapes_and_sizes([None], shape, size)
+    else:
+        shape, _ = lib._compact_pick_shapes_and_sizes(shapes, sizes)
+        if shape is None:  # no picks
+            shape = _MIXED_PICKS_SHAPE
 
     def point(p) -> list[float]:
         return [float(p[0]), float(p[1])]
 
-    regions = {}
-    if shape == "Circle":
-        regions["Diameter (nm)"] = float(size)
-        regions["Centers"] = [point(_) for _ in picks]
-    elif shape == "Rectangle":
-        regions["Width (nm)"] = float(size)
-        regions["Center-Axis-Points"] = [
-            [point(a), point(b)] for a, b in picks
-        ]
-    elif shape == "Polygon":
-        regions["Vertices"] = [
-            [point(v) for v in pick] for pick in picks if len(pick)
-        ]
-    elif shape == "Square":
-        regions["Side Length (nm)"] = float(size)
-        regions["Centers"] = [point(_) for _ in picks]
-    elif shape == "Box":
-        # each box carries its own extent, so no size is saved
-        regions["Corners"] = [[point(a), point(b)] for a, b in picks]
-    elif shape == "Brush":
-        # a flat, ordered stroke list: which strokes form one pick
-        # follows from their geometry and is re-derived on loading
-        regions["Strokes"] = [
+    def coordinates(pick, shape: str):
+        if shape in ("Circle", "Square"):
+            return point(pick)
+        if shape in ("Rectangle", "Box"):
+            return [point(pick[0]), point(pick[1])]
+        if shape == "Polygon":
+            return [point(v) for v in pick]
+        return [  # brush strokes
             {
                 "Width (nm)": float(stroke[0]),
                 "Path": [point(_) for _ in stroke[1]],
             }
-            for pick in picks
             for stroke in pick
+        ]
+
+    regions = {}
+    if not isinstance(shape, str) or shape == _MIXED_PICKS_SHAPE:
+        regions["Picks"] = []
+        for pick, shape_, size_ in zip(picks, shapes, sizes):
+            if shape_ == "Polygon" and not len(pick):
+                continue
+            key, size_key = _MIXED_PICK_KEYS[shape_]
+            entry = {"Shape": shape_}
+            if size_key is not None:
+                entry[f"{size_key} (nm)"] = size_
+            entry[key] = coordinates(pick, shape_)
+            regions["Picks"].append(entry)
+        shape = _MIXED_PICKS_SHAPE
+    elif shape == "Brush":
+        # a flat, ordered stroke list: which strokes form one pick
+        # follows from their geometry and is re-derived on loading
+        regions["Strokes"] = [
+            stroke for pick in picks for stroke in coordinates(pick, shape)
+        ]
+    else:
+        key, size_key = _MIXED_PICK_KEYS[shape]
+        if size_key is not None:
+            _, sizes_ = lib._compact_pick_shapes_and_sizes(shapes, sizes)
+            regions[f"{size_key} (nm)"] = (
+                float(size) if sizes_ is None else sizes_
+            )
+        key = "Centers" if shape in ("Circle", "Square") else key
+        regions[key] = [
+            coordinates(pick, shape)
+            for pick in picks
+            if shape != "Polygon" or len(pick)
         ]
     regions["Shape"] = shape
     regions[FORMAT_VERSION_ATTR] = FORMAT_VERSION
@@ -2387,7 +2775,10 @@ def picks_dict(picks: list, shape: str, size: float | None = None) -> dict:
 
 
 def save_picks(
-    path: str, picks: list, shape: str, size: float | None = None
+    path: str,
+    picks: list,
+    shape: str | list[str],
+    size: float | list[float | None] | None = None,
 ) -> None:
     """Save pick regions to a .yaml file that ``load_picks`` reads.
 
@@ -2398,16 +2789,27 @@ def save_picks(
     picks : list
         Picks in the format of the Render window (positions in nm), see
         ``load_picks``.
-    shape : str
-        The shape of the picks, one of ``lib.PICK_SHAPES``.
-    size : float, optional
-        The size of the picks in nm (diameter, width or side length);
-        not needed for polygons, boxes and brush picks. Default is None.
+    shape : str or list of str
+        The shape of the picks, one of ``lib.PICK_SHAPES``, or the shape
+        of each pick, see ``picks_dict``.
+    size : float, list or None, optional
+        The size of the picks in nm (diameter, width or side length), or
+        the size of each pick; not needed for polygons, boxes and brush
+        picks. Default is None.
 
     Examples
     --------
     >>> from picasso import io
     >>> io.save_picks("picks.yaml", [(1200.0, 850.5)], "Circle", size=100.0)
+
+    Circles of different diameters and a box:
+
+    >>> io.save_picks(
+    ...     "picks.yaml",
+    ...     [(1200.0, 850.5), (400.0, 230.0), ((0.0, 0.0), (90.0, 60.0))],
+    ...     ["Circle", "Circle", "Box"],
+    ...     size=[100.0, 140.0, None],
+    ... )
     """
     save_yaml(path, picks_dict(picks, shape, size))
 
@@ -2493,7 +2895,9 @@ def load_drift(path: str, pixelsize: float | None = None) -> pd.DataFrame:
     -------
     drift : pd.DataFrame
         A DataFrame containing the drift per frame in nm, with columns
-        'x', 'y', and optionally 'z'.
+        'x', 'y', and optionally 'z'. ``drift.attrs["Path"]`` holds
+        ``path``, which ``postprocess.apply_drift`` records in the
+        metadata.
 
     Raises
     ------
@@ -2534,6 +2938,7 @@ def load_drift(path: str, pixelsize: float | None = None) -> pd.DataFrame:
                 f"{docs_url('files.html#files-legacy')}"
             )
         drift_df = legacy.drift_to_nm(drift_df, pixelsize)
+    drift_df.attrs["Path"] = path
     return drift_df
 
 
@@ -3595,9 +4000,9 @@ class ND2Movie(AbstractPicassoMovie):
 
 
 class _MultiDimMovie(AbstractPicassoMovie):
-    """Shared base for vendor formats (Zeiss .czi, Leica .lif) that store a
-    multi-dimensional image which Picasso reduces to a single-channel
-    ``(T, Y, X)`` movie.
+    """Shared base for vendor formats (Zeiss .czi, Leica .lif, PicoQuant
+    .ptu) that store a multi-dimensional image which Picasso reduces to a
+    single-channel ``(T, Y, X)`` movie.
 
     Subclasses open the file in ``__init__``, populate ``n_frames``,
     ``height``, ``width`` and ``_dtype``, call :meth:`_select_channel` to
@@ -3913,6 +4318,566 @@ class LIFMovie(_MultiDimMovie):
             self._lif.close()
         except Exception:
             pass
+
+
+# Header tags of a PTU file kept in the movie metadata ("PTU Metadata"):
+# acquisition software, hardware, timing, scan geometry and optics. Long
+# vendor blocks (e.g. Luminosa's XML device settings) are left out.
+_PTU_METADATA_TAGS = (
+    "File_GUID",
+    "File_CreatingTime",
+    "File_Comment",
+    "CreatorSW_Name",
+    "CreatorSW_Version",
+    "HW_Type",
+    "Measurement_Mode",
+    "Measurement_SubMode",
+    "TTResultFormat_TTTRRecType",
+    "TTResult_SyncRate",
+    "MeasDesc_Resolution",
+    "MeasDesc_GlobalResolution",
+    "MeasDesc_BinningFactor",
+    "MeasDesc_AcquisitionTime",
+    "ImgHdr_PixX",
+    "ImgHdr_PixY",
+    "ImgHdr_PixResol",
+    "ImgHdr_TimePerPixel",
+    "ImgHdr_BiDirect",
+    "ImgHdr_ObjectiveName",
+    "LaserName",
+    "LaserWL",
+    "Detector",
+    "DetectorInUse",
+    "Chromophore",
+    "AnaChName",
+)
+
+
+class PTUMovie(_MultiDimMovie):
+    """Read PicoQuant PTU confocal image scans via the optional
+    ``ptufile`` library, presenting the photons of one detector as a
+    ``(T, Y, X)`` movie.
+
+    A PTU file stores every detected photon (time-correlated single
+    photon counting, T3 mode) with its arrival time, its detector and
+    its microtime, the delay after the excitation pulse. ``ptufile``
+    assigns the photons of each scan line to pixels with the pixel dwell
+    time of the file header, the convention of PicoQuant's software;
+    photons detected during the scanner's retrace are left out, as are
+    incomplete first and last scan frames. A pixel value is the number of
+    photons detected in that pixel, integrated over the microtime, so the
+    frames need no camera conversion: the metadata carry
+    ``"Photon Counting": True`` (baseline 0, sensitivity 1, no EM gain).
+
+    Confocal scan frames are often too dim to localize one by one, so
+    ``frame_sum_window`` consecutive scan frames can be summed into one
+    frame, a new sum starting every ``frame_sum_stride`` scan frames
+    (default: the window, i.e., sums that do not overlap and use every
+    photon once; a stride of 1 gives a sliding window). Frame ``k`` is the
+    sum of scan frames ``k * stride`` to ``k * stride + window - 1``; scan
+    frames at the end that do not fill a whole window are left out.
+
+    Microtime gates (``microtime_gates``, ``(start, end)`` in ns after
+    the sync pulse) select the photons by their microtime, e.g., one gate
+    per laser of pulsed interleaved excitation (PIE); a gated frame counts
+    only the photons within its gate.
+
+    Only T3 image scans are supported (not point or line scans, z-stacks
+    or T2 data). Each detector that recorded photons is one channel, or,
+    with microtime gates, each detector and gate (detector by detector,
+    named e.g. ``"Detector 1 gate 2"``).
+
+    The microtimes stay available for fluorescence-lifetime analyses
+    such as FL-PAINT through ``_microtime_histograms``, private until
+    such an analysis is part of Picasso; Localize's lifetime display uses
+    ``_delay_sums``.
+    """
+
+    # frames are decoded into arrays once, so reading them is thread-safe
+    supports_concurrent_reads = True
+    # Decoded frames are held in memory up to this fraction of the
+    # available memory; larger movies go to a temporary memory-mapped file
+    # (removed by ptufile once it is no longer used).
+    MEMORY_FRACTION = 0.25
+
+    def __init__(
+        self,
+        path: str,
+        prompt_info: Callable[[list[str]], str] | None = None,
+        channel: int | None = None,
+        *,
+        frame_sum_window: int = 1,
+        frame_sum_stride: int | None = None,
+        microtime_gates: Sequence[tuple[float, float]] | None = None,
+    ):
+        super().__init__()
+        window, stride = _frame_sum_parameters(
+            frame_sum_window, frame_sum_stride
+        )
+        gates = _microtime_gate_parameters(microtime_gates)
+        self.path = os.path.abspath(path)
+        self.frame_sum_window = window
+        self.frame_sum_stride = stride
+        # ptufile's file access is not thread-safe
+        self._lock = threading.Lock()
+        self._ptu = self._open(path)
+        try:
+            specs = self._channel_specs(self._ptu, path, gates)
+            self._select_channel(
+                [name for name, *_ in specs], prompt_info, channel
+            )
+            _, self._detector, self.microtime_gate = specs[self._channel]
+            self._microtime_range = self._gate_bins(self.microtime_gate)
+            n_scan, height, width = (int(_) for _ in self._ptu.shape[:3])
+            if n_scan < window:
+                raise ValueError(
+                    f"{self.path} has {n_scan} complete scan frame(s), "
+                    f"fewer than the {window} to be summed into one frame."
+                )
+            self.scan_frames = n_scan
+            self.height = height
+            self.width = width
+            self.n_frames = (n_scan - window) // stride + 1
+            if stride == window:
+                # sums that do not overlap: ptufile bins the frames itself
+                self._dtype = np.dtype(np.uint16 if window == 1 else np.uint32)
+                self._frames = self._decode(
+                    slice(0, self.n_frames * window, window), self._dtype
+                )
+                self._scan = None
+            else:
+                # overlapping sums are added up from the scan frames
+                self._dtype = np.dtype(np.uint32)
+                self._scan = self._decode(slice(None), np.dtype(np.uint16))
+                self._frames = None
+        except Exception:
+            self._ptu.close()
+            raise
+
+    @staticmethod
+    def _open(path: str) -> "ptufile.PtuFile":
+        """Open ``path`` with ptufile and check that it is a T3 image
+        scan. Channels are not trimmed, so a channel index is the
+        detector's index; empty trailing microtime bins are."""
+        ptu = ptufile.PtuFile(path, trimdims="TH")
+        try:
+            dims = tuple(ptu.dims)
+            if not (ptu.is_t3 and ptu.is_image) or dims != (
+                "T",
+                "Y",
+                "X",
+                "C",
+                "H",
+            ):
+                raise ValueError(
+                    f"{os.path.abspath(path)} is not a PicoQuant T3 image "
+                    f"scan (dimensions {dims}); Picasso reads .ptu files "
+                    "of confocal image scans only, not point or line "
+                    "scans, z-stacks or T2 data."
+                )
+        except Exception:
+            ptu.close()
+            raise
+        return ptu
+
+    @staticmethod
+    def _active_detectors(ptu: "ptufile.PtuFile", path: str) -> tuple:
+        """Indices of the detectors (TCSPC input channels) with photons."""
+        detectors = tuple(int(_) for _ in ptu.active_channels)
+        if not detectors:
+            raise ValueError(f"{os.path.abspath(path)} contains no photons.")
+        return detectors
+
+    @classmethod
+    def _channel_specs(
+        cls,
+        ptu: "ptufile.PtuFile",
+        path: str,
+        gates: list[tuple[float, float]],
+    ) -> list[tuple[str, int, tuple[float, float] | None]]:
+        """``(name, detector, gate)`` of every channel: one per detector
+        with photons, or per detector and gate, detector by detector."""
+        detectors = cls._active_detectors(ptu, path)
+        if not gates:
+            return [(f"Detector {d + 1}", d, None) for d in detectors]
+        return [
+            (f"Detector {d + 1} gate {g + 1}", d, gate)
+            for d in detectors
+            for g, gate in enumerate(gates)
+        ]
+
+    @classmethod
+    def channel_names(
+        cls,
+        path: str,
+        microtime_gates: Sequence[tuple[float, float]] | None = None,
+    ) -> list[str]:
+        """Names of the channels of a PTU file (detectors with photons,
+        or detectors x microtime gates), without decoding its frames."""
+        gates = _microtime_gate_parameters(microtime_gates)
+        ptu = cls._open(path)
+        try:
+            return [name for name, *_ in cls._channel_specs(ptu, path, gates)]
+        finally:
+            ptu.close()
+
+    def _gate_bins(self, gate: tuple[float, float] | None) -> tuple[int, int]:
+        """The microtime bins ``[lo, hi)`` of ``gate`` (ns), or all bins
+        without a gate. Bin edges are rounded to the nearest TCSPC bin."""
+        n_bins = self._number_bins
+        if gate is None:
+            return 0, n_bins
+        width_ns = self._tcspc_resolution * 1e9
+        lo = max(0, int(round(gate[0] / width_ns)))
+        hi = min(n_bins, int(round(gate[1] / width_ns)))
+        if lo >= hi:
+            raise ValueError(
+                f"The microtime gate {gate[0]:g}-{gate[1]:g} ns holds no "
+                f"photons of {self.path}: they arrive within 0-"
+                f"{n_bins * width_ns:.3g} ns after the sync pulse."
+            )
+        return lo, hi
+
+    def _decode(self, frames: slice, dtype: np.dtype) -> np.ndarray:
+        """Decode the photon counts of the selected detector, integrated
+        over the microtime, for the scan frames in ``frames`` (a slice
+        whose step sums that many frames) into a read-only
+        ``(T, Y, X)`` array."""
+        first, last, step = frames.indices(self.scan_frames)
+        n = -(-(last - first) // step)  # one frame per (started) step
+        nbytes = n * self.height * self.width * np.dtype(dtype).itemsize
+        out = None
+        try:
+            import psutil
+
+            if (
+                nbytes
+                > self.MEMORY_FRACTION * psutil.virtual_memory().available
+            ):
+                out = "memmap"
+        except Exception as error:  # noqa: BLE001 - keep in memory
+            _log.debug("Available memory not read: %s", error)
+        with self._lock:
+            if self.microtime_gate is None:
+                data = self._ptu.decode_image(
+                    (frames, Ellipsis),
+                    channel=self._detector,
+                    dtime=-1,
+                    dtype=dtype,
+                    out=out,
+                )
+            else:
+                # one microtime bin as wide as the gate holds its photons
+                lo, hi = self._microtime_range
+                data = self._ptu.decode_image(
+                    (
+                        frames,
+                        slice(None),
+                        slice(None),
+                        self._detector,
+                        slice(lo, hi, hi - lo),
+                    ),
+                    dtype=dtype,
+                    out=out,
+                )
+        data = data[:, :, :, 0, 0]
+        data.flags.writeable = False
+        return data
+
+    def _read_plane(self, index: int) -> np.ndarray:
+        if not 0 <= index < self.n_frames:
+            raise IndexError(
+                f"Frame {index} is out of range for a movie with "
+                f"{self.n_frames} frames."
+            )
+        if self._scan is None:
+            return self._frames[index]
+        start = index * self.frame_sum_stride
+        return self._scan[start : start + self.frame_sum_window].sum(
+            axis=0, dtype=np.uint32
+        )
+
+    def info(self) -> dict:
+        tags = self._ptu.tags
+        info = {
+            "File": self.path,
+            "Height": self.height,
+            "Width": self.width,
+            "Frames": self.n_frames,
+            "Data Type": self._dtype.name,
+            "Channel": self.channels[self._channel],
+            "Generated by": "Picasso Localize (PTU)",
+            "Photon Counting": True,
+            "Frame Sum Window": self.frame_sum_window,
+            "Frame Sum Stride": self.frame_sum_stride,
+            "Scan Frames": self.scan_frames,
+        }
+        if self.microtime_gate is not None:
+            info["Microtime Gate (ns)"] = list(self.microtime_gate)
+        resolution = tags.get("ImgHdr_PixResol")  # micrometer
+        if isinstance(resolution, (int, float)) and resolution > 0:
+            info["Pixelsize"] = round(float(resolution) * 1000, 3)
+        info["PTU Metadata"] = _yaml_safe(
+            {key: tags[key] for key in _PTU_METADATA_TAGS if key in tags}
+        )
+        return info
+
+    @property
+    def _tcspc_resolution(self) -> float:
+        """Width of one microtime (TCSPC) bin in seconds."""
+        return float(self._ptu.tcspc_resolution)
+
+    @property
+    def _number_bins(self) -> int:
+        """Number of microtime (TCSPC) bins, up to the last occupied one."""
+        return int(self._ptu.shape[-1])
+
+    def _microtime_histograms(
+        self,
+        start: int,
+        stop: int,
+        *,
+        roi: tuple[tuple[int, int], tuple[int, int]] | None = None,
+        dtime_bin: int = 1,
+        dtime_range: tuple[int, int] | None = None,
+    ) -> np.ndarray:
+        """Microtime histograms of the photons in frames ``start`` to
+        ``stop - 1``, per pixel.
+
+        The extension point for fluorescence-lifetime analyses such as
+        FL-PAINT: the histograms of a localization's box give its
+        lifetime. Summing a histogram over its last axis gives the
+        photon count of the frame, i.e., the frames are the histograms
+        integrated over the microtime.
+
+        Decoding reads the file from its start up to the last scan frame
+        requested, and the result holds one histogram per pixel, so
+        callers should request a block of frames at a time and reduce it
+        to the boxes they need.
+
+        Parameters
+        ----------
+        start, stop : int
+            Frames of this movie (sums of scan frames, see the class
+            docstring).
+        roi : tuple of two tuples, optional
+            ``((y_start, x_start), (y_end, x_end))`` in pixels, as in
+            ``localize.identify_in_frame``. None (default) is the whole
+            frame.
+        dtime_bin : int, optional
+            Number of microtime bins (of ``_tcspc_resolution``) merged
+            into one histogram bin. Default 1.
+        dtime_range : tuple of two ints, optional
+            First and last-plus-one microtime bin included, e.g., the
+            tail of the decay. It is restricted to the movie's microtime
+            gate (``_microtime_range``), so that the histograms always add
+            up to the frames. None (default) is the movie's microtime
+            gate, i.e., all bins without one.
+
+        Returns
+        -------
+        histograms : np.ndarray
+            ``(stop - start, Y, X, B)`` uint32 photon counts per pixel
+            and microtime bin.
+        """
+        if not 0 <= start < stop <= self.n_frames:
+            raise IndexError(
+                f"Frames {start} to {stop} are out of range for a movie "
+                f"with {self.n_frames} frames."
+            )
+        if (
+            isinstance(dtime_bin, bool)
+            or int(dtime_bin) != dtime_bin
+            or dtime_bin < 1
+        ):
+            raise ValueError(
+                f"dtime_bin must be a positive integer, got {dtime_bin!r}."
+            )
+        window, stride = self.frame_sum_window, self.frame_sum_stride
+        first = start * stride
+        last = (stop - 1) * stride + window
+        gate_lo, gate_hi = self._microtime_range
+        lo, hi = (gate_lo, gate_hi) if dtime_range is None else dtime_range
+        lo, hi = max(gate_lo, int(lo)), min(gate_hi, int(hi))
+        if lo >= hi:
+            raise ValueError(
+                f"Empty microtime range {dtime_range!r} within the movie's "
+                f"microtime bins {gate_lo}-{gate_hi}."
+            )
+        if roi is None:
+            rows, cols = slice(None), slice(None)
+        else:
+            (y0, x0), (y1, x1) = roi
+            rows, cols = slice(int(y0), int(y1)), slice(int(x0), int(x1))
+        n = stop - start
+        # sums that do not overlap (or a single one): ptufile bins the
+        # scan frames itself, without decoding them one by one
+        binned = stride == window or n == 1
+        with self._lock:
+            hist = self._ptu.decode_image(
+                (
+                    slice(first, last, window if binned else 1),
+                    rows,
+                    cols,
+                    self._detector,
+                    slice(lo, hi, int(dtime_bin)),
+                ),
+                dtype=np.uint32,
+            )[:, :, :, 0, :]
+        if binned:
+            return hist
+        cumulative = np.zeros((hist.shape[0] + 1,) + hist.shape[1:], np.uint32)
+        np.cumsum(hist, axis=0, out=cumulative[1:])
+        starts = np.arange(n) * stride
+        return cumulative[starts + window] - cumulative[starts]
+
+    def _decay(
+        self,
+        first: int = 0,
+        last: int | None = None,
+        *,
+        dtime_bin: int = 1,
+    ) -> np.ndarray:
+        """Decay (microtime) histogram of every photon of the movie's
+        detector detected during scan frames ``first`` to ``last - 1``
+        (scan frames, not the summed frames of this movie), within its
+        microtime gate (``_microtime_range``). Unlike the frames, it also
+        counts the photons detected while the scanner returns to the start
+        of a line: the decay of all the photons a detector saw.
+
+        Scan frame ``i`` spans the records from the ``i``-th frame marker
+        (the start of the file for 0) to the ``i + 1``-th; only the
+        records up to the last frame needed are decoded.
+
+        Parameters
+        ----------
+        first, last : int, optional
+            Scan frames; ``last`` None (default) is the last scan frame.
+        dtime_bin : int, optional
+            Number of microtime bins merged into one histogram bin, the
+            first starting at the start of the gate. Default 1.
+
+        Returns
+        -------
+        decay : np.ndarray
+            Photons per microtime bin (uint64).
+        """
+        last = (
+            self.scan_frames if last is None else min(last, self.scan_frames)
+        )
+        if not 0 <= first < last:
+            raise IndexError(
+                f"Scan frames {first} to {last} are out of range for a "
+                f"movie with {self.scan_frames} scan frames."
+            )
+        lo, hi = self._microtime_range
+        with self._lock:
+            ptu = self._ptu
+            records = ptu.read_records(copy=False)
+            frame_mask = ptu.frame_change_mask
+            size = min(len(records), 1 << 20)
+            while True:
+                decoded = ptu.decode_records(records[:size])
+                markers = np.flatnonzero(
+                    (decoded["channel"] < 0)
+                    & (decoded["marker"] & frame_mask != 0)
+                )
+                if len(markers) >= last or size == len(records):
+                    break
+                size = min(len(records), size * 4)
+        begin = 0 if first == 0 else int(markers[first - 1])
+        end = int(markers[last - 1]) + 1 if len(markers) >= last else size
+        decoded = decoded[begin:end]
+        dtime = decoded["dtime"][decoded["channel"] == self._detector]
+        dtime = dtime.astype(np.int64)
+        dtime = dtime[(dtime >= lo) & (dtime < hi)]
+        n_bins = -(-(hi - lo) // int(dtime_bin))
+        return np.bincount(
+            (dtime - lo) // int(dtime_bin), minlength=n_bins
+        ).astype(np.uint64)
+
+    # upper limit of the per-pixel histograms decoded by ``_delay_sums``
+    _DELAY_HISTOGRAM_BYTES = 64 * 2**20
+
+    def _delay_sums(
+        self, index: int, dtime_range: tuple[int, int]
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Photons of every pixel of frame ``index`` within a range of
+        microtimes, and the sum of their delays after the start of the
+        range, e.g., for a lifetime image: a pixel's mean photon delay is
+        its delay sum divided by its photons.
+
+        A photon's delay is the center of its microtime bin minus the
+        start of the range. Bins are merged when the per-pixel histograms
+        would take more than ``_DELAY_HISTOGRAM_BYTES``, and the delay is
+        then the center of the merged bin.
+
+        Parameters
+        ----------
+        index : int
+            Frame of this movie.
+        dtime_range : tuple of two ints
+            First and last-plus-one microtime bin, restricted to the
+            movie's microtime gate (``_microtime_range``).
+
+        Returns
+        -------
+        photons : np.ndarray
+            ``(Y, X)`` photons within the range (float64).
+        delays : np.ndarray
+            ``(Y, X)`` sums of their delays in ns (float64).
+        """
+        gate_lo, gate_hi = self._microtime_range
+        lo, hi = max(gate_lo, int(dtime_range[0])), min(
+            gate_hi, int(dtime_range[1])
+        )
+        if lo >= hi:
+            raise ValueError(
+                f"Empty microtime range {dtime_range!r} within the movie's "
+                f"microtime bins {gate_lo}-{gate_hi}."
+            )
+        nbytes = self.height * self.width * (hi - lo) * 4
+        merge = max(1, -(-nbytes // self._DELAY_HISTOGRAM_BYTES))
+        hist = self._microtime_histograms(
+            index, index + 1, dtime_bin=merge, dtime_range=(lo, hi)
+        )[0]
+        edges = np.minimum(lo + merge * np.arange(hist.shape[-1] + 1), hi)
+        centers = (edges[:-1] + edges[1:]) / 2 - lo
+        delays_ns = centers * self._tcspc_resolution * 1e9
+        photons = hist.sum(axis=-1, dtype=np.float64)
+        delays = np.tensordot(hist, delays_ns, axes=([-1], [0]))
+        return photons, delays
+
+    def close(self):
+        try:
+            self._ptu.close()
+        except Exception:
+            pass
+
+
+def _ptu_decay_histograms(path: str) -> dict:
+    """Decay (microtime) histograms of every detector of a PTU file with
+    photons, e.g., to place microtime gates.
+
+    Returns
+    -------
+    histograms : dict
+        ``"names"`` (list of ``"Detector N"``), ``"counts"`` (one row of
+        photons per microtime bin per detector) and ``"bin_ns"`` (the
+        width of a bin in ns).
+    """
+    _require_ptufile()
+    ptu = PTUMovie._open(path)
+    try:
+        detectors = PTUMovie._active_detectors(ptu, path)
+        counts = np.asarray(ptu.decode_histogram(dtype=np.uint32))
+        return {
+            "names": [f"Detector {d + 1}" for d in detectors],
+            "counts": counts[list(detectors)],
+            "bin_ns": float(ptu.tcspc_resolution) * 1e9,
+        }
+    finally:
+        ptu.close()
 
 
 def _yaml_safe(obj):
@@ -6943,6 +7908,7 @@ def import_ts(path: str, pixelsize: float) -> tuple[pd.DataFrame, list[dict]]:
     locs.sort_values(kind="quicksort", by="frame", inplace=True)
 
     img_info = lib.step_info("csv2hdf")
+    img_info["File"] = path
     img_info["Frames"] = int(np.max(frames)) + 1
     img_info["Height"] = _canvas_pixels(y, pixelsize)
     img_info["Width"] = _canvas_pixels(x, pixelsize)
@@ -7046,7 +8012,8 @@ def _read_smap_loc(path: str) -> dict:
 
 
 def _smap_psf_widths(loc: dict, n: int, pixelsize: float):
-    """Return ``(sx, sy)`` PSF widths in nm, as SMAP stores them.
+    """Return ``(sx, sy)``, the PSF sigma in x and y in nm, as SMAP
+    stores them.
 
     A neutral default of one camera pixel (``pixelsize`` nm) is used
     when the corresponding field is absent.
@@ -7185,6 +8152,7 @@ def import_smap(
     locs.sort_values(kind="quicksort", by="frame", inplace=True)
 
     img_info = lib.step_info("smap2hdf")
+    img_info["File"] = path
     img_info["Frames"] = int(np.max(frames)) + 1
     img_info["Height"] = _canvas_pixels(y, pixelsize)
     img_info["Width"] = _canvas_pixels(x, pixelsize)
@@ -7532,7 +8500,7 @@ def _pyme_restore_info(
     added = {
         key: value
         for key, value in imported[0].items()
-        if key in ("Generated by", "PyME metadata", *canvas_keys)
+        if key in ("Generated by", "File", "PyME metadata", *canvas_keys)
     }
     if probe is not None:
         added["PyME probe"] = probe
@@ -7571,7 +8539,7 @@ def import_pyme(
       ``Camera.ElectronsPerCount / Camera.TrueEMGain`` from the
       metadata. **If the metadata does not store the camera
       conversion, the photons are given in camera counts.** 1 if there
-      is no amplitude or PSF width.
+      is no amplitude or PSF sigma.
     - ``bg``: ``bg`` (files exported by Picasso), otherwise
       ``fitResults_background + subtractedBackground`` (camera counts
       per pixel, converted to photons as above), otherwise 0.
@@ -7744,6 +8712,7 @@ def import_pyme(
     height = max(height, _canvas_pixels(data["y"], pixelsize))
 
     img_info = lib.step_info("pyme2hdf")
+    img_info["File"] = path
     img_info["Frames"] = int(np.max(frames)) + 1 if n else 1
     img_info["Height"] = max(height, 1)
     img_info["Width"] = max(width, 1)
@@ -7761,6 +8730,32 @@ def import_pyme(
     if restored is not None and len(restored) == 1:
         info = _pyme_restore_info(restored[0], info)
     return locs, info
+
+
+def _split_by_column(
+    locs: pd.DataFrame, column: str
+) -> list[tuple[int | None, pd.DataFrame]]:
+    """Localizations per (rounded, integer) value of ``column``, sorted
+    by value, without ``column``.
+
+    Returns
+    -------
+    list of tuples
+        ``(value, locs)`` per value. With at most one value, a single
+        ``(value or None, locs)`` that keeps every localization.
+    """
+    rounded = np.rint(locs[column].to_numpy(dtype=np.float64))
+    values = np.unique(rounded[np.isfinite(rounded)]).astype(np.int64)
+    if len(values) <= 1:
+        value = int(values[0]) if len(values) else None
+        return [(value, locs.drop(columns=column))]
+    return [
+        (
+            int(value),
+            locs[rounded == value].drop(columns=column).reset_index(drop=True),
+        )
+        for value in values
+    ]
 
 
 def split_pyme_channels(
@@ -7794,10 +8789,10 @@ def split_pyme_channels(
     """
     if "probe" not in locs.columns:
         return [(path, locs, info)]
-    probes = np.rint(locs["probe"].to_numpy(dtype=np.float64))
-    values = np.unique(probes[np.isfinite(probes)]).astype(np.int64)
-    if len(values) <= 1:
-        return [(path, locs.drop(columns="probe"), info)]
+    parts = _split_by_column(locs, "probe")
+    if len(parts) == 1:
+        return [(path, parts[0][1], info)]
+    values = [value for value, _ in parts]
 
     restored = None
     try:
@@ -7813,9 +8808,7 @@ def split_pyme_channels(
 
     base, ext = os.path.splitext(path)
     channels = []
-    for value in values:
-        channel_locs = locs[probes == value].drop(columns="probe")
-        channel_locs = channel_locs.reset_index(drop=True)
+    for value, channel_locs in parts:
         if restored is not None:
             channel_info = _pyme_restore_info(
                 restored[value], info, int(value)
@@ -8042,3 +9035,582 @@ def export_pyme_multi(
     with tables.open_file(path, "w") as h5file:
         h5file.create_table("/", "Localizations", obj=records, filters=filters)
         _pyme_write_metadata(h5file, metadata)
+
+
+# MINFLUX localization files written by pyMINFLUX
+# (https://github.com/bsse-scf/pyMINFLUX). Its ``.pmx`` file (HDF5) and
+# its ``.csv`` export hold the same filtered table, one row per MINFLUX
+# localization: trace ID ``tid``, time ``tim`` (s), ``x``, ``y``, ``z``
+# (nm, z already corrected with pyMINFLUX's z scaling factor), ``efo``,
+# ``cfr``, ``eco``, ``dcr``, ``dwell``, fluorophore ID ``fluo`` and,
+# depending on the version, ``fbg`` and ``iid``. Other MINFLUX tables
+# saved as ``.csv`` (e.g., converted from Imspector's .mat files) may
+# hold only ``tid``, the time ``t`` (s), ``x``, ``y`` and ``z``.
+
+#: Extension of pyMINFLUX's native file format (HDF5).
+MINFLUX_EXTENSIONS = (".pmx",)
+
+#: Versions of the ``.pmx`` format that ``import_minflux`` reads.
+_MINFLUX_PMX_VERSIONS = ("1.0", "2.0", "3.0")
+
+#: Columns of pyMINFLUX's localization table that identify its ``.csv``
+#: export.
+_MINFLUX_CSV_COLUMNS = ("tid", "tim", "x", "y", "efo", "cfr", "eco", "dcr")
+
+#: Columns ``import_minflux`` requires (``tim`` may be named ``t`` in a
+#: ``.csv`` file). In a ``.csv`` file, they identify a MINFLUX table
+#: (and tell it apart from, e.g., a ThunderSTORM ``.csv``).
+_MINFLUX_REQUIRED_COLUMNS = ("tid", "tim", "x", "y")
+
+#: Other names of MINFLUX columns in ``.csv`` files, mapped to
+#: pyMINFLUX's names.
+_MINFLUX_CSV_ALIASES = {"t": "tim"}
+
+#: Largest |z| (nm) of a 2D acquisition; pyMINFLUX takes data with
+#: |z| > 1e-11 m as 3D (2D files can hold z of a few 1e-4 nm).
+_MINFLUX_2D_Z_TOLERANCE = 0.01
+
+#: Localization precision (nm) of traces with a single localization when
+#: no trace of the file has more than one.
+_MINFLUX_DEFAULT_PRECISION = 1.0
+
+#: Nominal camera pixel size (nm) of MINFLUX data, which has no camera;
+#: it only sets the extent of the field of view (``lib.field_of_view``).
+_MINFLUX_PIXELSIZE = 10.0
+
+#: Margin (nm) between the localizations and the edges of the field of
+#: view when ``import_minflux`` moves the data to the origin.
+_MINFLUX_MARGIN = 100.0
+
+#: Values of ``origin`` of ``import_minflux``.
+_MINFLUX_ORIGINS = ("data", "stage")
+
+
+def _minflux_csv_header(path: str) -> list[str] | None:
+    """Column names of a ``.csv`` file: its first line that is neither
+    empty nor a ``#`` comment, split at commas. None if the file cannot
+    be read or has no such line."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as file:
+            for line in file:
+                line = line.strip()
+                if line and not line.startswith("#"):
+                    return [
+                        name.strip().strip('"') for name in line.split(",")
+                    ]
+    except OSError:
+        return None
+    return None
+
+
+def is_minflux_file(path: str) -> bool:
+    """Whether ``path`` names a MINFLUX localization file: pyMINFLUX's
+    native ``.pmx`` file, or a ``.csv`` file with a MINFLUX localization
+    table, e.g., exported by pyMINFLUX (recognized by its columns
+    ``tid``, ``x``, ``y`` and the time, ``tim`` or ``t``).
+
+    Parameters
+    ----------
+    path : str
+        Path to a file.
+
+    Returns
+    -------
+    bool
+        True for ``.pmx`` files and MINFLUX ``.csv`` files.
+    """
+    ext = os.path.splitext(path)[1].lower()
+    if ext in MINFLUX_EXTENSIONS:
+        return True
+    if ext != ".csv":
+        return False
+    header = _minflux_csv_header(path)
+    if header is None:
+        return False
+    columns = {_MINFLUX_CSV_ALIASES.get(name, name) for name in header}
+    return set(_MINFLUX_REQUIRED_COLUMNS) <= columns
+
+
+def _minflux_read_pmx(
+    path: str,
+) -> tuple[pd.DataFrame, dict, dict[int, str]]:
+    """Read the localization table, the parameters and the fluorophore
+    names of a pyMINFLUX ``.pmx`` file.
+
+    Returns
+    -------
+    table : pd.DataFrame
+        pyMINFLUX's filtered localization table (``/paraview/dataframe``)
+        with its original column types.
+    metadata : dict
+        Format, file version and the datasets of ``/parameters``.
+    names : dict
+        Fluorophore names by fluorophore ID; empty if not stored.
+
+    Raises
+    ------
+    FileFormatError
+        If the file has an unknown ``file_version`` or no localization
+        table.
+    """
+    with h5py.File(path, "r") as file:
+        version = _pyme_metadata_value(file.attrs.get("file_version"))
+        if version not in _MINFLUX_PMX_VERSIONS:
+            raise FileFormatError(
+                f"{path} is not a pyMINFLUX .pmx file of a known version "
+                f"(file_version {version!r}, supported: "
+                f"{', '.join(_MINFLUX_PMX_VERSIONS)})."
+            )
+        if "paraview/dataframe" not in file:
+            raise FileFormatError(
+                f"pyMINFLUX file {path} contains no localizations "
+                "(/paraview/dataframe)."
+            )
+        dataset = file["paraview/dataframe"]
+        columns = [
+            _pyme_metadata_value(name)
+            for name in dataset.attrs["column_names"]
+        ]
+        types = [
+            _pyme_metadata_value(name)
+            for name in dataset.attrs.get("column_types", [])
+        ]
+        values = np.asarray(dataset[()]).reshape(-1, len(columns))
+
+        metadata = {"Format": "pyMINFLUX .pmx", "File version": version}
+        reader_version = file.attrs.get("reader_version")
+        if reader_version is not None:
+            metadata["Reader version"] = _pyme_metadata_value(reader_version)
+        names = {}
+        parameters = file.get("parameters")
+        if isinstance(parameters, h5py.Group):
+            for key, item in parameters.items():
+                if isinstance(item, h5py.Dataset):
+                    value = _pyme_metadata_value(item[()])
+                    if value is not None:
+                        metadata[key] = value
+            names_json = _pyme_metadata_value(
+                parameters.attrs.get("fluorophore_names")
+            )
+            if isinstance(names_json, str):
+                try:
+                    names = {
+                        int(key): str(value)
+                        for key, value in json.loads(names_json).items()
+                    }
+                except (ValueError, AttributeError) as error:
+                    _log.debug(
+                        "Fluorophore names of %s not read: %s", path, error
+                    )
+
+    table = pd.DataFrame(values, columns=columns)
+    for column, dtype in zip(columns, types):
+        try:
+            table[column] = table[column].astype(dtype)
+        except (TypeError, ValueError):  # e.g., NaN in an integer column
+            pass
+    return table, metadata, names
+
+
+def _minflux_read_csv(
+    path: str,
+) -> tuple[pd.DataFrame, dict, dict[int, str]]:
+    """Read the localization table and the fluorophore names (header
+    comments ``# fluo_<id>=<name>``) of a MINFLUX ``.csv`` file, e.g.,
+    exported by pyMINFLUX; see ``_minflux_read_pmx`` for the returned
+    values. Columns named as in ``_MINFLUX_CSV_ALIASES`` are renamed
+    unless the file also has pyMINFLUX's name."""
+    names = {}
+    with open(path, encoding="utf-8", errors="replace") as file:
+        for line in file:
+            if not line.startswith("#"):
+                break
+            match = re.match(
+                r"#\s*fluo_(\d+)\s*=\s*(.*)$", line.rstrip("\r\n")
+            )
+            if match:
+                names[int(match.group(1))] = match.group(2).strip()
+    table = pd.read_csv(path, comment="#")
+    is_pyminflux = set(_MINFLUX_CSV_COLUMNS) <= set(table.columns)
+    table = table.rename(
+        columns={
+            alias: name
+            for alias, name in _MINFLUX_CSV_ALIASES.items()
+            if alias in table.columns and name not in table.columns
+        }
+    )
+    file_format = "pyMINFLUX .csv" if is_pyminflux else "MINFLUX .csv"
+    return table, {"Format": file_format}, names
+
+
+def _minflux_trace_precision(
+    values: np.ndarray, codes: np.ndarray, per_trace: bool
+) -> np.ndarray:
+    """Localization precision from the spread of the localizations of
+    each trace.
+
+    Parameters
+    ----------
+    values : np.ndarray
+        One coordinate (nm) of each localization.
+    codes : np.ndarray
+        Trace index (0, 1, ...) of each localization.
+    per_trace : bool
+        If True, return the standard error of each trace's mean (one
+        value per trace), otherwise the standard deviation of the
+        trace's localizations (one value per localization).
+
+    Returns
+    -------
+    np.ndarray
+        Precision (nm). Traces with a single localization get the median
+        of the other traces' values (``_MINFLUX_DEFAULT_PRECISION`` if
+        no trace has more than one localization).
+    """
+    grouped = pd.Series(values, dtype=np.float64).groupby(codes)
+    precision = grouped.std().to_numpy()  # ddof=1, as pyMINFLUX
+    if per_trace:
+        precision = precision / np.sqrt(grouped.size().to_numpy())
+    finite = np.isfinite(precision)
+    fill = (
+        float(np.median(precision[finite]))
+        if finite.any()
+        else _MINFLUX_DEFAULT_PRECISION
+    )
+    precision = np.where(finite, precision, fill)
+    return precision if per_trace else precision[codes]
+
+
+def _minflux_extra_columns(
+    table: pd.DataFrame, skip: set[str]
+) -> list[tuple[str, str]]:
+    """Numeric columns of a MINFLUX table that are copied as they are,
+    as ``(MINFLUX name, Picasso name)`` pairs."""
+    return [
+        (column, _sanitize_column_name(str(column)))
+        for column in table.columns
+        if column not in skip and table[column].dtype.kind in "biuf"
+    ]
+
+
+def _minflux_localizations(table: pd.DataFrame, is_3d: bool) -> dict:
+    """Picasso columns of every MINFLUX localization, see
+    ``import_minflux``; ``table`` is sorted by time."""
+    codes = pd.factorize(table["tid"], sort=False)[0]
+    n = len(table)
+    data = {
+        "frame": np.arange(n, dtype=np.uint32),
+        "x": table["x"].to_numpy(dtype=np.float32),
+        "y": table["y"].to_numpy(dtype=np.float32),
+    }
+    if is_3d:
+        data["z"] = table["z"].to_numpy(dtype=np.float32)
+    for axis in ("x", "y", "z") if is_3d else ("x", "y"):
+        data[f"lp{axis}"] = _minflux_trace_precision(
+            table[axis].to_numpy(), codes, per_trace=False
+        ).astype(np.float32)
+    if "eco" in table.columns:
+        data["photons"] = table["eco"].to_numpy(dtype=np.float32)
+    for column, name in _minflux_extra_columns(table, {"x", "y", "z", "eco"}):
+        if name in data:
+            continue
+        values = table[column].to_numpy()
+        if values.dtype.kind == "f":
+            values = values.astype(np.float32)
+        data[name] = values
+    return data
+
+
+def _minflux_trace_means(table: pd.DataFrame, is_3d: bool) -> dict:
+    """Picasso columns of one localization per MINFLUX trace, the
+    photon-weighted mean of the trace's localizations, see
+    ``import_minflux``; ``table`` is sorted by time, so the traces come
+    in the order of their first localization."""
+    codes, tids = pd.factorize(table["tid"], sort=False)
+    n_traces = len(tids)
+    counts = np.bincount(codes, minlength=n_traces)
+
+    # weights: eco, or equal weights in traces without photon counts
+    if "eco" in table.columns:
+        weights = np.nan_to_num(table["eco"].to_numpy(dtype=np.float64))
+        weights = np.clip(weights, 0, None)
+    else:
+        weights = np.ones(len(table))
+    totals = np.bincount(codes, weights, minlength=n_traces)
+    no_counts = totals[codes] <= 0
+    weights[no_counts] = 1.0
+    totals = np.bincount(codes, weights, minlength=n_traces)
+
+    def weighted_mean(column: str) -> np.ndarray:
+        values = table[column].to_numpy(dtype=np.float64)
+        return (
+            np.bincount(codes, weights * values, minlength=n_traces) / totals
+        )
+
+    data = {
+        "frame": np.arange(n_traces, dtype=np.uint32),
+        "x": weighted_mean("x").astype(np.float32),
+        "y": weighted_mean("y").astype(np.float32),
+    }
+    if is_3d:
+        data["z"] = weighted_mean("z").astype(np.float32)
+    for axis in ("x", "y", "z") if is_3d else ("x", "y"):
+        data[f"lp{axis}"] = _minflux_trace_precision(
+            table[axis].to_numpy(), codes, per_trace=True
+        ).astype(np.float32)
+    if "eco" in table.columns:
+        data["photons"] = np.bincount(
+            codes, table["eco"].to_numpy(dtype=np.float64), minlength=n_traces
+        ).astype(np.float32)
+    data["tid"] = np.asarray(tids)
+    data["n"] = counts.astype(np.uint32)
+    data["tim"] = (
+        np.bincount(codes, table["tim"].to_numpy(dtype=np.float64)) / counts
+    ).astype(np.float32)
+    if "fluo" in table.columns:
+        # the most frequent fluorophore of each trace (traces should
+        # have one), as pyMINFLUX
+        pairs = pd.DataFrame(
+            {"trace": codes, "fluo": table["fluo"].to_numpy()}
+        )
+        mode = (
+            pairs.value_counts()
+            .reset_index()
+            .sort_values(["trace", "count"], ascending=[True, False])
+            .drop_duplicates("trace")
+            .set_index("trace")["fluo"]
+        )
+        data["fluo"] = mode.reindex(range(n_traces)).to_numpy()
+
+    skip = {"x", "y", "z", "eco", "tid", "tim", "fluo", "iid"}
+    medians = _minflux_extra_columns(table, skip)
+    if medians:
+        grouped = table[[column for column, _ in medians]].groupby(codes)
+        median = grouped.median()
+        for column, name in medians:
+            if name not in data:
+                data[name] = median[column].to_numpy(dtype=np.float32)
+    return data
+
+
+def import_minflux(
+    path: str,
+    *,
+    average_traces: bool = False,
+    pixelsize: float = _MINFLUX_PIXELSIZE,
+    origin: Literal["data", "stage"] = "data",
+) -> tuple[pd.DataFrame, list[dict]]:
+    """Import MINFLUX localizations processed with pyMINFLUX
+    (https://github.com/bsse-scf/pyMINFLUX) or saved as a ``.csv`` table.
+
+    Reads pyMINFLUX's native ``.pmx`` file (versions 1.0 to 3.0) and the
+    ``.csv`` file it exports, which hold the same filtered table of
+    localizations. Other ``.csv`` files with a MINFLUX table are read,
+    too: they need the columns ``tid``, ``x``, ``y`` and the time
+    (``tim``, or ``t``, which is renamed to ``tim``); ``z`` and the other
+    columns are optional. MINFLUX localizes one emitter at a time, repeatedly:
+    the localizations of one emitter in one on-event form a trace
+    (``tid``). By default, every localization is imported; with
+    ``average_traces``, one localization per trace.
+
+    Every localization (default), sorted by time:
+
+    - ``frame``: the index of the localization in time (0, 1, ...), as
+      MINFLUX has no camera frames; ``tim`` keeps the time (s).
+    - ``x``, ``y``, ``z``: ``x``, ``y``, ``z`` (nm in both pyMINFLUX and
+      Picasso). ``z`` is omitted for 2D data (z within 0.01 nm of 0).
+    - ``lpx``, ``lpy``, ``lpz``: standard deviation of ``x``, ``y``,
+      ``z`` of the trace's localizations (as pyMINFLUX's ``sx``, ``sy``,
+      ``sz``); traces with a single localization get the median of the
+      other traces.
+    - ``photons``: ``eco`` (photon counts of the localization).
+    - All other numeric columns (``tid``, ``tim``, ``efo``, ``cfr``,
+      ``dcr``, ``dwell``, ``fbg``, ``iid``, ``fluo``) are kept as they
+      are.
+
+    One localization per trace (``average_traces=True``), sorted by the
+    start of the trace:
+
+    - ``frame``: the index of the trace in time.
+    - ``x``, ``y``, ``z``: mean of the trace's localizations weighted by
+      their ``eco`` (as pyMINFLUX's weighted localizations).
+    - ``lpx``, ``lpy``, ``lpz``: standard error of the mean, i.e., the
+      standard deviation of the trace divided by the square root of its
+      number of localizations.
+    - ``photons``: sum of ``eco``; ``n``: number of localizations;
+      ``tim``: mean time (s); ``tid``; ``fluo``: the trace's (most
+      frequent) fluorophore; the other numeric columns (``efo``,
+      ``cfr``, ``dcr``, ...) hold the median of the trace.
+
+    MINFLUX coordinates are absolute (stage) coordinates, often many um
+    away from 0. By default (``origin="data"``), the localizations are
+    moved such that they start 100 nm (rounded to whole nominal pixels)
+    from the origin of the field of view, which Picasso shows from 0 nm;
+    the stage coordinates of Picasso's origin are stored in the metadata
+    (``"MINFLUX origin x (nm)"`` and ``"MINFLUX origin y (nm)"``), i.e.,
+    stage x = x + origin x. The fluorophores of one file stay registered,
+    separate files usually not. With ``origin="stage"``, coordinates are
+    kept as they are (negative ones extend the canvas, see
+    ``lib.fit_canvas``), so separate files of the same sample stay
+    registered. Several fluorophores in one file (``fluo``) can be split
+    with ``split_minflux_channels``.
+
+    Parameters
+    ----------
+    path : str
+        The path to the pyMINFLUX ``.pmx`` or MINFLUX ``.csv`` file.
+    average_traces : bool, optional
+        If True, import one localization per trace instead of every
+        localization. Default is False.
+    pixelsize : float, optional
+        Nominal camera pixel size in nm. MINFLUX has no camera, but
+        Picasso metadata requires a pixel size; it only sets the extent
+        of the field of view (``Width`` and ``Height``). Default is 10.
+    origin : {"data", "stage"}, optional
+        ``"data"`` moves the localizations next to the origin of the
+        field of view, ``"stage"`` keeps the absolute coordinates, see
+        above. Default is ``"data"``.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        The localization data imported from the file.
+    info : list of dicts
+        Minimal metadata information, including the pyMINFLUX parameters
+        (``"MINFLUX metadata"``) and the fluorophore names
+        (``"MINFLUX fluorophores"``, if stored).
+
+    Raises
+    ------
+    FileFormatError
+        If the file is not a MINFLUX file (or a pyMINFLUX ``.pmx`` of a
+        known version), lacks the columns ``tid``, ``tim``, ``x`` or
+        ``y``, or contains no localizations.
+    ValueError
+        If ``origin`` is neither ``"data"`` nor ``"stage"``.
+    """
+    if origin not in _MINFLUX_ORIGINS:
+        raise ValueError(
+            f"origin must be one of {', '.join(_MINFLUX_ORIGINS)}, "
+            f"not {origin!r}."
+        )
+    _check_path_length(path)
+    if os.path.splitext(path)[1].lower() in MINFLUX_EXTENSIONS:
+        table, metadata, names = _minflux_read_pmx(path)
+    elif is_minflux_file(path):
+        table, metadata, names = _minflux_read_csv(path)
+    else:
+        raise FileFormatError(
+            f"{path} is not a MINFLUX localization file (pyMINFLUX .pmx, "
+            "or .csv with the columns tid, tim (or t), x and y)."
+        )
+    missing = [c for c in _MINFLUX_REQUIRED_COLUMNS if c not in table.columns]
+    if missing:
+        raise FileFormatError(
+            f"MINFLUX file {path} lacks the column(s) {', '.join(missing)}."
+        )
+    finite = np.isfinite(table["x"].to_numpy(dtype=np.float64)) & np.isfinite(
+        table["y"].to_numpy(dtype=np.float64)
+    )
+    table = table[finite]
+    if not len(table):
+        raise FileFormatError(
+            f"MINFLUX file {path} contains no localizations."
+        )
+    table = table.sort_values("tim", kind="stable").reset_index(drop=True)
+
+    pixelsize = float(pixelsize)
+    offsets = {}
+    if origin == "data":
+        # whole nominal pixels, so the shift is exact in the metadata
+        for axis in ("x", "y"):
+            values = table[axis].to_numpy(dtype=np.float64)
+            offset = (
+                np.floor((values.min() - _MINFLUX_MARGIN) / pixelsize)
+                * pixelsize
+            )
+            table[axis] = values - offset
+            offsets[axis] = float(offset)
+
+    is_3d = "z" in table.columns and bool(
+        np.nanmax(np.abs(table["z"].to_numpy(dtype=np.float64)))
+        > _MINFLUX_2D_Z_TOLERANCE
+    )
+    if average_traces:
+        data = _minflux_trace_means(table, is_3d)
+    else:
+        data = _minflux_localizations(table, is_3d)
+    locs = pd.DataFrame(data)
+
+    # the same margin on the far side when the data is moved
+    margin = _MINFLUX_MARGIN if origin == "data" else 0.0
+    img_info = lib.step_info("minflux2hdf")
+    img_info["File"] = path
+    img_info["Frames"] = len(locs)
+    img_info["Width"] = _canvas_pixels(data["x"] + margin, pixelsize)
+    img_info["Height"] = _canvas_pixels(data["y"] + margin, pixelsize)
+    img_info["Pixelsize"] = pixelsize
+    img_info["Average traces"] = bool(average_traces)
+    for axis, offset in offsets.items():
+        img_info[f"MINFLUX origin {axis} (nm)"] = offset
+    img_info["MINFLUX metadata"] = metadata
+    if names:
+        img_info["MINFLUX fluorophores"] = names
+    info = [img_info]
+    # localizations at negative (stage) coordinates are kept
+    lib.fit_canvas([locs], [info])
+    return locs, info
+
+
+def split_minflux_channels(
+    path: str, locs: pd.DataFrame, info: list[dict]
+) -> list[tuple[str, pd.DataFrame, list[dict]]]:
+    """Split localizations imported with ``import_minflux`` into one
+    channel per fluorophore (pyMINFLUX's ``fluo`` column).
+
+    Parameters
+    ----------
+    path : str
+        The path to the pyMINFLUX file the localizations were imported
+        from.
+    locs : pd.DataFrame
+        Localizations returned by ``import_minflux``.
+    info : list of dicts
+        Metadata returned by ``import_minflux``.
+
+    Returns
+    -------
+    channels : list of tuples
+        ``(path, locs, info)`` per channel, sorted by fluorophore ID.
+        With a single fluorophore, the input is returned (without a
+        constant ``fluo`` column). Otherwise, each channel's path is
+        ``<base>_<name><ext>``, with the fluorophore's name stored by
+        pyMINFLUX or ``fluo<ID>``; its localizations do not contain the
+        ``fluo`` column and its metadata is a copy of ``info`` with the
+        fluorophore added (``"MINFLUX fluorophore"``).
+    """
+    if "fluo" not in locs.columns:
+        return [(path, locs, info)]
+    parts = _split_by_column(locs, "fluo")
+    if len(parts) == 1:
+        return [(path, parts[0][1], info)]
+
+    names = lib.get_from_metadata(info, "MINFLUX fluorophores") or {}
+    base, ext = os.path.splitext(path)
+    channels = []
+    labels = set()
+    for value, channel_locs in parts:
+        name = names.get(value, names.get(str(value)))
+        if name is None or str(name) == str(value):  # pyMINFLUX's default
+            name = str(value)
+            label = f"fluo{value}"
+        else:
+            name = str(name)
+            label = _sanitize_column_name(name)
+        if label in labels:
+            label = f"{label}_fluo{value}"
+        labels.add(label)
+        channel_info = copy.deepcopy(info)
+        channel_info[-1]["MINFLUX fluorophore"] = {"ID": value, "Name": name}
+        channels.append((f"{base}_{label}{ext}", channel_locs, channel_info))
+    return channels

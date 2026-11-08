@@ -36,7 +36,7 @@ Appearance
 - **Theme**: *System* (default) is light or dark like the operating system and follows it when it changes; *Light* and *Dark* fix it; *Native* is the platform's own PyQt style, the look of Picasso before version 1.0.
 - **Contrast**: *High* shows black text on white (or white on black in the dark theme) and draws the frames of buttons, input fields, check boxes and tables in the color of the text; the accent color is darkened or lightened where needed to stand out. *System* (default) is high when the operating system asks for it (macOS: *Increase contrast* in the Accessibility settings; Windows: a contrast theme) and follows it when it changes; *Normal* never is.
 - **Accent color**: the color of selections, checked and default buttons, sliders and focus frames; a preset or any color (*Custom...*).
-- **Font size**: the size of the text in percent of the system's (30–300 %). It also enlarges, on screen, the text of the charts (axis and tick labels, titles, legends) and the scale bar, legend and rotation angles on rendered images in Render and its 3D view. Saved charts and exported images keep the sizes set in the plot settings and the usual sizes of the scale bar and legend, whatever the font size.
+- **Font size**: the size of the text in percent of the system's (30–300 %). It also enlarges, on screen, the text of the charts (axis and tick labels, titles, legends) and the scale bar, legend and rotation angles on rendered images in Render and its 3D view, and the scale bars of Localize and SPINNA. Saved charts and exported images keep the sizes set in the plot settings and the font size of the scale bar set in its display settings and the usual size of the legend, whatever the font size.
 - **Density**: *Compact* reduces the spacing of the controls, e.g., for small laptop screens.
 - **Toolbar**: how the toolbars of ``Picasso: Render`` (also its 3D view), ``Picasso: Localize``, ``Picasso: Filter`` and ``Picasso: Average`` show their buttons: *Icons and text* (default), *Icons*, *Text* or *Hidden*. Which actions they hold is set in :ref:`toolbars`.
 - **Menus**: *Show icons in menus* (default on) shows the icons next to the actions of the menus.
@@ -175,6 +175,9 @@ Top level
    * - ``Release memory after idle (min)``
      - ``30``
      - Minutes without input (clicks, keys, scrolling) after which an open module releases the memory it rebuilds on demand - in Render the cached renders and the GPU memory, in Localize the frames cached for the identification preview - and hands freed memory back to the operating system. Render and Filter also move their localizations (200 MB or more) to ``~/.picasso/spill`` and read them back on the next action that needs them, while the rendered image and the rows of Filter's table stay on screen; linked Render windows keep sharing their channels. Nothing closes or changes on screen; the first action afterwards may take a moment longer (e.g., the first render starts the GPU again). A running task, such as clustering, counts as activity. ``0`` never releases memory.
+   * - ``ScaleBar``
+     - *(last used)*
+     - The look of the scale bars of Localize and SPINNA (position, margins, thickness, color, background, unit, label position and font), set with ``View`` > ``Scale bar settings...`` in Localize or the button next to a scale bar in SPINNA. Saved at each change. Render's scale bars have their own settings, see ``ScaleBar`` in the ``Render`` section.
 
 ``Sound_notification``
 ^^^^^^^^^^^^^^^^^^^^^^
@@ -279,6 +282,9 @@ Top level
    * - ``Confirm removing all localizations``
      - ``False``
      - ``True`` asks for confirmation before ``File > Remove all localizations``. Ticking *Don't ask again* in the question sets it to ``False``. See :ref:`render-remove-all-localizations`.
+   * - ``Show Ctrl+Z notice``
+     - ``True``
+     - Pressing :kbd:`Ctrl+Z` in Render shows a notice that tells that it undoes the last step rather than selecting the Zoom tool (now :kbd:`Z`), as before Picasso 1.0. Ticking *Don't show again* in the notice sets it to ``False``.
    * - ``Colorbar format``
      - ``.png``
      - Format of the exported colorbar/LUT image next to a "render by property" export - ``.png`` or ``.svg``. See :ref:`render-colorbar-format`.
@@ -291,6 +297,12 @@ Top level
    * - ``Grid3D``
      - *(last used)*
      - Remembered last value: the grid of the 3D view, as ``Grid`` plus its planes and position. See :ref:`render-3d-grid`.
+   * - ``ScaleBar``
+     - *(last used)*
+     - Remembered last value: the scale bar of the main window (printed length, position, margins, thickness, color, background, unit, label position and font, bold, italic), not whether it is shown or its length, which is automatic at each start. Saved when Render is closed. See :ref:`render-scale-bar`.
+   * - ``ScaleBar3D``
+     - *(last used)*
+     - Remembered last value: the scale bar of the 3D view, as ``ScaleBar``.
    * - ``Tracks``
      - *(last used)*
      - Remembered last value: the maximum number of tracks drawn and the look of the lines of single-particle tracks (``Display Settings > Tracks``), not whether they are shown. See :ref:`render-spt-overlay`.
@@ -377,12 +389,18 @@ Top level
    * - ``fit_mode``
      - *(last used)*
      - Remembered last value: the **Fit mode** selection.
+   * - ``magnification_calculator``
+     - *(last used)*
+     - Remembered last values of the dialog behind ``Calculate...`` next to the ``Magnification factor``: ``na``, ``n_immersion``, ``n_sample``, ``wavelength`` (nm), ``depth`` (nm) and ``near_surface`` (``midpoint`` or ``full-aperture``). See :ref:`localize-magnification-factor`.
    * - ``Columns to save``
      - *(all columns)*
      - Which localization columns are ticked in ``File`` > ``Select columns to save...`` when saving fit results.
    * - ``Expanded sections``
      - all expanded
      - Which sections of the ``Parameters`` dialog are expanded (``true``) or collapsed (``false``), keyed by the section title. Saved whenever a section is expanded or collapsed by clicking its header.
+   * - ``Print scale bar length``
+     - ``True``
+     - Whether the length of the scale bar (``View`` > ``Show scale bar``) is printed, set in ``View`` > ``Scale bar settings...``. Its look is ``ScaleBar`` at the top level.
 
 ``Filter``
 ^^^^^^^^^^
@@ -417,6 +435,12 @@ Top level
    * - ``NND fonts``
      - *(widget defaults)*
      - Font family and size for the title, axis labels and ticks of the NND plot, set in *Plot settings*. See :doc:`spinna`.
+   * - ``Print scale bar length (mask)``
+     - ``True``
+     - Whether the length of the scale bar of the mask preview is printed, set with the button next to its length. Its look is ``ScaleBar`` at the top level.
+   * - ``Print scale bar length (structures)``
+     - ``False``
+     - Whether the length of the scale bar of the structure preview is printed, set with the button next to *Show scale bar*.
 
 ``Updates``
 ^^^^^^^^^^^

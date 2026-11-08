@@ -383,6 +383,7 @@ class TestLocalizeWiring:
         info = localize._fit_localize_info(
             "vectorfit",
             None,
+            13,
             None,
             12,
             None,
@@ -401,7 +402,7 @@ class TestLocalizeWiring:
 
     def test_other_methods_record_no_vectorfit_settings(self):
         info = localize._fit_localize_info(
-            "avg", None, None, None, None, None, {"NA": 1.4}
+            "avg", None, 13, None, None, None, None, {"NA": 1.4}
         )
         assert not any(key.startswith("VectorFit") for key in info)
 
@@ -497,9 +498,10 @@ class TestCommandLine:
         return parser
 
     def test_is_a_fit_method(self):
-        from picasso import __main__ as cli
-
-        assert cli._FIT_METHOD_MAP["vectorfit"] == "vectorfit"
+        assert localize.resolve_fit_method("vectorfit") == (
+            "vectorfit",
+            False,
+        )
 
     def test_options_left_out_take_the_defaults(self):
         from picasso import __main__ as cli

@@ -173,6 +173,27 @@ class TestBeadRegistration:
             transform.jacobian(sparse[:1])[0], np.eye(2)
         )
 
+    def test_rigid_model_fits_rotation_and_shift(self):
+        """The 3-DOF model stays rigid through the ICP iterations and the
+        final fit."""
+        grid = _bead_grid()
+        truth = _rotation(np.radians(3.0), 4.0, -2.5)
+        movies = [
+            _bead_image(grid, seed=1),
+            _bead_image(_apply(grid, truth), seed=2),
+        ]
+
+        calibration = registration.calibrate_channel_registration_from_beads(
+            movies, box=BOX, identification_method=BEAD_NG, model="rigid"
+        )
+
+        transform = tform.from_dict(calibration["channel_transforms"][1])
+        assert transform.model == "rigid"
+        assert transform.rotation_deg == pytest.approx(3.0, abs=0.1)
+        np.testing.assert_allclose(
+            transform.apply(grid), _apply(grid, truth), atol=0.15
+        )
+
     def test_rejects_a_single_channel(self):
         with pytest.raises(ValueError, match="at least 2 channels"):
             registration.calibrate_channel_registration_from_beads(
@@ -862,3 +883,132 @@ class TestIdentificationMethod:
             registration.calibrate_channel_registration_from_beads(
                 [movie, movie], box=BOX, identification_method=[BEAD_NG] * 3
             )
+
+
+# ---------------------------------------------------------------------------
+# register_to_template (ported from picasso-workflow's tests where the math
+# is unit-agnostic)
+# ---------------------------------------------------------------------------
+
+
+def _grid_template(rows=3, columns=4, spacing=20.0) -> np.ndarray:
+    """A ``rows`` x ``columns`` grid of sites ``spacing`` nm apart."""
+    return np.array(
+        [
+            [c * spacing, r * spacing]
+            for r in range(rows)
+            for c in range(columns)
+        ],
+        dtype=float,
+    )
+
+
+#: an asymmetric constellation: only one orientation maps it onto itself
+CHIRAL = np.array(
+    [[0, 0], [20, 0], [40, 0], [0, 20], [0, 40], [13, 27.0]], dtype=float
+)
+
+
+def _maps_pairs(result, points, template, atol):
+    """Whether the transform maps each matched point onto its template
+    point."""
+    moved = result["transform"].apply(points[result["point_indices"]])
+    return np.allclose(moved, template[result["template_indices"]], atol=atol)
+
+
+class TestRegisterToTemplate:
+    @pytest.mark.parametrize("angle", [0.0, 17.0, 45.0, 90.0, 213.0])
+    def test_rotated_and_shifted_structures_register(self, angle):
+        template = _grid_template()
+        moved = tform.RigidTransform.from_params(angle, (500.0, -300.0))
+        points = moved.apply(template)
+        result = registration.register_to_template(points, template)
+        assert result["n_matched"] == 12
+        assert result["rmse"] < 1e-6
+        assert _maps_pairs(result, points, template, atol=1e-6)
+
+    def test_the_orientation_of_a_chiral_template_is_recovered(self):
+        moved = tform.RigidTransform.from_params(40.0, (5.0, -8.0))
+        result = registration.register_to_template(moved.apply(CHIRAL), CHIRAL)
+        assert result["n_matched"] == len(CHIRAL)
+        assert not result["transform"].mirror
+        assert result["transform"].allclose(moved.inverse(), tol=1e-6)
+
+    def test_a_mirror_is_detected(self):
+        moved = tform.RigidTransform.from_params(40.0, (5.0, -8.0), True)
+        points = moved.apply(CHIRAL)
+        result = registration.register_to_template(points, CHIRAL)
+        assert result["n_matched"] == len(CHIRAL)
+        assert result["rmse"] < 1e-6
+        assert result["transform"].mirror
+        assert np.allclose(result["transform"].apply(points), CHIRAL)
+        # without the mirrored orientations it cannot be matched whole
+        unmirrored = registration.register_to_template(
+            points, CHIRAL, mirror=False
+        )
+        assert unmirrored["n_matched"] < len(CHIRAL)
+
+    @pytest.mark.parametrize("k", [0, 1, 2, 3, 4])
+    def test_missing_sites(self, k):
+        template = _grid_template()
+        moved = tform.RigidTransform.from_params(22.0, (100.0, 100.0))
+        points = moved.apply(template)[k:]
+        result = registration.register_to_template(points, template)
+        assert result["n_matched"] == 12 - k
+        assert _maps_pairs(result, points, template, atol=1e-6)
+
+    def test_extra_points_are_left_unmatched(self):
+        template = _grid_template()
+        moved = tform.RigidTransform.from_params(-63.0, (40.0, 70.0))
+        extra = np.array([[300.0, 300.0], [-200.0, 50.0], [41.0, 98.0]])
+        points = np.vstack([moved.apply(template), extra])
+        result = registration.register_to_template(points, template)
+        assert result["n_matched"] == 12
+        assert set(result["point_indices"]) == set(range(12))
+
+    def test_noisy_sites(self):
+        rng = np.random.default_rng(0)
+        template = _grid_template()
+        moved = tform.RigidTransform.from_params(35.0, (250.0, 400.0))
+        points = moved.apply(template) + rng.normal(0, 2.0, (12, 2))
+        result = registration.register_to_template(points, template)
+        assert result["n_matched"] == 12
+        assert result["rmse"] < 3.0
+        # the same result every time
+        again = registration.register_to_template(points, template)
+        assert again["rmse"] == result["rmse"]
+        assert again["transform"].allclose(result["transform"])
+
+    def test_the_matching_takes_the_most_pairs_within_the_gate(self):
+        """Matched blindly, the point between the two template points
+        would take the nearer one and leave the other point out of the
+        gate."""
+        points = np.array([[0.0, 0.0], [6.0, 0.0]])
+        template = np.array([[5.0, 0.0], [16.0, 0.0]])
+        rows, cols, distances = registration._match_within_gate(
+            points, template, gate=10.5
+        )
+        assert list(zip(rows, cols)) == [(0, 0), (1, 1)]
+        np.testing.assert_allclose(distances, [5.0, 10.0])
+
+    def test_nothing_within_the_gate(self):
+        template = _grid_template()
+        result = registration.register_to_template(
+            template + 1e4, template, gate=1.0, mirror=False, angle_step=90
+        )
+        assert result["n_matched"] == len(template)  # centered first
+        far = registration.register_to_template(template[:1] + 1e4, template)
+        assert far["transform"] is None
+        assert far["n_matched"] == 0
+        assert np.isnan(far["rmse"])
+
+    def test_invalid_input(self):
+        template = _grid_template()
+        with pytest.raises(ValueError, match="at least 2 points"):
+            registration.register_to_template(template, template[:1])
+        with pytest.raises(ValueError, match=r"\(n, 2\)"):
+            registration.register_to_template(template[:, 0], template)
+        with pytest.raises(ValueError, match="angle_step"):
+            registration.register_to_template(template, template, angle_step=0)
+        with pytest.raises(ValueError, match="gate"):
+            registration.register_to_template(template, np.zeros((3, 2)))

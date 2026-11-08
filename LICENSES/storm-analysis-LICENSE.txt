@@ -1,0 +1,40 @@
+Picasso's multi-emitter fitting is a port of the 3D-DAOSTORM analysis of
+storm-analysis (https://github.com/ZhuangLab/storm-analysis, v2.4.1). Its peak
+finder, its per-peak Levenberg-Marquardt fitter and its peak pruning were
+ported to Python/numba in
+
+    picasso/fitting/residualfit.py     multi-emitter fitting of whole frames
+
+from the storm-analysis files sa_library/fitting.py, sa_library/multi_fit.c,
+sa_library/dao_fit.c, sa_library/ia_utilities.c and daostorm_3d/find_peaks.py,
+each of which carries the license below. Picasso does not link against or
+redistribute storm-analysis, but that module is a derivative work of its
+source, so the license is reproduced below in full.
+
+Cite: Babcock, H., Sigal, Y. M. & Zhuang, X. "A high-density 3D localization
+algorithm for stochastic optical reconstruction microscopy." Optical Nanoscopy
+1, 6 (2012). https://doi.org/10.1186/2192-2853-1-6
+
+---
+
+The MIT License
+
+Copyright (c) 2014-2018 Zhuang Lab, Harvard University
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in
+all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
+THE SOFTWARE.

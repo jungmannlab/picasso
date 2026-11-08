@@ -436,7 +436,8 @@ def _eval_spline_3d(
 # ----------------------------------------------------------------------
 
 
-@numba.njit(nogil=True, cache=True)
+# fastmath given, as that of its caller _solve_gj (see _lm_solve_step)
+@numba.njit(nogil=True, cache=True, fastmath=_FASTMATH)
 def _find_pivot(a: np.ndarray, n: int, ipiv: np.ndarray) -> tuple:
     """Largest-magnitude unused entry of ``a[:n, :n]``, full pivoting.
 
@@ -470,7 +471,8 @@ def _find_pivot(a: np.ndarray, n: int, ipiv: np.ndarray) -> tuple:
     return irow, icol
 
 
-@numba.njit(nogil=True, cache=True)
+# fastmath given, as that of its caller _lm_solve_step (see there)
+@numba.njit(nogil=True, cache=True, fastmath=_FASTMATH)
 def _solve_gj(
     a: np.ndarray,
     b: np.ndarray,
@@ -531,7 +533,10 @@ def _solve_gj(
     return True
 
 
-@numba.njit(nogil=True, cache=True)
+# fastmath given, as that of its callers: otherwise numba builds it with
+# that of the function that compiles it first (none for a direct call) and
+# keeps that one build per signature
+@numba.njit(nogil=True, cache=True, fastmath=_FASTMATH)
 def _lm_solve_step(
     hess: np.ndarray,
     grad: np.ndarray,

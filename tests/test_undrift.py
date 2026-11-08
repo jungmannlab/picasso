@@ -614,8 +614,14 @@ def _dense_drift_reference(picked_locs, n_frames, coordinate):
             drift[i, locs["frame"].to_numpy()] = values - np.mean(values)
         drift_mean = np.nanmean(drift, 0)
         msd = np.nanmean((drift - drift_mean) ** 2, 1)
+        # picks without deviation take the median weight of the others
+        weights = np.ones(len(msd))
+        deviates = msd > 0
+        weights[deviates] = 1 / msd[deviates]
+        if deviates.any():
+            weights[~deviates] = np.median(weights[deviates])
         masked = np.ma.MaskedArray(drift, mask=np.isnan(drift))
-        drift_mean = np.ma.average(masked, axis=0, weights=1 / msd)
+        drift_mean = np.ma.average(masked, axis=0, weights=weights)
     drift_mean = drift_mean.filled(np.nan)
     nans = np.isnan(drift_mean)
     drift_mean[nans] = np.interp(
@@ -675,6 +681,67 @@ def test_undrift_from_picked_matches_dense_reference(
         np.testing.assert_allclose(
             drift[coordinate].to_numpy(), reference, rtol=0, atol=1e-10
         )
+
+
+def _fiducial_pick(drift, frames, center, noise, rng):
+    """One fiducial following ``drift`` (n_frames x 2) in ``frames``."""
+    n = len(frames)
+    return pd.DataFrame(
+        {
+            "frame": frames.astype(np.uint32),
+            "x": center + drift[frames, 0] + rng.normal(0, noise, n),
+            "y": center + drift[frames, 1] + rng.normal(0, noise, n),
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    "case", ["single pick", "noiseless picks", "disjoint frames"]
+)
+def test_undrift_from_picked_picks_without_deviation(case):
+    """Picks that do not deviate from the mean drift (the only pick, a
+    pick alone in all of its frames, noiseless picks) used to weigh
+    infinitely, which made the drift NaN and raised in the
+    interpolation."""
+    rng = np.random.default_rng(RNG_SEED)
+    n_frames = 60
+    frames = np.arange(n_frames)
+    drift = np.c_[0.5 * frames, -0.3 * frames]
+    if case == "single pick":
+        picks = [_fiducial_pick(drift, frames, 100, 0.2, rng)]
+    elif case == "noiseless picks":
+        picks = [
+            _fiducial_pick(drift, frames, 100, 0.0, rng),
+            _fiducial_pick(drift, frames, 300, 0.0, rng),
+        ]
+    else:
+        # each pick alone in its half of the movie
+        picks = [
+            _fiducial_pick(drift, frames[:30], 100, 0.2, rng),
+            _fiducial_pick(drift, frames[30:], 300, 0.2, rng),
+        ]
+    result = postprocess.undrift_from_picked(picks, [{"Frames": n_frames}])
+    assert np.isfinite(result.to_numpy()).all()
+    if case != "disjoint frames":
+        # relative to the first frame, the drift is recovered (the
+        # disjoint halves have different centers of mass, so their
+        # drifts are offset against each other)
+        recovered = result[["x", "y"]].to_numpy()
+        np.testing.assert_allclose(
+            recovered - recovered[0], drift - drift[0], atol=1.0
+        )
+
+
+def test_undrift_from_picked_without_localizations_raises():
+    empty = pd.DataFrame(
+        {
+            "frame": np.empty(0, np.uint32),
+            "x": np.empty(0),
+            "y": np.empty(0),
+        }
+    )
+    with pytest.raises(ValueError, match="No picked localizations"):
+        postprocess.undrift_from_picked([empty], [{"Frames": 10}])
 
 
 def test_undrift_from_picked_needs_no_picks_by_frames_table():

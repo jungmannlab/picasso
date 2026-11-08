@@ -1476,9 +1476,17 @@ def stitch(
             "Tile offsets y (nm)": [float(final[tiles[i], 1]) for i in files],
             "Tile offsets z (nm)": [float(z_offsets[tiles[i]]) for i in files],
             "Frame offsets": [int(offset) for offset in frame_offsets],
+            "Frames offset": bool(offset_frames),
+            "Files used for alignment": [
+                paths[i] if paths is not None else int(i)
+                for i in np.flatnonzero(use)
+            ],
             "Initial positions": ("stage" if positions is None else "given"),
             "Stage orientation": chosen,
             "Search radius (um)": float(search_radius_um),
+            "Min. overlap (um)": float(min_overlap_um),
+            "Max. residual (nm)": float(max_residual),
+            "Aligned in z": bool(with_z),
             "Overlaps cut at the seams": bool(cut_seams),
             "Width": width,
             "Height": height,

@@ -172,6 +172,38 @@ def test_nena_button(window, qt_offscreen):
     assert info_dialog.nena_label.text().endswith("nm")
 
 
+def test_precision_follows_selected_channel(window, qt_offscreen, tmp_path):
+    """NeNA and FRC are calculated for and shown with the channel
+    selected in the Precision and resolution section."""
+    info_dialog = window.info_dialog
+    path = str(tmp_path / "locs2.hdf5")
+    window.view.add(path, _locs(seed=1), _info(), render_=False)
+    info_dialog.update_fit_precision()
+    combo = info_dialog.precision_channel
+    assert combo.count() == 2
+    assert not combo.isHidden()
+    combo.setCurrentIndex(1)
+    info_dialog.calculate_nena_lp()
+    _wait_for_tasks(qt_offscreen)
+    assert combo.currentIndex() == 1
+    assert info_dialog.nena_label.text().endswith("nm")
+    assert info_dialog.nena_result
+    assert "NeNA (nm)" in window.view.infos[1][-1]
+    assert "NeNA (nm)" not in window.view.infos[0][-1]
+    info_dialog.calculate_frc_resolution()
+    assert info_dialog.frc_result
+    frc_text = info_dialog.frc_resolution.text()
+    assert frc_text != "-"
+    combo.setCurrentIndex(0)
+    assert info_dialog.nena_label.text() == "-"
+    assert info_dialog.lp is None
+    assert info_dialog.frc_resolution.text() == "-"
+    assert not info_dialog.frc_result
+    combo.setCurrentIndex(1)
+    assert info_dialog.nena_label.text().endswith("nm")
+    assert info_dialog.frc_resolution.text() == frc_text
+
+
 def test_rcc_applies_drift(window, qt_offscreen, monkeypatch):
     monkeypatch.setattr(
         QtWidgets.QInputDialog, "getInt", lambda *a, **k: (500, True)
@@ -863,4 +895,48 @@ def test_nnd_of_two_channels(window, qt_offscreen, tmp_path, monkeypatch):
     paths = plot_window.write_data(str(tmp_path / "nnd.csv"))
     assert paths[1] == str(tmp_path / "nnd_summary.csv")
     assert len(pd.read_csv(paths[1])) == 4
+    plot_window.close()
+
+
+def test_knn_dialog_shows_the_neighbor_settings(window, qt_offscreen):
+    view = window.view
+    view.add(
+        view.locs_paths[0][:-5] + "_b.hdf5", _locs(1), _info(), render_=False
+    )
+    dialog = gui_render.SpatialStatisticDialog(window, "knn")
+    assert not dialog.channel.isHidden()  # two channels
+    assert dialog.partner.isHidden() and dialog.channels_list.isHidden()
+    assert dialog.r_max.isHidden() and dialog.steps.isHidden()
+    for widget in (dialog.k_max, dialog.k_min, dialog.r_min):
+        assert not widget.isHidden()
+    assert not dialog.edge_correction.isHidden()
+    assert dialog.cross_null.isHidden()
+    dialog.k_max.setValue(3)
+    assert dialog.k_min.maximum() == 3
+    # the other statistics take radii
+    other = gui_render.SpatialStatisticDialog(window, "ripley_h")
+    assert other.k_max.isHidden() and not other.r_max.isHidden()
+
+
+def test_knn_density_plots_and_saves(
+    window, qt_offscreen, tmp_path, monkeypatch
+):
+    _answer_unlinked_warning(
+        monkeypatch, QtWidgets.QMessageBox.StandardButton.Yes
+    )
+    view = window.view
+    params = _ripley_params("fov", k_max=3, k_min=2, r_min=0.0)
+    result = _run_spatial_statistic(
+        view, qt_offscreen, monkeypatch, params, "knn"
+    )
+    assert result["k_min"] == 2 and len(result["densities"]) == 3
+    assert result["n_simulations"] == 2
+    # clustered localizations: denser around them than on average
+    assert result["densities"][0] > 2 * result["count_density"]
+    plot_window = view.spatial_statistic_windows["knn"]
+    assert plot_window.windowTitle().startswith("Density from k nearest")
+    assert len(plot_window.figure.axes) == 2
+    paths = plot_window.write_data(str(tmp_path / "knn.csv"))
+    assert paths[1] == str(tmp_path / "knn_densities.csv")
+    assert len(pd.read_csv(paths[1])) == 5  # 3 orders, pooled, count
     plot_window.close()

@@ -129,6 +129,10 @@ def test_align_removes_non_overlapping_localizations(window):
     locs = window.view.locs
     assert len(locs[1]) <= n_before[1] - N_STRAY
     assert locs[1]["x"].max() <= locs[0]["x"].max()
+    # removed by postprocess.align, whose entry says so
+    entry = window.view.infos[1][-1]
+    assert entry["Remove non-overlapping"] is True
+    assert entry["Files"] == window.view.locs_paths
 
 
 def test_align_keeps_all_if_the_channels_do_not_overlap(window, monkeypatch):
@@ -141,15 +145,18 @@ def test_align_keeps_all_if_the_channels_do_not_overlap(window, monkeypatch):
         "warning",
         lambda *args, **kwargs: warnings.append(args),
     )
-    monkeypatch.setattr(
-        gui_render.postprocess,
-        "align",
-        lambda locs, infos, **kwargs: (
-            [_locs(10.0), _locs(28.0).query("x > 20")],
-            infos,
-        ),
-    )
+    calls = []
+
+    def align(locs, infos, *, keep_non_overlapping, **kwargs):
+        calls.append(keep_non_overlapping)
+        if not keep_non_overlapping:
+            raise ValueError("The aligned channels do not overlap.")
+        return [_locs(10.0), _locs(28.0).query("x > 20")], infos
+
+    monkeypatch.setattr(gui_render.postprocess, "align", align)
     window.view.align()
+    # asked to remove them first, then aligned again keeping them all
+    assert calls == [False, True]
     assert len(warnings) == 1
     assert len(window.view.locs[0]) == len(_locs(10.0))
 
@@ -175,3 +182,158 @@ def test_cli_remove_non_overlapping(tmp_path, monkeypatch, remove):
     else:
         assert len(aligned_b) == n_b
     assert info_b[-1]["Remove non-overlapping"] is remove
+
+
+# ---------------------------------------------------------------------------
+# Choosing the method
+# ---------------------------------------------------------------------------
+
+
+def _sites(shift: tuple[float, float], seed: int) -> pd.DataFrame:
+    """Ten localizations around each of 300 sites spread over the field
+    of view (the same sites for every seed), shifted by ``shift`` nm."""
+    sites = np.random.default_rng(0).uniform(200, 3900, (300, 2))
+    rng = np.random.default_rng(seed)
+    points = np.repeat(sites, 10, axis=0) + rng.normal(0, 5, (3000, 2))
+    points += shift
+    return pd.DataFrame(
+        {
+            "frame": rng.integers(0, 1000, size=3000).astype(np.int32),
+            "x": points[:, 0],
+            "y": points[:, 1],
+            "lpx": np.full(3000, 5.0),
+            "lpy": np.full(3000, 5.0),
+            "photons": np.full(3000, 1000.0),
+        }
+    )
+
+
+@pytest.fixture
+def sites_window(qt_offscreen, tmp_path, monkeypatch):
+    """Two channels of the same sites, the second shifted by (30, -12)
+    nm."""
+    monkeypatch.setattr(gui_render.AlignChannelsDialog, "last_method", "rcc")
+    window = gui_render.Window(plugins_loaded=True)
+    for k, shift in enumerate([(0.0, 0.0), (30.0, -12.0)]):
+        window.view.add(
+            str(tmp_path / f"{k}.hdf5"),
+            _sites(shift, seed=k + 1),
+            _info(),
+            render_=False,
+        )
+    window.view.viewport = [
+        (0.0, 0.0),
+        (HEIGHT * PIXELSIZE, WIDTH * PIXELSIZE),
+    ]
+    window.view.resize(128, 128)
+    return window
+
+
+def test_align_dialog_shows_the_widgets_of_the_method(sites_window):
+    dialog = gui_render.AlignChannelsDialog(sites_window, has_picks=False)
+    assert dialog.method.currentText() == "Cross-correlation of images (RCC)"
+    assert not dialog.method.model().item(1).isEnabled()  # no picks
+    assert dialog.max_shift.isHidden()
+    dialog.method.setCurrentText("Displacements between localizations")
+    assert not dialog.max_shift.isHidden()
+    dialog.close()
+    # picked structures whenever there are picks
+    dialog = gui_render.AlignChannelsDialog(sites_window, has_picks=True)
+    assert dialog.method.currentText() == "Picked structures"
+    assert dialog.method.model().item(1).isEnabled()
+    dialog.close()
+
+
+def test_align_channels_by_the_displacements(sites_window, monkeypatch):
+    monkeypatch.setattr(
+        gui_render.AlignChannelsDialog,
+        "getParams",
+        staticmethod(lambda parent, has_picks: ("points", 300.0, True)),
+    )
+    before = sites_window.view.locs[1]["x"].to_numpy().copy()
+    sites_window.view.align_channels()
+    entry = sites_window.view.infos[1][-1]
+    assert entry["Method"] == "Points" and entry["Max. shift (nm)"] == 300
+    assert entry["Shift x (nm)"] == pytest.approx(30, abs=1)
+    assert entry["Shift y (nm)"] == pytest.approx(-12, abs=1)
+    assert 0 < entry["Shift x uncertainty (nm)"] < 1
+    np.testing.assert_allclose(
+        sites_window.view.locs[1]["x"], before - entry["Shift x (nm)"]
+    )
+    sites_window.view.undo()
+    np.testing.assert_allclose(sites_window.view.locs[1]["x"], before)
+
+
+def test_align_channels_canceled(sites_window, monkeypatch):
+    monkeypatch.setattr(
+        gui_render.AlignChannelsDialog,
+        "getParams",
+        staticmethod(lambda parent, has_picks: ("points", 300.0, False)),
+    )
+    infos = list(sites_window.view.infos)
+    sites_window.view.align_channels()
+    assert sites_window.view.infos == infos
+
+
+def test_align_without_common_structures_warns(sites_window, monkeypatch):
+    warnings = []
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "warning",
+        lambda *args, **kwargs: warnings.append(args[2]),
+    )
+    view = sites_window.view
+    unrelated = _sites((0.0, 0.0), seed=3)
+    unrelated[["x", "y"]] = np.random.default_rng(4).uniform(
+        200, 3900, (3000, 2)
+    )
+    view.locs[1] = unrelated
+    view.align("points", 300.0)
+    assert len(warnings) == 1 and "could not be found" in warnings[0]
+    assert view.infos[1][-1].get("Step") != "Align"
+
+
+def test_align_dialog_remembers_the_method(sites_window, monkeypatch):
+    def exec_(dialog):
+        dialog.method.setCurrentText("Displacements between localizations")
+        dialog.max_shift.setValue(250.0)
+        return QtWidgets.QDialog.DialogCode.Accepted
+
+    monkeypatch.setattr(gui_render.AlignChannelsDialog, "exec", exec_)
+    monkeypatch.setattr(
+        gui_render.AlignChannelsDialog, "last_max_shift", 500.0
+    )
+    method, max_shift, ok = gui_render.AlignChannelsDialog.getParams(
+        sites_window, has_picks=False
+    )
+    assert (method, max_shift, ok) == ("points", 250.0, True)
+    dialog = gui_render.AlignChannelsDialog(sites_window, has_picks=False)
+    assert dialog.method.currentText() == "Displacements between localizations"
+    assert dialog.max_shift.value() == 250.0
+    dialog.close()
+
+
+def test_cli_align_by_the_displacements(tmp_path, monkeypatch, capsys):
+    from picasso.__main__ import main
+
+    paths = []
+    for k, shift in enumerate([(0.0, 0.0), (30.0, -12.0)]):
+        path = str(tmp_path / f"{k}.hdf5")
+        io.save_locs(path, _sites(shift, seed=k + 1), _info())
+        paths.append(path)
+    argv = ["picasso", "align", *paths, "-m", "points", "--max-shift", "300"]
+    monkeypatch.setattr(sys, "argv", argv)
+    main()
+    out = capsys.readouterr().out
+    assert "Shifts (nm):" in out and "+/-" in out
+    _, info = io.load_locs(str(tmp_path / "1_align.hdf5"))
+    assert info[-1]["Method"] == "Points"
+    assert info[-1]["Shift x (nm)"] == pytest.approx(30, abs=1)
+    # unrelated files
+    unrelated = _sites((0.0, 0.0), seed=3)
+    unrelated[["x", "y"]] = np.random.default_rng(4).uniform(
+        200, 3900, (3000, 2)
+    )
+    io.save_locs(paths[1], unrelated, _info())
+    with pytest.raises(SystemExit, match="could not be found"):
+        main()

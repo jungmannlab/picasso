@@ -152,6 +152,25 @@ def test_picks_are_mirrored(linked):
     assert secondary.view._picks == []
 
 
+def test_pick_shapes_and_sizes_are_mirrored(linked):
+    group, primary, secondary = linked
+    group.set_enabled("picks", True)
+    tools = primary.tools_settings_dialog
+    tools.pick_shape.setCurrentText("Circle")
+    tools.pick_diameter.setValue(100.0)
+    primary.view.add_pick((1300.0, 1560.0))
+    primary.view.add_pick(((2000.0, 2000.0), (2600.0, 2400.0)), shape="Box")
+    assert secondary.view._pick_shapes == ["Circle", "Box"]
+    assert secondary.view._pick_sizes == [100.0, None]
+    # the size of new picks changes no pick, in either window
+    tools.pick_diameter.setValue(250.0)
+    assert primary.view._pick_sizes == [100.0, None]
+    assert secondary.view._pick_sizes == [100.0, None]
+    tools.pick_circle_settings.apply_to_all.click()
+    assert primary.view._pick_sizes == [250.0, None]
+    assert secondary.view._pick_sizes == [250.0, None]
+
+
 def test_polygons_extended_in_place_are_mirrored_as_copies(linked):
     group, primary, secondary = linked
     group.set_enabled("picks", True)
@@ -159,7 +178,7 @@ def test_polygons_extended_in_place_are_mirrored_as_copies(linked):
     view._pick_shape = "Polygon"
     view._picks = [[(130.0, 130.0), (650.0, 130.0)]]
     view.update_scene(picks_only=True)
-    assert secondary.view._pick_shape == "Polygon"
+    assert secondary.view._pick_shapes == ["Polygon"]
     assert secondary.view._picks == view._picks
     assert secondary.view._picks[0] is not view._picks[0]
     view._picks[0].append((650.0, 650.0))

@@ -38,7 +38,11 @@ Train a MLP model for nanopattern prediction using nanoTRON.
      model ``.yaml`` records it as ``Display pixel size (nm)`` and the pick
      size as ``Pick Diameter (nm)`` (models trained before Picasso 1.0
      recorded ``Oversampling`` and ``Pick Diameter`` in camera pixels; they
-     are converted when loaded, see :ref:`files-legacy`).
+     are converted when loaded, see :ref:`files-legacy`). The training files
+     need circular picks; of picks with different diameters, the largest is
+     used, so that every pick fits into the images. Files picked with other
+     shapes, or with a mix of shapes, record no pick diameter and are
+     refused.
    - Augment the training data sets via the check button
      ``Expand Training Set``. Here every data set point is rotated eleven
      times.
@@ -81,7 +85,8 @@ Train a MLP model for nanopattern prediction using nanoTRON.
       X, y = [], []
       for label, path in enumerate(["class0_picked.hdf5", "class1_picked.hdf5"]):
           locs, info = io.load_locs(path)
-          pick_diameter = lib.get_from_metadata(info, "Pick Diameter (nm)")   # nm
+          # nm; one diameter per pick if they differ, of which the largest
+          pick_diameter = np.max(lib.get_from_metadata(info, "Pick Diameter (nm)"))
           for group in locs["group"].unique():
               img = nanotron.roi_to_img(
                   locs, info, pick=int(group), pick_diameter=pick_diameter,
@@ -106,9 +111,17 @@ Use a trained nanoTRON model to classify nanopatterns on new data.
    which uses Python's ``pickle``. Loading a model runs code stored in the
    file, and that code can do anything Picasso itself can do: read and write
    your files, use the network, start other programs. Only load models whose
-   authors you trust, e.g., the default model that comes with Picasso and
-   models you trained yourself. The ``.yaml`` file next to a model is read
-   safely.
+   authors you trust, e.g., the default model from the Picasso
+   `Zenodo record <https://doi.org/10.5281/zenodo.23669134>`_ and models you
+   trained yourself. The ``.yaml`` file next to a model is read safely.
+
+A default model is available in the Picasso `Zenodo record
+<https://doi.org/10.5281/zenodo.23669134>`_: download ``default_model.sav``
+and ``default_model.yaml`` into the same folder (the record holds other
+files as well). It classifies DNA origami into the digits 1, 2 and 3 and
+the 20 nm grid, was trained with a pick diameter of 130 nm and a display
+pixel size of 2.6 nm, and was saved with scikit-learn 0.21.3, so it may not
+load with every scikit-learn version.
 
 1. Load the model via ``Tools`` > ``Train Model``. The different classes should now be listed on the right side.
 2. Drag and drop the Picasso localization table file (HDF5) that should be used for prediction into the large gray box. If the file was loaded correctly, the box displays the image.

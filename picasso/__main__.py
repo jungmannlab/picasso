@@ -11,10 +11,12 @@ Picasso command line interface.
 
 from __future__ import annotations
 
+import contextlib
 import os.path
 import argparse
 import logging
 import sys
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Literal
 import pandas as pd
 from . import deprecation, docs_url
@@ -279,6 +281,45 @@ def _pyme2hdf(path: str, pixelsize: float | None = None) -> None:
     print("Complete.")
 
 
+def _minflux2hdf(
+    path: str, average_traces: bool = False, origin: str = "data"
+) -> None:
+    """Convert MINFLUX localizations (pyMINFLUX .pmx, or a .csv table
+    such as pyMINFLUX's export) to HDF5 format. A file with several fluorophores is
+    saved as one file per fluorophore, ``<base>_<fluorophore>_locs.hdf5``.
+
+    Parameters
+    ----------
+    path : str
+        Path (unix style pattern) to the MINFLUX .pmx/.csv files.
+    average_traces : bool, optional
+        If True, save one localization per MINFLUX trace (the
+        photon-weighted mean) instead of every localization, see
+        ``picasso.io.import_minflux``. Default is False.
+    origin : {"data", "stage"}, optional
+        ``"data"`` moves the localizations next to the origin of the
+        field of view (the shift is stored in the metadata), ``"stage"``
+        keeps MINFLUX's absolute coordinates. Default is ``"data"``.
+    """
+    from glob import glob
+    from tqdm import tqdm as _tqdm
+
+    paths = glob(path)
+    if paths:
+        import os.path
+        from .io import import_minflux, save_locs, split_minflux_channels
+
+        for path in _tqdm(paths, desc="Converting from pyMINFLUX"):
+            locs, info = import_minflux(
+                path, average_traces=average_traces, origin=origin
+            )
+            channels = split_minflux_channels(path, locs, info)
+            for channel_path, locs, info in channels:
+                base, ext = os.path.splitext(channel_path)
+                save_locs(base + "_locs.hdf5", locs, info)
+    print("Complete.")
+
+
 def _hdf2pyme(path: str) -> None:
     """Convert HDF5 localization files to PyME (python-microscopy)
     .hdf format, one file per input file."""
@@ -363,7 +404,14 @@ def _clusterfilter(
                 print("Error: Field {} not found.".format(parameter))
                 continue
             _clusterfilter_locs(
-                clusters, locs, info, parameter, minval, maxval, path
+                clusters,
+                locs,
+                info,
+                parameter,
+                minval,
+                maxval,
+                path,
+                clusterfile,
             )
 
 
@@ -375,6 +423,7 @@ def _clusterfilter_locs(
     minval: float,
     maxval: float,
     path: str,
+    clusterfile: str,
 ) -> None:
     import numpy as np
     from . import io, lib
@@ -394,6 +443,7 @@ def _clusterfilter_locs(
             filtered = filtered.sort_values(kind="quicksort", by="frame")
             clusterfilter_info = {
                 **lib.step_info(f"Clusterfilter - {suffix}"),
+                "Cluster file": clusterfile,
                 "Parameter": parameter,
                 "Minval": minval,
                 "Maxval": maxval,
@@ -427,8 +477,8 @@ def _undrift_rcc(
             drift = io.load_drift(
                 fromfile, pixelsize=lib.get_from_metadata(info, "Pixelsize")
             )
+            # records the drift file (drift.attrs["Path"])
             locs, info = postprocess.apply_drift(locs, info, drift=drift)
-            info[-1]["From File"] = fromfile
 
             if display:
                 import matplotlib.pyplot as plt
@@ -735,7 +785,7 @@ def _cbc(
     import warnings
     from glob import glob
     from itertools import chain
-    from . import io, lib, postprocess
+    from . import io, postprocess
 
     paths = list(chain(*[sorted(glob(_)) for _ in files]))
     if len(paths) < 2:
@@ -798,11 +848,6 @@ def _cbc(
             )
             out_locs, out_infos = [locs], [info]
     for i, (locs, info) in enumerate(zip(out_locs, out_infos)):
-        info[-1].update(lib.step_info("CBC"))
-        info[-1]["Scored channel"] = paths[i]
-        info[-1]["Partner channels"] = [
-            p for j, p in enumerate(paths) if j != i
-        ]
         base, ext = os.path.splitext(paths[i])
         io.save_locs(base + "_cbc.hdf5", locs, info)
         print(f"Saved {base}_cbc.hdf5")
@@ -1038,6 +1083,480 @@ def _nnd(
         print(f"saved {base + suffix}")
 
 
+def _knn_density(
+    files: list[str],
+    picks_path: str | None,
+    k_max: int,
+    k_min: int,
+    r_min: float,
+    n_simulations: int,
+    edge_correction: bool,
+    use_3d: bool = False,
+    z_range: tuple[float, float] | None = None,
+) -> None:
+    """Density of the molecules in each of ``files`` fitted to the
+    distances to their ``k_max`` nearest neighbors, in the picks of
+    ``picks_path`` or in the whole field of view, in 2D or, with
+    ``use_3d``, in 3D over ``z_range`` (nm; None for the z range of
+    each region's molecules), with p-values from ``n_simulations``
+    random simulations. Prints the densities and saves the
+    distributions (``<file>_knn_density.csv``), the densities
+    (``..._densities.csv``) and a plot (``.png``) next to each file.
+    See ``postprocess.knn_density`` for details."""
+    import warnings
+    from glob import glob
+    from itertools import chain
+    from . import io, lib, postprocess
+
+    paths = list(chain(*[sorted(glob(_)) for _ in files]))
+    if not paths:
+        raise SystemExit("No localization files found.")
+    for path in paths:
+        locs, info = io.load_locs(path)
+        _warn_if_not_molecules(path, locs)
+        picks, shape, size = None, None, None
+        if picks_path is not None:
+            # the pixel size converts picks saved before Picasso 1.0
+            picks, shape, size = io.load_picks(
+                picks_path, lib.get_from_metadata(info, "Pixelsize")
+            )
+        print(f"Density from the k nearest neighbors of {path}:")
+        try:
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                result = postprocess.knn_density(
+                    locs,
+                    info,
+                    picks=picks,
+                    pick_shape=shape,
+                    pick_size=size,
+                    k_max=k_max,
+                    k_min=k_min,
+                    r_min=r_min,
+                    edge_correction=edge_correction,
+                    n_simulations=n_simulations,
+                    use_z=use_3d,
+                    z_range=z_range,
+                    progress="console",
+                )
+        except ValueError as e:
+            raise SystemExit(f"{path}: {e}")
+        for warning in caught:
+            if "not molecules" not in str(warning.message):  # see above
+                print(f"WARNING: {warning.message}")
+        curves, densities = postprocess._knn_density_tables(result)
+        print(
+            densities.to_string(
+                index=False, float_format=lambda value: f"{value:.4g}"
+            )
+        )
+        base = os.path.splitext(path)[0] + "_knn_density"
+        curves.to_csv(base + ".csv", index=False)
+        densities.to_csv(base + "_densities.csv", index=False)
+        figure = postprocess.plot_knn_density(result)
+        figure.set_size_inches(11, 4.5)
+        figure.savefig(base + ".png", dpi=150)
+        for suffix in (".csv", "_densities.csv", ".png"):
+            print(f"  saved {base + suffix}")
+
+
+def _decorrelation(
+    files: list[str],
+    pixel_sizes: list[float] | None,
+    n_radii: int,
+    n_filters: int,
+    max_image_size: int,
+) -> None:
+    """Decorrelation resolution of the localizations in each of
+    ``files`` over the whole field of view, at ``pixel_sizes`` (nm;
+    None scans the default pixel sizes). Prints the resolution at each
+    pixel size and saves them (``<file>_decorrelation.csv``), the
+    decorrelation functions (``..._curves.csv``) and a plot (``.png``)
+    next to each file. See ``postprocess.decorrelation`` for
+    details."""
+    from glob import glob
+    from itertools import chain
+    import numpy as np
+    from . import io, postprocess
+
+    paths = list(chain(*[sorted(glob(_)) for _ in files]))
+    if not paths:
+        raise SystemExit("No localization files found.")
+    for path in paths:
+        locs, info = io.load_locs(path)
+        print(f"Decorrelation resolution of {path}:")
+        try:
+            result = postprocess.decorrelation(
+                locs,
+                info,
+                pixel_size=pixel_sizes,
+                n_radii=n_radii,
+                n_filters=n_filters,
+                max_image_size=max_image_size or None,
+                progress="console",
+            )
+        except ValueError as e:
+            raise SystemExit(f"{path}: {e}")
+        sizes, curves = postprocess._decorrelation_tables(result)
+        print(
+            sizes.to_string(
+                index=False, float_format=lambda value: f"{value:.4g}"
+            )
+        )
+        skipped = result["skipped_pixel_sizes"]
+        if len(skipped):
+            print(
+                "  skipped pixel sizes (image too large or small): "
+                + ", ".join(f"{size:.3g}" for size in skipped)
+                + " nm"
+            )
+        if np.isfinite(result["resolution"]):
+            print(
+                f"  resolution {result['resolution']:.2f} nm at"
+                f" {result['pixel_size']:.3g} nm pixels"
+            )
+            if result["pixel_size_limited"]:
+                print(
+                    "WARNING: the resolution is close to twice the smallest"
+                    " pixel size rendered, so it may be limited by the pixel"
+                    " size; render smaller pixels with -px or a larger"
+                    " --max-image-size."
+                )
+        else:
+            print("  no resolution: no decorrelation function has a peak")
+        print(
+            f"  {result['n_locs']:,} localizations,"
+            f" {result['density']:,.0f} per um^2 of sample"
+        )
+        base = os.path.splitext(path)[0] + "_decorrelation"
+        sizes.to_csv(base + ".csv", index=False)
+        curves.to_csv(base + "_curves.csv", index=False)
+        figure = postprocess.plot_decorrelation(result)
+        figure.set_size_inches(11, 4.5)
+        figure.savefig(base + ".png", dpi=150)
+        for suffix in (".csv", "_curves.csv", ".png"):
+            print(f"  saved {base + suffix}")
+
+
+def _dye_performance_cli(
+    files: list[str],
+    picks_path: str | None,
+    max_dark_time: int,
+    cutoff: float,
+    fraction: float,
+) -> None:
+    """Dye performance of the docking sites in each of ``files`` (Steen
+    et al., 2024): the docking sites are the picks of ``picks_path`` or,
+    without picks, the groups of the localizations (e.g., picked
+    localizations saved in Render). Prints the SBR, the localization
+    drop and the destroyed docking sites and saves the summary
+    (``<file>_dye_performance.csv``), the values of each site
+    (``..._sites.csv``) and a plot (``.png``) next to each file. See
+    ``postprocess.dye_performance`` for details."""
+    from glob import glob
+    from itertools import chain
+    import numpy as np
+    import pandas as pd
+    import matplotlib.pyplot as plt
+    from . import io, lib, postprocess
+
+    if max_dark_time < 0:
+        raise SystemExit("--max-dark-time must not be negative.")
+    if not cutoff > 0:
+        raise SystemExit("--cutoff must be positive.")
+    if not 0 < fraction <= 0.5:
+        raise SystemExit("--fraction must be in (0, 0.5].")
+    paths = list(chain(*[sorted(glob(_)) for _ in files]))
+    if not paths:
+        raise SystemExit("No localization files found.")
+    for path in paths:
+        locs, info = io.load_locs(path)
+        if picks_path is not None:
+            # the pixel size converts picks saved before Picasso 1.0
+            picks, shape, size = io.load_picks(
+                picks_path, lib.get_from_metadata(info, "Pixelsize")
+            )
+            picked = postprocess.picked_locs(
+                locs,
+                info,
+                picks=picks,
+                pick_shape=shape,
+                pick_size=size,
+                progress="console",
+            )
+            sites = np.arange(len(picked))
+        elif "group" in locs.columns:
+            sites, picked = zip(*locs.groupby("group", sort=True))
+            sites = np.asarray(sites)
+        else:
+            raise SystemExit(
+                f"{path}: each docking site must be a pick (-p) or a group of"
+                " the localizations (e.g., picked localizations saved in"
+                " Render)."
+            )
+        print(f"Dye performance of {path} ({len(picked):,} docking sites):")
+        result = postprocess.dye_performance(
+            list(picked),
+            info,
+            max_dark_time=max_dark_time,
+            cutoff=cutoff,
+            fraction=fraction,
+            progress="console",
+        )
+        errors = result["errors"]
+        sbr, damage = result["sbr"], result["damage"]
+        drop = result["localization_drop"]
+        summary = {"n_sites": len(picked)}
+        if sbr is not None and np.isfinite(sbr).any():
+            n_sbr = int(np.isfinite(sbr).sum())
+            summary |= {
+                "sbr_mean": np.nanmean(sbr),
+                "sbr_std": np.nanstd(sbr),
+                "n_sbr_localizations": n_sbr,
+            }
+            print(
+                f"  SBR {summary['sbr_mean']:.2f} +/- {summary['sbr_std']:.2f}"
+                f" ({n_sbr:,} localizations in the centers of binding"
+                " events)"
+            )
+        else:
+            reason = errors.get(
+                "sbr",
+                "no localization in the center of a binding event of at"
+                " least three frames",
+            )
+            print(f"  SBR not available: {reason}")
+        if drop is not None:
+            summary["localization_drop_percent"] = 100 * drop
+            print(
+                f"  localization drop {100 * drop:.1f}% (first vs. last"
+                f" {100 * fraction:g}% of the frames)"
+            )
+        else:
+            print(
+                "  localization drop not available:"
+                f" {errors['localization_drop']}"
+            )
+        if damage is not None:
+            summary |= {
+                "n_sites_with_r": damage["n_sites"],
+                "mu": damage["mu"],
+                "r_cutoff": damage["r_cutoff"],
+                "sites_above_cutoff_percent": (
+                    100 * damage["fraction_above_cutoff"]
+                ),
+                "destroyed_sites_percent": 100 * damage["fraction_destroyed"],
+            }
+            print(
+                "  destroyed docking sites"
+                f" {100 * damage['fraction_destroyed']:.1f}% (r >"
+                f" {damage['r_cutoff']:.2f} = {cutoff:g} mu, mu ="
+                f" {damage['mu']:.2f}; {damage['n_sites']:,} sites with a"
+                " mean dark time)"
+            )
+        else:
+            print(
+                "  destroyed docking sites not available:"
+                f" {errors['damage']}"
+            )
+        summary |= {
+            "max_dark_time": max_dark_time,
+            "cutoff": cutoff,
+            "fraction": fraction,
+        }
+        base = os.path.splitext(path)[0] + "_dye_performance"
+        pd.DataFrame([summary]).to_csv(base + ".csv", index=False)
+        site_table = pd.DataFrame(
+            {
+                "site": sites,
+                "n_locs": [len(site_locs) for site_locs in picked],
+            }
+        )
+        if damage is not None:
+            site_table["t_end_frames"] = damage["t_end"]
+            site_table["dark_time_frames"] = damage["dark"]
+            site_table["r"] = damage["r"]
+        site_table.to_csv(base + "_sites.csv", index=False)
+        saved = [".csv", "_sites.csv"]
+        if result["locs"] is not None:
+            figure = plt.Figure(constrained_layout=True, figsize=(11, 4.5))
+            ax_damage, ax_rate = figure.subplots(1, 2)
+            if damage is not None:
+                postprocess.plot_docking_site_damage(damage, ax=ax_damage)
+            else:
+                ax_damage.set_axis_off()
+            if drop is not None:
+                postprocess.plot_localization_rate(
+                    result["locs"], info, fraction=fraction, ax=ax_rate
+                )
+            else:
+                ax_rate.set_axis_off()
+            figure.savefig(base + ".png", dpi=150)
+            saved.append(".png")
+        for suffix in saved:
+            print(f"  saved {base + suffix}")
+
+
+def _pick_similar_cli(
+    files: list[str],
+    picks_path: str | None = None,
+    pick_size: float | None = None,
+    std_range: float = 2.0,
+    n_locs_range: list[float] | None = None,
+    rmsd_range: list[float] | None = None,
+    classes: bool = False,
+    min_n_locs: int | None = None,
+    save_candidates: bool = False,
+) -> list[str]:
+    """Pick similar structures in localization files (``picasso
+    pick-similar``), saving one picks file per file (per class with
+    ``classes``).
+
+    The structures are similar to the seed picks of ``picks_path`` (see
+    ``postprocess.pick_similar``), or are the candidate circular picks
+    (``postprocess.pick_similar_candidates``) within ``n_locs_range``
+    and/or ``rmsd_range``, or within the ranges of each class of
+    ``postprocess.structure_classes``, as Render's Tools > Pick by
+    localizations and RMSD finds them: candidates with at least
+    ``min_n_locs`` localizations, by default 1% of the frames, and at
+    least the lower bound of ``n_locs_range``.
+
+    Returns
+    -------
+    saved : list of str
+        Paths of the picks files written.
+    """
+    from glob import glob
+    from itertools import chain
+    from . import io, lib, postprocess
+
+    by_ranges = n_locs_range is not None or rmsd_range is not None
+    if (picks_path is not None) + by_ranges + bool(classes) != 1:
+        raise SystemExit(
+            "Give exactly one of --picks, --n-locs-range/--rmsd-range and "
+            "--classes."
+        )
+    if picks_path is None and pick_size is None:
+        raise SystemExit(
+            "--pick-size (the diameter in nm) is needed without --picks."
+        )
+    paths = list(chain(*[sorted(glob(_)) for _ in files]))
+    if not paths:
+        raise SystemExit("No localization files found.")
+    saved = []
+    for path in paths:
+        locs, info = io.load_locs(path)
+        base = os.path.splitext(path)[0] + "_pick_similar"
+        if picks_path is not None:
+            saved.append(
+                _pick_similar_seeded(
+                    locs, info, path, base, picks_path, std_range
+                )
+            )
+            continue
+        if min_n_locs is None:
+            n_frames = lib.get_from_metadata(info, "Frames", 0)
+            n_min = max(2, int(0.01 * n_frames))
+        else:
+            n_min = min_n_locs
+        if n_locs_range is not None:
+            # smaller candidates must not exclude the structures they
+            # overlap, as in postprocess.pick_similar
+            n_min = max(n_min, postprocess._range_min_n_locs(n_locs_range))
+        print(
+            f"{path}: candidate picks of {pick_size:g} nm with at least "
+            f"{n_min} localizations"
+        )
+        candidates = postprocess.pick_similar_candidates(
+            locs,
+            info,
+            pick_size=pick_size,
+            min_n_locs=n_min,
+            progress="console",
+        )
+        print(f"{len(candidates)} candidate picks")
+        if classes:
+            if len(candidates) < 2:
+                raise SystemExit(
+                    f"{path}: too few candidate picks for classes."
+                )
+            labels, table = postprocess.structure_classes(candidates)
+            candidates = candidates.assign(**{"class": labels + 1})
+            if not len(table):
+                print("No classes found.")
+            else:
+                table.index = table.index + 1
+                table.index.name = "class"
+                print(table.round(1).to_string())
+            ranges = [
+                (
+                    (row["n_locs_min"], row["n_locs_max"]),
+                    (row["rmsd_min"], row["rmsd_max"]),
+                    f"{base}_class{index}.yaml",
+                )
+                for index, row in table.iterrows()
+            ]
+        else:
+            ranges = [(n_locs_range, rmsd_range, base + ".yaml")]
+        for n_range, r_range, out in ranges:
+            keep = postprocess._in_range(
+                candidates["n_locs"], n_range
+            ) & postprocess._in_range(candidates["rmsd"], r_range)
+            picks = list(zip(candidates["x"][keep], candidates["y"][keep]))
+            io.save_picks(out, picks, "Circle", pick_size)
+            print(f"saved {len(picks)} picks to {out}")
+            saved.append(out)
+        if save_candidates:
+            out = base + "_candidates.csv"
+            candidates.to_csv(out, index=False)
+            print(f"saved {out}")
+    return saved
+
+
+def _pick_similar_seeded(
+    locs: pd.DataFrame,
+    info: list[dict],
+    path: str,
+    base: str,
+    picks_path: str,
+    std_range: float,
+) -> str:
+    """``picasso pick-similar --picks``: the seed picks and the picks
+    similar to them, saved to ``base``.yaml; the new picks take the
+    median size of the seed picks, which keep theirs."""
+    import numpy as np
+
+    from . import io, lib, postprocess
+
+    seeds, shape, size = io.load_picks(
+        picks_path, lib.get_from_metadata(info, "Pixelsize")
+    )
+    try:
+        picks = postprocess.pick_similar(
+            locs,
+            info,
+            picks=seeds,
+            pick_shape=shape,
+            pick_size=size,
+            std_range=std_range,
+        )
+    except (ValueError, AssertionError) as e:
+        raise SystemExit(f"{path}: {e}")
+    shapes, sizes = lib.pick_shapes_and_sizes(seeds, shape, size)
+    n_new = len(picks) - len(seeds)
+    if shapes and shapes[0] not in lib.PICK_SHAPES_WITHOUT_SIZE:
+        sizes = list(sizes) + [float(np.median(sizes))] * n_new
+    else:
+        sizes = list(sizes) + [None] * n_new
+    out = base + ".yaml"
+    io.save_picks(out, picks, shapes[0] if shapes else "Circle", sizes)
+    print(
+        f"{path}: {n_new} picks similar to the {len(seeds)} of "
+        f"{picks_path}; saved all {len(picks)} to {out}"
+    )
+    return out
+
+
 def _warn_if_not_molecules(path: str, locs: pd.DataFrame) -> None:
     """Print a warning if the localizations in ``path`` are not
     molecules, see ``postprocess._are_molecules``."""
@@ -1173,7 +1692,7 @@ def _track(
     """Link localizations into tracks (single-particle tracking) and
     save them as ``<base>_tracks.hdf5``. ``max_jump`` is in nm; see
     ``spt.link_tracks`` for details."""
-    from . import io, lib, spt
+    from . import io, spt
 
     for path in _spt_paths(files):
         locs, info = io.load_locs(path)
@@ -1194,7 +1713,6 @@ def _track(
             )
         except ValueError as e:
             raise SystemExit(str(e))
-        new_info[-1].update(lib.step_info("Track"))
         out_path = os.path.splitext(path)[0] + "_tracks.hdf5"
         io.save_locs(out_path, tracked, new_info)
         print(
@@ -1312,11 +1830,17 @@ def _dark(files: str) -> None:
 
 
 def _align(
-    files: str, display: bool, remove_non_overlapping: bool = False
+    files: str,
+    display: bool,
+    remove_non_overlapping: bool = False,
+    method: str = "rcc",
+    max_shift: float = 500.0,
 ) -> None:
-    """Align localization files using RCC, see ``postprocess.align_rcc``
-    for details. If ``remove_non_overlapping``, the localizations
-    outside the region where all aligned files overlap are removed."""
+    """Align localization files by RCC or by the displacements between
+    their localizations (``method="points"``, searching shifts up to
+    ``max_shift`` nm), see ``postprocess.align`` for details. If
+    ``remove_non_overlapping``, the localizations outside the region
+    where all aligned files overlap are removed."""
     from glob import glob
     from itertools import chain
     from .io import load_locs, save_locs
@@ -1330,15 +1854,29 @@ def _align(
     locs_infos = [load_locs(_) for _ in files]
     locs = [_[0] for _ in locs_infos]
     infos = [_[1] for _ in locs_infos]
-    aligned_locs, aligned_infos = align(
-        locs,
-        infos,
-        method="rcc",
-        display=display,
-        keep_non_overlapping=not remove_non_overlapping,
-    )
+    try:
+        aligned_locs, aligned_infos = align(
+            locs,
+            infos,
+            method=method,
+            max_shift=max_shift,
+            display=display,
+            keep_non_overlapping=not remove_non_overlapping,
+            paths=files,
+        )
+    except ValueError as e:
+        raise SystemExit(str(e))
+    if method == "points":
+        print("Shifts (nm):")
+        for file, info in zip(files, aligned_infos):
+            entry = info[-1]
+            print(
+                f"  {file}: x {entry['Shift x (nm)']:.2f} +/-"
+                f" {entry['Shift x uncertainty (nm)']:.2f}, y"
+                f" {entry['Shift y (nm)']:.2f} +/-"
+                f" {entry['Shift y uncertainty (nm)']:.2f}"
+            )
     for file, locs_, info in zip(files, aligned_locs, aligned_infos):
-        info[-1]["Files"] = files
         base, ext = splitext(file)
         save_locs(base + "_align.hdf5", locs_, info)
 
@@ -1358,6 +1896,7 @@ def _join(files: list[str], keep_index: bool = True) -> None:
     join_info = {
         **lib.step_info("Join"),
         "Files": files,
+        "Frames kept": keep_index,
     }
     base, ext = splitext(files[0])
     info = load_locs(files[0])[1]
@@ -1814,30 +2353,6 @@ def _localize_load_3d_calibration(
     return zpath, magnification_factor, z_calibration
 
 
-_FIT_METHOD_MAP = {
-    "lq": "gausslq",
-    "lq-spherical": "gausslq-spherical",
-    "lq-spherical-gpu": "gausslq-spherical-gpu",
-    "lq-rotated": "gausslq-rotated",
-    "lq-rotated-gpu": "gausslq-rotated-gpu",
-    "lq-3d": "gausslq",
-    "lq-gpu": "gausslq-gpu",
-    "lq-gpu-3d": "gausslq-gpu",
-    "mle": "gaussmle",
-    "mle-gpu": "gaussmle-gpu",
-    "mle-spherical": "gaussmle-spherical",
-    "mle-spherical-gpu": "gaussmle-spherical-gpu",
-    "mle-rotated": "gaussmle-rotated",
-    "mle-rotated-gpu": "gaussmle-rotated-gpu",
-    "mle-3d": "gaussmle",
-    "spline": "spline",
-    "spline-mle": "spline-mle",
-    "spline-gpu": "spline-gpu",
-    "spline-mle-gpu": "spline-mle-gpu",
-    "avg": "avg",
-    "vectorfit": "vectorfit",
-}
-
 #: ``--vf-*`` options of the 'vectorfit' fit method and the
 #: ``vectorfit.DEFAULT_PARAMETERS`` key each sets.
 _VECTORFIT_ARGS = {
@@ -2012,6 +2527,79 @@ def _identification_method_from_args(
     return NetGradient(min_net_gradient)
 
 
+#: ``--gradient`` value that estimates the minimum net gradient of each
+#: movie (see ``_localize_auto_gradient``)
+_AUTO_GRADIENT = "auto"
+
+
+def _gradient_arg(value: str) -> int | str:
+    """``--gradient`` of ``picasso localize``: a minimum net gradient or
+    'auto'."""
+    if value.strip().lower() == _AUTO_GRADIENT:
+        return _AUTO_GRADIENT
+    try:
+        return int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"invalid value: {value!r} (an integer or 'auto')"
+        ) from None
+
+
+def _localize_auto_gradient(
+    movie,
+    args: argparse.Namespace,
+    box: int,
+    min_net_gradient: int | str | list,
+    roi,
+    frame_bounds,
+) -> int | str | list:
+    """``min_net_gradient`` with every ``--gradient auto`` replaced by
+    the estimate of ``localize.estimate_min_net_gradient`` for this
+    movie, as Localize's 'Estimate' button makes it: on the movie the
+    identification searches (filtered), within the ROIs and the frame
+    bounds. A single 'auto' is estimated in all ROIs; with one value
+    per ROI, each in its own. Left as is when the net gradient is not
+    used (wavelet identification, or the multi-emitter fit without
+    ``--seed-identification``)."""
+    from . import localize
+
+    values = (
+        list(min_net_gradient)
+        if isinstance(min_net_gradient, list)
+        else [min_net_gradient]
+    )
+    if _AUTO_GRADIENT not in values:
+        return min_net_gradient
+    if _wavelet_from_args(args) is not None or (
+        args.multi_emitter and not getattr(args, "seed_identification", False)
+    ):
+        return min_net_gradient
+    # the filter settings; the threshold plays no part in the filters
+    parameters = _identification_parameters_from_args(args, box, 0)
+    filtered = localize._identification_filtered_movie(movie, parameters, roi)
+    for index, value in enumerate(values):
+        if value != _AUTO_GRADIENT:
+            continue
+        region = roi if len(values) == 1 else [roi[index]]
+        result = localize.estimate_min_net_gradient(
+            filtered,
+            box=box,
+            roi=region,
+            frame_bounds=frame_bounds,
+            progress="console",
+        )
+        # rounded and at least 0, like the value the button sets
+        values[index] = max(int(round(result["min_net_gradient"])), 0)
+        where = "" if len(values) == 1 else f" (ROI {index + 1})"
+        print(
+            f"Min. net gradient estimated{where}: {values[index]} "
+            f"(background peak {result['background']:.0f}, width "
+            f"{result['background_width']:.0f}; "
+            f"{len(result['frames'])} frames)"
+        )
+    return values if isinstance(min_net_gradient, list) else values[0]
+
+
 def _identification_parameters_from_args(
     args: argparse.Namespace,
     box: int,
@@ -2147,6 +2735,81 @@ def _localize_legacy_calibrations(
     return z_params, lateral_transforms
 
 
+def _localize_photon_options(args: argparse.Namespace) -> dict:
+    """The keywords of ``io.load_movie`` for photon-counting movies set by
+    ``--frame-sum-window`` / ``--frame-sum-stride`` and
+    ``--microtime-gate``; empty when none of them is used."""
+    options = {}
+    window = getattr(args, "frame_sum_window", 1)
+    stride = getattr(args, "frame_sum_stride", None)
+    if window != 1 or stride not in (None, 1):
+        options["frame_sum_window"] = window
+        options["frame_sum_stride"] = stride
+    gates = getattr(args, "microtime_gate", None)
+    if gates:
+        options["microtime_gates"] = [tuple(gate) for gate in gates]
+    return options
+
+
+def _localize_check_photon_options(
+    args: argparse.Namespace, paths: list[str], concat: bool
+) -> None:
+    """Exit with a message when scan frames are to be summed or gated for
+    movies whose pixel values are not photon counts (anything but
+    .ptu)."""
+    if not _localize_photon_options(args):
+        return
+    others = [
+        path for path in paths if os.path.splitext(path)[1].lower() != ".ptu"
+    ]
+    if concat or others:
+        listed = ", ".join(others[:3]) + (" ..." if len(others) > 3 else "")
+        raise SystemExit(
+            "--frame-sum-window, --frame-sum-stride and --microtime-gate "
+            "apply to photon-counting movies (.ptu) only: camera frames "
+            "carry an offset (the baseline) in every frame, so a sum of "
+            "their raw counts is not a count of photons, and they hold no "
+            "photon arrival times to gate."
+            + (f" Not photon-counting: {listed}" if others else "")
+        )
+
+
+def _localize_movies(paths: list[str], args: argparse.Namespace):
+    """The movies of one ``picasso localize`` job, each with the suffix of
+    its output files: the files concatenated into one movie
+    (``--concat``), every channel of a .ptu file with several channels
+    (detectors, or detectors x microtime gates) one after the other as
+    ``_<channel>``, else the one movie, without a suffix."""
+    from . import io
+
+    if len(paths) > 1:
+        movie, info = io.load_tif_concatenated(paths, progress="console")
+        yield movie, info, ""
+        return
+    path = paths[0]
+    options = _localize_photon_options(args)
+    names = [None]
+    if os.path.splitext(path)[1].lower() == ".ptu":
+        io._require_ptufile()
+        names = io.PTUMovie.channel_names(path, options.get("microtime_gates"))
+    if len(names) == 1:
+        movie, info = io.load_movie(path, progress="console", **options)
+        yield movie, info, ""
+        return
+    for name in names:
+        print(f"Channel {name}")
+        movie, info = io.load_movie(
+            path,
+            prompt_info=lambda channels, name=name: name,
+            progress="console",
+            **options,
+        )
+        try:
+            yield movie, info, "_" + io._sanitize_filename(name)
+        finally:
+            movie.close()
+
+
 def _localize_process_file(
     paths: str | list[str],
     i: int,
@@ -2181,9 +2844,10 @@ def _localize_process_file(
         Parsed ``picasso localize`` arguments.
     box : int
         Side length of the fitting box in camera pixels.
-    min_net_gradient : float or list of float
+    min_net_gradient : float, "auto" or list of them
         Minimum net gradient for identification; one value per ROI
-        region if a list.
+        region if a list. "auto" is estimated for each movie (see
+        ``_localize_auto_gradient``).
     roi : list or None
         ROI regions, each ``[[y_min, x_min], [y_max, x_max]]``, or None
         for the whole frame.
@@ -2226,11 +2890,9 @@ def _localize_process_file(
     -------
     saved : list of str
         Paths of the localization files written: one, or one per region
-        with ``region_fit``.
+        with ``region_fit``, or one per channel of a .ptu file with
+        several channels.
     """
-    from .io import load_movie, load_tif_concatenated
-    from .localize import localize
-
     if isinstance(paths, str):
         paths = [paths]
     path = paths[0]
@@ -2247,12 +2909,56 @@ def _localize_process_file(
     else:
         print(f"Processing {path}, File {i + 1} of {n_total}")
     print("------------------------------------------")
-    if len(paths) > 1:
-        movie, info = load_tif_concatenated(paths, progress="console")
-    else:
-        movie, info = load_movie(path, progress="console")
+    saved = []
+    for movie, info, suffix in _localize_movies(paths, args):
+        saved += _localize_movie(
+            movie,
+            info,
+            path,
+            suffix,
+            args,
+            box,
+            min_net_gradient,
+            roi,
+            frame_bounds,
+            camera_info,
+            convergence,
+            max_iterations,
+            z_params,
+            spline_calibration=spline_calibration,
+            camera_calibration=camera_calibration,
+            lateral_transforms=lateral_transforms,
+            region_fit=region_fit,
+        )
+    return saved
 
-    fitting_method = _FIT_METHOD_MAP[args.fit_method]
+
+def _localize_movie(
+    movie,
+    info: list[dict],
+    path: str,
+    suffix: str,
+    args: argparse.Namespace,
+    box: int,
+    min_net_gradient: float,
+    roi,
+    frame_bounds,
+    camera_info: dict,
+    convergence: float,
+    max_iterations: int,
+    z_params,
+    spline_calibration: dict | None = None,
+    camera_calibration: dict | None = None,
+    lateral_transforms: list | None = None,
+    region_fit: dict | None = None,
+) -> list[str]:
+    """Identify, fit, save and optionally undrift one loaded movie of
+    ``_localize_process_file``, whose arguments it takes; ``suffix`` is
+    inserted into the output names before ``_locs`` (a channel of a .ptu
+    file)."""
+    from .localize import localize, resolve_fit_method
+
+    fitting_method = resolve_fit_method(args.fit_method)[0]
     cam_info = dict(camera_info)
     cam_info["Pixelsize"] = _resolve_camera_pixelsize(
         args.pixelsize, movie, info, path
@@ -2261,6 +2967,28 @@ def _localize_process_file(
     z_params, lateral_transforms = _localize_legacy_calibrations(
         args, z_params, lateral_transforms, cam_info["Pixelsize"]
     )
+    min_net_gradient = _localize_auto_gradient(
+        movie, args, box, min_net_gradient, roi, frame_bounds
+    )
+    if args.multi_emitter:
+        return [
+            _localize_multi_emitter(
+                movie,
+                info,
+                path,
+                args,
+                box,
+                min_net_gradient,
+                roi,
+                frame_bounds,
+                cam_info,
+                camera_calibration,
+                z_params,
+                lateral_transforms,
+                spline_calibration,
+                suffix=suffix,
+            )
+        ]
     if region_fit is not None:
         return _localize_regions(
             movie,
@@ -2278,25 +3006,29 @@ def _localize_process_file(
             region_fit,
             camera_calibration=camera_calibration,
             lateral_transforms=lateral_transforms,
+            suffix=suffix,
         )
-    locs, info = localize(
-        movie,
-        camera_info=cam_info,
-        identification_parameters=_identification_parameters_from_args(
-            args, box, min_net_gradient
-        ),
-        roi=roi,
-        frame_bounds=frame_bounds,
-        movie_info=info,
-        fitting_method=fitting_method,
-        eps=convergence if convergence > 0 else None,
-        max_it=max_iterations if max_iterations > 0 else None,
-        spline_calibration=spline_calibration,
-        vectorfit_parameters=_vectorfit_parameters_from_args(args),
-        camera_calibration=camera_calibration,
-        parallel=True,
-        progress="console",
-    )
+    with _lateral_report_only():
+        locs, info = localize(
+            movie,
+            camera_info=cam_info,
+            identification_parameters=_identification_parameters_from_args(
+                args, box, min_net_gradient
+            ),
+            roi=roi,
+            frame_bounds=frame_bounds,
+            movie_info=info,
+            fitting_method=fitting_method,
+            eps=convergence if convergence > 0 else None,
+            max_it=max_iterations if max_iterations > 0 else None,
+            spline_calibration=spline_calibration,
+            vectorfit_parameters=_vectorfit_parameters_from_args(args),
+            camera_calibration=camera_calibration,
+            # in 3D, the z fit applies them (see _localize_finish)
+            affine_calibration=None if z_params else lateral_transforms,
+            parallel=True,
+            progress="console",
+        )
 
     saved = _localize_finish(
         locs,
@@ -2306,8 +3038,111 @@ def _localize_process_file(
         z_params,
         lateral_transforms,
         spline_calibration,
+        suffix=suffix,
     )
     return [saved]
+
+
+def _multi_emitter_parameters_from_args(args: argparse.Namespace):
+    """The ``localize.MultiEmitterParameters`` given on the command
+    line."""
+    from .localize import MultiEmitterParameters
+
+    return MultiEmitterParameters(
+        psf_model=args.psf_model,
+        snr_threshold=args.snr_threshold,
+        psf_sigma=args.psf_sigma,
+        max_cycles=args.max_cycles,
+        peak_radius=args.peak_radius,
+        background_sigma=args.background_sigma,
+        peak_search_z=tuple(args.peak_search_z),
+        fit_region_size=args.fit_region_size,
+    )
+
+
+def _localize_multi_emitter(
+    movie,
+    info: list[dict],
+    path: str,
+    args: argparse.Namespace,
+    box: int,
+    min_net_gradient: float | list[float],
+    roi,
+    frame_bounds,
+    camera_info: dict,
+    camera_calibration: dict | None,
+    z_params,
+    lateral_transforms: list | None,
+    spline_calibration: dict | None,
+    suffix: str = "",
+) -> str:
+    """Fit one movie with the multi-emitter fitting (``--multi-emitter``),
+    then save it and undrift it as any other fit. With ``z_params`` (an
+    elliptical fit, see ``_check_multi_emitter_args``), z is read from the
+    fitted sigmas, and the z fit applies the lateral corrections. With
+    ``spline_calibration`` (``--psf-model spline``), it is the PSF, and
+    its own lateral corrections are not applied again.
+
+    Returns
+    -------
+    out_path : str
+        Path of the localization file written.
+    """
+    from .io import strip_mm_metadata
+    from .localize import localize_multi_emitter
+
+    seed_identification = None
+    if args.seed_identification:
+        seed_identification = _identification_parameters_from_args(
+            args, box, min_net_gradient
+        )
+    calibration_3d = None
+    if z_params is not None:
+        _, magnification_factor, z_calibration = z_params
+        calibration_3d = dict(z_calibration)
+        calibration_3d["Magnification factor"] = magnification_factor
+    with _lateral_report_only():
+        locs, info = localize_multi_emitter(
+            movie,
+            # as localize.localize does, see "Save Micro-Manager metadata"
+            strip_mm_metadata(info),
+            camera_info=camera_info,
+            parameters=_multi_emitter_parameters_from_args(args),
+            roi=roi,
+            frame_bounds=frame_bounds,
+            seed_identification=seed_identification,
+            camera_calibration=camera_calibration,
+            calibration_3d=calibration_3d,
+            spline_calibration=spline_calibration,
+            lateral_transforms=lateral_transforms,
+            parallel=True,
+            fit_z_gpu=args.fit_z_gpu,
+            progress="console",
+        )
+    entry = next(e for e in info if e.get("Step") == "Fit multi-emitter")
+    if spline_calibration is None:
+        print(
+            f"PSF sigma: {entry['PSF Sigma (nm)']:.1f} nm"
+            + (" (estimated)" if entry["PSF Sigma Estimated"] else "")
+            + ("" if args.psf_model == "fixed" else ", the start of the fit")
+        )
+    if calibration_3d is not None:
+        _print_lateral_report(
+            info[-1].get("Lateral corrections applied"),
+            info[-1].get("Lateral corrections skipped"),
+        )
+        # applied and reported by the z fit
+        lateral_transforms = None
+    return _localize_finish(
+        locs,
+        info,
+        path,
+        args,
+        None,
+        lateral_transforms,
+        spline_calibration,
+        suffix=suffix,
+    )
 
 
 def _localize_region_fit(
@@ -2327,7 +3162,9 @@ def _localize_region_fit(
             "least one --roi is needed. Pass the regions, e.g. "
             "--roi 0 0 256 256 --roi 0 256 256 512."
         )
-    methods = [_FIT_METHOD_MAP[method] for method in fit_methods]
+    from .localize import resolve_fit_method
+
+    methods = [resolve_fit_method(method)[0] for method in fit_methods]
     if len(methods) not in (1, n_regions):
         raise Exception(
             f"{len(methods)} fitting methods were given but {n_regions} "
@@ -2366,6 +3203,7 @@ def _localize_regions(
     region_fit: dict,
     camera_calibration: dict | None = None,
     lateral_transforms: list | None = None,
+    suffix: str = "",
 ) -> list[str]:
     """Fit each ``--roi`` region of one movie on its own
     (``--regions-separately``).
@@ -2383,6 +3221,7 @@ def _localize_regions(
         Paths of the localization files written, one per region with
         localizations.
     """
+    from .io import strip_mm_metadata
     from .localize import (
         fit_split_fov_independent,
         identify,
@@ -2391,7 +3230,8 @@ def _localize_regions(
 
     identifications, ids_info = identify(
         movie,
-        info,
+        # as localize.localize does, see "Save Micro-Manager metadata"
+        strip_mm_metadata(info),
         parameters=_identification_parameters_from_args(
             args, box, min_net_gradient
         ),
@@ -2404,22 +3244,25 @@ def _localize_regions(
         f"Identified {len(identifications):,} spots in {len(roi)} regions. "
         "Fitting each region on its own..."
     )
-    results = fit_split_fov_independent(
-        movie,
-        camera_info=cam_info,
-        identifications=identifications,
-        box=box,
-        regions=roi,
-        fitting_method=region_fit["methods"],
-        info=ids_info,
-        eps=convergence if convergence > 0 else None,
-        max_it=max_iterations if max_iterations > 0 else None,
-        spline_calibration=region_fit["spline_calibrations"],
-        vectorfit_parameters=_vectorfit_parameters_from_args(args),
-        camera_calibration=camera_calibration,
-        parallel=True,
-        progress="console",
-    )
+    with _lateral_report_only():
+        results = fit_split_fov_independent(
+            movie,
+            camera_info=cam_info,
+            identifications=identifications,
+            box=box,
+            regions=roi,
+            fitting_method=region_fit["methods"],
+            info=ids_info,
+            eps=convergence if convergence > 0 else None,
+            max_it=max_iterations if max_iterations > 0 else None,
+            spline_calibration=region_fit["spline_calibrations"],
+            vectorfit_parameters=_vectorfit_parameters_from_args(args),
+            camera_calibration=camera_calibration,
+            # in 3D, the z fit applies them (see _localize_finish)
+            lateral_transforms=None if z_params else lateral_transforms,
+            parallel=True,
+            progress="console",
+        )
     saved = []
     for c, (locs, region_info) in enumerate(results):
         label = region_label(c)
@@ -2442,11 +3285,24 @@ def _localize_regions(
                 z_params,
                 lateral_transforms,
                 region_fit["spline_calibrations"][c],
-                suffix=f"_{label}",
+                suffix=f"{suffix}_{label}",
                 fitting_method=region_fit["methods"][c],
             )
         )
     return saved
+
+
+@contextlib.contextmanager
+def _lateral_report_only() -> Iterator[None]:
+    """Fit without warning about the lateral corrections skipped because
+    the calibration used for fitting applies them already: the console
+    report of ``_print_lateral_report`` says so instead."""
+    import warnings
+    from . import lib
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", lib.DuplicateLateralTransformWarning)
+        yield
 
 
 def _print_lateral_report(
@@ -2499,7 +3355,9 @@ def _localize_finish(
         ``(zpath, magnification_factor, z_calibration)``; else ``None``.
     lateral_transforms : list or None
         Lateral corrections loaded separately from the calibration used
-        for fitting (see ``_localize_process_file``).
+        for fitting (see ``_localize_process_file``). Without
+        ``z_params``, the fit has applied them already, so they are
+        only reported here; with it, the z fit applies them.
     spline_calibration : dict or None
         Spline PSF calibration used for fitting, whose own lateral
         corrections are not applied again; None if not a spline fit.
@@ -2520,10 +3378,9 @@ def _localize_finish(
     from . import lib
     from .io import save_locs
     from .localize import add_file_to_db
-
-    method_name = fitting_method or args.fit_method
     from .vectorfit import outliers_discarded
 
+    method_name = fitting_method or args.fit_method
     n_outliers = outliers_discarded(info)
     if n_outliers is not None:
         print(
@@ -2533,8 +3390,7 @@ def _localize_finish(
     if z_params is not None:
         from . import zfit
 
-        zpath, magnification_factor, z_calibration = z_params
-        z_calibration["Magnification Factor"] = magnification_factor
+        _, magnification_factor, z_calibration = z_params
         print("------------------------------------------")
         print("Fitting 3D...")
         method = "gausslq" if "mle" not in method_name else "gaussmle"
@@ -2552,6 +3408,8 @@ def _localize_finish(
                 locs=locs,
                 info=info,
                 calibration=z_calibration,
+                # --magnification-factor, over the calibration's own
+                magnification_factor=magnification_factor,
                 fitting_method=method,
                 filter=0,
                 lateral_transforms=lateral_transforms,
@@ -2559,7 +3417,6 @@ def _localize_finish(
                 gpu=args.fit_z_gpu,
                 progress="console",
             )
-        info[-1]["Z Calibration Path"] = zpath
         print("3D fitting complete.")
         print("------------------------------------------")
         _print_lateral_report(
@@ -2567,18 +3424,13 @@ def _localize_finish(
             info[-1].get("Lateral corrections skipped"),
         )
     elif lateral_transforms:
-        # No z fit to fold them into, so apply them here. Corrections the
-        # spline calibration carries were applied by ``localize`` itself;
-        # passing that same file to --affine-calibration would otherwise
-        # correct the coordinates twice.
+        # No z fit to fold them into, so the fit applied them and recorded
+        # them in an entry of its own. It skipped the corrections the spline
+        # calibration carries, which it applies itself; passing that same
+        # file to --affine-calibration would otherwise correct twice.
         extra, duplicates = lib.drop_duplicate_lateral_transforms(
             lateral_transforms, spline_calibration
         )
-        if extra:
-            locs = lib.apply_lateral_transforms(locs, extra)
-            info[-1]["Lateral corrections applied"] = info[-1].get(
-                "Lateral corrections applied", []
-            ) + lib.describe_lateral_transforms(extra)
         _print_lateral_report(
             lib.describe_lateral_transforms(extra),
             lib.describe_lateral_transforms(duplicates),
@@ -2623,6 +3475,46 @@ def _localize_finish(
     return out_path
 
 
+def _check_multi_emitter_args(args: argparse.Namespace) -> None:
+    """Refuse the options the multi-emitter fitting cannot honor: it fits
+    by maximum likelihood, on the CPU, one region of one channel at a
+    time, takes a spline calibration only as the PSF of --psf-model
+    spline, and gives z otherwise only with sigmas in x and y."""
+    fit_methods = args.fit_method or ["mle"]
+    if fit_methods != ["mle"]:
+        raise SystemExit(
+            "--multi-emitter fits by maximum likelihood; leave out "
+            "--fit-method."
+        )
+    n_splines = len(args.spline_calibration or [])
+    if args.psf_model == "spline" and n_splines != 1:
+        raise SystemExit(
+            "--multi-emitter --psf-model spline needs one "
+            "--spline-calibration, the PSF it fits."
+        )
+    if args.psf_model != "spline" and n_splines:
+        raise SystemExit(
+            "--multi-emitter fits a Gaussian unless --psf-model spline; "
+            "add it, or leave out --spline-calibration."
+        )
+    if args.psf_model != "spline" and args.fit_region_size is not None:
+        raise SystemExit(
+            "--multi-emitter takes the fit region of a Gaussian from its "
+            "sigma; leave out --fit-region-size, or add --psf-model spline."
+        )
+    if args.zc and args.psf_model != "elliptical":
+        raise SystemExit(
+            "--multi-emitter reads z from the sigmas in x and y it fits "
+            "with --psf-model elliptical; add it, or leave out "
+            "--z-calibration."
+        )
+    if args.regions_separately:
+        raise SystemExit(
+            "--multi-emitter cannot fit regions separately yet; leave out "
+            "--regions-separately."
+        )
+
+
 def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
     """Localize molecules in microscopy images.
 
@@ -2637,8 +3529,9 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
           ``'mle'``, ``'lq-3d'`` or ``'lq-gpu-3d'``; one per ROI region
           with ``regions_separately``.
         - ``box_side_length`` (int): side length of the fitting box.
-        - ``gradient`` (list of float): minimum net gradient(s), one per
-          ROI region or a single one for all.
+        - ``gradient`` (list of int or "auto"): minimum net gradient(s),
+          one per ROI region or a single one for all; "auto" estimates
+          it for each movie.
         - ``roi`` (list of list of int): regions of interest, each
           ``[y_min, x_min, y_max, x_max]``.
         - ``frame_bounds`` (list of list of int): one or more
@@ -2665,13 +3558,17 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
     # regions are fitted separately, where they are one per region; the
     # first one stands for the run as a whole (the GPU check, the 3D and
     # spline branches below).
+    if getattr(args, "multi_emitter", False):
+        _check_multi_emitter_args(args)
+    else:
+        args.multi_emitter = False
     fit_methods = args.fit_method or ["mle"]
     args.fit_method = fit_methods[0]
     gradients = args.gradient or [5000]
     args.gradient = gradients[0]
     spline_paths = args.spline_calibration or []
     args.spline_calibration = spline_paths[0] if spline_paths else ""
-    if _FIT_METHOD_MAP[args.fit_method].endswith("-gpu"):
+    if localize.resolve_fit_method(args.fit_method)[0].endswith("-gpu"):
         if localize.CUDA_AVAILABLE:
             print("CUDA GPU found")
         else:
@@ -2701,6 +3598,7 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
     if not paths:
         print("Error. No files found.")
         raise FileNotFoundError
+    _localize_check_photon_options(args, paths, concat)
 
     if concat:
         print(
@@ -2746,7 +3644,9 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
     max_iterations = args.max_iterations
 
     z_params = None
-    if "-3d" in args.fit_method:
+    # the multi-emitter fit reads z from the sigmas of --psf-model
+    # elliptical (see _check_multi_emitter_args)
+    if "-3d" in args.fit_method or (args.multi_emitter and args.zc):
         z_params = _localize_load_3d_calibration(args)
         if args.fit_z_gpu:
             from . import zfit
@@ -2762,7 +3662,9 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
                 args.fit_z_gpu = False
 
     spline_calibrations = []
-    if any(method.startswith("spline") for method in fit_methods):
+    if any(method.startswith("spline") for method in fit_methods) or (
+        args.multi_emitter and args.psf_model == "spline"
+    ):
         from .io import load_spline_calibration
 
         if not spline_paths:
@@ -3360,1210 +4262,6 @@ def _render(args: argparse.Namespace) -> None:
         )
 
 
-def _parse_float_list(value) -> list:
-    """Parse a CSV cell into a list of floats. Accepts a numeric scalar
-    or a comma-separated string like ``"3,4,5"``."""
-    if isinstance(value, bool):
-        raise ValueError("Expected a number or comma-separated string.")
-    if isinstance(value, (int, float)):
-        return [float(value)]
-    return [float(x.strip()) for x in str(value).split(",") if x.strip()]
-
-
-def _spinna_targets_from_row(row) -> list:
-    """Derive target names from the ``exp_data_*`` columns of a CSV row.
-
-    LE fitting does not load a structures yaml, so targets come from
-    column names. The first non-empty ``exp_data_*`` column maps to
-    ``target_a`` in ``spinna.fit_le``.
-    """
-    import pandas as pd
-
-    prefix = "exp_data_"
-    targets = [
-        c[len(prefix) :]
-        for c in row.index
-        if c.startswith(prefix) and pd.notna(row[c])
-    ]
-    if len(targets) != 2:
-        raise ValueError(
-            "LE fitting requires exactly two targets (two non-empty "
-            f"exp_data_* columns); found: {targets}"
-        )
-    return targets
-
-
-def _spinna_parse_distances(row) -> list:
-    """Parse the ``distances`` column of an LE-fitting row into a list
-    of candidate heterodimer distances (nm)."""
-    import pandas as pd
-
-    if "distances" not in row.index or pd.isna(row["distances"]):
-        raise ValueError("Column 'distances' is required when le_fitting=1.")
-    distances = _parse_float_list(row["distances"])
-    if not distances:
-        raise ValueError("'distances' must contain at least one value.")
-    return distances
-
-
-def _spinna_validate_parameters(
-    parameters_filename: str,
-) -> tuple:
-    """Validate the parameters file and create a result directory name.
-
-    Also checks that all required columns are present; the result
-    directory name is made unique.
-
-    Parameters
-    ----------
-    parameters_filename : str
-        Path to the ``.csv`` file with the SPINNA fitting parameters.
-
-    Returns
-    -------
-    tuple[pd.DataFrame, str]
-        ``(parameters, result_dir)``
-    """
-    import os
-    import pandas as pd
-
-    if not isinstance(parameters_filename, str):
-        raise TypeError(
-            "parameters_filename must be a string ending with .csv"
-        )
-    elif not parameters_filename.endswith(".csv"):
-        raise TypeError("parameters_filename must end with .csv")
-
-    parameters = pd.read_csv(parameters_filename)
-    if "rotation_mode" in parameters.columns:
-        # "None" (no rotations) is a value, which pandas reads as missing
-        parameters["rotation_mode"] = pd.read_csv(
-            parameters_filename,
-            usecols=["rotation_mode"],
-            dtype=str,
-            keep_default_na=False,
-        )["rotation_mode"]
-
-    path, ext = os.path.splitext(parameters_filename)
-    result_dir = path + "__fitting_results"
-    if os.path.isdir(result_dir):
-        i = 1
-        while True:
-            result_dir_ = result_dir + f"_{i}"
-            if not os.path.isdir(result_dir_):
-                result_dir = result_dir_
-                break
-            else:
-                i += 1
-
-    for column in [
-        "granularity",
-        "save_filename",
-        "NND_bin",
-        "NND_maxdist",
-        "sim_repeats",
-    ]:
-        if column not in parameters.columns:
-            raise ValueError(
-                f"Column {column} not found in the parameters file."
-            )
-
-    return parameters, result_dir
-
-
-def _spinna_check_target_columns(row, target: str, le_fitting: bool) -> None:
-    """Raise if a target's required columns are missing from the row."""
-    for col_name in [f"{_}_{target}" for _ in ["label_unc", "exp_data"]]:
-        if col_name not in row.index:
-            raise ValueError(
-                f"Column {col_name} not found in the parameters file."
-            )
-    if not le_fitting and f"le_{target}" not in row.index:
-        raise ValueError(
-            f"Column le_{target} not found in the parameters file."
-        )
-
-
-def _spinna_parse_target_uncertainty(
-    row, target: str, le_fitting: bool
-) -> tuple:
-    """Parse ``label_unc_TARGET`` and ``le_TARGET`` for one target."""
-    if le_fitting:
-        label_unc = _parse_float_list(row[f"label_unc_{target}"])
-        if not label_unc:
-            raise ValueError(
-                f"label_unc_{target} must contain at least one value."
-            )
-        return label_unc, 1.0
-    return float(row[f"label_unc_{target}"]), float(row[f"le_{target}"]) / 100
-
-
-def _spinna_stack_exp_data(locs) -> tuple:
-    """Stack loc coordinates (nm) into an (N, dim) array."""
-    import numpy as np
-
-    if "z" in locs.columns:
-        return np.stack((locs.x, locs.y, locs.z)).T, 3
-    return np.stack((locs.x, locs.y)).T, 2
-
-
-def _spinna_load_target_data(
-    row,
-    targets: list,
-    io,
-    le_fitting: bool = False,
-) -> tuple:
-    """Load per-target experimental data and parameters from a CSV row.
-
-    When ``le_fitting`` is True, ``label_unc_TARGET`` is parsed as a
-    comma-separated list of candidates (single values are still accepted),
-    ``le_TARGET`` is not read (LE is what is being fit), and
-    ``n_simulated`` is the raw localization count (no LE division).
-
-    Parameters
-    ----------
-    row : pd.Series
-        One row of the parameters file.
-    targets : list of str
-        Names of the targets.
-    io : module
-        The ``picasso.io`` module, used to load the localizations.
-    le_fitting : bool, optional
-        Whether the labeling efficiency is fitted. Default is False.
-
-    Returns
-    -------
-    tuple[dict, dict, dict, dict, int, dict]
-        ``(label_unc, le, exp_data, n_simulated, dim, infos)``
-    """
-    label_unc: dict = {}
-    le: dict = {}
-    exp_data: dict = {}
-    n_simulated: dict = {}
-    infos: dict = {}
-    dim = 2
-
-    for target in targets:
-        _spinna_check_target_columns(row, target, le_fitting)
-        label_unc[target], le[target] = _spinna_parse_target_uncertainty(
-            row, target, le_fitting
-        )
-
-        locs, info = io.load_locs(str(row[f"exp_data_{target}"]))
-        infos[target] = info
-        exp_data[target], dim = _spinna_stack_exp_data(locs)
-
-        if le_fitting:
-            n_simulated[target] = len(locs)
-        else:
-            n_simulated[target] = int(len(locs) / le[target])
-
-    return label_unc, le, exp_data, n_simulated, dim, infos
-
-
-def _spinna_resolve_roi_3d(row) -> tuple:
-    """Resolve a homogeneous 3D ROI (volume, z_range) from a row.
-
-    Parameters
-    ----------
-    row : pd.Series
-        One row of the parameters file.
-
-    Returns
-    -------
-    tuple[float | None, float | None, bool]
-        ``(volume, z_range, apply_mask)``
-    """
-    if "volume" not in row.index:
-        return None, None, True
-    volume = float(row["volume"])
-    if "z_range" not in row.index:
-        raise ValueError(
-            "Column z_range not found in the parameters file."
-            " 3D simulation was specified with homogeneous"
-            " distribution. Please specify z_range."
-        )
-    return volume, float(row["z_range"]), False
-
-
-def _spinna_resolve_roi_2d(row, targets: list, infos: dict | None) -> tuple:
-    """Resolve a homogeneous 2D ROI (area) from a row.
-
-    If the ``area`` column is missing or empty, the area is recovered from
-    the experimental data metadata key ``"Area (um^2)"`` (taken from the
-    first target's info).
-
-    Parameters
-    ----------
-    row : pd.Series
-        One row of the parameters file.
-    targets : list of str
-        Names of the targets.
-    infos : dict or None
-        Metadata of the experimental data per target.
-
-    Returns
-    -------
-    tuple[float | None, bool]
-        ``(area, apply_mask)``
-    """
-    import pandas as pd
-    from . import lib
-
-    if "area" in row.index and pd.notna(row["area"]):
-        return float(row["area"]), False
-    if infos:
-        meta_area = lib.get_from_metadata(infos[targets[0]], "Area (um^2)")
-        if meta_area is not None:
-            return float(meta_area), False
-    return None, True
-
-
-def _spinna_resolve_mask_paths(row, targets: list) -> dict:
-    """Collect and validate the per-target mask filenames from a row."""
-    mask_paths = {}
-    for target in targets:
-        if f"mask_filename_{target}" not in row.index:
-            raise ValueError(
-                f"Column mask_filename_{target} not found in the"
-                " parameters file."
-            )
-        mask_paths[target] = row[f"mask_filename_{target}"]
-    return mask_paths
-
-
-def _spinna_resolve_roi(
-    row, dim: int, targets: list, infos: dict | None = None
-) -> tuple:
-    """Determine ROI parameters for a row: homogeneous or masked.
-
-    Parameters
-    ----------
-    row : pd.Series
-        One row of the parameters file.
-    dim : int
-        Dimensionality of the data, 2 or 3.
-    targets : list of str
-        Names of the targets.
-    infos : dict or None, optional
-        Metadata of the experimental data per target, used to recover
-        the 2D area. Default is None.
-
-    Returns
-    -------
-    tuple[bool, dict, float | None, float | None, float | None]
-        ``(apply_mask, mask_paths, area, volume, z_range)``
-    """
-    apply_mask = True
-    area = volume = z_range = None
-
-    if dim == 3:
-        volume, z_range, apply_mask = _spinna_resolve_roi_3d(row)
-    elif dim == 2:
-        area, apply_mask = _spinna_resolve_roi_2d(row, targets, infos)
-
-    mask_paths = _spinna_resolve_mask_paths(row, targets) if apply_mask else {}
-    return apply_mask, mask_paths, area, volume, z_range
-
-
-def _spinna_compute_roi(
-    targets: list,
-    apply_mask: bool,
-    mask_paths: dict,
-    dim: int,
-    area,
-    volume,
-    z_range,
-) -> tuple:
-    """Resolve the simulation ROI for a row.
-
-    Parameters
-    ----------
-    targets : list of str
-        Names of the targets.
-    apply_mask : bool
-        Whether masks are used instead of a homogeneous ROI.
-    mask_paths : dict
-        Path of the ``.npy`` mask per target.
-    dim : int
-        Dimensionality of the data, 2 or 3.
-    area : float or None
-        Area of the 2D homogeneous ROI in um^2.
-    volume : float or None
-        Volume of the 3D homogeneous ROI in um^3.
-    z_range : float or None
-        Depth of the 3D homogeneous ROI in nm.
-
-    Returns
-    -------
-    tuple[dict | None, float | None, float | None, float | None]
-        ``(mask_dict, width, height, depth)``
-    """
-    import os
-    import numpy as np
-    from .io import FORMAT_VERSION_ATTR, check_format_version, load_yaml
-
-    if apply_mask:
-        masks: dict = {}
-        mask_info: dict = {}
-        width = height = depth = None
-        for target in targets:
-            masks[target] = np.load(mask_paths[target])
-            mask_path = os.path.splitext(mask_paths[target])[0] + ".yaml"
-            mask_info[target] = load_yaml(mask_path)
-            check_format_version(
-                mask_info[target].get(FORMAT_VERSION_ATTR),
-                mask_path,
-                kind="mask",
-            )
-        mask_dict = {"mask": masks, "info": mask_info}
-    else:
-        mask_dict = None
-        if dim == 2:
-            width = height = np.sqrt(area * 1e6)
-            depth = None
-        else:  # dim == 3
-            depth = z_range
-            width = height = np.sqrt(volume * 1e9 / depth)
-
-    return mask_dict, width, height, depth
-
-
-def _spinna_build_mixer(
-    spinna,
-    structures: list,
-    targets: list,
-    label_unc: dict,
-    le: dict,
-    random_rot_mode: str | None,
-    apply_mask: bool,
-    mask_paths: dict,
-    dim: int,
-    area,
-    volume,
-    z_range,
-):
-    """Build a ``StructureMixer`` from resolved ROI and target data."""
-    mask_dict, width, height, depth = _spinna_compute_roi(
-        targets,
-        apply_mask,
-        mask_paths,
-        dim,
-        area,
-        volume,
-        z_range,
-    )
-    return spinna.StructureMixer(
-        structures=structures,
-        label_unc=label_unc,
-        le=le,
-        mask_dict=mask_dict,
-        width=width,
-        height=height,
-        depth=depth,
-        random_rot_mode=random_rot_mode,
-    )
-
-
-def _spinna_roi_results(
-    row, targets: list, apply_mask: bool, dim: int, area, volume, z_range
-) -> dict:
-    """Report the ROI (mask paths, or area/volume/z-range) used for a row."""
-    if apply_mask:
-        return {
-            "File location of masks": [
-                row[f"mask_filename_{target}"] for target in targets
-            ]
-        }
-    if dim == 2:
-        return {"Area (um^2)": area}
-    if dim == 3:
-        return {"Volume (um^3)": volume, "Z range (nm)": z_range}
-    return {}
-
-
-def _spinna_collect_le_fit_results(
-    row,
-    targets: list,
-    structures: list,
-    opt_props,
-    score,
-    label_unc: dict,
-    random_rot_mode: str | None,
-    dim: int,
-    granularity,
-    sim_repeats: int,
-    apply_mask: bool,
-    area,
-    volume,
-    z_range,
-    label_unc_search: dict | None,
-    distances_search: list | None,
-    best_distance: float | None,
-    le_values: dict | None,
-) -> dict:
-    """Assemble the results dict for an LE-fitting row."""
-    results: dict = {
-        "Molecular targets": targets,
-        "File location of experimental data": [
-            str(row[f"exp_data_{target}"]) for target in targets
-        ],
-        "Parameters search space granularity": granularity,
-        "Dimensionality": f"{dim}D",
-        "Rotation mode": str(random_rot_mode),
-        "Number of simulation repeats": sim_repeats,
-    }
-    if label_unc_search is not None:
-        for target in targets:
-            results[f"Label-uncertainty search space (nm) for {target}"] = (
-                ", ".join(f"{float(v):.2f}" for v in label_unc_search[target])
-            )
-    for target in targets:
-        results[f"Fitted label uncertainty (nm) for {target}"] = (
-            f"{float(label_unc[target]):.4f}"
-        )
-    if distances_search is not None:
-        results["Heterodimer distance search space (nm)"] = ", ".join(
-            f"{float(v):.2f}" for v in distances_search
-        )
-    if best_distance is not None:
-        results["Fitted heterodimer distance (nm)"] = (
-            f"{float(best_distance):.4f}"
-        )
-    if le_values is not None:
-        for target in targets:
-            results[f"Fitted labeling efficiency (%) for {target}"] = (
-                f"{float(le_values[target]):.2f}"
-            )
-    results["Best fitting structure proportions (%)"] = ", ".join(
-        f"{s.title}: {float(p):.2f}" for s, p in zip(structures, opt_props)
-    )
-    results["Modified Kolmogorov-Smirnov score"] = score
-    results.update(
-        _spinna_roi_results(
-            row, targets, apply_mask, dim, area, volume, z_range
-        )
-    )
-    return results
-
-
-def _spinna_relative_proportions(
-    targets: list, structures: list, mixer, opt_props, n_simulated: dict
-) -> dict:
-    """Report each target's relative proportion across structures."""
-    import numpy as np
-
-    opt_props_ = opt_props[0] if isinstance(opt_props, tuple) else opt_props
-    results = {}
-    for target in targets:
-        rel_props = mixer.convert_props_for_target(
-            opt_props_, target, n_simulated
-        )
-        idx_valid = np.where(rel_props != np.inf)[0]
-        value = ", ".join(
-            [f"{structures[i].title}: {rel_props[i]:.2f}%" for i in idx_valid]
-        )
-        results[f"Relative proportions of {target} in"] = value
-    return results
-
-
-def _spinna_collect_structure_results(
-    row,
-    targets: list,
-    structures: list,
-    mixer,
-    opt_props,
-    score,
-    label_unc: dict,
-    le: dict,
-    random_rot_mode: str | None,
-    dim: int,
-    granularity,
-    N_structures: dict,
-    sim_repeats: int,
-    apply_mask: bool,
-    area,
-    volume,
-    z_range,
-    n_simulated: dict,
-) -> dict:
-    """Assemble the results dict for a structure-fitting row."""
-    results: dict = {
-        "File location of structures": row["structures_filename"],
-        "Molecular targets": targets,
-        "File location of experimental data": [
-            str(row[f"exp_data_{target}"]) for target in targets
-        ],
-        "Labeling efficiency (%)": [le[target] * 100 for target in targets],
-        "Label uncertainty (nm)": list(label_unc.values()),
-        "Rotation mode": str(random_rot_mode),
-        "Dimensionality": f"{dim}D",
-        "Parameters search space granularity": granularity,
-        "Fitted structures names": list(N_structures.keys()),
-        "Number of simulation repeats": sim_repeats,
-    }
-
-    if isinstance(opt_props, tuple):
-        props_mean, props_std = opt_props
-        results["Modified Kolmogorov-Smirnov score +/- s.d."] = score
-        results["Fitted proportions of structures"] = ", ".join(
-            [
-                f"{props_mean[i]:.2f} +/- {props_std[i]:.2f}%"
-                for i in range(len(props_mean))
-            ]
-        )
-    else:
-        results["Modified Kolmogorov-Smirnov score"] = score
-        results["Fitted proportions of structures"] = opt_props
-
-    if len(targets) > 1:
-        results.update(
-            _spinna_relative_proportions(
-                targets, structures, mixer, opt_props, n_simulated
-            )
-        )
-
-    results.update(
-        _spinna_roi_results(
-            row, targets, apply_mask, dim, area, volume, z_range
-        )
-    )
-    return results
-
-
-def _spinna_collect_results(
-    row,
-    targets: list,
-    structures: list,
-    mixer,
-    opt_props,
-    score,
-    label_unc: dict,
-    le: dict,
-    random_rot_mode: str | None,
-    dim: int,
-    granularity,
-    N_structures: dict,
-    sim_repeats: int,
-    apply_mask: bool,
-    mask_paths: dict,
-    area,
-    volume,
-    z_range,
-    n_simulated: dict,
-    spinna,
-    le_fitting: bool = False,
-    label_unc_search: dict | None = None,
-    distances_search: list | None = None,
-    best_distance: float | None = None,
-    le_values: dict | None = None,
-) -> dict:
-    """Assemble the full results dict from fitting output.
-
-    When ``le_fitting`` is True, the dict reports the recovered LE
-    values, fitted label uncertainty and heterodimer distance (plus the
-    search spaces used), mirroring the GUI's Fit LE summary keys.
-    """
-    from datetime import datetime
-
-    results = {"Date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-
-    if le_fitting:
-        results.update(
-            _spinna_collect_le_fit_results(
-                row,
-                targets,
-                structures,
-                opt_props,
-                score,
-                label_unc,
-                random_rot_mode,
-                dim,
-                granularity,
-                sim_repeats,
-                apply_mask,
-                area,
-                volume,
-                z_range,
-                label_unc_search,
-                distances_search,
-                best_distance,
-                le_values,
-            )
-        )
-    else:
-        results.update(
-            _spinna_collect_structure_results(
-                row,
-                targets,
-                structures,
-                mixer,
-                opt_props,
-                score,
-                label_unc,
-                le,
-                random_rot_mode,
-                dim,
-                granularity,
-                N_structures,
-                sim_repeats,
-                apply_mask,
-                area,
-                volume,
-                z_range,
-                n_simulated,
-            )
-        )
-
-    return results
-
-
-def _spinna_plot_nnd(
-    spinna,
-    mixer,
-    targets: list,
-    exp_data: dict,
-    opt_props,
-    n_simulated: dict,
-    sim_repeats: int,
-    NND_bin: float,
-    NND_maxdist: float,
-    nn_plotted: int,
-    save_filename: str,
-) -> None:
-    """Compute and save NND plots for all target pairs."""
-    import matplotlib.pyplot as plt
-
-    nn_counts = {
-        f"{t1}-{t2}": nn_plotted
-        for i, t1 in enumerate(targets)
-        for t2 in targets[i:]
-    }
-    mixer.nn_counts = nn_counts
-    n_total = sum(n_simulated.values())
-
-    opt_for_counts = (
-        opt_props[0] if isinstance(opt_props, tuple) else opt_props
-    )
-    dist_sim = spinna.get_NN_dist_simulated(
-        mixer.convert_props_to_counts(opt_for_counts, n_total),
-        sim_repeats,
-        mixer,
-        duplicate=True,
-    )
-
-    for i, (t1, t2, _) in enumerate(mixer.get_neighbor_idx(duplicate=True)):
-        fig, ax = spinna.plot_NN(
-            dist=dist_sim[i],
-            mode="plot",
-            show_legend=False,
-            return_fig=True,
-            figsize=(4.947, 3.71),
-            alpha=1.0,
-            binsize=NND_bin,
-            xlim=[0, NND_maxdist],
-            title=f"Nearest Neighbors Distances: {t1} -> {t2}",
-        )
-        fig, ax = spinna.plot_NN(
-            data1=exp_data[t1],
-            data2=exp_data[t2],
-            n_neighbors=nn_plotted,
-            show_legend=False,
-            fig=fig,
-            ax=ax,
-            mode="hist",
-            return_fig=True,
-            binsize=NND_bin,
-            xlim=[0, NND_maxdist],
-            title=f"Nearest Neighbors Distances: {t1} -> {t2}",
-            savefig=[
-                f"{save_filename}_NND_{t1}_{t2}.{_}" for _ in ["png", "svg"]
-            ],
-        )
-        # release the figure; otherwise pyplot keeps every figure of
-        # every batch row in memory (growing RAM + "too many figures")
-        plt.close(fig)
-
-
-def _spinna_row_rotation_mode(row) -> str | None:
-    """Read ``rotation_mode`` from a row: "3D", "2D" or None for "None"
-    (no rotations), defaulting to "2D" when it is missing or empty."""
-    import pandas as pd
-
-    if "rotation_mode" not in row.index:
-        return "2D"
-    value = row["rotation_mode"]
-    mode = "" if pd.isna(value) else str(value).strip()
-    if mode in ("2D", "3D"):
-        return mode
-    if mode == "None":
-        return None
-    if mode:
-        print(
-            f"Invalid rotation_mode '{mode}'. Must be one of '3D', '2D', "
-            "'None'. Using default: 2D"
-        )
-    return "2D"
-
-
-def _spinna_row_nn_plotted(row) -> int:
-    """Read ``nn_plotted`` from a row, defaulting to 4."""
-    if "nn_plotted" in row.index:
-        if not isinstance(row["nn_plotted"], int):
-            print("Invalid nn_plotted. Using default: 4")
-        else:
-            return int(row["nn_plotted"])
-    return 4
-
-
-def _spinna_row_fitting_mode(row) -> str | None:
-    """Read ``fitting_mode`` from a row.
-
-    None means "use the per-branch default" (bayesian for standard
-    SPINNA, coarse-to-fine for LE fitting).
-    """
-    import pandas as pd
-
-    if "fitting_mode" not in row.index or pd.isna(row["fitting_mode"]):
-        return None
-    mode = str(row["fitting_mode"]).strip()
-    if mode in ("coarse-to-fine", "bayesian", "brute-force"):
-        return mode
-    print(
-        f"Invalid fitting_mode '{mode}'. Must be one of "
-        "'coarse-to-fine', 'bayesian', 'brute-force'. Using default."
-    )
-    return None
-
-
-def _spinna_row_targets_and_structures(
-    index: int, row, le_fitting: bool
-) -> tuple:
-    """Resolve ``(structures, targets)`` for a row.
-
-    ``structures`` is None when ``le_fitting`` is True, since LE fitting
-    does not use a structures file.
-    """
-    import pandas as pd
-
-    from . import io
-
-    if le_fitting:
-        return None, _spinna_targets_from_row(row)
-    if "structures_filename" not in row.index or pd.isna(
-        row["structures_filename"]
-    ):
-        raise ValueError(
-            f"Row {index}: structures_filename is required when "
-            "le_fitting != 1."
-        )
-    return io.load_structures(row["structures_filename"])
-
-
-def _spinna_process_row(
-    index: int,
-    row,
-    parameters,
-    result_dir: str,
-    io,
-    spinna,
-    parallel: bool,
-    bootstrap: bool,
-    verbose: bool,
-) -> dict:
-    """Run a single SPINNA analysis row and return the results dict."""
-    import os
-    import pandas as pd
-
-    print(f"Running SPINNA on row {index+1} out of {len(parameters)}.")
-
-    le_fitting = (
-        "le_fitting" in row.index
-        and pd.notna(row["le_fitting"])
-        and int(row["le_fitting"]) == 1
-    )
-
-    granularity = row["granularity"]
-    NND_bin = row["NND_bin"]
-    NND_maxdist = row["NND_maxdist"]
-    sim_repeats = row["sim_repeats"]
-    save_filename, _ = os.path.splitext(row["save_filename"])
-    save_filename = os.path.join(result_dir, os.path.basename(save_filename))
-
-    random_rot_mode = _spinna_row_rotation_mode(row)
-    nn_plotted = _spinna_row_nn_plotted(row)
-    fitting_mode = _spinna_row_fitting_mode(row)
-
-    structures, targets = _spinna_row_targets_and_structures(
-        index, row, le_fitting
-    )
-
-    label_unc, le, exp_data, n_simulated, dim, infos = (
-        _spinna_load_target_data(
-            row,
-            targets,
-            io,
-            le_fitting=le_fitting,
-        )
-    )
-    apply_mask, mask_paths, area, volume, z_range = _spinna_resolve_roi(
-        row, dim, targets, infos
-    )
-
-    if le_fitting:
-        return _spinna_process_row_le(
-            row=row,
-            targets=targets,
-            label_unc=label_unc,
-            exp_data=exp_data,
-            n_simulated=n_simulated,
-            dim=dim,
-            granularity=granularity,
-            sim_repeats=sim_repeats,
-            NND_bin=NND_bin,
-            NND_maxdist=NND_maxdist,
-            nn_plotted=nn_plotted,
-            apply_mask=apply_mask,
-            mask_paths=mask_paths,
-            area=area,
-            volume=volume,
-            z_range=z_range,
-            random_rot_mode=random_rot_mode,
-            save_filename=save_filename,
-            parallel=parallel,
-            verbose=verbose,
-            fitting_mode=fitting_mode,
-            spinna=spinna,
-        )
-
-    N_structures = spinna.generate_N_structures(
-        structures, n_simulated, granularity
-    )
-
-    mixer = _spinna_build_mixer(
-        spinna,
-        structures,
-        targets,
-        label_unc,
-        le,
-        random_rot_mode,
-        apply_mask,
-        mask_paths,
-        dim,
-        area,
-        volume,
-        z_range,
-    )
-
-    opt_props, score = spinna.SPINNA(
-        mixer=mixer,
-        gt_coords=exp_data,
-        N_sim=sim_repeats,
-    ).fit_stoichiometry(
-        N_structures,
-        fitting_mode=fitting_mode if fitting_mode is not None else "bayesian",
-        save=f"{save_filename}_fit_scores.csv",
-        parallel=parallel,
-        bootstrap=bootstrap,
-        progress="console" if verbose else None,
-    )
-
-    results = _spinna_collect_results(
-        row,
-        targets,
-        structures,
-        mixer,
-        opt_props,
-        score,
-        label_unc,
-        le,
-        random_rot_mode,
-        dim,
-        granularity,
-        N_structures,
-        sim_repeats,
-        apply_mask,
-        mask_paths,
-        area,
-        volume,
-        z_range,
-        n_simulated,
-        spinna,
-    )
-
-    with open(f"{save_filename}_fit_summary.txt", "w") as f:
-        for key, value in results.items():
-            f.write(f"{key}: {value}\n")
-    print(f"Results saved to {save_filename}_fit_summary.txt")
-
-    _spinna_plot_nnd(
-        spinna,
-        mixer,
-        targets,
-        exp_data,
-        opt_props,
-        n_simulated,
-        sim_repeats,
-        NND_bin,
-        NND_maxdist,
-        nn_plotted,
-        save_filename,
-    )
-
-    return results
-
-
-def _spinna_process_row_le(
-    *,
-    row,
-    targets: list,
-    label_unc: dict,
-    exp_data: dict,
-    n_simulated: dict,
-    dim: int,
-    granularity,
-    sim_repeats: int,
-    NND_bin: float,
-    NND_maxdist: float,
-    nn_plotted: int,
-    apply_mask: bool,
-    mask_paths: dict,
-    area,
-    volume,
-    z_range,
-    random_rot_mode: str | None,
-    save_filename: str,
-    parallel: bool,
-    verbose: bool,
-    fitting_mode: str | None,
-    spinna,
-) -> dict:
-    """LE-fitting branch of ``_spinna_process_row``: builds monomer/
-    heterodimer structures via ``spinna.fit_le`` and recovers per-target
-    LE from the fitted structure proportions."""
-    import os
-
-    distances = _spinna_parse_distances(row)
-    mask_dict, width, height, depth = _spinna_compute_roi(
-        targets,
-        apply_mask,
-        mask_paths,
-        dim,
-        area,
-        volume,
-        z_range,
-    )
-
-    # snapshot the search-space inputs before calling fit_le —
-    # compare_models mutates label_unc in place
-    label_unc_input = {t: list(v) for t, v in label_unc.items()}
-    distances_input = list(distances)
-
-    (
-        le_values,
-        fitted_label_unc,
-        best_distance,
-        score,
-        best_props,
-        best_mixer,
-    ) = spinna.fit_le(
-        target_a=targets[0],
-        target_b=targets[1],
-        exp_data=exp_data,
-        granularity=int(granularity),
-        label_unc=label_unc,
-        distances=distances,
-        N_sim=int(sim_repeats),
-        mask_dict=mask_dict,
-        width=width,
-        height=height,
-        depth=depth,
-        random_rot_mode=random_rot_mode,
-        parallel=parallel,
-        savedir=os.path.dirname(save_filename),
-        progress="console" if verbose else None,
-        fitting_mode=(
-            fitting_mode if fitting_mode is not None else "bayesian"
-        ),
-    )
-
-    structures = best_mixer.structures
-    results = _spinna_collect_results(
-        row,
-        targets,
-        structures,
-        best_mixer,
-        best_props,
-        score,
-        fitted_label_unc,
-        {t: 1.0 for t in targets},
-        random_rot_mode,
-        dim,
-        granularity,
-        {s.title: None for s in structures},
-        sim_repeats,
-        apply_mask,
-        mask_paths,
-        area,
-        volume,
-        z_range,
-        n_simulated,
-        spinna,
-        le_fitting=True,
-        label_unc_search=label_unc_input,
-        distances_search=distances_input,
-        best_distance=best_distance,
-        le_values=le_values,
-    )
-
-    with open(f"{save_filename}_fit_summary.txt", "w") as f:
-        for key, value in results.items():
-            f.write(f"{key}: {value}\n")
-    print(f"Results saved to {save_filename}_fit_summary.txt")
-
-    _spinna_plot_nnd(
-        spinna,
-        best_mixer,
-        targets,
-        exp_data,
-        best_props,
-        n_simulated,
-        sim_repeats,
-        NND_bin,
-        NND_maxdist,
-        nn_plotted,
-        save_filename,
-    )
-
-    return results
-
-
-def _spinna_batch_analysis(
-    parameters_filename: str,
-    parallel: bool = True,
-    bootstrap: bool = False,
-    verbose: bool = False,
-) -> None:
-    """SPINNA batch analysis. Results are automatically saved in the
-    a new subfolder named "parameters_filename_fitting_results" in the
-    folder where the parameters file is located. Parameters should be
-    provided in .csv file. Each row in the file specifies one analysis
-    run. The parameters (columns) are:
-
-    - "structures_filename" : Name of the files with structures saved
-        (.yaml). Required unless ``le_fitting=1``, in which case the
-        monomer/heterodimer structures are built internally and targets
-        are taken from the two ``exp_data_TARGET`` columns.
-    - "exp_data_TARGET" : Name of the file with experimental data
-        (.hdf5). Each target in the structures must have a
-        corresponding column, for example, "exp_data_EGFR".
-    - "le_TARGET" : Labeling efficiency (%) for each target. Each
-        target in the structures must have a corresponding column,
-        for example, "le_EGFR". Ignored when ``le_fitting=1``.
-    - "label_unc_TARGET" : Label uncertainty (nm) for each target. Each
-        target in the structures must have a corresponding column,
-        for example: "label_unc_EGFR". When ``le_fitting=1``, this may
-        be a comma-separated list of candidates (e.g. ``"3,4,5,6"``);
-        a single value disables the per-target search.
-    - "granularity" : Granularity used in parameters search space
-        generation. The higher the value the more combinations of
-        structure counts will be tested.
-    - "sim_repeats" : Number of simulation repeats used for obtaining
-        smoother NND histograms.
-    - "save_filename" : Name of the file where the results will be
-        saved.
-    - "NND_bin" : Bin size (nm) for the nearest neighbor distance (NND)
-        histogram (plotting only).
-    - "NND_maxdist" : Maximum distance (nm) for the nearest neighbor
-        distance (NND) histogram (plotting only).
-
-    Depending on whether a homo- or heterogeneous (masked) distribution
-    is used, the following columns must be present:
-    * For homogeneous distribution:
-
-    - "area" or "volume" : Area (2D simulation) or volume (3D
-        simulation) of the simulated ROI (um^2 or um^3). For 2D rows,
-        "area" is optional: if omitted, the area is read from the
-        experimental data metadata key "Area (um^2)" (written by Picasso
-        when picks/areas are saved).
-    - "z_range" : Applicable only when "volume" is provided. Defines
-        the range of z coordinates (nm) of simulated molecular targets.
-
-    * For heterogeneous distribution:
-    - "mask_filename_TARGET" : Name of the .npy file with the mask saved for
-        each molecular target. Each target in the structures must have
-        a corresponding column, for example, "mask_EGFR".
-
-    Optional columns are:
-
-    - "rotation_mode" : Random rotations mode used in analysis. Values
-        must be one of {"3D", "2D", "None"}. Default: "2D".
-    - "nn_plotted" : Number of nearest neighbors plotted in the NND.
-        Only integer values are accepted. Default: 4.
-    - "fitting_mode" : Optimization method used to fit the structure
-        counts. Values must be one of {"coarse-to-fine", "bayesian",
-        "brute-force"}. Default: "bayesian".
-    - "le_fitting" : 0 if standard SPINNA is ran, 1 if labeling
-        efficiency fitting is to be performed. If the column is not
-        provided, standard SPINNA is ran. When set to 1, the batch
-        calls ``picasso.spinna.fit_le``: monomer A, monomer B and
-        heterodimer(d) structures are built internally for each
-        candidate ``distances`` value, label uncertainty is fit per
-        target from the comma-separated candidates in
-        ``label_unc_TARGET``, and the per-target LE is recovered from
-        the fitted structure proportions. Exactly two ``exp_data_*``
-        columns must be present; the first column maps to ``target_a``.
-        ``-b/--bootstrap`` is ignored on LE-fitting rows. For more
-        details about the LE fitting, see Hellmeier, Strauss, et al.
-        Nature Methods, 2024.
-    - "distances" : Comma-separated list of candidate heterodimer
-        distances in nm (e.g. ``"5,10,15,20"``). A single value fixes
-        the distance. Required when ``le_fitting=1``; ignored
-        otherwise.
-
-    When saving, each analysis run index is used as the prefix for
-    filename, for example, "analysis_run1_fit_summary.txt".
-
-    Parameters
-    ----------
-    parameters_filename : str
-        Path to the parameters file.
-    parallel : bool (default=True)
-        If True, the candidates are scored in a pool of worker processes.
-    bootstrap : bool (default=False)
-        If True, bootstrapping is used.
-    verbose : bool (default=True)
-        If True, progress bar for each row is printed to the console.
-    """
-    import os
-    import pandas as pd
-    from . import io, spinna
-
-    parameters, result_dir = _spinna_validate_parameters(parameters_filename)
-    os.makedirs(result_dir, exist_ok=True)
-
-    summary = []
-    for index, row in parameters.iterrows():
-        results = _spinna_process_row(
-            index,
-            row,
-            parameters,
-            result_dir,
-            io,
-            spinna,
-            parallel,
-            bootstrap,
-            verbose,
-        )
-        summary.append(results)
-
-    summary = pd.DataFrame(summary)
-    summary.to_csv(
-        os.path.join(result_dir, "summary_results.csv"),
-        index=False,
-    )
-
-
 def _g5m(
     files: str,
     min_locs: int = 10,
@@ -5142,13 +4840,16 @@ def _build_parser() -> (
     localize_parser.add_argument(
         "-g",
         "--gradient",
-        type=int,
+        type=_gradient_arg,
         action="append",
         default=None,
         help=(
-            "minimum net gradient (default 5000). May be given once per "
-            "--roi, since regions imaged through different optics need not "
-            "share a brightness scale"
+            "minimum net gradient (default 5000), or 'auto' to estimate it "
+            "for each movie from its background (the local maxima of 40 "
+            "frames; see localize.estimate_min_net_gradient). May be given "
+            "once per --roi, since regions imaged through different optics "
+            "need not share a brightness scale; an 'auto' is then estimated "
+            "in its own region"
         ),
     )
     localize_parser.add_argument(
@@ -5256,6 +4957,45 @@ def _build_parser() -> (
         ),
     )
     localize_parser.add_argument(
+        "--frame-sum-window",
+        type=int,
+        default=1,
+        help=(
+            "photon-counting movies (.ptu) only: number of consecutive\n"
+            "scan frames summed into one frame, for confocal scans too\n"
+            "dim to localize scan frame by scan frame. Default 1 (no\n"
+            "summing)"
+        ),
+    )
+    localize_parser.add_argument(
+        "--frame-sum-stride",
+        type=int,
+        default=None,
+        help=(
+            "photon-counting movies (.ptu) only: number of scan frames\n"
+            "between the starts of two sums, at most --frame-sum-window.\n"
+            "Default: --frame-sum-window, i.e., sums that do not overlap\n"
+            "(every photon is used once); 1 gives a sliding window"
+        ),
+    )
+    localize_parser.add_argument(
+        "--microtime-gate",
+        type=float,
+        nargs=2,
+        action="append",
+        default=None,
+        metavar=("START", "END"),
+        help=(
+            "photon-counting movies (.ptu) only: a microtime gate, i.e.,\n"
+            "photons arriving START to END ns after the sync (laser)\n"
+            "pulse, e.g., one gate per laser of pulsed interleaved\n"
+            "excitation (PIE). May be given several times; each detector\n"
+            "then gives one channel per gate. A .ptu file with several\n"
+            "channels (detectors or gates) is localized channel by\n"
+            "channel, into <movie>_<channel>_locs.hdf5"
+        ),
+    )
+    localize_parser.add_argument(
         "-bl", "--baseline", type=int, default=0, help="camera baseline"
     )
     localize_parser.add_argument(
@@ -5322,6 +5062,109 @@ def _build_parser() -> (
         "--database",
         action="store_true",
         help="add the run to the local database",
+    )
+    multi_emitter = localize_parser.add_argument_group(
+        "multi-emitter fitting",
+        "fit all emitters of a frame at once, so that emitters closer than"
+        " about 2 PSF sigma are localized separately (3D-DAOSTORM,"
+        " Babcock et al., Optical Nanoscopy 2012). The peaks are found in"
+        " the residual of the fit, so the identification options are not"
+        " used, except with --seed-identification",
+    )
+    multi_emitter.add_argument(
+        "-me",
+        "--multi-emitter",
+        action="store_true",
+        help="fit overlapping emitters instead of one emitter per box",
+    )
+    multi_emitter.add_argument(
+        "--psf-model",
+        choices=["fixed", "spherical", "elliptical", "spline"],
+        default="fixed",
+        help=(
+            "the PSF of each emitter: a Gaussian whose sigma is fixed, the"
+            " same for all (default), spherical, one fitted sigma per"
+            " emitter, or elliptical, a fitted sigma in x and one in y per"
+            " emitter, whose z --z-calibration then gives (storm-analysis"
+            " models 2dfixed, 2d and 3d); or spline, the PSF of the"
+            " --spline-calibration, which gives z directly for a 3D one"
+        ),
+    )
+    multi_emitter.add_argument(
+        "--snr-threshold",
+        type=float,
+        default=15.0,
+        help=(
+            "peak threshold, in units of the signal-to-noise ratio, and the"
+            " minimum significance of an emitter (default 15)"
+        ),
+    )
+    multi_emitter.add_argument(
+        "--psf-sigma",
+        type=float,
+        default=None,
+        help=(
+            "standard deviation of the PSF in nm: fixed in the fit, or the"
+            " start of a fitted one. Default: estimated from the movie"
+        ),
+    )
+    multi_emitter.add_argument(
+        "--max-cycles",
+        type=int,
+        default=20,
+        help=(
+            "most cycles of finding, fitting and subtracting per frame"
+            " (default 20)"
+        ),
+    )
+    multi_emitter.add_argument(
+        "--peak-radius",
+        type=float,
+        default=5.0,
+        help=(
+            "radius (camera pixels) within which a new peak must be the"
+            " maximum of the residual (default 5)"
+        ),
+    )
+    multi_emitter.add_argument(
+        "--background-sigma",
+        type=float,
+        default=8.0,
+        help=(
+            "sigma (camera pixels) of the Gaussian low pass that estimates"
+            " the background (default 8)"
+        ),
+    )
+    multi_emitter.add_argument(
+        "--peak-search-z",
+        type=float,
+        nargs="+",
+        default=[0.0],
+        help=(
+            "z (nm) at which --psf-model spline with a 3D calibration"
+            " filters the residual to find peaks; a new emitter starts at"
+            " the z where it is brightest (default 0)"
+        ),
+    )
+    multi_emitter.add_argument(
+        "--fit-region-size",
+        type=int,
+        default=None,
+        help=(
+            "side length (camera pixels) of the disc each emitter is fitted"
+            " in with --psf-model spline, cropped from the calibration: at"
+            " most its box less 2. Default: from the calibration's PSF"
+            " sigma, 8 sigma (12 for a 3D calibration)"
+        ),
+    )
+    multi_emitter.add_argument(
+        "--seed-identification",
+        action="store_true",
+        help=(
+            "start the fit of each frame from the spots the identification"
+            " options find (--gradient, --box-side-length, the wavelet and"
+            " filter options), instead of the peak finder's first cycle"
+        ),
     )
 
     # camera-calibrate: per-pixel sCMOS offset, variance and gain maps
@@ -5468,8 +5311,9 @@ def _build_parser() -> (
         help=(
             "how the channels are registered to the reference in a"
             " multichannel or split-FOV calibration: translation (2 DOF, a"
-            " pure xy shift), affine (6 DOF, the default), projective (8 DOF,"
-            " adds the perspective term) or"
+            " pure xy shift), rigid (3 DOF, a rotation and a shift), affine"
+            " (6 DOF, the default), projective (8 DOF, adds the perspective"
+            " term) or"
             " polynomial2 / polynomial3 (a smooth field-distortion warp,"
             " needing 6 / 10 well-spread beads). Ignored for a"
             " single-channel calibration"
@@ -5591,10 +5435,10 @@ def _build_parser() -> (
         choices=list(TRANSFORM_MODELS),
         default="affine",
         help=(
-            "transform model: translation (2 DOF, a pure xy shift), affine"
-            " (6 DOF, the default), projective (8 DOF), polynomial2 or"
-            " polynomial3, needing at least 1 / 3 / 4 / 6 / 10 bead pairs"
-            " respectively"
+            "transform model: translation (2 DOF, a pure xy shift), rigid"
+            " (3 DOF, a rotation and a shift), affine (6 DOF, the default),"
+            " projective (8 DOF), polynomial2 or polynomial3, needing at"
+            " least 1 / 2 / 3 / 4 / 6 / 10 bead pairs respectively"
         ),
     )
     lateral_parser.add_argument(
@@ -6238,6 +6082,273 @@ def _build_parser() -> (
         ),
     )
 
+    # decorrelation resolution
+    decorrelation_parser = subparsers.add_parser(
+        "decorrelation",
+        help=(
+            "resolution of localizations by decorrelation analysis, over"
+            " the whole field of view"
+        ),
+    )
+    decorrelation_parser.add_argument(
+        "files",
+        nargs="+",
+        help="hdf5 localization files (unix style path patterns)",
+    )
+    decorrelation_parser.add_argument(
+        "-px",
+        "--pixel-size",
+        nargs="+",
+        type=float,
+        default=None,
+        help=(
+            "pixel size or sizes in nm at which the localizations are"
+            " rendered; the smallest resolution is reported (default:"
+            " 2 to 64 nm in steps of a factor sqrt(2))"
+        ),
+    )
+    decorrelation_parser.add_argument(
+        "--n-radii",
+        type=int,
+        default=50,
+        help="number of radii of the decorrelation functions (default=50)",
+    )
+    decorrelation_parser.add_argument(
+        "--n-filters",
+        type=int,
+        default=10,
+        help="number of high-pass filters (default=10)",
+    )
+    decorrelation_parser.add_argument(
+        "--max-image-size",
+        type=int,
+        default=8192,
+        help=(
+            "largest side length of the rendered images in pixels; smaller"
+            " pixel sizes are skipped, 0 for no limit (default=8192)"
+        ),
+    )
+
+    # dye performance of picked docking sites
+    dye_parser = subparsers.add_parser(
+        "dye-performance",
+        help=(
+            "signal-to-background ratio, localization drop and destroyed"
+            " docking sites of picked docking sites (Steen et al., 2024)"
+        ),
+    )
+    dye_parser.add_argument(
+        "files",
+        nargs="+",
+        help=(
+            "hdf5 localization files (unix style path patterns); without"
+            " --picks, each group of the localizations is a docking site,"
+            " e.g., in picked localizations saved in Render"
+        ),
+    )
+    dye_parser.add_argument(
+        "-p",
+        "--picks",
+        default=None,
+        help="picks file (.yaml) with one docking site per pick",
+    )
+    dye_parser.add_argument(
+        "-t",
+        "--max-dark-time",
+        type=int,
+        default=0,
+        help=(
+            "largest number of frames without a localization within a"
+            " binding event; 0 links only consecutive frames, as Steen et"
+            " al. (default=0)"
+        ),
+    )
+    dye_parser.add_argument(
+        "--cutoff",
+        type=float,
+        default=4.0,
+        help=(
+            "cut-off of the ratio r (time after the last binding event over"
+            " the mean dark time) for destroyed sites, in units of its"
+            " fitted mean (default=4)"
+        ),
+    )
+    dye_parser.add_argument(
+        "--fraction",
+        type=float,
+        default=0.2,
+        help=(
+            "fraction of the frames at the beginning and the end compared"
+            " for the localization drop (default=0.2)"
+        ),
+    )
+
+    # density from the k nearest neighbors
+    knn_parser = subparsers.add_parser(
+        "knn-density",
+        help=(
+            "density of molecules fitted to the distances to their k"
+            " nearest neighbors: are they randomly distributed"
+        ),
+    )
+    knn_parser.add_argument(
+        "files",
+        nargs="+",
+        help="hdf5 localization files (unix style path patterns)",
+    )
+    knn_parser.add_argument(
+        "-p",
+        "--picks",
+        default=None,
+        help=(
+            "picks (.yaml) saved in Render; the regions of interest in"
+            " which the neighbors are searched (default: the whole field"
+            " of view)"
+        ),
+    )
+    knn_parser.add_argument(
+        "-k",
+        "--k-max",
+        type=int,
+        default=5,
+        help="highest order of the neighbors (default=5)",
+    )
+    knn_parser.add_argument(
+        "--k-min",
+        type=int,
+        default=1,
+        help=(
+            "lowest order of the neighbors of the pooled density, e.g., 2"
+            " to leave out the nearest neighbors (default=1)"
+        ),
+    )
+    knn_parser.add_argument(
+        "--r-min",
+        type=float,
+        default=0.0,
+        help=(
+            "shortest distance to a neighbor used in nm; shorter ones are"
+            " left out, e.g., molecules counted twice (default=0)"
+        ),
+    )
+    knn_parser.add_argument(
+        "-n",
+        "--simulations",
+        type=int,
+        default=99,
+        help=(
+            "number of simulations of complete spatial randomness for the"
+            " p-values and errors, 0 to skip (default=99)"
+        ),
+    )
+    knn_parser.add_argument(
+        "--no-edge-correction",
+        dest="edge_correction",
+        action="store_false",
+        help=(
+            "use the distances as measured, also those longer than the"
+            " distance to the region boundary"
+        ),
+    )
+    knn_parser.add_argument(
+        "--3d",
+        dest="use_3d",
+        action="store_true",
+        help="measure the distances in 3D (x, y and z), requires z",
+    )
+    knn_parser.add_argument(
+        "--z-range",
+        nargs=2,
+        type=float,
+        metavar=("ZMIN", "ZMAX"),
+        default=None,
+        help=(
+            "z range in nm over which the regions extend in 3D (default:"
+            " the z range of the molecules in each region)"
+        ),
+    )
+
+    pick_similar_parser = subparsers.add_parser(
+        "pick-similar",
+        help=(
+            "pick structures similar to seed picks, or by ranges of their"
+            " number of localizations and RMSD without seed picks"
+        ),
+    )
+    pick_similar_parser.add_argument(
+        "files",
+        nargs="+",
+        help="one or more hdf5 localization files (unix style path patterns)",
+    )
+    pick_similar_parser.add_argument(
+        "-p",
+        "--picks",
+        default=None,
+        help=(
+            "seed picks (.yaml) saved in Render; the picks similar to"
+            " them are found (circles, squares, rectangles or boxes)"
+        ),
+    )
+    pick_similar_parser.add_argument(
+        "-d",
+        "--pick-size",
+        type=float,
+        default=None,
+        help="diameter (nm) of the circular picks, without --picks",
+    )
+    pick_similar_parser.add_argument(
+        "-s",
+        "--std-range",
+        type=float,
+        default=2.0,
+        help=(
+            "with --picks, the range around the mean of the seed picks in"
+            " standard deviations (default=2)"
+        ),
+    )
+    pick_similar_parser.add_argument(
+        "--n-locs-range",
+        type=float,
+        nargs=2,
+        default=None,
+        metavar=("MIN", "MAX"),
+        help="range of the number of localizations of the picks",
+    )
+    pick_similar_parser.add_argument(
+        "--rmsd-range",
+        type=float,
+        nargs=2,
+        default=None,
+        metavar=("MIN", "MAX"),
+        help="range of the RMSD (nm) of the picks",
+    )
+    pick_similar_parser.add_argument(
+        "--classes",
+        action="store_true",
+        help=(
+            "find classes of structures by their number of localizations"
+            " and RMSD and save the picks of each class to its own file"
+        ),
+    )
+    pick_similar_parser.add_argument(
+        "--min-n-locs",
+        type=int,
+        default=None,
+        help=(
+            "without --picks, the minimum number of localizations of a"
+            " candidate pick (default: 1%% of the frames; at least the"
+            " minimum of --n-locs-range)"
+        ),
+    )
+    pick_similar_parser.add_argument(
+        "--save-candidates",
+        action="store_true",
+        help=(
+            "without --picks, also save the candidate picks with their"
+            " number of localizations and RMSD (.csv)"
+        ),
+    )
+
     clusterfilter_parser = subparsers.add_parser(
         "cluster-filter",
         help="filter localizations by properties of their clusters",
@@ -6533,6 +6644,27 @@ def _build_parser() -> (
         "align", help="align one localization file to another"
     )
     align_parser.add_argument(
+        "-m",
+        "--method",
+        choices=["rcc", "points"],
+        default="rcc",
+        help=(
+            "how the shifts are found: rcc, the cross-correlation of the"
+            " rendered images, or points, the peak of the displacements"
+            " between the localizations, with an uncertainty"
+            " (default=rcc)"
+        ),
+    )
+    align_parser.add_argument(
+        "--max-shift",
+        type=float,
+        default=500.0,
+        help=(
+            "largest shift (nm) between two files searched for by"
+            " --method points (default=500)"
+        ),
+    )
+    align_parser.add_argument(
         "-d",
         "--display",
         help="display the mean shift per RCC iteration",
@@ -6768,6 +6900,31 @@ def _build_parser() -> (
     )
     hdf2pyme_parser.add_argument("files", help="one or multiple hdf5 files")
 
+    minflux2hdf_parser = subparsers.add_parser(
+        "minflux2hdf",
+        help="convert MINFLUX .pmx/.csv (pyMINFLUX) to hdf5 format",
+    )
+    minflux2hdf_parser.add_argument(
+        "files", help="one or multiple MINFLUX .pmx/.csv files"
+    )
+    minflux2hdf_parser.add_argument(
+        "--average-traces",
+        action="store_true",
+        help=(
+            "save one localization per MINFLUX trace (photon-weighted"
+            " mean) instead of every localization"
+        ),
+    )
+    minflux2hdf_parser.add_argument(
+        "--origin",
+        choices=("data", "stage"),
+        default="data",
+        help=(
+            "'data' (default) moves the localizations next to the origin of"
+            " the field of view, 'stage' keeps the absolute coordinates"
+        ),
+    )
+
     # files written before Picasso 1.0 (camera pixels) to nm
     convert_units_parser = subparsers.add_parser(
         "convert-units",
@@ -7002,13 +7159,17 @@ def main():  # noqa: C901
             if args.columns:
                 import inspect
 
-                print(inspect.getdoc(_spinna_batch_analysis))
+                from .spinna import batch_analysis
+
+                print(inspect.getdoc(batch_analysis))
             elif args.parameters:
-                _spinna_batch_analysis(
+                from .spinna import batch_analysis
+
+                batch_analysis(
                     args.parameters,
-                    args.parallel,
-                    args.bootstrap,
-                    args.verbose,
+                    parallel=args.parallel,
+                    bootstrap=args.bootstrap,
+                    progress="console" if args.verbose else None,
                 )
             else:
                 from .gui import spinna
@@ -7124,6 +7285,46 @@ def main():  # noqa: C901
                 args.observed_z,
                 args.cross_null,
             )
+        elif args.command == "decorrelation":
+            _decorrelation(
+                args.files,
+                args.pixel_size,
+                args.n_radii,
+                args.n_filters,
+                args.max_image_size,
+            )
+        elif args.command == "dye-performance":
+            _dye_performance_cli(
+                args.files,
+                args.picks,
+                args.max_dark_time,
+                args.cutoff,
+                args.fraction,
+            )
+        elif args.command == "knn-density":
+            _knn_density(
+                args.files,
+                args.picks,
+                args.k_max,
+                args.k_min,
+                args.r_min,
+                args.simulations,
+                args.edge_correction,
+                args.use_3d,
+                None if args.z_range is None else tuple(args.z_range),
+            )
+        elif args.command == "pick-similar":
+            _pick_similar_cli(
+                args.files,
+                picks_path=args.picks,
+                pick_size=args.pick_size,
+                std_range=args.std_range,
+                n_locs_range=args.n_locs_range,
+                rmsd_range=args.rmsd_range,
+                classes=args.classes,
+                min_n_locs=args.min_n_locs,
+                save_candidates=args.save_candidates,
+            )
         elif args.command in ("ripley-h", "rdf"):
             _pair_statistic(
                 "ripley_h" if args.command == "ripley-h" else "rdf",
@@ -7142,7 +7343,13 @@ def main():  # noqa: C901
         elif args.command == "dark":
             _dark(args.files)
         elif args.command == "align":
-            _align(args.file, args.display, args.remove_non_overlapping)
+            _align(
+                args.file,
+                args.display,
+                args.remove_non_overlapping,
+                args.method,
+                args.max_shift,
+            )
         elif args.command == "join":
             _join(args.file, args.keep_index)
         elif args.command == "stitch":
@@ -7181,6 +7388,8 @@ def main():  # noqa: C901
             _pyme2hdf(args.files, args.pixelsize)
         elif args.command == "hdf2pyme":
             _hdf2pyme(args.files)
+        elif args.command == "minflux2hdf":
+            _minflux2hdf(args.files, args.average_traces, args.origin)
         elif args.command == "convert-units":
             _convert_units(args.files, args.pixelsize, args.in_place)
     else:

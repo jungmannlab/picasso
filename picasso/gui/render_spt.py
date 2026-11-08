@@ -1003,26 +1003,28 @@ class SPTController:
         def apply(results: list[tuple]) -> None:
             empty = []
             applied = False
-            for c, tracked_locs, new_info in results:
-                if len(tracked_locs) == 0:
-                    empty.append(c)
-                    continue
-                view.locs[c] = tracked_locs
-                # new list, the old one may be shared with linked windows
-                view.infos[c] = new_info
-                applied = True
-            if applied:
-                if len(view.locs_paths) == 1:
-                    view.group_color = render.get_group_color(
-                        view.locs[0], shuffle=True
-                    )
-                self.invalidate()
-                # show the tracks, drawn by the redraw below
-                box = view.window.display_settings_dlg.tracks_box
-                box.blockSignals(True)
-                box.setChecked(True)
-                box.blockSignals(False)
-                view.update_scene(resample_locs=True)
+            with view.undo_step("Track particles"):
+                for c, tracked_locs, new_info in results:
+                    if len(tracked_locs) == 0:
+                        empty.append(c)
+                        continue
+                    view.locs[c] = tracked_locs
+                    # new list, the old one may be shared with linked
+                    # windows
+                    view.infos[c] = new_info
+                    applied = True
+                if applied:
+                    if len(view.locs_paths) == 1:
+                        view.group_color = render.get_group_color(
+                            view.locs[0], shuffle=True
+                        )
+                    self.invalidate()
+                    # show the tracks, drawn by the redraw below
+                    box = view.window.display_settings_dlg.tracks_box
+                    box.blockSignals(True)
+                    box.setChecked(True)
+                    box.blockSignals(False)
+                    view.update_scene(resample_locs=True)
             if empty:
                 skipped.append(
                     "No tracks found, the localizations were left "

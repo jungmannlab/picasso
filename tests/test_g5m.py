@@ -485,6 +485,11 @@ class TestAutoSelection:
             postprocess=False,
         )
         assert out_info[-1]["Covariance type"] == "rotated"
+        # the other settings the run used
+        assert out_info[-1]["Cluster column"] == "group"
+        assert "Max. no. locs per cluster" not in out_info[-1]  # no cap
+        # the calibration was not loaded from a file
+        assert out_info[-1]["Calibration path"] == "N/A"
 
     def test_auto_keeps_diagonal_without_angle(self, dbscan_locs_3d, info):
         _, out_info, _ = g5m.g5m(

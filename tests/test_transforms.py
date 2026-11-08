@@ -29,6 +29,14 @@ CHIP = 2048.0
 TRANSLATION_TRUTH = np.array(
     [[1.0, 0.0, 3.5], [0.0, 1.0, -2.25], [0.0, 0.0, 1.0]]
 )
+# 30 degrees counterclockwise and a shift
+RIGID_TRUTH = np.array(
+    [
+        [np.cos(np.pi / 6), -np.sin(np.pi / 6), 3.5],
+        [np.sin(np.pi / 6), np.cos(np.pi / 6), -2.25],
+        [0.0, 0.0, 1.0],
+    ]
+)
 AFFINE_TRUTH = np.array(
     [[1.004, -0.011, 3.5], [0.008, 0.997, -2.25], [0.0, 0.0, 1.0]]
 )
@@ -71,6 +79,8 @@ def _model(model, n=60, seed=0):
     src = _src(n, seed)
     if model == "translation":
         dst = _apply_matrix(TRANSLATION_TRUTH, src)
+    elif model == "rigid":
+        dst = _apply_matrix(RIGID_TRUTH, src)
     elif model == "affine":
         dst = _apply_matrix(AFFINE_TRUTH, src)
     elif model == "projective":
@@ -177,6 +187,8 @@ class TestEstimateValidation:
     @pytest.mark.parametrize(
         "model, expected",
         [
+            ("translation", 1),
+            ("rigid", 2),
             ("affine", 3),
             ("projective", 4),
             ("polynomial2", 6),
@@ -776,3 +788,93 @@ class TestTranslation:
         affine = transforms.AffineTransform(matrix=t.matrix.copy())
         assert not t.allclose(affine)
         assert not affine.allclose(t)
+
+
+class TestRigid:
+    """The 3-DOF model: a rotation and a shift, which may also reflect."""
+
+    def test_is_an_affine_so_every_affine_fast_path_takes_it(self):
+        _, _, t = _model("rigid")
+        assert isinstance(t, transforms.AffineTransform)
+        assert t.model == "rigid"
+        assert t.n_params == 3
+
+    def test_estimate_recovers_rotation_and_shift(self):
+        _, _, t = _model("rigid")
+        assert np.allclose(t.matrix, RIGID_TRUTH, atol=1e-10)
+        assert t.rotation_deg == pytest.approx(30.0)
+        assert np.allclose(t.shift, [3.5, -2.25])
+        assert not t.mirror
+
+    def test_scale_and_shear_are_left_in_the_residual(self):
+        """What an affine would absorb, a rigid fit cannot: its linear part
+        stays a rotation."""
+        src = _src(80, seed=3)
+        dst = _apply_matrix(AFFINE_TRUTH, src)
+        t = transforms.estimate(src, dst, "rigid")
+        linear = t.matrix[:2, :2]
+        assert np.allclose(linear @ linear.T, np.eye(2))
+        resid = dst - t.apply(src)
+        assert np.sqrt(np.mean(np.sum(resid**2, axis=1))) > 1.0
+
+    def test_estimate_fits_a_proper_rotation_to_mirrored_data(self):
+        src = _src(30, seed=4)
+        mirrored = transforms.RigidTransform.from_params(
+            20.0, (5.0, 1.0), mirror=True
+        )
+        t = transforms.estimate(src, mirrored.apply(src), "rigid")
+        assert not t.mirror
+
+    def test_from_params(self):
+        t = transforms.RigidTransform.from_params(-120.0, (1.0, 2.0), True)
+        assert t.rotation_deg == pytest.approx(-120.0)
+        assert t.mirror
+        assert np.allclose(t.shift, [1.0, 2.0])
+        # the reflection y -> -y first, then the rotation, then the shift
+        angle = np.radians(-120.0)
+        rotation = np.array(
+            [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
+        )
+        xy = _src(5, seed=6)
+        expected = (xy * [1.0, -1.0]) @ rotation.T + [1.0, 2.0]
+        assert np.allclose(t.apply(xy), expected)
+
+    @pytest.mark.parametrize("mirror", [False, True])
+    def test_inverse_is_exact_and_stays_rigid(self, mirror):
+        t = transforms.RigidTransform.from_params(
+            47.0, (300.0, -20.0), mirror, domain=[[0.0, 0.0], [CHIP, CHIP]]
+        )
+        inverse = t.inverse()
+        assert inverse.model == "rigid"
+        assert inverse.mirror == mirror
+        xy = _src(20, seed=9)
+        assert np.allclose(inverse.apply(t.apply(xy)), xy, atol=1e-9)
+
+    def test_composition_and_rescaling_stay_rigid(self):
+        _, _, t = _model("rigid")
+        moved = t.compose_translations(pre=(1.0, 2.0), post=(3.0, 4.0))
+        assert moved.model == "rigid"
+        xy = _src(5, seed=2)
+        expected = t.apply(xy + [1.0, 2.0]) + [3.0, 4.0]
+        assert np.allclose(moved.apply(xy), expected)
+        rescaled = t.rescaled(130.0)
+        assert rescaled.model == "rigid"
+        assert np.allclose(rescaled.shift, 130.0 * t.shift)
+        assert transforms.identity("rigid").model == "rigid"
+
+    def test_a_non_orthogonal_linear_part_is_rejected(self):
+        with pytest.raises(ValueError, match="orthogonal linear part"):
+            transforms.RigidTransform(matrix=AFFINE_TRUTH)
+
+    def test_coincident_source_points_are_degenerate(self):
+        src = np.full((5, 2), 100.0)
+        with pytest.raises(ValueError, match="degenerate"):
+            transforms.estimate(src, src + 1.0, "rigid")
+
+    def test_two_correspondences_fix_it(self):
+        src = np.array([[0.0, 0.0], [10.0, 0.0]])
+        dst = np.array([[1.0, 1.0], [1.0, 11.0]])  # 90 degrees, shifted
+        with pytest.warns(UserWarning):
+            t = transforms.estimate(src, dst, "rigid")
+        assert t.rotation_deg == pytest.approx(90.0)
+        assert np.allclose(t.apply(src), dst)

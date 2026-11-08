@@ -9,6 +9,7 @@ Simulate single molecule fluorescence data.
 """
 
 import numpy as np
+import pandas as pd
 from . import io, lib
 from numba import njit
 
@@ -21,6 +22,7 @@ __all__ = [
     "noisy_p",
     "check_type",
     "save_movie",
+    "ground_truth_locs",
 ]
 
 magfac = 0.79
@@ -531,6 +533,102 @@ def save_movie(filename: str, movie: lib.IntArray3D, info: dict) -> None:
         Metadata to save alongside it.
     """
     io.save_raw(filename, movie, [info])
+
+
+def _positions_to_nm(
+    x: lib.FloatArray1D,
+    y: lib.FloatArray1D,
+    height: int,
+    pixelsize: float,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
+    """Convert positions in the simulation's frame to Picasso's, in nm.
+
+    The simulation places pixel ``i`` at ``[i, i + 1)`` with y pointing up,
+    and :func:`convert_movie` flips each frame upside down, so that the
+    movie shows the structures the right way up. Picasso puts the pixel
+    centers on integers, with y pointing down the rows. A position
+    ``(x, y)`` in the simulation is therefore at ``(x - 0.5, height - y -
+    0.5)`` camera pixels in Picasso, where fitting the movie finds it.
+    """
+    x_nm = (np.asarray(x, dtype=np.float64) - 0.5) * pixelsize
+    y_nm = (height - np.asarray(y, dtype=np.float64) - 0.5) * pixelsize
+    return x_nm, y_nm
+
+
+def ground_truth_locs(
+    structures: lib.FloatArray2D,
+    photondist: lib.FloatArray2D,
+    *,
+    height: int,
+    pixelsize: float,
+    is_3d: bool = False,
+) -> pd.DataFrame:
+    """The emitters of a simulated movie as a localization table.
+
+    One row per binding site and frame in which it emits photons, with
+    the true position, i.e., where fitting the movie should localize it.
+    Saved with ``io.save_locs``, it opens in Picasso: Render next to the
+    localizations fitted to the movie.
+
+    Parameters
+    ----------
+    structures : lib.FloatArray2D
+        The binding sites the movie was simulated from (see
+        :func:`prepare_structures`): x and y in camera pixels in the
+        simulation's frame, exchange round, structure index and z in nm,
+        one column per site.
+    photondist : lib.FloatArray2D
+        ``(n_sites, n_frames)`` number of photons each site emits in each
+        frame (see :func:`distribute_photons`).
+    height : int
+        Height of the movie in camera pixels; the y axis is flipped (see
+        :func:`convert_movie`).
+    pixelsize : float
+        Camera pixel size in nm.
+    is_3d : bool, optional
+        Whether the movie was simulated with an astigmatic PSF, which
+        adds the column ``z``. Default is False.
+
+    Returns
+    -------
+    locs : pd.DataFrame
+        The columns ``frame``, ``x`` and ``y`` (nm), ``z`` (nm, only if
+        ``is_3d``) and ``photons``, the number of photons the site emits
+        in that frame, sorted by frame. The localization precisions
+        ``lpx`` and ``lpy``, which every localization file has, are 0.
+
+    Notes
+    -----
+    An emitter at ``(x, y)`` camera pixels in the simulation is at
+    ``((x - 0.5) * pixelsize, (height - y - 0.5) * pixelsize)`` nm in
+    Picasso, whose pixel centers are on integers. Emitters within half a
+    pixel of the left or top edge thus get negative coordinates, which
+    ``io.save_locs`` drops, as it does for any localization.
+    """
+    structures = np.asarray(structures)
+    photondist = np.asarray(photondist)
+    n_sites = structures.shape[1]
+    if photondist.shape[0] != n_sites:
+        raise ValueError(
+            f"photondist has {photondist.shape[0]} rows but there are "
+            f"{n_sites} binding sites."
+        )
+    site, frame = np.nonzero(photondist > 0)
+    x, y = _positions_to_nm(
+        structures[0, site], structures[1, site], height, pixelsize
+    )
+    columns = {
+        "frame": frame.astype(np.uint32),
+        "x": x.astype(np.float32),
+        "y": y.astype(np.float32),
+    }
+    if is_3d:
+        columns["z"] = structures[4, site].astype(np.float32)
+    columns["photons"] = photondist[site, frame].astype(np.float32)
+    columns["lpx"] = np.zeros(len(site), dtype=np.float32)
+    columns["lpy"] = np.zeros(len(site), dtype=np.float32)
+    locs = pd.DataFrame(columns)
+    return locs.sort_values("frame", kind="stable", ignore_index=True)
 
 
 # Function to store the coordinates of a structure in a container.

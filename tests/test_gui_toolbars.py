@@ -265,6 +265,8 @@ def test_filter_toolbar(qt_offscreen):
             "Filter",
             "Expression",
             "From metadata",
+            "Undo",
+            "Redo",
             "Plot settings",
         ]
     finally:

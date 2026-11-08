@@ -9,8 +9,11 @@
  ],
  "align": [
   "--display",
+  "--max-shift",
+  "--method",
   "--remove-non-overlapping",
   "-d",
+  "-m",
   "-r"
  ],
  "average": [],
@@ -59,6 +62,13 @@
  "dbscan": [
   "--radius-z"
  ],
+ "decorrelation": [
+  "--max-image-size",
+  "--n-filters",
+  "--n-radii",
+  "--pixel-size",
+  "-px"
+ ],
  "density": [],
  "design": [],
  "diffusion": [
@@ -73,6 +83,14 @@
   "-l",
   "-n",
   "-s",
+  "-t"
+ ],
+ "dye-performance": [
+  "--cutoff",
+  "--fraction",
+  "--max-dark-time",
+  "--picks",
+  "-p",
   "-t"
  ],
  "filter": [],
@@ -110,6 +128,19 @@
   "--keep-index",
   "-k"
  ],
+ "knn-density": [
+  "--3d",
+  "--k-max",
+  "--k-min",
+  "--no-edge-correction",
+  "--picks",
+  "--r-min",
+  "--simulations",
+  "--z-range",
+  "-k",
+  "-n",
+  "-p"
+ ],
  "lateral-calibrate": [
   "--box-side-length",
   "--calibration",
@@ -141,6 +172,7 @@
  ],
  "localize": [
   "--affine-calibration",
+  "--background-sigma",
   "--baseline",
   "--box-side-length",
   "--camera-calibration",
@@ -149,19 +181,31 @@
   "--database",
   "--drift",
   "--fit-method",
+  "--fit-region-size",
   "--fit-z-gpu",
   "--frame-bounds",
+  "--frame-sum-stride",
+  "--frame-sum-window",
   "--gain",
   "--gaussian-filter",
   "--gradient",
   "--identification-method",
   "--magnification-factor",
+  "--max-cycles",
   "--max-iterations",
+  "--microtime-gate",
+  "--multi-emitter",
+  "--peak-radius",
+  "--peak-search-z",
   "--pixelsize",
+  "--psf-model",
+  "--psf-sigma",
   "--qe",
   "--regions-separately",
   "--roi",
+  "--seed-identification",
   "--sensitivity",
+  "--snr-threshold",
   "--spline-calibration",
   "--suffix",
   "--temporal-median",
@@ -194,6 +238,7 @@
   "-ga",
   "-gf",
   "-im",
+  "-me",
   "-mf",
   "-mi",
   "-px",
@@ -206,6 +251,10 @@
   "-tm",
   "-zc",
   "-zg"
+ ],
+ "minflux2hdf": [
+  "--average-traces",
+  "--origin"
  ],
  "nanotron": [],
  "nearest-neighbor": [],
@@ -229,6 +278,19 @@
   "--r-max",
   "-b",
   "-r"
+ ],
+ "pick-similar": [
+  "--classes",
+  "--min-n-locs",
+  "--n-locs-range",
+  "--pick-size",
+  "--picks",
+  "--rmsd-range",
+  "--save-candidates",
+  "--std-range",
+  "-d",
+  "-p",
+  "-s"
  ],
  "plugins": [],
  "plugins disable": [

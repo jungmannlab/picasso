@@ -45,10 +45,16 @@ A collection of tools for painting super-resolution images, covering single-mole
 Installation
 ------------
 
-- **One-click installer** (Windows, macOS): download it from the `release page <https://github.com/jungmannlab/picasso/releases/>`__.
-- **PyPI**: ``pip install picassosr``, then start a module with ``picasso render``, ``picasso localize``, etc.
+**Just the GUI** (Windows, macOS): download the one-click installer from the `latest release <https://github.com/jungmannlab/picasso/releases/latest>`__.
 
-Optional extras (file formats, GPU support) and the developer installation are described in the `installation guide <https://picassosr.readthedocs.io/en/latest/getting-started/installation.html>`__.
+**As a Python package** (Windows, macOS, Linux):
+
+.. code-block:: bash
+
+   pip install picassosr
+   picasso render  # or localize, filter, design, ...
+
+For GPU support, extra file formats or a developer setup, see the `installation guide <https://picassosr.readthedocs.io/en/latest/getting-started/installation.html>`__.
 
 Example Usage
 -------------
@@ -119,9 +125,15 @@ Many of the functionalities provided by Picasso were published independently, pl
    * - 3D fitting via astigmatism
      - Huang et al., Science, 2008
      - `10.1126/science.1153529 <https://www.science.org/doi/10.1126/science.1153529>`__
+   * - Magnification factor of z (refractive-index mismatch, ``Calculate...``)
+     - Loginov et al., Optica, 2024; Lyakin et al., Opt. Spectrosc., 2017
+     - `10.1364/OPTICA.520595 <https://doi.org/10.1364/OPTICA.520595>`__, `10.1134/S0030400X17090235 <https://doi.org/10.1134/S0030400X17090235>`__
    * - B-spline wavelet spot identification
      - Izeddin et al., Opt. Express, 2012
      - `10.1364/OE.20.002081 <https://doi.org/10.1364/OE.20.002081>`__
+   * - Multi-emitter fitting (3D-DAOSTORM). A port of storm-analysis, see the `storm-analysis license <https://github.com/jungmannlab/picasso/blob/master/LICENSES/storm-analysis-LICENSE.txt>`__; its spline PSF is implemented from the paper
+     - Babcock et al., Opt. Nanoscopy, 2012; Babcock & Zhuang, Sci. Rep., 2017
+     - `10.1186/2192-2853-1-6 <https://doi.org/10.1186/2192-2853-1-6>`__, `10.1038/s41598-017-00622-w <https://doi.org/10.1038/s41598-017-00622-w>`__
    * - sCMOS pixel-dependent noise modeling
      - Huang et al., Nat. Methods, 2013
      - `10.1038/nmeth.2488 <https://doi.org/10.1038/nmeth.2488>`__
@@ -131,12 +143,21 @@ Many of the functionalities provided by Picasso were published independently, pl
    * - FRC
      - Nieuwenhuizen et al., Nat. Methods, 2013
      - `10.1038/nmeth.2448 <https://doi.org/10.1038/nmeth.2448>`__
+   * - Decorrelation analysis
+     - Descloux et al., Nat. Methods, 2019
+     - `10.1038/s41592-019-0515-7 <https://doi.org/10.1038/s41592-019-0515-7>`__
+   * - Bilinear rendering and pixel size for decorrelation analysis of SMLM data
+     - Descloux et al., Commun. Biol., 2021
+     - `10.1038/s42003-021-02086-1 <https://doi.org/10.1038/s42003-021-02086-1>`__
    * - Theoretical lateral localization precision (``lpx`` / ``lpy``, Gaussian least-squares)
      - Mortensen et al., Nat. Methods, 2010
      - `10.1038/nmeth.1447 <https://doi.org/10.1038/nmeth.1447>`__
    * - Theoretical axial localization precision (``lpz``, Gaussian)
      - Kowalewski et al., Nat. Commun., 2026
      - `10.1038/s41467-026-70198-5 <https://doi.org/10.1038/s41467-026-70198-5>`__
+   * - Theoretical lateral localization precision of overlapping emitters (``lpx`` / ``lpy``, multi-emitter fitting)
+     - Huang et al., Biomed. Opt. Express, 2011
+     - `10.1364/BOE.2.001377 <https://doi.org/10.1364/BOE.2.001377>`__
    * - Quad-tree adaptive histogram rendering
      - Baddeley et al., Microsc. Microanal., 2010
      - `10.1017/S143192760999122X <https://doi.org/10.1017/S143192760999122X>`__
@@ -185,6 +206,15 @@ Many of the functionalities provided by Picasso were published independently, pl
    * - Two-channel (cross) Ripley's H and radial distribution functions
      - Lotwick and Silverman, J. R. Stat. Soc. B, 1982
      - `10.1111/j.2517-6161.1982.tb01221.x <https://doi.org/10.1111/j.2517-6161.1982.tb01221.x>`__
+   * - Distances to the k-th nearest neighbors for random positions
+     - Thompson, Ecology, 1956
+     - `10.2307/1933159 <https://doi.org/10.2307/1933159>`__
+   * - Edge-corrected (Kaplan-Meier) nearest neighbor distance distributions
+     - Baddeley and Gill, Ann. Stat., 1997
+     - `10.1214/aos/1034276629 <https://doi.org/10.1214/aos/1034276629>`__
+   * - Signal-to-background ratio, localization drop and destroyed docking sites (dye performance)
+     - Steen et al., Nat. Methods, 2024
+     - `10.1038/s41592-024-02374-8 <https://doi.org/10.1038/s41592-024-02374-8>`__
    * - Stitching tiles (global tile positions, inspired by)
      - Preibisch et al., Bioinformatics, 2009
      - `10.1093/bioinformatics/btp184 <https://doi.org/10.1093/bioinformatics/btp184>`__

@@ -2006,6 +2006,53 @@ def resize_with_sections(
         )
 
 
+def resize_with_contents(
+    dialog: QtWidgets.QWidget,
+    scroll_area: QtWidgets.QScrollArea,
+    change: Callable[[], None],
+) -> None:
+    """Run ``change``, which shows or hides widgets of a dialog whose
+    contents scroll, and grow or shrink the dialog by the change in the
+    height of its contents, as ``resize_with_sections`` does for a
+    section: added contents are shown in full up to the height of the
+    screen, and removed ones leave no empty space behind.
+
+    Parameters
+    ----------
+    dialog : QWidget
+        Dialog to resize.
+    scroll_area : QScrollArea
+        Holds the dialog's contents.
+    change : callable
+        Called without arguments; shows or hides the widgets.
+    """
+    before = scroll_area.widget().sizeHint().height()
+    change()
+    if not dialog.isVisible():
+        return
+
+    def resize():
+        if sip.isdeleted(dialog) or sip.isdeleted(scroll_area):
+            return
+        # nested layouts settle one level per layout request, and the
+        # height of the contents is out of date until they all have
+        after = None
+        for _ in range(20):
+            QtCore.QCoreApplication.sendPostedEvents(
+                None, QtCore.QEvent.Type.LayoutRequest
+            )
+            height = scroll_area.widget().sizeHint().height()
+            if height == after:
+                break
+            after = height
+        delta = after - before
+        if delta:
+            _resize_by_delta(dialog, scroll_area, abs(delta), delta > 0)
+
+    # the layouts settle in the event loop, see resize_with_sections
+    QtCore.QTimer.singleShot(0, resize)
+
+
 def _resize_by(
     dialog: QtWidgets.QWidget,
     scroll_area: QtWidgets.QScrollArea,
@@ -2017,8 +2064,21 @@ def _resize_by(
     if sip.isdeleted(dialog) or not dialog.isVisible():
         return
     delta = box.content.sizeHint().height() + box.layout().spacing()
+    _resize_by_delta(dialog, scroll_area, delta, expanded)
+
+
+def _resize_by_delta(
+    dialog: QtWidgets.QWidget,
+    scroll_area: QtWidgets.QScrollArea,
+    delta: int,
+    grown: bool,
+) -> None:
+    """Resize ``dialog`` after its contents grew (``grown``) or shrank
+    by ``delta`` pixels, see ``resize_with_sections``."""
+    if sip.isdeleted(dialog) or not dialog.isVisible():
+        return
     height = dialog.height()
-    if expanded:
+    if grown:
         screen = dialog.screen()
         cap = 1000 if screen is None else screen.size().height() - 200
         target = min(height + delta, max(cap, height))

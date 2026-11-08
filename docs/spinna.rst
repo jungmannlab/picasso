@@ -60,8 +60,9 @@ structures:
 8. The *Preview* box allows the user to see the currently loaded structure,
    rotate it in 3D (drag with the left mouse button; with :kbd:`Ctrl`, around
    the z axis; *Reset rotation* undoes it), show/hide legend and scale bar
-   (whose length is adjustable) as well as save the current view as a .png or
-   .tif file.
+   (whose length is adjustable; the button next to *Show scale bar* sets its
+   look and whether its length is printed, see below) as well as save the
+   current view as a .png or .tif file.
 9. Once at least two molecular targets are defined for the given structure, it
    is possible to add a new molecular target by clicking with the right mouse
    button on the structure view.
@@ -331,6 +332,13 @@ below the button and the label uncertainties are set in the *Load data* box.
 The LEs in the *Load data* box are set to 100%. A summary can be saved as
 a .txt file.
 
+With *Bootstrap* checked, each LE is given with its uncertainty (mean +/-
+s.d.): data are simulated 20 times from the best fit, the structure
+proportions are refitted near it and the standard deviation of their LEs is
+reported. The refits can only find the candidates of the search space, so a
+coarse granularity limits the uncertainty (it is 0 if every refit finds the
+best fit again).
+
 .. dropdown:: Python
    :icon: code
    :class-container: api-example
@@ -350,6 +358,9 @@ a .txt file.
           N_sim=N_SIM,
           width=ROI, height=ROI,
       )
+
+   With ``bootstrap=True``, ``fit_le`` returns the uncertainty of each LE
+   (``le_std``, percent) as a seventh value.
 
 .. _spinna-fitting-modes:
 
@@ -523,7 +534,11 @@ the heterogeneous density distribution present in the experimental data.
    the preview, and *Fit* shows the whole mask. For 3D masks, tick *Show
    z-slice* in the *Display* box to slice through individual z planes with the
    slider. A scale bar can be shown (*Scale bar (nm)*, 1000 nm by default),
-   and *Save view* saves the image. The *Mask information* box shows the area
+   and *Save view* saves the image. The button next to the scale bar's length
+   sets whether its length is printed and its look: position, margins, thickness, color,
+   background, unit, label and font, as in Render (see
+   :ref:`render-scale-bar`). The look is shared by the scale bars of SPINNA
+   and Localize. The *Mask information* box shows the area
    (volume in 3D) and the dimensions of the mask.
 7. Once the mask is ready, click *Save mask*. This saves a numpy array in the
    .npy format (the thresholded mask if *Apply threshold* is ticked) and a
@@ -602,9 +617,57 @@ script directly.
 
    .. tab-item:: Python
 
-      SPINNA functions can also be run in a Python script directly. Examples
-      are presented in ``samples/sample_notebook_4_spinna.ipynb`` (see
-      :ref:`notebook-spinna`).
+      In Python, a batch is a loop over the steps above, with the
+      ``structures`` and constants of :ref:`spinna-fitting`. Here, two cells
+      are fitted at three label uncertainties each and the results collected
+      in one table (proportions in %). See also
+      ``samples/sample_notebook_4_spinna.ipynb`` (:ref:`notebook-spinna`).
+
+      .. code-block:: python
+
+         import pandas as pd
+         from picasso import io, spinna
+
+         rows = []
+         for path in ["cell1_egfr_mols.hdf5", "cell2_egfr_mols.hdf5"]:
+             mols, info = io.load_locs(path)
+             coords = mols[["x", "y"]].to_numpy()  # nm
+             n_egfr = int(coords.shape[0] / LE)
+             search_space = spinna.generate_N_structures(
+                 structures=structures,
+                 N_total={"EGFR": n_egfr},
+                 granularity=GRANULARITY,
+             )
+             for label_unc in [4.0, 6.0, 8.0]:
+                 mixer = spinna.StructureMixer(
+                     structures=structures,
+                     label_unc={"EGFR": label_unc},
+                     le={"EGFR": LE},
+                     width=ROI, height=ROI,
+                 )
+                 spinner = spinna.SPINNA(
+                     mixer=mixer, gt_coords={"EGFR": coords}, N_sim=N_SIM
+                 )
+                 proportions, score = spinner.fit_stoichiometry(
+                     N_structures=search_space, parallel=True
+                 )
+                 rows.append(
+                     {"file": path, "label_unc": label_unc, "score": score}
+                     | {s.title: p for s, p in zip(structures, proportions)}
+                 )
+         pd.DataFrame(rows).to_csv("spinna_batch.csv", index=False)
+
+      A parameters file (see below) runs as on the command line with
+      ``spinna.batch_analysis``, which returns the folder with the results
+      and the summary of all rows:
+
+      .. code-block:: python
+
+         from picasso import spinna
+
+         result_dir, summary = spinna.batch_analysis(
+             "parameters.csv", progress="console"
+         )
 
 .. _spinna-batch-columns:
 
@@ -710,7 +773,8 @@ Optional columns are:
        - the per-target LE is recovered from the fitted structure proportions;
        - exactly two ``exp_data_*`` columns must be present; the first maps to
          ``target_a``;
-       - ``-b/--bootstrap`` is ignored on LE-fitting rows.
+       - with ``-b/--bootstrap``, each LE is given with its uncertainty
+         (mean +/- s.d.), see :ref:`spinna-le-fitting`.
 
        For more details, see
        `Hellmeier, Strauss, et al. Nature Methods, 2024 <https://doi.org/10.1038/s41592-024-02242-5>`_.

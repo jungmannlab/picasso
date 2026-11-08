@@ -6,7 +6,7 @@ None for them. These tests drive the real mouse handlers of a ``View``
 to cover the drag, the removal, the YAML round trip and the metadata,
 which is where the None size would otherwise surface as a
 ``TypeError``. For the brush they also cover the merging of overlapping
-strokes and the undo of the last one.
+strokes.
 
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -414,6 +414,63 @@ class TestLoaderSplitsPyMEChannels:
         assert window.view.infos[1][0]["Pixelsize"] == PIXELSIZE
 
 
+class TestLoaderSplitsMinfluxChannels:
+    """A pyMINFLUX file holds several fluorophores (``fluo`` column);
+    the loader emits each as its own channel, after asking once whether
+    to load every localization or one per trace."""
+
+    @pytest.mark.parametrize("average", [False, True])
+    def test_worker(self, qt_offscreen, tmp_path, average):
+        from tests.test_io import _minflux_table, _write_pmx
+
+        path = str(tmp_path / "minflux.pmx")
+        _write_pmx(path, _minflux_table(), names={1: "Tom20", 2: "ATP5B"})
+        worker = gui_render.LocsLoadWorker(
+            [(path, None)], average_traces=average
+        )
+        results = []
+        worker.loaded.connect(lambda *args: results.append(args))
+        worker.failed.connect(lambda *args: pytest.fail(str(args)))
+        worker.run()
+        assert [os.path.basename(r[0]) for r in results] == [
+            "minflux_Tom20.pmx",
+            "minflux_ATP5B.pmx",
+        ]
+        assert [len(r[1]) for r in results] == ([2, 1] if average else [5, 1])
+
+    def test_add_multiple_asks_once_without_pixel_size(
+        self, qt_offscreen, tmp_path, monkeypatch
+    ):
+        import time
+
+        from PyQt6 import QtWidgets
+        from tests.test_io import _minflux_table, _write_pmx
+
+        paths = [str(tmp_path / f"{name}.pmx") for name in ("a", "b")]
+        for path in paths:
+            _write_pmx(path, _minflux_table())
+        asked = []
+
+        def get_item(parent, title, label, items, *args, **kwargs):
+            asked.append(label)
+            return items[1], True  # one localization per trace
+
+        monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", get_item)
+        window = gui_render.Window(plugins_loaded=True)
+        window.view.add_multiple(paths)
+        start = time.monotonic()
+        while window.view._load_thread is not None:
+            qt_offscreen.processEvents()
+            time.sleep(0.005)
+            assert time.monotonic() - start < 30
+        qt_offscreen.processEvents()
+        assert len(asked) == 1 and "a.pmx, b.pmx" in asked[0]
+        # two fluorophores per file, one localization per trace
+        assert len(window.view.locs) == 4
+        assert [len(locs) for locs in window.view.locs] == [2, 1, 2, 1]
+        assert window.view.infos[0][-1]["Average traces"] is True
+
+
 class TestCircularPicksUseThePyramid:
     """Circular picks query the render pyramid built at load, so no
     pick-size specific index blocks are built (that indexing sorted
@@ -429,7 +486,7 @@ class TestCircularPicksUseThePyramid:
 
     def test_no_index_blocks_are_built(self, circle_view, monkeypatch):
         view = circle_view
-        assert view.render_index[0] is not None
+        assert view._ensure_render_index(0) is not None
         monkeypatch.setattr(
             view,
             "index_locs",
@@ -905,9 +962,17 @@ class TestMultiChannelSavesKeepAllLocs:
         path = str(tmp_path / "picked_multi.hdf5")
         with pytest.warns(UserWarning, match="net_gradient"):
             view.save_picked_locs_multi(path)
-        saved, _ = io.load_locs(path)
+        saved, info = io.load_locs(path)
         assert len(saved) == self._n_picked(view) > 0
         assert "net_gradient" not in saved.columns
+        self._check_channel_metadata(view, info)
+
+    @staticmethod
+    def _check_channel_metadata(view, info):
+        """The first channel's metadata, then the pick entry naming the
+        combined channels."""
+        assert info[:-1] == view.infos[0]
+        assert info[-1]["Channels combined"] == view.locs_paths
 
     def test_picked_locs_combined_per_pick(self, two_channels, tmp_path):
         view = two_channels.view
@@ -915,8 +980,9 @@ class TestMultiChannelSavesKeepAllLocs:
         with pytest.warns(UserWarning, match="net_gradient"):
             view.save_picked_locs_multi_sep(path)
         for i in range(2):
-            saved, _ = io.load_locs(str(tmp_path / f"picked_sep_{i}.hdf5"))
+            saved, info = io.load_locs(str(tmp_path / f"picked_sep_{i}.hdf5"))
             assert len(saved) == self._n_picked(view, i) > 0
+            self._check_channel_metadata(view, info)
 
     def test_all_channels_combined(self, two_channels, tmp_path, monkeypatch):
         window = two_channels
