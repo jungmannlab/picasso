@@ -25,6 +25,7 @@ The following PSF models are implemented:
 - **Spherical (isotropic) Gaussian.** Fits a single shared width, so ``sx`` and ``sy`` are always equal. The ``ellipticity`` column is not saved for this model. Supports multichannel fitting as well, see :ref:`localize-multichannel-gaussian`.
 - **Rotated elliptical Gaussian.** Same as *Elliptical Gaussian*, however, an in-plane rotation angle is also fitted and saved in the ``angle`` column, in degrees.
 - **Experimental PSF (cubic spline).** Fits an experimentally measured PSF; a 3D calibration recovers ``z`` directly; see :doc:`localize/spline`. Supports multichannel fitting as well, see :ref:`localize-multichannel-spline`.
+- **Vectorial PSF (VectorFit).** Fits a vectorial PSF model computed from the optics (numerical aperture, emission wavelength, refractive indices) and user-defined aberrations, with no calibration needed; the 3D model recovers ``z`` directly. Requires the optional VectorFit library, see :doc:`localize/vectorfit`.
 
 In addition, ``Average of ROI`` is available as a non-fitting option that simply sums the intensity of each spot.
 
@@ -185,6 +186,12 @@ Topics
 
       Building and checking a spline PSF calibration, fitting with it, and multichannel (e.g. biplane) spline fitting.
 
+   .. grid-item-card:: :octicon:`telescope;1.5em;sd-mr-1` Vectorial PSF (VectorFit)
+      :link: localize/vectorfit
+      :link-type: doc
+
+      The vectorial PSF model and its aberrations, and fitting with VectorFit in 2D or 3D.
+
    .. grid-item-card:: :octicon:`git-compare;1.5em;sd-mr-1` Lateral corrections
       :link: localize/lateral-correction
       :link-type: doc
@@ -205,5 +212,6 @@ Topics
    localize/camera
    localize/3d-calibration
    localize/spline
+   localize/vectorfit
    localize/lateral-correction
    localize/multichannel

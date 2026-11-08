@@ -95,6 +95,11 @@ lif = [
 formats = [
     "picassosr[czi,lif]",
 ]
+# Vectorial PSF fitting ('vectorfit' fit method) with the VectorFit
+# library, CPU build.
+vectorfit = [
+    "vectorfit-py>=0.3.2",
+]
 # Not for general use: the installer / installer_cuda extras exist only to
 # build the one-click installers, where every version is pinned exactly so
 # the frozen bundles stay reproducible and stable. Regular users should

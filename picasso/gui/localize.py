@@ -39,6 +39,7 @@ from .. import (
     registration,
     scmos,
     spline,
+    vectorfit,
     wavelet,
     __version__,
     docs_url,
@@ -357,6 +358,11 @@ FIT_MODELS = {
         "optimizers": None,
         "code": "avg",
     },
+    "Vectorial PSF (VectorFit)": {
+        "optimizers": None,
+        "code": "vectorfit",
+        "needs_vectorfit_parameters": True,
+    },
 }
 
 # The only model whose widths (sx, sy) an astigmatism z calibration can
@@ -382,7 +388,13 @@ MODEL_TOOLTIP = (
     "(much faster).\n\n"
     "Average of ROI:\n"
     "No fit: reports the summed intensity of the box (photons).\n"
-    "x/y stay at the identified pixel (no sub-pixel position)."
+    "x/y stay at the identified pixel (no sub-pixel position).\n\n"
+    "Vectorial PSF (VectorFit):\n"
+    "Maximum-likelihood fit of a vectorial PSF model computed from\n"
+    "the optics (NA, wavelength, refractive indices), no calibration\n"
+    "needed; its 3D model yields z directly. Runs on the CPU and\n"
+    "requires the optional VectorFit library\n"
+    "(pip install picassosr[vectorfit])."
 )
 
 CAMERA_CALIB_TOOLTIP = (
@@ -482,6 +494,15 @@ def _filtered_identification_movie(
     return movie, [temporal, gaussian]
 
 
+def _outliers_note(info: list[dict]) -> str:
+    """The status bar's note on the outliers a VectorFit fit discarded,
+    read from the fit's metadata; "" for any other fit."""
+    n_outliers = vectorfit.outliers_discarded(info)
+    if n_outliers is None:
+        return ""
+    return f" Discarded {n_outliers:,} outliers."
+
+
 def _fit_code(model: str, optimizer: str) -> str:
     """Resolve a (model, optimizer) selection to an internal ``fit`` code."""
     entry = FIT_MODELS[model]
@@ -529,9 +550,18 @@ _CONVERGENCE_DEFAULTS = {
         )
     )
     for code in localize.FIT_METHODS
-    if code != "avg"
+    if code not in ("avg", "vectorfit")
 }
+_CONVERGENCE_DEFAULTS["vectorfit"] = (
+    vectorfit.TOLERANCE,
+    vectorfit.MAX_ITERATIONS,
+)
 _CONVERGENCE_CODES = frozenset(_CONVERGENCE_DEFAULTS)
+# Smallest convergence criterion offered: below ~1e-6 the test on the
+# chi-square answers its noise rather than convergence. VectorFit has its
+# own test, whose default (vectorfit.TOLERANCE) lies far below.
+_CONVERGENCE_MINIMUM = 1e-6
+_CONVERGENCE_MINIMUMS = {"vectorfit": 1e-12}
 
 
 # Steps allotted to each file in the load progress dialog, so the bar can
@@ -1417,6 +1447,39 @@ class OddSpinBox(QtWidgets.QSpinBox):
         value = self.value()
         if value % 2 == 0:
             self.setValue(int(value + 1))
+
+
+class ToleranceSpinBox(QtWidgets.QDoubleSpinBox):
+    """Spinbox for a convergence tolerance, which may span many orders of
+    magnitude: shown in the shortest notation (``0.01``, ``5e-10``),
+    typed in either, and stepped by factors of 10."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        # enough decimals that Qt's rounding keeps the smallest tolerances
+        self.setDecimals(15)
+
+    def textFromValue(self, value: float) -> str:
+        return f"{value:g}"
+
+    def valueFromText(self, text: str) -> float:
+        return float(text.replace(",", "."))
+
+    def validate(self, text: str, pos: int):
+        State = QtGui.QValidator.State
+        try:
+            value = self.valueFromText(text)
+        except ValueError:
+            # a number still being typed, e.g. "5e-"
+            partial = all(_ in "0123456789.,eE+-" for _ in text)
+            state = State.Intermediate if partial else State.Invalid
+            return state, text, pos
+        if self.minimum() <= value <= self.maximum():
+            return State.Acceptable, text, pos
+        return State.Intermediate, text, pos
+
+    def stepBy(self, steps: int) -> None:
+        self.setValue(self.value() * 10.0**steps)
 
 
 class CamSettingComboBox(QtWidgets.QComboBox):
@@ -3657,7 +3720,7 @@ class ParametersDialog(lib.Dialog):
         Combo box for selecting the camera.
     cam_combos : CamSettingComboBoxDict
         Combo boxes for selecting channels.
-    convergence_criterion : QtWidgets.QDoubleSpinBox
+    convergence_criterion : ToleranceSpinBox
         Spin box for setting the convergence criterion. Only used for
         MLE fitting.
     emission_combos : EmissionSettingComboBoxDict
@@ -3771,6 +3834,7 @@ class ParametersDialog(lib.Dialog):
         # further below
         self.z_groupbox = None
         self.spline_groupbox = None
+        self.vectorfit_groupbox = None
         self.channel_registration_groupbox = None
         # last resolved fit code, so the convergence defaults are only
         # reapplied when the method actually changes
@@ -4484,13 +4548,11 @@ class ParametersDialog(lib.Dialog):
             " its own magnitude."
         )
         mle_grid.addWidget(cc_label, 0, 0)
-        self.convergence_criterion = QtWidgets.QDoubleSpinBox()
-        # Never 0: fit requires a positive tolerance, and below ~1e-6 the
-        # test is answering noise in the chi-square rather than convergence.
-        self.convergence_criterion.setRange(1e-6, 1e6)
-        self.convergence_criterion.setDecimals(6)
+        self.convergence_criterion = ToleranceSpinBox()
+        # Never 0: fit requires a positive tolerance. The minimum depends on
+        # the method, see _CONVERGENCE_MINIMUM.
+        self.convergence_criterion.setRange(_CONVERGENCE_MINIMUM, 1e6)
         self.convergence_criterion.setValue(0.001)
-        self.convergence_criterion.setSingleStep(0.0001)
         mle_grid.addWidget(self.convergence_criterion, 0, 1)
         mi_label = QtWidgets.QLabel("Max. iterations:")
         mi_label.setToolTip("Maximum number of iterations per spot.")
@@ -4664,6 +4726,113 @@ class ParametersDialog(lib.Dialog):
         self.link_photons_checkbox.setChecked(True)
         self.link_photons_checkbox.hide()  # shown for 2-6 channel calibs
         spline_grid.addWidget(self.link_photons_checkbox, 1, 0, 1, 3)
+
+        # Vectorial PSF (VectorFit). The PSF is computed from the optics
+        # set here, so no calibration is loaded; the pixel size comes from
+        # the camera settings above.
+        self.vectorfit_groupbox = vectorfit_groupbox = QtWidgets.QGroupBox(
+            "Vectorial PSF (VectorFit)"
+        )
+        vectorfit_groupbox.setToolTip(
+            "Optics of the vectorial PSF model fitted by VectorFit.\n"
+            "Runs on the CPU; requires the optional VectorFit library\n"
+            "(pip install picassosr[vectorfit]). Supported box sizes are\n"
+            f"{', '.join(str(_) for _ in vectorfit.N_PUPIL)}."
+        )
+        vbox.addWidget(vectorfit_groupbox)
+        vectorfit_grid = QtWidgets.QGridLayout(vectorfit_groupbox)
+        defaults = vectorfit.DEFAULT_PARAMETERS
+        self.vectorfit_model = QtWidgets.QComboBox()
+        self.vectorfit_model.addItems(["2D", "3D"])
+        self.vectorfit_model.setCurrentText(defaults["Fit model"])
+        self.vectorfit_model.setToolTip(
+            "2D fits x, y, photons and background; 3D also fits z."
+        )
+        # (key, label, range, decimals, step, tooltip)
+        spinboxes = [
+            (
+                "Wavelength",
+                "Emission wavelength (nm):",
+                (100, 2000),
+                0,
+                10,
+                "Peak emission wavelength of the fluorophore.",
+            ),
+            ("NA", "Numerical aperture:", (0.1, 2), 3, 0.01, ""),
+            (
+                "Refractive index medium",
+                "Refractive index medium:",
+                (1, 3),
+                3,
+                0.01,
+                "Of the sample medium (e.g. 1.33 for water).",
+            ),
+            (
+                "Refractive index cover slip",
+                "Refractive index cover slip:",
+                (1, 3),
+                3,
+                0.01,
+                "",
+            ),
+            (
+                "Refractive index immersion",
+                "Refractive index immersion:",
+                (1, 3),
+                3,
+                0.01,
+                "Of the immersion fluid (e.g. 1.515 for oil).",
+            ),
+        ]
+        # fixed primary aberrations (nm)
+        for key, zernike in (
+            ("Vertical astigmatism", "Z<sub>2</sub><sup>2</sup>"),
+            ("Oblique astigmatism", "Z<sub>2</sub><sup>−2</sup>"),
+            ("Horizontal coma", "Z<sub>3</sub><sup>1</sup>"),
+            ("Vertical coma", "Z<sub>3</sub><sup>−1</sup>"),
+            ("Spherical aberration", "Z<sub>4</sub><sup>0</sup>"),
+        ):
+            spinboxes.append(
+                (
+                    key,
+                    f"{key} {zernike} (nm):",
+                    (-1000, 1000),
+                    3,
+                    1,
+                    "Fixed aberration of the PSF model; it is not fitted.",
+                )
+            )
+        vectorfit_grid.addWidget(QtWidgets.QLabel("Fit model:"), 0, 0)
+        vectorfit_grid.addWidget(self.vectorfit_model, 0, 1)
+        self.vectorfit_spinboxes = {}
+        for row, (key, text, (low, high), decimals, step, tip) in enumerate(
+            spinboxes, start=1
+        ):
+            label = QtWidgets.QLabel(text)
+            label.setToolTip(tip)
+            vectorfit_grid.addWidget(label, row, 0)
+            spinbox = QtWidgets.QDoubleSpinBox()
+            spinbox.setRange(low, high)
+            spinbox.setDecimals(decimals)
+            spinbox.setSingleStep(step)
+            spinbox.setValue(defaults[key])
+            spinbox.setToolTip(tip)
+            vectorfit_grid.addWidget(spinbox, row, 1)
+            self.vectorfit_spinboxes[key] = spinbox
+        self.vectorfit_outliers_checkbox = QtWidgets.QCheckBox(
+            "Discard outliers"
+        )
+        self.vectorfit_outliers_checkbox.setToolTip(
+            "Drop the spots VectorFit flags as outliers: not converged,\n"
+            "a likelihood far below the others' or a position far from\n"
+            "the box center."
+        )
+        self.vectorfit_outliers_checkbox.setChecked(
+            defaults["Discard outliers"]
+        )
+        vectorfit_grid.addWidget(
+            self.vectorfit_outliers_checkbox, len(spinboxes) + 1, 0, 1, 2
+        )
 
         # Channel registration for the multichannel (joint) 2D spherical
         # Gaussian fit. Shown only for that model; unlike the spline path this
@@ -5007,7 +5176,10 @@ class ParametersDialog(lib.Dialog):
         if optimizers is None:
             self.optimizer_label.hide()
             self.fit_optimizer.hide()
-            self.fit_stack.hide()
+            # a method without an optimizer choice may still iterate
+            self.fit_stack.setVisible(
+                FIT_MODELS[model]["code"] in _CONVERGENCE_CODES
+            )
             self._apply_convergence_defaults()
         else:
             self.optimizer_label.show()
@@ -5024,19 +5196,44 @@ class ParametersDialog(lib.Dialog):
     def _update_calib_group_visibility(self) -> None:
         """Show only the calibration box relevant to the selected fit model:
         the astigmatism z-calibration for Gaussian models, the spline PSF
-        calibration for the experimental-PSF (spline) model, and the channel
-        registration for the model that has a multichannel fit. Guarded so the
-        initial ``on_fit_model_changed`` call (before the boxes exist) is a
-        no-op."""
+        calibration for the experimental-PSF (spline) model, the optics for
+        the vectorial PSF model and the channel registration for the model
+        that has a multichannel fit. Guarded so the initial
+        ``on_fit_model_changed`` call (before the boxes exist) is a no-op."""
         entry = FIT_MODELS[self.fit_model.currentText()]
         needs_spline = entry.get("needs_spline_calibration", False)
+        needs_vectorfit = entry.get("needs_vectorfit_parameters", False)
         needs_registration = entry.get("needs_channel_registration", False)
         if self.z_groupbox is not None:
-            self.z_groupbox.setVisible(not needs_spline)
+            self.z_groupbox.setVisible(not (needs_spline or needs_vectorfit))
         if self.spline_groupbox is not None:
             self.spline_groupbox.setVisible(needs_spline)
+        if self.vectorfit_groupbox is not None:
+            self.vectorfit_groupbox.setVisible(needs_vectorfit)
         if self.channel_registration_groupbox is not None:
             self.channel_registration_groupbox.setVisible(needs_registration)
+
+    def vectorfit_parameters(self) -> dict:
+        """The VectorFit settings on the dialog, keyed as
+        ``vectorfit.DEFAULT_PARAMETERS``."""
+        parameters = {"Fit model": self.vectorfit_model.currentText()}
+        for key, spinbox in self.vectorfit_spinboxes.items():
+            parameters[key] = spinbox.value()
+        parameters["Discard outliers"] = (
+            self.vectorfit_outliers_checkbox.isChecked()
+        )
+        return parameters
+
+    def set_vectorfit_parameters(self, parameters: dict | None) -> None:
+        """Put VectorFit settings on the dialog; missing ones take their
+        defaults."""
+        parameters = vectorfit.parameters_with_defaults(parameters)
+        self.vectorfit_model.setCurrentText(parameters["Fit model"])
+        for key, spinbox in self.vectorfit_spinboxes.items():
+            spinbox.setValue(parameters[key])
+        self.vectorfit_outliers_checkbox.setChecked(
+            parameters["Discard outliers"]
+        )
 
     def current_fit_code(self) -> str:
         """The ``fit`` code the current selection would run."""
@@ -5054,6 +5251,9 @@ class ParametersDialog(lib.Dialog):
         if not code:
             return
         self.fit_stack.setCurrentIndex(1 if code in _CONVERGENCE_CODES else 0)
+        self.convergence_criterion.setMinimum(
+            _CONVERGENCE_MINIMUMS.get(code, _CONVERGENCE_MINIMUM)
+        )
         if code == self._last_fit_code:
             return
         self._last_fit_code = code
@@ -8961,6 +9161,7 @@ class Window(QtWidgets.QMainWindow):
             # can need its own calibration (shared unless the link is off)
             "spline_calibration": pd.spline_calibration,
             "spline_calibration_path": pd.spline_calibration_path,
+            "vectorfit_parameters": pd.vectorfit_parameters(),
             "use_gpu": pd.gpu_checkbox.isChecked(),
             "temporal_median_on": pd.temporal_median_checkbox.isChecked(),
             "temporal_median": pd.temporal_median_spinbox.value(),
@@ -9024,6 +9225,8 @@ class Window(QtWidgets.QMainWindow):
                 params["spline_calibration"],
                 params.get("spline_calibration_path"),
             )
+        # .get(): parameter sets captured before VectorFit was added
+        pd.set_vectorfit_parameters(params.get("vectorfit_parameters"))
         # Saved parameter files written before the Numba CUDA port use the
         # old "gpufit" key.
         pd.gpu_checkbox.setChecked(
@@ -10946,6 +11149,7 @@ class Window(QtWidgets.QMainWindow):
             "use_gpu": pd.gpu_checkbox.isChecked(),
             "spline_calibration": pd.spline_calibration,
             "spline_calibration_path": pd.spline_calibration_path,
+            "vectorfit_parameters": pd.vectorfit_parameters(),
             "z_calibration": pd.z_calibration,
             "z_calibration_path": pd.z_calibration_path,
             "z_calib_label": pd.z_calib_label.text(),
@@ -10975,6 +11179,7 @@ class Window(QtWidgets.QMainWindow):
                 params["spline_calibration"],
                 params["spline_calibration_path"],
             )
+            pd.set_vectorfit_parameters(params.get("vectorfit_parameters"))
             pd.z_calibration = params["z_calibration"]
             pd.z_calibration_path = params["z_calibration_path"]
             pd.z_calib_label.setText(params["z_calib_label"])
@@ -12482,6 +12687,30 @@ class Window(QtWidgets.QMainWindow):
             # A 3D spline fit recovers z directly, so the separate
             # astigmatism z-fitting step must not run.
             fit_z = False
+        vectorfit_parameters = None
+        if method == "vectorfit":
+            if not vectorfit.VECTORFIT_AVAILABLE:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "VectorFit",
+                    "The vectorial PSF fit requires the optional VectorFit "
+                    "library. Install it with\n\n"
+                    "pip install picassosr[vectorfit]",
+                )
+                return None
+            box = self.parameters["Box Size"]
+            if box not in vectorfit.N_PUPIL:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "VectorFit",
+                    f"VectorFit does not support a box size of {box}. "
+                    "Supported box sizes are "
+                    f"{', '.join(str(_) for _ in vectorfit.N_PUPIL)}.",
+                )
+                return None
+            vectorfit_parameters = dialog.vectorfit_parameters()
+            # VectorFit's 3D model fits z itself
+            fit_z = False
         return FitWorker(
             self.movie,
             self.identifications_info,
@@ -12505,6 +12734,7 @@ class Window(QtWidgets.QMainWindow):
             camera_calibration=(
                 self.parameters_dialog.camera_calibration or None
             ),
+            vectorfit_parameters=vectorfit_parameters,
         )
 
     def _start_fit_worker(self, worker: FitWorker) -> None:
@@ -12723,7 +12953,7 @@ class Window(QtWidgets.QMainWindow):
         self.status_bar.showMessage(
             f"Fitted {len(locs):,} spots in region "
             f"{localize.region_label(state['current'])} in "
-            f"{elapsed_time:.2f} seconds."
+            f"{elapsed_time:.2f} seconds." + _outliers_note(info)
         )
         self.locs = localize.locs_to_region_coordinates(
             locs, region, self.parameters_dialog.pixelsize.value()
@@ -13508,6 +13738,7 @@ class Window(QtWidgets.QMainWindow):
         """Say which lateral corrections the finished fit skipped, since
         the calibration it used applies them itself. The metadata the fit
         returns records them."""
+
         skipped = list(
             getattr(worker, "skipped_lateral_transforms", None) or []
         )
@@ -13613,6 +13844,7 @@ class Window(QtWidgets.QMainWindow):
         self.abort_action.setEnabled(False)
         self.status_bar.showMessage(
             f"Fitted {len(locs):,} spots in {elapsed_time:.2f} seconds."
+            + _outliers_note(info)
         )
         self.locs = locs
         self.locs_display = locs
@@ -14301,6 +14533,7 @@ class FitWorker(QtCore.QThread):
             "spline-gpu",
             "spline-mle-gpu",
             "avg",
+            "vectorfit",
         ],
         eps: float | None,
         max_it: int | None,
@@ -14310,6 +14543,7 @@ class FitWorker(QtCore.QThread):
         spline_calibration: dict | None = None,
         lateral_transforms: list | None = None,
         camera_calibration: dict | None = None,
+        vectorfit_parameters: dict | None = None,
     ) -> None:
         super().__init__()
         self.movie = movie
@@ -14325,6 +14559,7 @@ class FitWorker(QtCore.QThread):
         self.spline_calibration = spline_calibration
         self.lateral_transforms = lateral_transforms or []
         self.camera_calibration = camera_calibration
+        self.vectorfit_parameters = vectorfit_parameters
         self.N = len(identifications)
         self.method = _effective_fit_code(method, use_gpu)
 
@@ -14363,6 +14598,7 @@ class FitWorker(QtCore.QThread):
                 eps=self.eps,
                 max_it=self.max_it,
                 spline_calibration=self.spline_calibration,
+                vectorfit_parameters=self.vectorfit_parameters,
                 camera_calibration=self.camera_calibration,
                 # With a z fit to follow, FitZWorker applies them after it,
                 # so that they land on the final coordinates either way.
