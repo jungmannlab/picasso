@@ -389,17 +389,21 @@ MULTI_EMITTER_PSF_MODELS = {
 # Fitting models offered in the GUI, decoupled from the optimizer. Each
 # model maps its optimizer labels to the internal ``fit`` codes;
 # models without an optimizer (e.g. averaging) declare a fixed ``code``
-# and ``optimizers=None``. Add a new fitting algorithm by adding an
-# entry here.
+# and ``optimizers=None``. ``docs`` is the page (and anchor) of the
+# documentation that describes the model, opened by the help button next
+# to the Model combo box. Add a new fitting algorithm by adding an entry
+# here.
 FIT_MODELS = {
     "2D elliptical Gaussian": {
         "optimizers": {"Least squares": "gausslq", "MLE": "gaussmle"},
+        "docs": "localize.html#localize-psf-models",
     },
     "2D rotated elliptical Gaussian": {
         "optimizers": {
             "Least squares": "gausslq-rotated",
             "MLE": "gaussmle-rotated",
         },
+        "docs": "localize.html#localize-psf-models",
     },
     "2D spherical Gaussian": {
         "optimizers": {
@@ -407,12 +411,14 @@ FIT_MODELS = {
             "MLE": "gaussmle-spherical",
         },
         "needs_channel_registration": True,
+        "docs": "localize.html#localize-psf-models",
     },
     # not a ``localize.fit`` method: it finds the spots itself and runs
     # ``localize.localize_multi_emitter`` (see Window.fit)
     MULTI_EMITTER_MODEL: {
         "optimizers": {"MLE": MULTI_EMITTER_CODE},
         "multi_emitter": True,
+        "docs": "localize/multi-emitter.html#localize-multi-emitter",
     },
     "Experimental PSF (cubic spline)": {
         "optimizers": {
@@ -420,15 +426,18 @@ FIT_MODELS = {
             "MLE": "spline-mle",
         },
         "needs_spline_calibration": True,
+        "docs": "localize/spline.html#localize-spline",
     },
     "Average of ROI": {
         "optimizers": None,
         "code": "avg",
+        "docs": "localize.html#localize-psf-models",
     },
     "Vectorial PSF (VectorFit)": {
         "optimizers": None,
         "code": "vectorfit",
         "needs_vectorfit_parameters": True,
+        "docs": "localize/vectorfit.html#localize-vectorfit",
     },
 }
 
@@ -462,13 +471,57 @@ MODEL_TOOLTIP = (
     "(much faster).\n\n"
     "Average of ROI:\n"
     "No fit: reports the summed intensity of the box (photons).\n"
-    "x/y stay at the identified pixel (no sub-pixel position).\n\n"
+    "x/y stay at the identified pixel (no sub-pixel position)."
+)
+
+# The model tooltip's paragraph on VectorFit, shown only where the model is
+# offered (see ``offered_fit_models``).
+VECTORFIT_MODEL_TOOLTIP = (
     "Vectorial PSF (VectorFit):\n"
     "Maximum-likelihood fit of a vectorial PSF model computed from\n"
     "the optics (NA, wavelength, refractive indices), no calibration\n"
     "needed; its 3D model yields z directly. Runs on the CPU and\n"
-    "requires the optional VectorFit library\n"
-    "(pip install picassosr[vectorfit])."
+    "requires the optional VectorFit library;\n"
+    "tick Use GPU to run it on the GPU with VectorFit's GPU build."
+)
+
+
+def offered_fit_models() -> list[str]:
+    """The fit models the Parameters dialog offers, in the order of
+    ``FIT_MODELS``: all of them, but VectorFit's only where the VectorFit
+    library is installed (never on macOS, which it does not support)."""
+    return [
+        model
+        for model, entry in FIT_MODELS.items()
+        if vectorfit.VECTORFIT_AVAILABLE
+        or not entry.get("needs_vectorfit_parameters", False)
+    ]
+
+
+def model_tooltip() -> str:
+    """The tooltip of the Model combo box: a paragraph per offered model."""
+    if "Vectorial PSF (VectorFit)" in offered_fit_models():
+        return MODEL_TOOLTIP + "\n\n" + VECTORFIT_MODEL_TOOLTIP
+    return MODEL_TOOLTIP
+
+
+GPU_TOOLTIP = (
+    "Perform fitting on a CUDA-capable GPU.\n\n"
+    "The algorithm is a port of Gpufit; the kernels are compiled "
+    "at run time by Numba.\n\n"
+    "Przybylski, A., Thiel, B., Keller-Findeisen, J. et al. "
+    "Gpufit: An open-source toolkit for GPU-accelerated curve "
+    "fitting. Sci Rep 7, 15722 (2017). "
+)
+
+# The "Use GPU" tooltip while VectorFit is selected: VectorFit has its own
+# GPU implementation.
+VECTORFIT_GPU_TOOLTIP = (
+    "Fit the vectorial PSF on a CUDA-capable GPU, with VectorFit's GPU\n"
+    "build (vectorfit-py-cu12, installed in place of vectorfit-py).\n\n"
+    "Despite its name, it needs CUDA 13, i.e. an NVIDIA driver of\n"
+    "version 580 or newer, and an Ampere or newer GPU; a driver that\n"
+    "supports CUDA 12 only is not enough."
 )
 
 CAMERA_CALIB_TOOLTIP = (
@@ -660,18 +713,21 @@ _CONVERGENCE_DEFAULTS = {
         )
     )
     for code in localize.FIT_METHODS
-    if code not in ("avg", "vectorfit")
+    if code != "avg" and not code.startswith("vectorfit")
 }
-_CONVERGENCE_DEFAULTS["vectorfit"] = (
-    vectorfit.TOLERANCE,
-    vectorfit.MAX_ITERATIONS,
+# the same on either device
+_VECTORFIT_CODES = ("vectorfit", "vectorfit-gpu")
+_CONVERGENCE_DEFAULTS.update(
+    dict.fromkeys(
+        _VECTORFIT_CODES, (vectorfit.TOLERANCE, vectorfit.MAX_ITERATIONS)
+    )
 )
 _CONVERGENCE_CODES = frozenset(_CONVERGENCE_DEFAULTS)
 # Smallest convergence criterion offered: below ~1e-6 the test on the
 # chi-square answers its noise rather than convergence. VectorFit has its
 # own test, whose default (vectorfit.TOLERANCE) lies far below.
 _CONVERGENCE_MINIMUM = 1e-6
-_CONVERGENCE_MINIMUMS = {"vectorfit": 1e-12}
+_CONVERGENCE_MINIMUMS = dict.fromkeys(_VECTORFIT_CODES, 1e-12)
 
 
 # Steps allotted to each file in the load progress dialog, so the bar can
@@ -744,7 +800,7 @@ class Channel:
 def _region_fit_summary(params: dict) -> list[tuple[str, str]]:
     """One split-FOV region's fit settings as ``(text, tooltip)`` pairs for
     the ROI table: the model (with its optimizer) and its PSF calibration."""
-    models = list(FIT_MODELS)
+    models = offered_fit_models()
     model = models[min(params.get("fit_model", 0), len(models) - 1)]
     optimizers = FIT_MODELS[model]["optimizers"]
     optimizer = ""
@@ -4979,6 +5035,7 @@ class ParametersDialog(lib.Dialog):
     WAVELET_URL = docs_url("localize/identification.html#localize-wavelet")
     ROI_URL = docs_url("localize/identification.html#localize-rois")
     SPLINE_URL = docs_url("localize/spline.html#localize-spline")
+    VECTORFIT_URL = docs_url("localize/vectorfit.html#localize-vectorfit")
     MULTI_EMITTER_URL = docs_url(
         "localize/multi-emitter.html#localize-multi-emitter"
     )
@@ -5727,13 +5784,22 @@ class ParametersDialog(lib.Dialog):
         fit_grid = QtWidgets.QGridLayout(fit_groupbox.content)
 
         model_label = QtWidgets.QLabel("Model:")
-        model_label.setToolTip(MODEL_TOOLTIP)
+        model_label.setToolTip(model_tooltip())
         fit_grid.addWidget(model_label, 1, 0)
         self.fit_model = QtWidgets.QComboBox()
-        self.fit_model.addItems(list(FIT_MODELS.keys()))
+        self.fit_model.addItems(offered_fit_models())
         self.fit_model.setCurrentIndex(0)
-        self.fit_model.setToolTip(MODEL_TOOLTIP)
-        fit_grid.addWidget(self.fit_model, 1, 1)
+        self.fit_model.setToolTip(model_tooltip())
+        # the help button opens the selected model's documentation
+        self.fit_model_help = lib.HelpButton(self.fit_model_docs_url())
+        self.fit_model_help.setToolTip(
+            "Open the documentation of the selected model"
+        )
+        model_row = QtWidgets.QHBoxLayout()
+        model_row.setContentsMargins(0, 0, 0, 0)
+        model_row.addWidget(self.fit_model, 1)
+        model_row.addWidget(self.fit_model_help)
+        fit_grid.addLayout(model_row, 1, 1)
 
         self.optimizer_label = QtWidgets.QLabel("Optimizer:")
         self.optimizer_label.setToolTip(OPTIMIZER_TOOLTIP)
@@ -5783,14 +5849,7 @@ class ParametersDialog(lib.Dialog):
         # GPU, so the checkbox applies to both optimizers and sits below
         # the optimizer parameter stack.
         self.gpu_checkbox = QtWidgets.QCheckBox("Use GPU")
-        self.gpu_checkbox.setToolTip(
-            "Perform fitting on a CUDA-capable GPU.\n\n"
-            "The algorithm is a port of Gpufit; the kernels are compiled "
-            "at run time by Numba.\n\n"
-            "Przybylski, A., Thiel, B., Keller-Findeisen, J. et al. "
-            "Gpufit: An open-source toolkit for GPU-accelerated curve "
-            "fitting. Sci Rep 7, 15722 (2017). "
-        )
+        self.gpu_checkbox.setToolTip(GPU_TOOLTIP)
         self.gpu_checkbox.setTristate(False)
         self.gpu_checkbox.setDisabled(True)
         self.gpu_checkbox.stateChanged.connect(self.on_gpu_fitting_changed)
@@ -6125,23 +6184,27 @@ class ParametersDialog(lib.Dialog):
         # Vectorial PSF (VectorFit). The PSF is computed from the optics
         # set here, so no calibration is loaded; the pixel size comes from
         # the camera settings above.
-        self.vectorfit_groupbox = vectorfit_groupbox = QtWidgets.QGroupBox(
+        self.vectorfit_groupbox = vectorfit_groupbox = lib.CollapsibleGroupBox(
             "Vectorial PSF (VectorFit)"
         )
         vectorfit_groupbox.setToolTip(
             "Optics of the vectorial PSF model fitted by VectorFit.\n"
-            "Runs on the CPU; requires the optional VectorFit library\n"
-            "(pip install picassosr[vectorfit]). Supported box sizes are\n"
-            f"{', '.join(str(_) for _ in vectorfit.N_PUPIL)}."
+            "Runs on the CPU, or on the GPU with Use GPU; requires the\n"
+            "optional VectorFit library (pip install picassosr[vectorfit],\n"
+            "or vectorfit-py-cu12 for the GPU, which needs CUDA 13 despite\n"
+            "its name). Supported box sizes are\n"
+            f"{vectorfit.supported_boxes_text()}."
         )
         vbox.addWidget(vectorfit_groupbox)
-        vectorfit_grid = QtWidgets.QGridLayout(vectorfit_groupbox)
+        vectorfit_grid = QtWidgets.QGridLayout(vectorfit_groupbox.content)
         defaults = vectorfit.DEFAULT_PARAMETERS
         self.vectorfit_model = QtWidgets.QComboBox()
         self.vectorfit_model.addItems(["2D", "3D"])
         self.vectorfit_model.setCurrentText(defaults["Fit model"])
         self.vectorfit_model.setToolTip(
-            "2D fits x, y, photons and background; 3D also fits z."
+            "2D fits x, y, photons and background; 3D also fits z.\n"
+            "3D needs the astigmatism or the spherical aberration below:\n"
+            "without them the PSF is the same above and below focus."
         )
         # (key, label, range, decimals, step, tooltip)
         spinboxes = [
@@ -6153,7 +6216,14 @@ class ParametersDialog(lib.Dialog):
                 10,
                 "Peak emission wavelength of the fluorophore.",
             ),
-            ("NA", "Numerical aperture:", (0.1, 2), 3, 0.01, ""),
+            (
+                "NA",
+                "Numerical aperture:",
+                (0.1, 2),
+                3,
+                0.01,
+                "Of the objective (e.g. 1.49 for a TIRF oil objective).",
+            ),
             (
                 "Refractive index medium",
                 "Refractive index medium:",
@@ -6168,7 +6238,7 @@ class ParametersDialog(lib.Dialog):
                 (1, 3),
                 3,
                 0.01,
-                "",
+                "Of the cover slip glass (e.g. 1.525 for #1.5 borosilicate).",
             ),
             (
                 "Refractive index immersion",
@@ -6199,6 +6269,7 @@ class ParametersDialog(lib.Dialog):
             )
         vectorfit_grid.addWidget(QtWidgets.QLabel("Fit model:"), 0, 0)
         vectorfit_grid.addWidget(self.vectorfit_model, 0, 1)
+        vectorfit_grid.addWidget(lib.HelpButton(self.VECTORFIT_URL), 0, 2)
         self.vectorfit_spinboxes = {}
         for row, (key, text, (low, high), decimals, step, tip) in enumerate(
             spinboxes, start=1
@@ -6214,6 +6285,8 @@ class ParametersDialog(lib.Dialog):
             spinbox.setToolTip(tip)
             vectorfit_grid.addWidget(spinbox, row, 1)
             self.vectorfit_spinboxes[key] = spinbox
+            if key in vectorfit.Z_ABERRATIONS:
+                spinbox.valueChanged.connect(self.update_vectorfit_3d)
         self.vectorfit_outliers_checkbox = QtWidgets.QCheckBox(
             "Discard outliers"
         )
@@ -6228,6 +6301,7 @@ class ParametersDialog(lib.Dialog):
         vectorfit_grid.addWidget(
             self.vectorfit_outliers_checkbox, len(spinboxes) + 1, 0, 1, 2
         )
+        self.update_vectorfit_3d()
 
         # Channel registration for the multichannel (joint) 2D spherical
         # Gaussian fit. Shown only for that model; unlike the spline path this
@@ -6578,6 +6652,8 @@ class ParametersDialog(lib.Dialog):
         """Show the optimizers and settings of the selected fit model,
         see ``on_fit_model_changed``."""
         model = self.fit_model.currentText()
+        if getattr(self, "fit_model_help", None) is not None:
+            self.fit_model_help.help_url = self.fit_model_docs_url()
         if FIT_MODELS[model].get("multi_emitter") and not getattr(
             ParametersDialog, "_multi_emitter_compiling", False
         ):
@@ -6590,6 +6666,7 @@ class ParametersDialog(lib.Dialog):
         if optimizers is None:
             self.optimizer_label.hide()
             self.fit_optimizer.hide()
+            self._update_gpu_checkbox()
             self._apply_convergence_defaults()
         else:
             self.optimizer_label.show()
@@ -6601,6 +6678,11 @@ class ParametersDialog(lib.Dialog):
             self.fit_optimizer.blockSignals(False)
             self.on_fit_optimizer_changed()
         self._update_calib_group_visibility()
+
+    def fit_model_docs_url(self) -> str:
+        """The documentation of the selected fit model, see the ``docs``
+        entries of ``FIT_MODELS``."""
+        return docs_url(FIT_MODELS[self.fit_model.currentText()]["docs"])
 
     def _has_multichannel_data(self) -> bool:
         """Whether the window holds several channels: several movies
@@ -6771,14 +6853,47 @@ class ParametersDialog(lib.Dialog):
 
     def set_vectorfit_parameters(self, parameters: dict | None) -> None:
         """Put VectorFit settings on the dialog; missing ones take their
-        defaults."""
+        defaults. A 3D set without an aberration that makes ``z``
+        measurable falls back to 2D, as the dialog offers 3D only then
+        (see ``update_vectorfit_3d``)."""
+        parameters = dict(parameters or {})
+        if parameters.get("Fit model") == "3D" and not (
+            vectorfit.z_measurable(parameters)
+        ):
+            parameters["Fit model"] = "2D"
         parameters = vectorfit.parameters_with_defaults(parameters)
-        self.vectorfit_model.setCurrentText(parameters["Fit model"])
+        # the aberrations first: they decide whether 3D can be selected
         for key, spinbox in self.vectorfit_spinboxes.items():
             spinbox.setValue(parameters[key])
+        self.vectorfit_model.setCurrentText(parameters["Fit model"])
+        self.update_vectorfit_3d()
         self.vectorfit_outliers_checkbox.setChecked(
             parameters["Discard outliers"]
         )
+
+    def update_vectorfit_3d(self, _value: float = 0.0) -> None:
+        """Enable the 3D VectorFit model only while an aberration that
+        makes ``z`` measurable is set (see ``vectorfit.Z_ABERRATIONS``);
+        otherwise select 2D."""
+        allowed = vectorfit.z_measurable(
+            {
+                key: spinbox.value()
+                for key, spinbox in self.vectorfit_spinboxes.items()
+            }
+        )
+        item = self.vectorfit_model.model().item(
+            self.vectorfit_model.findText("3D")
+        )
+        item.setEnabled(allowed)
+        item.setToolTip(
+            ""
+            if allowed
+            else "Set the astigmatism or the spherical aberration first:\n"
+            "without them the PSF is the same above and below focus, so\n"
+            "z cannot be measured."
+        )
+        if not allowed and self.vectorfit_model.currentText() == "3D":
+            self.vectorfit_model.setCurrentText("2D")
 
     def current_fit_code(self) -> str:
         """The ``fit`` code the current selection would run."""
@@ -6811,17 +6926,39 @@ class ParametersDialog(lib.Dialog):
             self.convergence_criterion.setValue(defaults[0])
             self.max_it.setValue(defaults[1])
 
+    def _update_gpu_checkbox(self) -> None:
+        """Enable the GPU fitting checkbox if the selected model and
+        optimizer have a GPU implementation that can run here; otherwise
+        untick and disable it. VectorFit's needs its GPU build and a recent
+        enough driver, so its tooltip says why it cannot run."""
+        if getattr(self, "gpu_checkbox", None) is None:
+            return  # still building the dialog
+        model = self.fit_model.currentText()
+        if FIT_MODELS[model]["optimizers"] is None:
+            code = FIT_MODELS[model]["code"]
+        else:
+            optimizer = self.fit_optimizer.currentText()
+            code = _fit_code(model, optimizer) if optimizer else ""
+        tooltip = GPU_TOOLTIP
+        if code not in _GPU_CAPABLE_CODES:
+            available = False
+        elif code in _VECTORFIT_CODES:
+            reason = vectorfit.gpu_unavailable_reason()
+            available = reason is None
+            tooltip = VECTORFIT_GPU_TOOLTIP + (
+                "" if available else f"\n\nNot available: {reason}"
+            )
+        else:
+            available = CUDA_AVAILABLE
+        if not available:
+            self.gpu_checkbox.setChecked(False)
+        self.gpu_checkbox.setDisabled(not available)
+        self.gpu_checkbox.setToolTip(tooltip)
+
     def on_fit_optimizer_changed(self) -> None:
         """Enable/disable the GPU fitting checkbox based on the selected
         model and optimizer, then show that method's convergence schedule."""
-        model = self.fit_model.currentText()
-        optimizer = self.fit_optimizer.currentText()
-        code = _fit_code(model, optimizer) if optimizer else ""
-        if code in _GPU_CAPABLE_CODES:
-            self.gpu_checkbox.setDisabled(not CUDA_AVAILABLE)
-        else:
-            self.gpu_checkbox.setChecked(False)
-            self.gpu_checkbox.setDisabled(True)
+        self._update_gpu_checkbox()
         self.on_gpu_fitting_changed()
 
     def on_frames_edit_changed(self) -> None:
@@ -8739,6 +8876,26 @@ class Window(QtWidgets.QMainWindow):
         self._load_multi_emitter_settings(
             settings["Localize"].get("multi_emitter")
         )
+        self._load_vectorfit_settings(settings["Localize"].get("vectorfit"))
+
+    def _load_vectorfit_settings(self, saved: dict | None) -> None:
+        """Put the saved VectorFit settings on the dialog. Unknown keys are
+        ignored and missing ones take their defaults; if a value is invalid,
+        the dialog keeps what it had."""
+        if not isinstance(saved, dict):
+            return
+        known = {
+            key: value
+            for key, value in saved.items()
+            if key in vectorfit.DEFAULT_PARAMETERS
+        }
+        dialog = self.parameters_dialog
+        previous = dialog.vectorfit_parameters()
+        try:
+            dialog.set_vectorfit_parameters(known)
+        except (TypeError, ValueError):
+            # a hand-edited file: a value of the wrong type or out of range
+            dialog.set_vectorfit_parameters(previous)
 
     def _load_multi_emitter_settings(self, saved: dict | None) -> None:
         """Put the saved multi-emitter settings on the dialog; values that
@@ -8843,6 +9000,7 @@ class Window(QtWidgets.QMainWindow):
             # 2 is "Auto"
             "fit_region_size": dialog.fit_region_spinbox.value(),
         }
+        settings["Localize"]["vectorfit"] = dialog.vectorfit_parameters()
         settings["Localize"]["Columns to save"] = {
             column: checkbox.isChecked()
             for column, checkbox in (
@@ -14803,6 +14961,17 @@ class Window(QtWidgets.QMainWindow):
                     "pip install picassosr[vectorfit]",
                 )
                 return None
+            # the checkbox is disabled then, but restoring saved settings
+            # can tick it
+            if use_gpu and not vectorfit.gpu_available():
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "VectorFit",
+                    "VectorFit cannot fit on the GPU. "
+                    f"{vectorfit.gpu_unavailable_reason()}\n\n"
+                    "Untick Use GPU to fit on the CPU.",
+                )
+                return None
             box = self.parameters["Box Size"]
             if box not in vectorfit.N_PUPIL:
                 QtWidgets.QMessageBox.warning(
@@ -14810,7 +14979,7 @@ class Window(QtWidgets.QMainWindow):
                     "VectorFit",
                     f"VectorFit does not support a box size of {box}. "
                     "Supported box sizes are "
-                    f"{', '.join(str(_) for _ in vectorfit.N_PUPIL)}.",
+                    f"{vectorfit.supported_boxes_text()}.",
                 )
                 return None
             vectorfit_parameters = dialog.vectorfit_parameters()
@@ -16669,6 +16838,7 @@ class FitWorker(QtCore.QThread):
             "spline-mle-gpu",
             "avg",
             "vectorfit",
+            "vectorfit-gpu",
         ],
         eps: float | None,
         max_it: int | None,

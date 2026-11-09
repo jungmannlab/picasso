@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 08-NOV-2026 CEST
+Last change: 09-NOV-2026 CEST
 
 ## 1.0.0
 
@@ -121,7 +121,7 @@ Picasso 1.0 is the largest update since Picasso was first published. The highlig
 
 ### Localize
 - **Multi-emitter fitting:** the new fit model *Overlapping emitters (3D-DAOSTORM)* localizes emitters closer than about 2 PSF σ in the same frame separately. The 3D-DAOSTORM analysis of Babcock et al. (*Optical Nanoscopy* 2012), ported from storm-analysis. See the [documentation](https://picassosr.readthedocs.io/en/latest/localize/multi-emitter.html).
-- New PSF model *Vectorial PSF (VectorFit)*: maximum-likelihood fitting of a vectorial PSF computed from the optics, in 2D or 3D (``z`` fitted directly), with the optional [VectorFit](https://gitlab.tudelft.nl/imphys/ci/vectorfit) library on the CPU (`pip install picassosr[vectorfit]`, vectorfit-py 0.3.2 or later), with box sizes 5, 7, 9, 11, 13, 15, 17, 19, 21 or 27. Five fixed primary aberrations can be added to the model: vertical and oblique astigmatism, horizontal coma, vertical coma and spherical aberration, all in nm. Fit method `vectorfit` in `picasso.localize.fit` / `localize` (settings in `vectorfit_parameters`) and in `picasso localize` (`--fit-method vectorfit` with the `--vf-*` options). The spots VectorFit flags as outliers are discarded unless asked otherwise, and their number is saved in the metadata (`VectorFit outliers discarded`). The default convergence schedule is Vectorfit's (tolerance 5e-10, at most 20 iterations); for this method the *Convergence criterion* box accepts values down to 1e-12.
+- New PSF model *Vectorial PSF* ([VectorFit](https://doi.org/10.1364/OPTICA.560721)): maximum-likelihood fitting of a vectorial PSF computed from the optics, in 2D or 3D, with the optional VectorFit library (Windows and Linux only). See the [documentation](https://picassosr.readthedocs.io/en/latest/localize/vectorfit.html).
 - New spot identification method: B-spline wavelet segmentation (Izeddin et al., *Opt. Express* 2012), see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html#localize-wavelet).
 - New column `reduced_chi_square` for MLE and least-squares fits: the goodness of fit normalized for the box size and the photon counts, about 1 for a good fit (`picasso.localize.reduced_chi_square`).
 - The quantum efficiency is no longer shown in the Parameters dialog. A `Quantum Efficiency` entry in the camera config, `--qe` in `picasso localize` and a `Qe` key in `camera_info` are still accepted and ignored. `camera_parameters` of the movie classes in `picasso.io` no longer returns `qe`. The `Emission Wavelength` dropdown now lists the wavelengths of `Channel Device` > `Emission Wavelengths` and of the wavelength-keyed calibrations in the config (it appeared only when the config had a `Quantum Efficiency` mapping before, so wavelength-keyed calibrations were not selected with the template config).

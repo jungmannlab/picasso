@@ -76,6 +76,25 @@ CODE_SUFFIXES = {
     ".css",
 }
 
+#: Notices of native libraries that a wheel bundles without their license
+#: text, keyed by the canonical name of the distribution: ``(label, text)``
+#: pairs added to its license texts.
+_FFTW_NOTICE = (
+    "The .libs folder this package installs next to vectorfit_py contains "
+    "FFTW 3 "
+    "(https://www.fftw.org), Copyright (c) 2003, 2007-14 Matteo Frigo and "
+    "Copyright (c) 2003, 2007-14 Massachusetts Institute of Technology, "
+    "licensed under the GNU General Public License, version 2 or (at your "
+    "option) any later version. It is distributed here under version 3, "
+    "whose text is reproduced under PyQt6. FFTW's source code is "
+    "available at https://www.fftw.org/download.html."
+)
+_FFTW = ("bundled FFTW", "\n".join(textwrap.wrap(_FFTW_NOTICE, 70)))
+BUNDLED_NOTICES = {
+    "vectorfit-py": [_FFTW],
+    "vectorfit-py-cu12": [_FFTW],
+}
+
 RULE = "=" * 78
 THIN_RULE = "-" * 78
 
@@ -139,13 +158,26 @@ def add_texts(package: Package, files: list[tuple[str, Path]]) -> None:
         package.texts.append((label, text))
 
 
+def names_a_file(declared: str) -> bool:
+    """Return True if a declared ``License`` only names the license file,
+    as vectorfit-py's "LICENSE.txt" does; its classifiers then name the
+    license."""
+    file_name = r"[\w.-]+\.(txt|md|rst)|(LICEN[CS]E|COPYING|NOTICE)([._-]\w+)?"
+    return bool(re.fullmatch(file_name, declared, re.IGNORECASE))
+
+
 def license_name(meta: metadata.PackageMetadata) -> str:
     """Declared license of a distribution, as short as available."""
     expression = meta.get("License-Expression")
     if expression:
         return expression.strip()
     declared = (meta.get("License") or "").strip()
-    if declared and "\n" not in declared and len(declared) <= 80:
+    if (
+        declared
+        and "\n" not in declared
+        and len(declared) <= 80
+        and not names_a_file(declared)
+    ):
         return declared
     classifiers = [
         c.split(" :: ")[-1]
@@ -195,6 +227,7 @@ def python_packages() -> dict[str, Package]:
             package,
             [(Path(f).as_posix(), Path(dist.locate_file(f))) for f in files],
         )
+        package.texts += BUNDLED_NOTICES.get(key, [])
         packages[key] = package
     return packages
 

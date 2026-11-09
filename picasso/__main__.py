@@ -3568,8 +3568,23 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
     args.gradient = gradients[0]
     spline_paths = args.spline_calibration or []
     args.spline_calibration = spline_paths[0] if spline_paths else ""
+    if any(str(m).startswith("vectorfit") for m in fit_methods):
+        # before any movie is read: e.g. 3D needs astigmatism
+        from .vectorfit import parameters_with_defaults
+
+        parameters_with_defaults(_vectorfit_parameters_from_args(args))
     if localize.resolve_fit_method(args.fit_method)[0].endswith("-gpu"):
-        if localize.CUDA_AVAILABLE:
+        if args.fit_method == "vectorfit-gpu":
+            # VectorFit's own GPU build, with its own requirements
+            from .vectorfit import gpu_unavailable_reason
+
+            reason = gpu_unavailable_reason()
+            if reason is not None:
+                raise Exception(
+                    f"VectorFit cannot fit on the GPU. {reason} Aborting."
+                )
+            print("CUDA GPU found")
+        elif localize.CUDA_AVAILABLE:
             print("CUDA GPU found")
         else:
             raise Exception(
@@ -4776,6 +4791,7 @@ def _build_parser() -> (
             "spline-mle-gpu",
             "avg",
             "vectorfit",
+            "vectorfit-gpu",
         ],
         action="append",
         default=None,
@@ -4786,7 +4802,10 @@ def _build_parser() -> (
             "on the GPU (needs a CUDA-capable GPU); all four need "
             "--spline-calibration. 'vectorfit' fits a vectorial PSF model "
             "computed from the optics (see the --vf-* options) with the "
-            "optional VectorFit library (pip install picassosr[vectorfit]). "
+            "optional VectorFit library (pip install picassosr[vectorfit]), "
+            "'vectorfit-gpu' does the same on the GPU with VectorFit's GPU "
+            "build (pip install vectorfit-py-cu12), which, despite its "
+            "name, needs CUDA 13 (NVIDIA driver 580 or newer). "
             "With --regions-separately it may be given once per --roi, to "
             "fit each region its own way"
         ),

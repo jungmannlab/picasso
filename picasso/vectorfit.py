@@ -3,24 +3,34 @@ picasso.vectorfit
 ~~~~~~~~~~~~~~~~~
 
 Fits spots with a vectorial PSF model, using the VectorFit library through
-its Python bindings, ``vectorfit_py`` (CPU build: ``pip install
-picassosr[vectorfit]``).
+its Python bindings, ``vectorfit_py``. Its CPU build is ``pip install
+picassosr[vectorfit]``; its GPU (CUDA) build is the ``vectorfit-py-cu12``
+package, which installs the same ``vectorfit_py`` module. Both exist for
+Windows and Linux only.
+
+Despite its name, ``vectorfit-py-cu12`` is built with CUDA 13 (driver 580
+or newer). On an older driver its GPU fit crashes the process, so
+:func:`gpu_unavailable_reason` checks the binary against the driver before
+VectorFit touches the GPU. Its CPU fit runs on an older driver, too.
 
 The vectorial model describes the PSF from the optics (numerical aperture,
 emission wavelength, refractive indices) rather than from a measured
 calibration, and recovers ``z`` directly for the 3D model.
 
 The spots are fitted in batches; within a batch VectorFit parallelizes over
-its own threads, so no worker processes are started here. Only the CPU
-build of VectorFit is supported so far.
+its own threads, or over the GPU, so no worker processes are started here.
 
 :author: Thomas Bonte, 2026
 """
 
 from __future__ import annotations
 
+import functools
 import importlib
+import importlib.machinery
 import importlib.util
+import re
+from pathlib import Path
 from typing import Callable, Literal
 
 import numpy as np
@@ -31,6 +41,17 @@ from . import lib
 #: Whether the VectorFit bindings can be imported. Probed without importing
 #: them, so that importing Picasso stays fast without VectorFit.
 VECTORFIT_AVAILABLE = importlib.util.find_spec("vectorfit_py") is not None
+
+#: VectorFit device of the GPU fit: Fourier transforms in single precision,
+#: as VectorFit's authors recommend ("gpu" would run them in double
+#: precision).
+GPU_DEVICE = "gpu-lowaccuracy"
+
+#: Oldest NVIDIA driver of each CUDA major version (its minor versions run
+#: on it). Despite its name, vectorfit-py-cu12 (0.3.0 to 0.3.2) is built
+#: with CUDA 13.1, so it needs driver 580: on a CUDA 12 driver it cannot
+#: use the GPU, see :func:`gpu_unavailable_reason`.
+_MIN_DRIVER = {11: 450, 12: 525, 13: 580}
 
 #: Default convergence schedule, Vermeer's. Tighter than the defaults of
 #: ``vectorfit_py.FitParams`` (1e-6, 30), which stop small boxes after a
@@ -106,6 +127,37 @@ _PRIMARY_ABERRATIONS = {
     "Spherical aberration": 12,
 }
 
+#: The aberrations that make ``z`` measurable. Without aberrations the PSF
+#: is the same above and below focus, so the sign of ``z`` is undetermined
+#: and a spot in focus carries no information on ``z``. Astigmatism (the
+#: cylindrical lens) and spherical aberration make the two sides differ;
+#: coma does not, as it mirrors the spot sideways only.
+Z_ABERRATIONS = (
+    "Vertical astigmatism",
+    "Oblique astigmatism",
+    "Spherical aberration",
+)
+
+
+def z_measurable(parameters: dict | None) -> bool:
+    """Whether the aberrations of VectorFit ``parameters`` make ``z``
+    measurable, i.e. whether one of ``Z_ABERRATIONS`` is non-zero. The 3D
+    model needs this; :func:`parameters_with_defaults` rejects it
+    otherwise.
+
+    Parameters
+    ----------
+    parameters : dict or None
+        VectorFit settings, see ``DEFAULT_PARAMETERS``; missing ones take
+        their defaults.
+
+    Returns
+    -------
+    measurable : bool
+    """
+    parameters = DEFAULT_PARAMETERS | dict(parameters or {})
+    return any(parameters[key] != 0 for key in Z_ABERRATIONS)
+
 
 #: Metadata key ``localize.fit`` records the number of discarded outliers
 #: under.
@@ -144,6 +196,132 @@ def _import_vectorfit():
         ) from e
 
 
+def _extension_path() -> Path | None:
+    """The compiled ``vectorfit_py._vectorfit_py`` module on disk, found
+    without importing ``vectorfit_py``."""
+    spec = importlib.util.find_spec("vectorfit_py")
+    if spec is None or not spec.submodule_search_locations:
+        return None
+    for directory in spec.submodule_search_locations:
+        for suffix in importlib.machinery.EXTENSION_SUFFIXES:
+            path = Path(directory, "_vectorfit_py" + suffix)
+            if path.is_file():
+                return path
+    return None
+
+
+def _cuda_build(path: Path) -> tuple[tuple[int, int], int] | None:
+    """The CUDA toolkit version a VectorFit binary was compiled with and
+    the lowest GPU architecture (compute capability as an int, e.g. 80)
+    it carries code for; None for a CPU build.
+
+    The two builds install the same module, ``vectorfit_py`` (with both
+    installed, the one installed last wins) and neither reports which one
+    it is, so the binary itself is read. NVCC leaves its version and the
+    PTX targets in it as plain text."""
+    data = path.read_bytes()
+    version = re.search(rb"Cuda compilation tools, release (\d+)\.(\d+)", data)
+    if version is None:
+        return None
+    archs = [int(_) for _ in re.findall(rb"\.target sm_(\d+)", data)]
+    return (int(version[1]), int(version[2])), min(archs, default=0)
+
+
+def _cuda_device() -> tuple[tuple[int, int], tuple[int, int]] | None:
+    """The CUDA version the NVIDIA driver supports and the compute
+    capability of the first GPU, the one VectorFit fits on, as
+    ``numba.cuda`` reports them; None without a CUDA GPU."""
+    from numba import cuda
+
+    if not cuda.is_available():
+        return None
+    return (
+        tuple(cuda.cudadrv.driver.driver.get_version()),
+        tuple(cuda.list_devices()[0].compute_capability),
+    )
+
+
+@functools.cache
+def gpu_unavailable_reason() -> str | None:
+    """Why VectorFit cannot fit on the GPU, or None if it can.
+
+    The checks run before VectorFit touches the GPU because its GPU build,
+    on a driver too old for the CUDA it was compiled with, crashes the
+    process rather than raising an error. They need the GPU build of
+    VectorFit (``vectorfit-py-cu12``), a CUDA GPU of at least the lowest
+    architecture it was compiled for, and a driver supporting its CUDA
+    version. Cached: the answer cannot change while Picasso runs.
+
+    Returns
+    -------
+    reason : str or None
+        A sentence for the user, or None if the GPU fit can run.
+    """
+    if not VECTORFIT_AVAILABLE:
+        return (
+            "VectorFit is not installed; install its GPU build with "
+            "'pip install vectorfit-py-cu12'."
+        )
+    path = _extension_path()
+    build = None if path is None else _cuda_build(path)
+    if build is None:
+        # The builds share their files, so uninstalling one deletes the
+        # other's too: both go before the GPU build is installed.
+        return (
+            "The installed VectorFit is its CPU build. Install the GPU "
+            "build instead with 'pip uninstall vectorfit-py "
+            "vectorfit-py-cu12' followed by 'pip install vectorfit-py-cu12'."
+        )
+    (cuda_major, _), min_arch = build
+    try:
+        device = _cuda_device()
+    except Exception as e:  # a broken CUDA setup
+        return f"The CUDA GPU could not be queried ({e})."
+    if device is None:
+        return "No CUDA-capable GPU was found."
+    driver, capability = device
+    if driver[0] < cuda_major:
+        # the package name says CUDA 12, which misleads users of CUDA 12
+        misnamed = (
+            f" Despite its name, vectorfit-py-cu12 is built with CUDA "
+            f"{cuda_major}."
+            if cuda_major != 12
+            else ""
+        )
+        newer = (
+            f"to version {_MIN_DRIVER[cuda_major]} or newer"
+            if cuda_major in _MIN_DRIVER
+            else f"to one supporting CUDA {cuda_major}"
+        )
+        return (
+            f"The GPU build of VectorFit needs CUDA {cuda_major}, but the "
+            f"NVIDIA driver supports CUDA {driver[0]}.{driver[1]} only."
+            f"{misnamed} Update the NVIDIA driver {newer}, or fit on the "
+            "CPU."
+        )
+    if 10 * capability[0] + capability[1] < min_arch:
+        return (
+            "The GPU build of VectorFit needs a GPU of compute capability "
+            f"{min_arch // 10}.{min_arch % 10} or higher, but the GPU has "
+            f"{capability[0]}.{capability[1]}."
+        )
+    return None
+
+
+def gpu_available() -> bool:
+    """Whether VectorFit can fit on the GPU, see
+    :func:`gpu_unavailable_reason`."""
+    return gpu_unavailable_reason() is None
+
+
+def check_gpu() -> None:
+    """Raise a RuntimeError if VectorFit cannot fit on the GPU, saying
+    why (see :func:`gpu_unavailable_reason`)."""
+    reason = gpu_unavailable_reason()
+    if reason is not None:
+        raise RuntimeError(f"VectorFit cannot fit on the GPU. {reason}")
+
+
 def parameters_with_defaults(parameters: dict | None = None) -> dict:
     """Validate VectorFit settings and fill in the missing ones.
 
@@ -160,7 +338,9 @@ def parameters_with_defaults(parameters: dict | None = None) -> dict:
     Raises
     ------
     ValueError
-        If a key is unknown or a value is out of range.
+        If a key is unknown or a value is out of range, or if the 3D model
+        is asked for without an aberration that makes ``z`` measurable
+        (see :func:`z_measurable`).
     """
     parameters = dict(parameters or {})
     unknown = set(parameters) - set(DEFAULT_PARAMETERS)
@@ -184,7 +364,35 @@ def parameters_with_defaults(parameters: dict | None = None) -> dict:
     ):
         if not parameters[key] > 0:
             raise ValueError(f"VectorFit '{key}' must be positive.")
+    if parameters["Fit model"] == "3D" and not z_measurable(parameters):
+        raise ValueError(
+            "The VectorFit 3D model needs the vertical or oblique "
+            "astigmatism or the spherical aberration: without them the PSF "
+            "is the same above and below focus, so z cannot be measured. "
+            "Set the aberration of your setup (e.g. the astigmatism of the "
+            "cylindrical lens), or fit in 2D."
+        )
     return parameters
+
+
+def supported_boxes_text() -> str:
+    """The fit box sizes VectorFit supports (``N_PUPIL``) as ranges of
+    odd sizes, e.g. "odd sizes from 5 to 21, or 27"."""
+    runs = []
+    for box in sorted(N_PUPIL):
+        if runs and box == runs[-1][-1] + 2:
+            runs[-1].append(box)
+        else:
+            runs.append([box])
+    parts = [
+        (
+            f"from {run[0]} to {run[-1]}"
+            if len(run) > 2
+            else " or ".join(str(_) for _ in run)
+        )
+        for run in runs
+    ]
+    return "odd sizes " + ", or ".join(parts)
 
 
 def check_box(box: int) -> None:
@@ -192,7 +400,7 @@ def check_box(box: int) -> None:
     if box not in N_PUPIL:
         raise ValueError(
             f"VectorFit does not support a box size of {box}. Supported "
-            f"box sizes are {', '.join(str(_) for _ in N_PUPIL)}."
+            f"box sizes are {supported_boxes_text()}."
         )
 
 
@@ -332,16 +540,18 @@ def _fit_batch(
     gammas: np.ndarray,
     orders: np.ndarray,
     result: dict,
+    device: str = "cpu",
 ) -> None:
-    """Fit one batch of spots with VectorFit and append its results to the
-    lists in ``result`` (see :func:`fit_spots`)."""
+    """Fit one batch of spots with VectorFit on ``device`` ("cpu" or
+    ``GPU_DEVICE``) and append its results to the lists in ``result`` (see
+    :func:`fit_spots`)."""
     # float64 to match VectorFit's (MATLAB) double precision
     batch = np.maximum(np.asarray(spots, np.float64), 1e-3)
     fitter = vectorfit_py.Fitter(
         vectorfit_py.doubleArray4D(np.ascontiguousarray(batch[..., None])),
         vectorfit_py.doubleArray2D(np.ascontiguousarray(roi_yx)),
         params,
-        "cpu",
+        device,
     )
     fitter.update_zernike_coefficients(
         vectorfit_py.doubleArray1D(gammas),
@@ -371,10 +581,11 @@ def fit_spots(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     n_threads: int | None = None,
+    use_gpu: bool = False,
     progress: lib.Progress | Literal["console"] | None = None,
     abort_callback: Callable[[], bool] | None = None,
 ) -> dict | None:
-    """Fit a vectorial PSF model to each spot.
+    """Fit a vectorial PSF model to each spot, on the CPU or the GPU.
 
     Parameters
     ----------
@@ -394,6 +605,9 @@ def fit_spots(
         Convergence schedule; None picks ``TOLERANCE`` / ``MAX_ITERATIONS``.
     n_threads : int or None, optional
         CPU threads to fit on; None uses ``lib.n_workers()``.
+    use_gpu : bool, optional
+        Fit on the GPU (device ``GPU_DEVICE``), which needs the GPU build
+        of VectorFit, see :func:`gpu_unavailable_reason`. Default False.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``. Reports one phase,
         "Fitting spots", over the spots, advanced after every batch.
@@ -415,7 +629,14 @@ def fit_spots(
         - "iterations": iterations of each fit;
         - "log_likelihood": Poisson log-likelihood at the optimum;
         - "outlier": whether VectorFit flags the spot as an outlier.
+
+    Raises
+    ------
+    RuntimeError
+        If ``use_gpu`` but VectorFit cannot fit on the GPU.
     """
+    if use_gpu:
+        check_gpu()
     vectorfit_py = _import_vectorfit()
     parameters = parameters_with_defaults(parameters)
     box = spots.shape[-1]
@@ -456,6 +677,7 @@ def fit_spots(
                 gammas,
                 orders,
                 result,
+                GPU_DEVICE if use_gpu else "cpu",
             )
             progress.set_value(stop)
         progress.set_value(n_spots)

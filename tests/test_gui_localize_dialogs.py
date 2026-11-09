@@ -29,6 +29,7 @@ import pandas as pd
 import pytest
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+import picasso
 from picasso import io, lib, render, transforms
 from picasso.gui import localize as gui_localize
 from tests.test_gui_localize_calibration import (
@@ -3572,6 +3573,147 @@ class TestRememberedSettings:
             gui_localize.ASTIGMATISM_FIT_MODEL
         )
         window.close()
+
+    def test_the_vectorfit_settings_come_back(self, qt_offscreen):
+        first = gui_localize.Window()
+        first.parameters_dialog.set_vectorfit_parameters(
+            {
+                "Fit model": "3D",
+                "Wavelength": 600.0,
+                "Spherical aberration": -20.0,
+                "Discard outliers": False,
+            }
+        )
+        expected = first.parameters_dialog.vectorfit_parameters()
+        first.close()
+        assert io.load_user_settings()["Localize"]["vectorfit"] == expected
+
+        second = gui_localize.Window()
+        assert second.parameters_dialog.vectorfit_parameters() == expected
+        second.close()
+
+    @pytest.mark.parametrize(
+        "stored",
+        [
+            {"Wavelength": "red"},
+            {"Fit model": "4D"},
+            {"NA": -1.0},
+            "not a dict",
+        ],
+    )
+    def test_invalid_vectorfit_settings_keep_the_defaults(
+        self, qt_offscreen, stored
+    ):
+        settings = io.load_user_settings()
+        settings["Localize"]["vectorfit"] = stored
+        io.save_user_settings(settings)
+        window = gui_localize.Window()
+        assert window.parameters_dialog.vectorfit_parameters() == (
+            gui_localize.vectorfit.DEFAULT_PARAMETERS
+        )
+        window.close()
+
+    def test_unknown_vectorfit_settings_are_ignored(self, qt_offscreen):
+        settings = io.load_user_settings()
+        settings["Localize"]["vectorfit"] = {
+            "Wavelength": 600.0,
+            "Removed setting": 1,
+        }
+        io.save_user_settings(settings)
+        window = gui_localize.Window()
+        parameters = window.parameters_dialog.vectorfit_parameters()
+        assert parameters["Wavelength"] == 600.0
+        assert "Removed setting" not in parameters
+        window.close()
+
+
+class TestSeparateVectorFit:
+    """Fitted separately, each channel / split-FOV region is fitted with
+    its own VectorFit settings."""
+
+    REGIONS = [[[0, 0], [32, 16]], [[0, 16], [32, 32]]]
+
+    @pytest.fixture(autouse=True)
+    def _installed(self, monkeypatch):
+        # before the window is built: it offers VectorFit only if installed
+        monkeypatch.setattr(
+            gui_localize.vectorfit, "VECTORFIT_AVAILABLE", True
+        )
+
+    @pytest.fixture
+    def fake_fit_worker(self, monkeypatch):
+        _FakeFitWorker.built = []
+        monkeypatch.setattr(gui_localize, "FitWorker", _FakeFitWorker)
+        return _FakeFitWorker.built
+
+    @staticmethod
+    def _select_vectorfit(dialog):
+        dialog.fit_model.setCurrentText("Vectorial PSF (VectorFit)")
+        dialog.gpu_checkbox.setChecked(False)
+        dialog.fit_mode_combo.setCurrentText(gui_localize.FIT_MODE_SEPARATE)
+
+    def test_each_channel_has_its_own_settings(
+        self, window, tmp_path, fake_fit_worker
+    ):
+        _identified(window, tmp_path)
+        dialog = window.parameters_dialog
+        for channel, wavelength in enumerate((600.0, 700.0)):
+            window.set_current_channel(channel)
+            self._select_vectorfit(dialog)
+            dialog.set_vectorfit_parameters({"Wavelength": wavelength})
+        window.set_current_channel(0)
+        window.fit()
+        window._fit_run_next()
+        # the fake workers never finish, so the batch would never end
+        window._multi_fit = None
+        assert [
+            w.kwargs["vectorfit_parameters"]["Wavelength"]
+            for w in fake_fit_worker
+        ] == [600.0, 700.0]
+
+    def test_each_region_has_its_own_settings(self, loaded, fake_fit_worker):
+        dialog = loaded.parameters_dialog
+        dialog.split_fov_checkbox.setChecked(True)
+        loaded.view.rois = [list(map(list, r)) for r in self.REGIONS]
+        self._select_vectorfit(dialog)
+        loaded.identifications = _ids([(8, 10), (24, 10)])
+        loaded.ready_for_fit = True
+        for region, wavelength in enumerate((600.0, 700.0)):
+            loaded.view.selected_roi = region
+            loaded.sync_region_fit_params()
+            dialog.set_vectorfit_parameters({"Wavelength": wavelength})
+        loaded.fit()
+        loaded._fit_run_next()
+        # the fake workers never finish, so the batch would never end
+        loaded._multi_fit = None
+        assert [
+            w.kwargs["vectorfit_parameters"]["Wavelength"]
+            for w in fake_fit_worker
+        ] == [600.0, 700.0]
+
+
+class TestFitModelHelp:
+    @pytest.mark.parametrize("model", list(gui_localize.FIT_MODELS))
+    def test_every_model_links_to_an_existing_section(self, model):
+        page, _, section = gui_localize.FIT_MODELS[model]["docs"].partition(
+            "#"
+        )
+        source = os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "docs",
+            page.replace(".html", ".rst"),
+        )
+        with open(source, encoding="utf-8") as file:
+            assert f".. _{section}:" in file.read()
+
+    def test_the_button_follows_the_selected_model(self, window):
+        dialog = window.parameters_dialog
+        for model in gui_localize.offered_fit_models():
+            dialog.fit_model.setCurrentText(model)
+            assert dialog.fit_model_help.help_url == picasso.docs_url(
+                gui_localize.FIT_MODELS[model]["docs"]
+            )
 
 
 def _drag_event(kind, path):

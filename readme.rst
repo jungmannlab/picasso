@@ -134,6 +134,9 @@ Many of the functionalities provided by Picasso were published independently, pl
    * - Multi-emitter fitting (3D-DAOSTORM). A port of storm-analysis, see the `storm-analysis license <https://github.com/jungmannlab/picasso/blob/master/LICENSES/storm-analysis-LICENSE.txt>`__; its spline PSF is implemented from the paper
      - Babcock et al., Opt. Nanoscopy, 2012; Babcock & Zhuang, Sci. Rep., 2017
      - `10.1186/2192-2853-1-6 <https://doi.org/10.1186/2192-2853-1-6>`__, `10.1038/s41598-017-00622-w <https://doi.org/10.1038/s41598-017-00622-w>`__
+   * - Vectorial PSF fitting with the VectorFit library
+     - Droste et al., Optica, 2025
+     - `10.1364/OPTICA.560721 <https://doi.org/10.1364/OPTICA.560721>`__
    * - sCMOS pixel-dependent noise modeling
      - Huang et al., Nat. Methods, 2013
      - `10.1038/nmeth.2488 <https://doi.org/10.1038/nmeth.2488>`__

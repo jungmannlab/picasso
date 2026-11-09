@@ -16,6 +16,8 @@ Together, the two steps are referred to here as **localization** (``Analyze`` > 
 
 To get started, open a movie and follow the steps in :ref:`localize-identification`.
 
+.. _localize-psf-models:
+
 PSF models
 ----------
 
@@ -217,7 +219,7 @@ Topics
 
       Multi-emitter fitting of dense frames: when to use it, its settings and its output.
 
-   .. grid-item-card:: :octicon:`telescope;1.5em;sd-mr-1` Vectorial PSF (VectorFit)
+   .. grid-item-card:: :octicon:`north-star;1.5em;sd-mr-1` Vectorial PSF (VectorFit)
       :link: localize/vectorfit
       :link-type: doc
 
