@@ -3,7 +3,7 @@
 GPU Fitting
 ===========
 
-Picasso can run all of its Gaussian and cubic-spline fitting on a CUDA-capable NVIDIA GPU. The fitting kernels are written in Python and compiled for the GPU at run time by numba. This needs Picasso installed with CUDA support, see :doc:`/getting-started/installation`.
+Picasso can run its single-emitter Gaussian and cubic-spline fitting on a CUDA-capable NVIDIA GPU. Multi-emitter fitting runs on the CPU, only the z fit of an astigmatic calibration can use the GPU, see :doc:`multi-emitter`. The fitting kernels are written in Python and compiled for the GPU at run time by numba. This needs Picasso installed with CUDA support, see :doc:`/getting-started/installation`.
 
 The fitting algorithm — the Levenberg-Marquardt driver, its damping rule, its estimators and its PSF models — is a port of `Gpufit <https://github.com/gpufit/Gpufit>`_ (Przybylski et al., *Scientific Reports* **7**, 15722, 2017).
 

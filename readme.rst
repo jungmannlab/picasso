@@ -113,7 +113,7 @@ Many of the functionalities provided by Picasso were published independently, pl
    * - Feature
      - Citation
      - DOI
-   * - Fitting. All methods are ports of Gpufit, see the `Gpufit license <https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpufit-LICENSE.txt>`__
+   * - Single-emitter Gaussian and experimental-PSF (cubic-spline) fitting. A port of Gpufit, see the `Gpufit license <https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpufit-LICENSE.txt>`__
      - Przybylski et al., Sci. Rep., 2017
      - `10.1038/s41598-017-15313-9 <https://doi.org/10.1038/s41598-017-15313-9>`__
    * - Experimental PSF (cubic-spline) fitting. The calibration follows the coefficient scheme of Gpuspline, see the `Gpuspline license <https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpuspline-LICENSE.txt>`__

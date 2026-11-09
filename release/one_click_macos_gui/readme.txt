@@ -74,7 +74,7 @@ Nature Protocols (2017). 12: 1198-1228 DOI: 10.1038/nprot.2017.024 (https://doi.
 
 Many of the functionalities provided by Picasso were published independently, please also cite the respective publications:
 
-- Fitting. All methods are ports of Gpufit, see the Gpufit license (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpufit-LICENSE.txt): Przybylski et al., Sci. Rep., 2017; 10.1038/s41598-017-15313-9 (https://doi.org/10.1038/s41598-017-15313-9)
+- Single-emitter Gaussian and experimental-PSF (cubic-spline) fitting. A port of Gpufit, see the Gpufit license (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpufit-LICENSE.txt): Przybylski et al., Sci. Rep., 2017; 10.1038/s41598-017-15313-9 (https://doi.org/10.1038/s41598-017-15313-9)
 - Experimental PSF (cubic-spline) fitting. The calibration follows the coefficient scheme of Gpuspline, see the Gpuspline license (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpuspline-LICENSE.txt): Li et al., Nat. Methods, 2018; Babcock & Zhuang, Sci. Rep., 2017; 10.1038/nmeth.4661 (https://doi.org/10.1038/nmeth.4661), 10.1038/s41598-017-00622-w (https://doi.org/10.1038/s41598-017-00622-w)
 - Multichannel (global) experimental-PSF fitting (globLoc): Li et al., Nat. Commun., 2022; 10.1038/s41467-022-30719-4 (https://doi.org/10.1038/s41467-022-30719-4)
 - 3D fitting via astigmatism: Huang et al., Science, 2008; 10.1126/science.1153529 (https://www.science.org/doi/10.1126/science.1153529)
