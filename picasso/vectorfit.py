@@ -375,12 +375,32 @@ def parameters_with_defaults(parameters: dict | None = None) -> dict:
     return parameters
 
 
+def supported_boxes_text() -> str:
+    """The fit box sizes VectorFit supports (``N_PUPIL``) as ranges of
+    odd sizes, e.g. "odd sizes from 5 to 21, or 27"."""
+    runs = []
+    for box in sorted(N_PUPIL):
+        if runs and box == runs[-1][-1] + 2:
+            runs[-1].append(box)
+        else:
+            runs.append([box])
+    parts = [
+        (
+            f"from {run[0]} to {run[-1]}"
+            if len(run) > 2
+            else " or ".join(str(_) for _ in run)
+        )
+        for run in runs
+    ]
+    return "odd sizes " + ", or ".join(parts)
+
+
 def check_box(box: int) -> None:
     """Raise a ValueError if VectorFit does not support the fit ``box``."""
     if box not in N_PUPIL:
         raise ValueError(
             f"VectorFit does not support a box size of {box}. Supported "
-            f"box sizes are {', '.join(str(_) for _ in N_PUPIL)}."
+            f"box sizes are {supported_boxes_text()}."
         )
 
 

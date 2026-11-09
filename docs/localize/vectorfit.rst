@@ -5,7 +5,7 @@ Vectorial PSF (VectorFit)
 
 Picasso can fit a **vectorial PSF model** to every spot with the VectorFit library. The model is computed from the optics of the microscope, so no bead calibration is needed, and its 3D variant recovers ``z`` directly.
 
-VectorFit is described in `Droste et al., Optica <https://doi.org/10.1364/OPTICA.560721>`_. That work also estimates field-dependent aberrations from the single-molecule data itself; Picasso does not do this yet and only uses the aberrations you set (see below).
+VectorFit is described in `Droste et al., Optica, 2024 <https://doi.org/10.1364/OPTICA.560721>`_. That work also estimates field-dependent aberrations from the single-molecule data itself; Picasso does not do this yet and only uses the aberrations you set (see below).
 
 Theory
 ------
@@ -76,7 +76,7 @@ Both builds install the same Python module, so install **one or the other**: wit
 
 Besides the driver, the GPU build needs a GPU of compute capability 8.0 (Ampere, e.g. RTX 30xx or A-series) or higher. Picasso checks both before fitting, because VectorFit's GPU build crashes Picasso, rather than reporting an error, when they are not met. If a requirement is not met, **Use GPU** stays disabled and its tooltip says why. If you have no such GPU or driver, install the CPU build (``picassosr[vectorfit]``) instead: it is a much smaller download (2–3 MB instead of 15–21 MB). The GPU fit runs VectorFit's ``gpu-lowaccuracy`` mode, with the Fourier transforms of the PSF model in single precision, as VectorFit's authors recommend. The device is saved in the metadata as ``VectorFit device``.
 
-1. Identify the spots as usual (see :ref:`localize-identification`). The **box size** must be one VectorFit supports: 5, 7, 9, 11, 13, 15, 17, 19, 21 or 27.
+1. Identify the spots as usual (see :ref:`localize-identification`). The **box size** must be one VectorFit supports: an odd size from 5 to 21, or 27.
 2. Make sure the **pixel size** of the camera is right: the model is computed in nm.
 3. Open ``Analyze`` > ``Parameters`` and set **Model** to ``Vectorial PSF (VectorFit)``; it is listed only where VectorFit is installed. There is no optimizer to choose. Tick **Use GPU** to fit on the GPU (see above).
 4. In the **Vectorial PSF (VectorFit)** box, set the **Fit model** (``2D`` or ``3D``), the emission wavelength, the NA and the three refractive indices of your setup.

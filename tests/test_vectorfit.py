@@ -211,6 +211,13 @@ class TestParameters:
         with pytest.raises(ValueError, match=key):
             vectorfit.parameters_with_defaults({key: 0})
 
+    def test_supported_boxes_are_given_as_a_range(self, monkeypatch):
+        assert vectorfit.supported_boxes_text() == (
+            "odd sizes from 5 to 21, or 27"
+        )
+        monkeypatch.setattr(vectorfit, "N_PUPIL", {5: 0, 7: 0, 11: 0})
+        assert vectorfit.supported_boxes_text() == "odd sizes 5 or 7, or 11"
+
     @pytest.mark.parametrize("box", list(vectorfit.N_PUPIL))
     def test_supported_boxes_pass(self, box):
         vectorfit.check_box(box)

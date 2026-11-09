@@ -29,6 +29,7 @@ import pandas as pd
 import pytest
 from PyQt6 import QtCore, QtGui, QtWidgets
 
+import picasso
 from picasso import io, lib, render, transforms
 from picasso.gui import localize as gui_localize
 from tests.test_gui_localize_calibration import (
@@ -3689,6 +3690,30 @@ class TestSeparateVectorFit:
             w.kwargs["vectorfit_parameters"]["Wavelength"]
             for w in fake_fit_worker
         ] == [600.0, 700.0]
+
+
+class TestFitModelHelp:
+    @pytest.mark.parametrize("model", list(gui_localize.FIT_MODELS))
+    def test_every_model_links_to_an_existing_section(self, model):
+        page, _, section = gui_localize.FIT_MODELS[model]["docs"].partition(
+            "#"
+        )
+        source = os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "docs",
+            page.replace(".html", ".rst"),
+        )
+        with open(source, encoding="utf-8") as file:
+            assert f".. _{section}:" in file.read()
+
+    def test_the_button_follows_the_selected_model(self, window):
+        dialog = window.parameters_dialog
+        for model in gui_localize.offered_fit_models():
+            dialog.fit_model.setCurrentText(model)
+            assert dialog.fit_model_help.help_url == picasso.docs_url(
+                gui_localize.FIT_MODELS[model]["docs"]
+            )
 
 
 def _drag_event(kind, path):

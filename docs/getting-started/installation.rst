@@ -136,8 +136,9 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
            - The same on an NVIDIA GPU, with VectorFit's GPU build. Install
              it instead of ``[vectorfit]``, not alongside it. **Needs CUDA
              13 (NVIDIA driver 580 or newer), not CUDA 12**, and an Ampere
-             or newer GPU, see :ref:`localize-vectorfit-gpu`. Windows and
-             Linux only.
+             or newer GPU, see
+             :ref:`VectorFit on the GPU <localize-vectorfit-gpu>`. Windows
+             and Linux only.
          * - ``pip install picassosr[gpu]``
            - GPU-accelerated (``numba.cuda``) code for CUDA toolkit 12.x.
              Needs an NVIDIA (CUDA-capable) GPU.

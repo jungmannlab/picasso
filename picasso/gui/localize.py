@@ -389,17 +389,21 @@ MULTI_EMITTER_PSF_MODELS = {
 # Fitting models offered in the GUI, decoupled from the optimizer. Each
 # model maps its optimizer labels to the internal ``fit`` codes;
 # models without an optimizer (e.g. averaging) declare a fixed ``code``
-# and ``optimizers=None``. Add a new fitting algorithm by adding an
-# entry here.
+# and ``optimizers=None``. ``docs`` is the page (and anchor) of the
+# documentation that describes the model, opened by the help button next
+# to the Model combo box. Add a new fitting algorithm by adding an entry
+# here.
 FIT_MODELS = {
     "2D elliptical Gaussian": {
         "optimizers": {"Least squares": "gausslq", "MLE": "gaussmle"},
+        "docs": "localize.html#localize-psf-models",
     },
     "2D rotated elliptical Gaussian": {
         "optimizers": {
             "Least squares": "gausslq-rotated",
             "MLE": "gaussmle-rotated",
         },
+        "docs": "localize.html#localize-psf-models",
     },
     "2D spherical Gaussian": {
         "optimizers": {
@@ -407,12 +411,14 @@ FIT_MODELS = {
             "MLE": "gaussmle-spherical",
         },
         "needs_channel_registration": True,
+        "docs": "localize.html#localize-psf-models",
     },
     # not a ``localize.fit`` method: it finds the spots itself and runs
     # ``localize.localize_multi_emitter`` (see Window.fit)
     MULTI_EMITTER_MODEL: {
         "optimizers": {"MLE": MULTI_EMITTER_CODE},
         "multi_emitter": True,
+        "docs": "localize/multi-emitter.html#localize-multi-emitter",
     },
     "Experimental PSF (cubic spline)": {
         "optimizers": {
@@ -420,15 +426,18 @@ FIT_MODELS = {
             "MLE": "spline-mle",
         },
         "needs_spline_calibration": True,
+        "docs": "localize/spline.html#localize-spline",
     },
     "Average of ROI": {
         "optimizers": None,
         "code": "avg",
+        "docs": "localize.html#localize-psf-models",
     },
     "Vectorial PSF (VectorFit)": {
         "optimizers": None,
         "code": "vectorfit",
         "needs_vectorfit_parameters": True,
+        "docs": "localize/vectorfit.html#localize-vectorfit",
     },
 }
 
@@ -5026,6 +5035,7 @@ class ParametersDialog(lib.Dialog):
     WAVELET_URL = docs_url("localize/identification.html#localize-wavelet")
     ROI_URL = docs_url("localize/identification.html#localize-rois")
     SPLINE_URL = docs_url("localize/spline.html#localize-spline")
+    VECTORFIT_URL = docs_url("localize/vectorfit.html#localize-vectorfit")
     MULTI_EMITTER_URL = docs_url(
         "localize/multi-emitter.html#localize-multi-emitter"
     )
@@ -5780,7 +5790,16 @@ class ParametersDialog(lib.Dialog):
         self.fit_model.addItems(offered_fit_models())
         self.fit_model.setCurrentIndex(0)
         self.fit_model.setToolTip(model_tooltip())
-        fit_grid.addWidget(self.fit_model, 1, 1)
+        # the help button opens the selected model's documentation
+        self.fit_model_help = lib.HelpButton(self.fit_model_docs_url())
+        self.fit_model_help.setToolTip(
+            "Open the documentation of the selected model"
+        )
+        model_row = QtWidgets.QHBoxLayout()
+        model_row.setContentsMargins(0, 0, 0, 0)
+        model_row.addWidget(self.fit_model, 1)
+        model_row.addWidget(self.fit_model_help)
+        fit_grid.addLayout(model_row, 1, 1)
 
         self.optimizer_label = QtWidgets.QLabel("Optimizer:")
         self.optimizer_label.setToolTip(OPTIMIZER_TOOLTIP)
@@ -6165,7 +6184,7 @@ class ParametersDialog(lib.Dialog):
         # Vectorial PSF (VectorFit). The PSF is computed from the optics
         # set here, so no calibration is loaded; the pixel size comes from
         # the camera settings above.
-        self.vectorfit_groupbox = vectorfit_groupbox = QtWidgets.QGroupBox(
+        self.vectorfit_groupbox = vectorfit_groupbox = lib.CollapsibleGroupBox(
             "Vectorial PSF (VectorFit)"
         )
         vectorfit_groupbox.setToolTip(
@@ -6174,10 +6193,10 @@ class ParametersDialog(lib.Dialog):
             "optional VectorFit library (pip install picassosr[vectorfit],\n"
             "or vectorfit-py-cu12 for the GPU, which needs CUDA 13 despite\n"
             "its name). Supported box sizes are\n"
-            f"{', '.join(str(_) for _ in vectorfit.N_PUPIL)}."
+            f"{vectorfit.supported_boxes_text()}."
         )
         vbox.addWidget(vectorfit_groupbox)
-        vectorfit_grid = QtWidgets.QGridLayout(vectorfit_groupbox)
+        vectorfit_grid = QtWidgets.QGridLayout(vectorfit_groupbox.content)
         defaults = vectorfit.DEFAULT_PARAMETERS
         self.vectorfit_model = QtWidgets.QComboBox()
         self.vectorfit_model.addItems(["2D", "3D"])
@@ -6250,6 +6269,7 @@ class ParametersDialog(lib.Dialog):
             )
         vectorfit_grid.addWidget(QtWidgets.QLabel("Fit model:"), 0, 0)
         vectorfit_grid.addWidget(self.vectorfit_model, 0, 1)
+        vectorfit_grid.addWidget(lib.HelpButton(self.VECTORFIT_URL), 0, 2)
         self.vectorfit_spinboxes = {}
         for row, (key, text, (low, high), decimals, step, tip) in enumerate(
             spinboxes, start=1
@@ -6632,6 +6652,8 @@ class ParametersDialog(lib.Dialog):
         """Show the optimizers and settings of the selected fit model,
         see ``on_fit_model_changed``."""
         model = self.fit_model.currentText()
+        if getattr(self, "fit_model_help", None) is not None:
+            self.fit_model_help.help_url = self.fit_model_docs_url()
         if FIT_MODELS[model].get("multi_emitter") and not getattr(
             ParametersDialog, "_multi_emitter_compiling", False
         ):
@@ -6656,6 +6678,11 @@ class ParametersDialog(lib.Dialog):
             self.fit_optimizer.blockSignals(False)
             self.on_fit_optimizer_changed()
         self._update_calib_group_visibility()
+
+    def fit_model_docs_url(self) -> str:
+        """The documentation of the selected fit model, see the ``docs``
+        entries of ``FIT_MODELS``."""
+        return docs_url(FIT_MODELS[self.fit_model.currentText()]["docs"])
 
     def _has_multichannel_data(self) -> bool:
         """Whether the window holds several channels: several movies
@@ -14952,7 +14979,7 @@ class Window(QtWidgets.QMainWindow):
                     "VectorFit",
                     f"VectorFit does not support a box size of {box}. "
                     "Supported box sizes are "
-                    f"{', '.join(str(_) for _ in vectorfit.N_PUPIL)}.",
+                    f"{vectorfit.supported_boxes_text()}.",
                 )
                 return None
             vectorfit_parameters = dialog.vectorfit_parameters()
