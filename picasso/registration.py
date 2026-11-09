@@ -149,8 +149,9 @@ def fit_registration(
     however flexible ``model`` is: the early pairing is deliberately loose
     and contains cross-molecule mismatches, and a flexible model bends to
     accommodate them, locking in the wrong correspondence field on the next
-    pass - a failure an affine cannot have. Only the final iteration, which pairs at the tightest
-    radius, fits the model the user asked for.
+    pass - a failure an affine cannot have. Only the final iteration,
+    which pairs at the tightest radius, fits the model the user asked
+    for.
 
     Parameters
     ----------

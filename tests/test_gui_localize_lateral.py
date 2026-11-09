@@ -94,6 +94,7 @@ def _dialog(z_calibration=None, spline_calibration=None):
     for name in (
         "update_affine_calib",
         "_calibration_lateral_transforms",
+        "_warn_skipped_lateral_transforms",
         "_set_affine_state",
     ):
         setattr(

@@ -126,8 +126,9 @@ MIN_JUMPS_PER_PARAMETER = 5
 # --------------------------------------------------------------------
 
 
+# one pass over the frames with the active track ends, kept in one piece
 @numba.njit(cache=True, nogil=True)
-def _link_tracks_kernel(
+def _link_tracks_kernel(  # noqa: C901
     frame: lib.IntArray1D,
     x: lib.FloatArray1D,
     y: lib.FloatArray1D,
@@ -970,26 +971,9 @@ def fit_jump_distances(
     s0 = 4 * (sigma / 1000) ** 2
     r_max_2 = None if r_max is None else (r_max / 1000) ** 2
     log_d_bounds = (np.log(D_BOUNDS[0]), np.log(D_BOUNDS[1]))
-
-    def clip_D(D):
-        return np.clip(D, D_BOUNDS[0] * 10, D_BOUNDS[1] / 10)
-
-    # starting points: the apparent D of all jumps, spread over
-    # populations, and the D of equal-count chunks of the sorted jumps
-    D_all = clip_D((r2.mean() / 4 - s0 / 4) / dt)
-    starts = []
-    if k == 1:
-        starts.append(np.log([D_all]))
-    else:
-        chunks = np.array_split(np.sort(r2), k)
-        starts.append(
-            np.log(clip_D([(c.mean() / 4 - s0 / 4) / dt for c in chunks]))
-        )
-        for low, high in ((-1, 1), (-2, 0.5)):
-            starts.append(np.log(clip_D(D_all * np.logspace(low, high, k))))
     bounds = [log_d_bounds] * k + [(-20.0, 20.0)] * (k - 1)
     best = None
-    for log_D in starts:
+    for log_D in _jd_starts(r2, k, dt, s0):
         theta0 = np.concatenate((log_D, np.zeros(k - 1)))
         result = minimize(
             _jd_objective,
@@ -1020,6 +1004,31 @@ def fit_jump_distances(
         "success": bool(best.success),
         "message": str(best.message),
     }
+
+
+def _jd_starts(
+    r2: lib.FloatArray1D,
+    k: int,
+    dt: float,
+    s0: float,
+) -> list[lib.FloatArray1D]:
+    """For ``fit_jump_distances``: the starting points (log D of the
+    ``k`` populations) of the fits of the squared jump distances
+    ``r2`` (um^2): the apparent D of all jumps, spread over the
+    populations, and the D of equal-count chunks of the sorted
+    jumps."""
+
+    def clip_D(D):
+        return np.clip(D, D_BOUNDS[0] * 10, D_BOUNDS[1] / 10)
+
+    D_all = clip_D((r2.mean() / 4 - s0 / 4) / dt)
+    if k == 1:
+        return [np.log([D_all])]
+    chunks = np.array_split(np.sort(r2), k)
+    starts = [np.log(clip_D([(c.mean() / 4 - s0 / 4) / dt for c in chunks]))]
+    for low, high in ((-1, 1), (-2, 0.5)):
+        starts.append(np.log(clip_D(D_all * np.logspace(low, high, k))))
+    return starts
 
 
 def jump_distance_pdf(
@@ -1241,14 +1250,7 @@ def analyze_tracks(
         If the localizations are not tracked or a parameter is invalid.
     """
     frame_time = _frame_time(frame_time, info)
-    if int(n_fit) != n_fit or n_fit < 2:
-        raise ValueError(
-            f"n_fit must be an integer of at least 2, got {n_fit}."
-        )
-    if n_fit > max_lag:
-        raise ValueError(
-            f"n_fit ({n_fit}) cannot be larger than max_lag ({max_lag})."
-        )
+    _check_n_fit(n_fit, max_lag)
     if np.isscalar(n_populations):
         n_populations = [n_populations]
     n_populations = [int(k) for k in n_populations]
@@ -1274,21 +1276,9 @@ def analyze_tracks(
         progress.set_value(1)
         jumps = jump_distances(locs)
         progress.set_value(2)
-        lib.start_phase(
-            progress, "Fitting jump distances", len(n_populations), unit="fit"
+        jd_fits, jd_errors = _fit_jump_populations(
+            jumps, frame_time, n_populations, sigma_nm, r_max, progress
         )
-        jd_fits = {}
-        jd_errors = {}
-        for i, k in enumerate(n_populations):
-            try:
-                jd_fits[k] = fit_jump_distances(
-                    jumps, frame_time, k, sigma=sigma_nm, r_max=r_max
-                )
-            except ValueError as error:
-                jd_fits[k] = None
-                jd_errors[k] = str(error)
-            progress.set_value(i + 1)
-        progress.set_value(len(n_populations))
 
     parameters = {
         FRAME_TIME_KEY: frame_time,
@@ -1311,6 +1301,49 @@ def analyze_tracks(
         "n_tracks": len(table),
         "n_locs": len(locs),
     }
+
+
+def _check_n_fit(n_fit: int, max_lag: int) -> None:
+    """For ``analyze_tracks``: raise ValueError if ``n_fit`` is not an
+    integer from 2 to ``max_lag``."""
+    if int(n_fit) != n_fit or n_fit < 2:
+        raise ValueError(
+            f"n_fit must be an integer of at least 2, got {n_fit}."
+        )
+    if n_fit > max_lag:
+        raise ValueError(
+            f"n_fit ({n_fit}) cannot be larger than max_lag ({max_lag})."
+        )
+
+
+def _fit_jump_populations(
+    jumps: lib.FloatArray1D,
+    frame_time: float,
+    n_populations: list[int],
+    sigma: float,
+    r_max: float | None,
+    progress: lib.Progress,
+) -> tuple[dict, dict]:
+    """For ``analyze_tracks``: the jump distance fits for each number of
+    populations (None if it could not be fitted) and the reasons of
+    those that could not be fitted. Reports "Fitting jump distances"
+    over the numbers of populations."""
+    lib.start_phase(
+        progress, "Fitting jump distances", len(n_populations), unit="fit"
+    )
+    jd_fits = {}
+    jd_errors = {}
+    for i, k in enumerate(n_populations):
+        try:
+            jd_fits[k] = fit_jump_distances(
+                jumps, frame_time, k, sigma=sigma, r_max=r_max
+            )
+        except ValueError as error:
+            jd_fits[k] = None
+            jd_errors[k] = str(error)
+        progress.set_value(i + 1)
+    progress.set_value(len(n_populations))
+    return jd_fits, jd_errors
 
 
 def _plain(value: Any) -> Any:

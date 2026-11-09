@@ -1174,6 +1174,197 @@ def _initial_positions(
     return chosen, orientation_scores, initial
 
 
+def _checked_tiles(
+    tiles: list[int] | np.ndarray | None,
+    stage: np.ndarray | None,
+    n_files: int,
+) -> tuple[np.ndarray, int]:
+    """For ``stitch``: the tile index of each file (grouped by the
+    stage positions ``stage`` if ``tiles`` is None) and the number of
+    tiles; raise ValueError for invalid tiles or fewer than two."""
+    if tiles is None:
+        tiles = group_tiles(stage, n_files)
+    tiles = np.asarray(tiles, dtype=int)
+    n_tiles = int(tiles.max()) + 1 if n_files else 0
+    if len(tiles) != n_files or set(tiles) != set(range(n_tiles)):
+        raise ValueError(
+            "tiles must give each file a tile index, numbered 0, 1, ..."
+        )
+    if n_tiles < 2:
+        raise ValueError("Stitching requires at least two tiles.")
+    return tiles, n_tiles
+
+
+def _checked_targets(
+    targets: list[Hashable] | None,
+    tiles: np.ndarray,
+    n_tiles: int,
+) -> list[Hashable]:
+    """For ``stitch``: the target of each file (by default, the order
+    of the file within its tile); raise ValueError if a tile holds a
+    target more than once."""
+    n_files = len(tiles)
+    if targets is None:
+        targets = [int(np.sum(tiles[:i] == tiles[i])) for i in range(n_files)]
+    if len(targets) != n_files:
+        raise ValueError("targets must give one label per file.")
+    for t in range(n_tiles):
+        labels = [targets[i] for i in np.flatnonzero(tiles == t)]
+        if len(set(labels)) < len(labels):
+            raise ValueError(
+                f"Tile {t} contains the same target more than once."
+            )
+    return targets
+
+
+def _alignment_files(
+    use_for_alignment: list[bool] | np.ndarray | None,
+    tiles: np.ndarray,
+    n_tiles: int,
+) -> np.ndarray:
+    """For ``stitch``: whether each file is used for the alignment; all
+    files of a tile without any are used, since every tile needs points
+    to match."""
+    n_files = len(tiles)
+    use = (
+        np.ones(n_files, dtype=bool)
+        if use_for_alignment is None
+        else np.asarray(use_for_alignment, dtype=bool)
+    )
+    if len(use) != n_files:
+        raise ValueError("use_for_alignment must have one value per file.")
+    for t in range(n_tiles):
+        if not use[tiles == t].any():
+            use[tiles == t] = True
+    return use
+
+
+def _alignment_precision(
+    locs: list[pd.DataFrame], use: np.ndarray
+) -> float | None:
+    """For ``stitch``: the median localization precision (nm) of the
+    files used for the alignment, None without one."""
+    if not all("lpx" in locs[i].columns for i in np.flatnonzero(use)):
+        return None
+    lp = np.concatenate(
+        [locs[i]["lpx"].to_numpy() for i in np.flatnonzero(use)]
+    )
+    lp = lp[np.isfinite(lp)]
+    if not len(lp):
+        return None
+    return float(np.median(lp))
+
+
+def _non_negative_positions(
+    final: np.ndarray,
+    locs: list[pd.DataFrame],
+    tiles: np.ndarray,
+) -> np.ndarray:
+    """For ``stitch``: the tile positions ``final`` (nm) shifted so that
+    every coordinate is non-negative, including localizations slightly
+    outside their tile's field of view."""
+    lowest = final.min(axis=0)
+    for i, locs_ in enumerate(locs):
+        if len(locs_):
+            lowest = np.minimum(
+                lowest,
+                locs_[["x", "y"]].to_numpy().min(axis=0) + final[tiles[i]],
+            )
+    return final - lowest
+
+
+def _merge_target(
+    files: list[int],
+    locs: list[pd.DataFrame],
+    infos: list[list[dict]],
+    tiles: np.ndarray,
+    final: np.ndarray,
+    z_offsets: np.ndarray,
+    sizes: np.ndarray,
+    *,
+    offset_frames: bool,
+    cut_seams: bool,
+) -> tuple[pd.DataFrame, list[int], int]:
+    """For ``stitch``: the localizations of the ``files`` of one target
+    (in acquisition order) moved to their tile positions and merged,
+    the frame offset of each file and the number of frames of the
+    merged dataset."""
+    parts = []
+    frame_offsets = []
+    frame_offset = 0
+    group_offset = 0
+    for i in files:
+        t = tiles[i]
+        part = locs[i].copy()
+        x = part["x"].to_numpy(dtype=float) + final[t, 0]
+        y = part["y"].to_numpy(dtype=float) + final[t, 1]
+        part["x"] = x.astype(np.float32)
+        part["y"] = y.astype(np.float32)
+        if "z" in part.columns and z_offsets[t]:
+            part["z"] = (part["z"].to_numpy() + z_offsets[t]).astype(
+                part["z"].dtype
+            )
+        if offset_frames:
+            part["frame"] = part["frame"] + frame_offset
+        frame_offsets.append(frame_offset if offset_frames else 0)
+        frame_offset += _n_frames(locs[i], infos[i])
+        if "group" in part.columns and len(part):
+            part["group"] = part["group"] + group_offset
+            group_offset = int(part["group"].max()) + 1
+        if cut_seams:
+            part = part[seam_mask(x, y, t, final, sizes)]
+        parts.append(part)
+    merged = lib.concat_locs(parts)
+    merged = merged.sort_values("frame", kind="stable").reset_index(drop=True)
+    n_frames = (
+        frame_offset
+        if offset_frames
+        else max(_n_frames(locs[i], infos[i]) for i in files)
+    )
+    return merged, frame_offsets, n_frames
+
+
+def _stitched_info(
+    first_info: list[dict],
+    merged: pd.DataFrame,
+    positions: np.ndarray,
+    sizes: np.ndarray,
+    n_frames: int,
+) -> tuple[list[dict], int, int]:
+    """For ``stitch``: the metadata of a stitched target from that of
+    its first file, with the stitched canvas (from the tile
+    ``positions`` and ``sizes`` in nm and the localizations ``merged``)
+    and ``n_frames``, and the width and height of the canvas in camera
+    pixels of the first file."""
+    info = copy.deepcopy(first_info)
+    # the canvas and drift of the first tile do not describe the
+    # stitched dataset
+    for inf in info:
+        for key in (
+            *lib.CANVAS_OFFSET_KEYS,
+            *lib.CAMERA_SIZE_KEYS,
+            "Last driftfile",
+        ):
+            inf.pop(key, None)
+    pixelsize = float(
+        lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    )
+    extent = (positions + sizes).max(axis=0) / pixelsize
+    if len(merged):
+        # strictly x < Width is kept by lib.ensure_sanity, hence + 1
+        top = merged[["x", "y"]].to_numpy().max(axis=0) / pixelsize
+        extent = np.maximum(extent, np.floor(top) + 1)
+    width, height = (int(np.ceil(value)) for value in extent)
+    for inf in info:
+        if "Width" in inf:
+            inf["Width"] = width
+        if "Height" in inf:
+            inf["Height"] = height
+        if "Frames" in inf:
+            inf["Frames"] = n_frames
+    return info, width, height
+
+
 def stitch(
     locs: list[pd.DataFrame],
     infos: list[list[dict]],
@@ -1302,36 +1493,9 @@ def stitch(
         stage = np.asarray(stage_um, dtype=float).reshape(-1, 2)
         if len(stage) != n_files:
             raise ValueError("stage_um must give one position per file.")
-    if tiles is None:
-        tiles = group_tiles(stage, n_files)
-    tiles = np.asarray(tiles, dtype=int)
-    n_tiles = int(tiles.max()) + 1 if n_files else 0
-    if len(tiles) != n_files or set(tiles) != set(range(n_tiles)):
-        raise ValueError(
-            "tiles must give each file a tile index, numbered 0, 1, ..."
-        )
-    if n_tiles < 2:
-        raise ValueError("Stitching requires at least two tiles.")
-    if targets is None:
-        targets = [int(np.sum(tiles[:i] == tiles[i])) for i in range(n_files)]
-    if len(targets) != n_files:
-        raise ValueError("targets must give one label per file.")
-    for t in range(n_tiles):
-        labels = [targets[i] for i in np.flatnonzero(tiles == t)]
-        if len(set(labels)) < len(labels):
-            raise ValueError(
-                f"Tile {t} contains the same target more than once."
-            )
-    use = (
-        np.ones(n_files, dtype=bool)
-        if use_for_alignment is None
-        else np.asarray(use_for_alignment, dtype=bool)
-    )
-    if len(use) != n_files:
-        raise ValueError("use_for_alignment must have one value per file.")
-    for t in range(n_tiles):
-        if not use[tiles == t].any():
-            use[tiles == t] = True  # every tile needs points to match
+    tiles, n_tiles = _checked_tiles(tiles, stage, n_files)
+    targets = _checked_targets(targets, tiles, n_tiles)
+    use = _alignment_files(use_for_alignment, tiles, n_tiles)
 
     sizes = np.zeros((n_tiles, 2))
     for i, info in enumerate(infos):
@@ -1340,14 +1504,7 @@ def stitch(
         "z" in locs[i].columns for i in np.flatnonzero(use)
     )
     points = _tile_points(locs, tiles, use, n_tiles, with_z)
-    precision = None
-    if all("lpx" in locs[i].columns for i in np.flatnonzero(use)):
-        lp = np.concatenate(
-            [locs[i]["lpx"].to_numpy() for i in np.flatnonzero(use)]
-        )
-        lp = lp[np.isfinite(lp)]
-        if len(lp):
-            precision = float(np.median(lp))
+    precision = _alignment_precision(locs, use)
 
     with lib.tracked_progress(progress, "Stitching", unit="pair") as progress:
         chosen, orientation_scores, initial = _initial_positions(
@@ -1380,16 +1537,7 @@ def stitch(
             + ", ".join(map(str, unconnected))
             + "."
         )
-    # make every coordinate non-negative, including localizations
-    # slightly outside their tile's field of view
-    lowest = final.min(axis=0)
-    for i, locs_ in enumerate(locs):
-        if len(locs_):
-            lowest = np.minimum(
-                lowest,
-                locs_[["x", "y"]].to_numpy().min(axis=0) + final[tiles[i]],
-            )
-    final = final - lowest
+    final = _non_negative_positions(final, locs, tiles)
 
     # acquisition order, for the frame offsets
     times = [_acquisition_time(info) for info in infos]
@@ -1398,74 +1546,43 @@ def stitch(
     else:
         order = list(range(n_files))
 
+    # the settings of the alignment, shared by all targets
+    settings = {
+        "Files used for alignment": [
+            paths[i] if paths is not None else int(i)
+            for i in np.flatnonzero(use)
+        ],
+        "Initial positions": ("stage" if positions is None else "given"),
+        "Stage orientation": chosen,
+        "Search radius (um)": float(search_radius_um),
+        "Min. overlap (um)": float(min_overlap_um),
+        "Max. residual (nm)": float(max_residual),
+        "Aligned in z": bool(with_z),
+        "Overlaps cut at the seams": bool(cut_seams),
+    }
     target_labels = list(dict.fromkeys(targets))
     stitched_locs = []
     stitched_infos = []
     for label in target_labels:
         files = [i for i in order if targets[i] == label]
-        parts = []
-        frame_offsets = []
-        frame_offset = 0
-        group_offset = 0
-        for i in files:
-            t = tiles[i]
-            part = locs[i].copy()
-            x = part["x"].to_numpy(dtype=float) + final[t, 0]
-            y = part["y"].to_numpy(dtype=float) + final[t, 1]
-            part["x"] = x.astype(np.float32)
-            part["y"] = y.astype(np.float32)
-            if "z" in part.columns and z_offsets[t]:
-                part["z"] = (part["z"].to_numpy() + z_offsets[t]).astype(
-                    part["z"].dtype
-                )
-            if offset_frames:
-                part["frame"] = part["frame"] + frame_offset
-            frame_offsets.append(frame_offset if offset_frames else 0)
-            frame_offset += _n_frames(locs[i], infos[i])
-            if "group" in part.columns and len(part):
-                part["group"] = part["group"] + group_offset
-                group_offset = int(part["group"].max()) + 1
-            if cut_seams:
-                part = part[seam_mask(x, y, t, final, sizes)]
-            parts.append(part)
-        merged = lib.concat_locs(parts)
-        merged = merged.sort_values("frame", kind="stable").reset_index(
-            drop=True
+        merged, frame_offsets, n_frames = _merge_target(
+            files,
+            locs,
+            infos,
+            tiles,
+            final,
+            z_offsets,
+            sizes,
+            offset_frames=offset_frames,
+            cut_seams=cut_seams,
         )
-
-        info = copy.deepcopy(infos[files[0]])
-        # the canvas and drift of the first tile do not describe the
-        # stitched dataset
-        for inf in info:
-            for key in (
-                *lib.CANVAS_OFFSET_KEYS,
-                *lib.CAMERA_SIZE_KEYS,
-                "Last driftfile",
-            ):
-                inf.pop(key, None)
-        # the stitched canvas in camera pixels of the first tile
-        pixelsize = float(
-            lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+        info, width, height = _stitched_info(
+            infos[files[0]],
+            merged,
+            final[tiles[files]],
+            sizes[tiles[files]],
+            n_frames,
         )
-        extent = (final[tiles[files]] + sizes[tiles[files]]).max(axis=0)
-        extent = extent / pixelsize
-        if len(merged):
-            # strictly x < Width is kept by lib.ensure_sanity, hence + 1
-            top = merged[["x", "y"]].to_numpy().max(axis=0) / pixelsize
-            extent = np.maximum(extent, np.floor(top) + 1)
-        width, height = (int(np.ceil(value)) for value in extent)
-        frames = (
-            frame_offset
-            if offset_frames
-            else max(_n_frames(locs[i], infos[i]) for i in files)
-        )
-        for inf in info:
-            if "Width" in inf:
-                inf["Width"] = width
-            if "Height" in inf:
-                inf["Height"] = height
-            if "Frames" in inf:
-                inf["Frames"] = frames
         entry = {
             **lib.step_info("Stitch"),
             "Target": _yaml_label(label),
@@ -1477,20 +1594,10 @@ def stitch(
             "Tile offsets z (nm)": [float(z_offsets[tiles[i]]) for i in files],
             "Frame offsets": [int(offset) for offset in frame_offsets],
             "Frames offset": bool(offset_frames),
-            "Files used for alignment": [
-                paths[i] if paths is not None else int(i)
-                for i in np.flatnonzero(use)
-            ],
-            "Initial positions": ("stage" if positions is None else "given"),
-            "Stage orientation": chosen,
-            "Search radius (um)": float(search_radius_um),
-            "Min. overlap (um)": float(min_overlap_um),
-            "Max. residual (nm)": float(max_residual),
-            "Aligned in z": bool(with_z),
-            "Overlaps cut at the seams": bool(cut_seams),
+            **settings,
             "Width": width,
             "Height": height,
-            "Frames": int(frames),
+            "Frames": int(n_frames),
         }
         info.append(entry)
         stitched_locs.append(merged)

@@ -3324,8 +3324,9 @@ def frc_rois(
     Places up to ``n_rois`` non-overlapping square ROIs in ``viewport``
     (see ``lib.select_frc_rois``) and runs ``frc`` in each of them. The
     image bin size is set by the NeNA of all ``locs``, computed once
-    (unless given as ``lp``), so that the ROIs are comparable. The spread of the resolutions
-    across ROIs estimates the uncertainty of the FRC resolution.
+    (unless given as ``lp``), so that the ROIs are comparable. The
+    spread of the resolutions across ROIs estimates the uncertainty of
+    the FRC resolution.
 
     Parameters
     ----------
@@ -3743,6 +3744,60 @@ def decorrelation(
     (y_min, x_min), (y_max, x_max) = viewport
     if not (x_max > x_min and y_max > y_min):
         raise ValueError(f"The viewport {viewport} is empty.")
+    used, skipped = _decorrelation_pixel_sizes(
+        viewport, pixel_size, max_image_size
+    )
+    x = locs["x"].to_numpy(dtype=np.float64)
+    y = locs["y"].to_numpy(dtype=np.float64)
+    in_view = (x >= x_min) & (x < x_max) & (y >= y_min) & (y < y_max)
+    x, y = x[in_view], y[in_view]
+
+    results = []
+    phase = "Calculating decorrelation"
+    with lib.tracked_progress(progress, phase, unit="pixel size") as progress:
+        lib.start_phase(progress, phase, len(used), unit="pixel size")
+        progress.set_value(0)
+        for i, (size, shape) in enumerate(used):
+            image = _render_bilinear(x, y, x_min, y_min, size, shape)
+            results.append(
+                imageprocess.decorrelation(
+                    image,
+                    pixel_size=size,
+                    n_radii=n_radii,
+                    n_filters=n_filters,
+                )
+            )
+            progress.set_value(i + 1)
+        progress.set_value(len(used))
+    resolutions = np.array([result["resolution"] for result in results])
+    resolution, best_size, pixel_size_limited = _best_decorrelation_size(
+        resolutions, used
+    )
+    area = _sample_area(x, y)
+    return {
+        "resolution": resolution,
+        "pixel_size": best_size,
+        "pixel_size_limited": pixel_size_limited,
+        "pixel_sizes": np.array([size for size, _ in used]),
+        "resolutions": resolutions,
+        "results": results,
+        "skipped_pixel_sizes": np.array(skipped),
+        "n_locs": int(len(x)),
+        "sample_area": area,
+        "density": len(x) / (area / 1e6) if area > 0 else np.nan,
+        "viewport": viewport,
+    }
+
+
+def _decorrelation_pixel_sizes(
+    viewport: tuple[tuple[float, float], tuple[float, float]],
+    pixel_size: float | list[float] | None,
+    max_image_size: int | None,
+) -> tuple[list[tuple[float, tuple[int, int]]], list[float]]:
+    """For ``decorrelation``: the pixel sizes (nm) rendered, each with
+    the shape of its image of ``viewport``, and those skipped for the
+    size of their image."""
+    (y_min, x_min), (y_max, x_max) = viewport
     if pixel_size is None:
         sizes = np.array(DECORRELATION_PIXEL_SIZES)
     else:
@@ -3771,54 +3826,28 @@ def decorrelation(
             f"{y_max - y_min:,.0f} nm; choose other pixel sizes or "
             "viewport."
         )
-    x = locs["x"].to_numpy(dtype=np.float64)
-    y = locs["y"].to_numpy(dtype=np.float64)
-    in_view = (x >= x_min) & (x < x_max) & (y >= y_min) & (y < y_max)
-    x, y = x[in_view], y[in_view]
+    return used, skipped
 
-    results = []
-    phase = "Calculating decorrelation"
-    with lib.tracked_progress(progress, phase, unit="pixel size") as progress:
-        lib.start_phase(progress, phase, len(used), unit="pixel size")
-        progress.set_value(0)
-        for i, (size, shape) in enumerate(used):
-            image = _render_bilinear(x, y, x_min, y_min, size, shape)
-            results.append(
-                imageprocess.decorrelation(
-                    image,
-                    pixel_size=size,
-                    n_radii=n_radii,
-                    n_filters=n_filters,
-                )
-            )
-            progress.set_value(i + 1)
-        progress.set_value(len(used))
-    resolutions = np.array([result["resolution"] for result in results])
-    resolution = best_size = np.nan
-    pixel_size_limited = False
-    if np.isfinite(resolutions).any():
-        best = int(np.nanargmin(resolutions))
-        resolution = float(resolutions[best])
-        best_size = used[best][0]
-        # no smaller pixels were rendered to show the resolution beyond
-        pixel_size_limited = bool(
-            best_size == min(size for size, _ in used)
-            and resolution < DECORRELATION_LIMIT_FACTOR * best_size
-        )
-    area = _sample_area(x, y)
-    return {
-        "resolution": resolution,
-        "pixel_size": best_size,
-        "pixel_size_limited": pixel_size_limited,
-        "pixel_sizes": np.array([size for size, _ in used]),
-        "resolutions": resolutions,
-        "results": results,
-        "skipped_pixel_sizes": np.array(skipped),
-        "n_locs": int(len(x)),
-        "sample_area": area,
-        "density": len(x) / (area / 1e6) if area > 0 else np.nan,
-        "viewport": viewport,
-    }
+
+def _best_decorrelation_size(
+    resolutions: lib.FloatArray1D,
+    used: list[tuple[float, tuple[int, int]]],
+) -> tuple[float, float, bool]:
+    """For ``decorrelation``: the smallest of the ``resolutions`` (nm)
+    at the pixel sizes ``used``, its pixel size and whether it may be
+    limited by the pixel size (NaN, NaN, False without a
+    resolution)."""
+    if not np.isfinite(resolutions).any():
+        return np.nan, np.nan, False
+    best = int(np.nanargmin(resolutions))
+    resolution = float(resolutions[best])
+    best_size = used[best][0]
+    # no smaller pixels were rendered to show the resolution beyond
+    pixel_size_limited = bool(
+        best_size == min(size for size, _ in used)
+        and resolution < DECORRELATION_LIMIT_FACTOR * best_size
+    )
+    return resolution, best_size, pixel_size_limited
 
 
 def _best_decorrelation(result: dict) -> dict:
@@ -8285,39 +8314,11 @@ def _pick_region(
     elif pick_shape == "Brush":
         if not len(pick):
             return None
-        segments = []
-        for stroke in pick:
-            width, X, Y = lib.brush_stroke_arrays(stroke)
-            radius = width / 2
-            if len(X) == 1:  # a dot
-                segments.append([X[0], Y[0], X[0], Y[0], radius])
-            for k in range(len(X) - 1):
-                segments.append([X[k], Y[k], X[k + 1], Y[k + 1], radius])
-        x_min, x_max, y_min, y_max = lib._brush_bounds(pick)
-        region = _Region(
-            _REGION_BRUSH,
-            np.zeros(3),
-            np.array(segments, dtype=np.float64),
-            (x_min, x_max, y_min, y_max),
-            lib.pick_areas([pick], "Brush", None)[0],
-        )
+        region = _brush_region(pick)
     else:
-        if pick_shape == "Square":
-            x, y = pick
-            half = pick_size / 2
-            X = [x - half, x + half, x + half, x - half]
-            Y = [y - half, y - half, y + half, y + half]
-        elif pick_shape == "Rectangle":
-            (xs, ys), (xe, ye) = pick
-            X, Y = lib.get_pick_rectangle_corners(xs, ys, xe, ye, pick_size)
-        elif pick_shape == "Box":
-            X, Y = lib.get_pick_box_corners(pick)
-        elif pick_shape == "Polygon":
-            X, Y = lib.get_pick_polygon_corners(pick)
-            if X is None:  # not closed
-                return None
-        else:
-            raise ValueError(f"Unknown pick shape: {pick_shape}")
+        X, Y = _pick_corners(pick, pick_shape, pick_size)
+        if X is None:  # not closed
+            return None
         region = _polygon_region(
             np.asarray(X, dtype=np.float64),
             np.asarray(Y, dtype=np.float64),
@@ -8325,6 +8326,50 @@ def _pick_region(
     if not region.area > 0:
         return None
     return region
+
+
+def _brush_region(pick: list) -> _Region:
+    """For ``_pick_region``: geometry of a brush pick with strokes."""
+    segments = []
+    for stroke in pick:
+        width, X, Y = lib.brush_stroke_arrays(stroke)
+        radius = width / 2
+        if len(X) == 1:  # a dot
+            segments.append([X[0], Y[0], X[0], Y[0], radius])
+        for k in range(len(X) - 1):
+            segments.append([X[k], Y[k], X[k + 1], Y[k + 1], radius])
+    x_min, x_max, y_min, y_max = lib._brush_bounds(pick)
+    return _Region(
+        _REGION_BRUSH,
+        np.zeros(3),
+        np.array(segments, dtype=np.float64),
+        (x_min, x_max, y_min, y_max),
+        lib.pick_areas([pick], "Brush", None)[0],
+    )
+
+
+def _pick_corners(
+    pick: tuple,
+    pick_shape: str,
+    pick_size: float | None,
+) -> tuple:
+    """For ``_pick_region``: the corners ``(X, Y)`` (nm) of a square,
+    rectangle, box or polygon pick, ``(None, None)`` for a polygon
+    that is not closed."""
+    if pick_shape == "Square":
+        x, y = pick
+        half = pick_size / 2
+        X = [x - half, x + half, x + half, x - half]
+        Y = [y - half, y - half, y + half, y + half]
+        return X, Y
+    if pick_shape == "Rectangle":
+        (xs, ys), (xe, ye) = pick
+        return lib.get_pick_rectangle_corners(xs, ys, xe, ye, pick_size)
+    if pick_shape == "Box":
+        return lib.get_pick_box_corners(pick)
+    if pick_shape == "Polygon":
+        return lib.get_pick_polygon_corners(pick)
+    raise ValueError(f"Unknown pick shape: {pick_shape}")
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
@@ -8446,65 +8491,9 @@ def _circle_fraction_inside(
     and polygons (from the intersections of the circle with the edges),
     sampled at ``_BRUSH_ANGLES`` angles for brush picks."""
     if kind == _REGION_CIRCLE:
-        R = circle[2]
-        s = np.sqrt((px - circle[0]) ** 2 + (py - circle[1]) ** 2)
-        if d <= R - s:
-            return 1.0
-        if s == 0.0:
-            return 0.0
-        c = (s * s + d * d - R * R) / (2 * s * d)
-        if c >= 1.0:
-            return 0.0
-        if c <= -1.0:
-            return 1.0
-        return np.arccos(c) / np.pi
+        return _circle_fraction_in_circle(px, py, d, circle)
     if kind == _REGION_POLYGON:
-        n_edges = segments.shape[0]
-        angles = np.empty(2 * n_edges)
-        m = 0
-        for k in range(n_edges):
-            fx = segments[k, 0] - px
-            fy = segments[k, 1] - py
-            ex = segments[k, 2] - segments[k, 0]
-            ey = segments[k, 3] - segments[k, 1]
-            a = ex * ex + ey * ey
-            if a == 0.0:
-                continue
-            b = 2 * (fx * ex + fy * ey)
-            c = fx * fx + fy * fy - d * d
-            disc = b * b - 4 * a * c
-            if disc < 0.0:
-                continue
-            sq = np.sqrt(disc)
-            t = (-b - sq) / (2 * a)
-            if 0.0 <= t <= 1.0:
-                angles[m] = np.arctan2(fy + t * ey, fx + t * ex)
-                m += 1
-            t = (-b + sq) / (2 * a)
-            if sq > 0.0 and 0.0 <= t <= 1.0:
-                angles[m] = np.arctan2(fy + t * ey, fx + t * ex)
-                m += 1
-        if m == 0:  # entirely inside or outside
-            if _in_region(px + d, py, kind, circle, segments):
-                return 1.0
-            return 0.0
-        angles = np.sort(angles[:m])
-        inside = 0.0
-        for k in range(m):
-            a0 = angles[k]
-            a1 = angles[k + 1] if k + 1 < m else angles[0] + 2 * np.pi
-            if a1 <= a0:
-                continue
-            mid = 0.5 * (a0 + a1)
-            if _in_region(
-                px + d * np.cos(mid),
-                py + d * np.sin(mid),
-                kind,
-                circle,
-                segments,
-            ):
-                inside += a1 - a0
-        return inside / (2 * np.pi)
+        return _circle_fraction_in_polygon(px, py, d, circle, segments)
     n_inside = 0
     for k in range(_BRUSH_ANGLES):
         angle = (k + 0.5) * 2 * np.pi / _BRUSH_ANGLES
@@ -8517,6 +8506,102 @@ def _circle_fraction_inside(
         ):
             n_inside += 1
     return n_inside / _BRUSH_ANGLES
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _circle_fraction_in_circle(
+    px: float,
+    py: float,
+    d: float,
+    circle: lib.FloatArray1D,
+) -> float:
+    """``_circle_fraction_inside`` for a circular region: exact, from
+    the angle at which the two circles intersect."""
+    R = circle[2]
+    s = np.sqrt((px - circle[0]) ** 2 + (py - circle[1]) ** 2)
+    if d <= R - s:
+        return 1.0
+    if s == 0.0 or d == 0.0:  # a point outside (or on) the circle
+        return 0.0
+    c = (s * s + d * d - R * R) / (2 * s * d)
+    if c >= 1.0:
+        return 0.0
+    if c <= -1.0:
+        return 1.0
+    return np.arccos(c) / np.pi
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _circle_edge_angles(
+    px: float,
+    py: float,
+    d: float,
+    segments: lib.FloatArray2D,
+) -> lib.FloatArray1D:
+    """The angles (unsorted) around ``(px, py)`` at which the circle
+    of radius ``d`` crosses the edges ``segments`` of a polygon."""
+    n_edges = segments.shape[0]
+    angles = np.empty(2 * n_edges)
+    m = 0
+    for k in range(n_edges):
+        fx = segments[k, 0] - px
+        fy = segments[k, 1] - py
+        ex = segments[k, 2] - segments[k, 0]
+        ey = segments[k, 3] - segments[k, 1]
+        a = ex * ex + ey * ey
+        if a == 0.0:
+            continue
+        b = 2 * (fx * ex + fy * ey)
+        c = fx * fx + fy * fy - d * d
+        disc = b * b - 4 * a * c
+        if disc < 0.0:
+            continue
+        sq = np.sqrt(disc)
+        t = (-b - sq) / (2 * a)
+        if 0.0 <= t <= 1.0:
+            angles[m] = np.arctan2(fy + t * ey, fx + t * ex)
+            m += 1
+        t = (-b + sq) / (2 * a)
+        if sq > 0.0 and 0.0 <= t <= 1.0:
+            angles[m] = np.arctan2(fy + t * ey, fx + t * ex)
+            m += 1
+    return angles[:m]
+
+
+@numba.jit(nopython=True, nogil=True, cache=True)
+def _circle_fraction_in_polygon(
+    px: float,
+    py: float,
+    d: float,
+    circle: lib.FloatArray1D,
+    segments: lib.FloatArray2D,
+) -> float:
+    """``_circle_fraction_inside`` for a polygon: exact, from the arcs
+    between the intersections of the circle with the edges."""
+    kind = _REGION_POLYGON
+    angles = _circle_edge_angles(px, py, d, segments)
+    m = len(angles)
+    if m == 0:  # entirely inside or outside
+        if _in_region(px + d, py, kind, circle, segments):
+            return 1.0
+        return 0.0
+    angles = np.sort(angles)
+    inside = 0.0
+    for k in range(m):
+        a0 = angles[k]
+        a1 = angles[k + 1] if k + 1 < m else angles[0] + 2 * np.pi
+        if a1 <= a0:
+            continue
+        mid = 0.5 * (a0 + a1)
+        if _in_region(
+            px + d * np.cos(mid),
+            py + d * np.sin(mid),
+            kind,
+            circle,
+            segments,
+        ):
+            inside += a1 - a0
+    return inside / (2 * np.pi)
 
 
 @numba.jit(nopython=True, nogil=True, cache=True)
@@ -8562,8 +8647,9 @@ def _sphere_fraction_inside(
     return total * half / (2 * d)
 
 
+# the innermost loop of ripley_h and rdf, kept in one piece
 @numba.jit(nopython=True, nogil=True, cache=True)
-def _pair_counts(
+def _pair_counts(  # noqa: C901
     x: lib.FloatArray1D,
     y: lib.FloatArray1D,
     z: lib.FloatArray1D,
@@ -8885,6 +8971,8 @@ def _uniform_in_region(
     """``n`` points drawn uniformly at random inside ``region``
     (complete spatial randomness), by rejection from the bounding
     box."""
+    if n <= 0:
+        return np.zeros(0), np.zeros(0)
     x_min, x_max, y_min, y_max = region.bounds
     box_area = (x_max - x_min) * (y_max - y_min)
     acceptance = min(max(region.area / box_area, 1e-3), 1.0)
@@ -9036,29 +9124,17 @@ def _pair_statistic(
     over the regions, then "Simulating envelope" over the
     simulations."""
     cross = partner_locs is not None
-    if r_max <= 0:
-        raise ValueError("r_max must be positive.")
-    if steps < 2:
-        raise ValueError("steps must be at least 2.")
-    if n_simulations < 0:
-        raise ValueError("n_simulations must not be negative.")
-    if cross and cross_null not in ("shift", "labels"):
-        raise ValueError(
-            f"Invalid cross_null: {cross_null!r}; choose 'shift' or "
-            "'labels'."
-        )
-    if use_z:
-        if "z" not in locs.columns or (
-            cross and "z" not in partner_locs.columns
-        ):
-            raise ValueError("3D requires z in the localizations.")
-        if z_range is not None and not z_range[0] < z_range[1]:
-            raise ValueError("z_range must be (z_min, z_max), z_min < z_max.")
-        if not cross and simulated_z not in ("uniform", "observed"):
-            raise ValueError(
-                f"Invalid simulated_z: {simulated_z!r}; choose 'uniform' "
-                "or 'observed'."
-            )
+    _check_pair_statistic_arguments(
+        locs,
+        partner_locs,
+        r_max,
+        steps,
+        n_simulations,
+        use_z,
+        z_range,
+        simulated_z,
+        cross_null,
+    )
     regions = _statistic_regions(
         info, picks, pick_shape, pick_size, cross and cross_null == "shift"
     )
@@ -9094,25 +9170,10 @@ def _pair_statistic(
     for k, region in enumerate(regions):
         if region is not None:
             areas[k] = region.area
-            points = []
-            for x_all, y_all, z_all in coordinates:
-                inside = _locs_in_region(x_all, y_all, region)
-                if use_z and z_range is not None:
-                    z = z_all[inside]
-                    inside = inside[(z >= z_range[0]) & (z <= z_range[1])]
-                points.append(
-                    (
-                        x_all[inside],
-                        y_all[inside],
-                        z_all[inside] if use_z else None,
-                    )
-                )
+            points, z_ranges[k] = _pair_region_points(
+                region, coordinates, use_z, z_range
+            )
             n_locs[:, k] = [len(x) for x, _, _ in points]
-            if use_z and z_range is not None:
-                z_ranges[k] = z_range
-            elif use_z and n_locs[:, k].sum():
-                z = np.concatenate([z for _, _, z in points])
-                z_ranges[k] = z.min(), z.max()
             region_points[k] = points
             # in 3D, the region needs a depth
             has_size = not use_z or z_ranges[k, 1] > z_ranges[k, 0]
@@ -9142,56 +9203,26 @@ def _pair_statistic(
         )
     mean = values[valid].mean(axis=0)
     if use_z:
-        depths = z_ranges[valid, 1] - z_ranges[valid, 0]
-        n_thin = int((3 * r_max > depths).sum())
-        if n_thin:
-            warnings.warn(
-                f"r_max ({r_max:g} nm) exceeds a third of the z range "
-                f"of {n_thin} of {len(valid)} regions (smallest z "
-                f"range: {depths.min():.0f} nm); {statistic.upper()} at "
-                "large radii relies on large edge correction weights and "
-                "is noisy.",
-                UserWarning,
-                stacklevel=3,
-            )
+        _warn_thin_regions(z_ranges[valid], r_max, statistic)
 
     envelope_low = envelope_high = None
     if n_simulations:
-        rng = np.random.default_rng(random_seed)
-        simulated = np.zeros((n_simulations, steps))
-        lib.start_phase(
-            progress,
-            "Simulating envelope",
-            n_simulations,
-            unit="simulation",
+        simulated = _pair_statistic_simulations(
+            [
+                (regions[k], tuple(z_ranges[k]), region_points[k])
+                for k in valid
+            ],
+            statistic,
+            r_max=r_max,
+            steps=steps,
+            edge_correction=edge_correction,
+            n_simulations=n_simulations,
+            simulated_z=simulated_z,
+            cross=cross,
+            cross_null=cross_null,
+            random_seed=random_seed,
+            progress=progress,
         )
-        progress.set_value(0)
-        for s in range(n_simulations):
-            for k in valid:
-                region = regions[k]
-                z_range_k = tuple(z_ranges[k])
-                points = _simulated_points(
-                    region_points[k],
-                    region,
-                    z_range_k,
-                    cross,
-                    cross_null,
-                    simulated_z,
-                    rng,
-                )
-                simulated[s] += _pair_statistic_region(
-                    *points[0],
-                    region,
-                    z_range_k,
-                    r_max,
-                    steps,
-                    edge_correction,
-                    statistic,
-                    points[1] if cross else None,
-                )
-            simulated[s] /= len(valid)
-            progress.set_value(s + 1)
-        progress.set_value(n_simulations)
         envelope_low = simulated.min(axis=0)
         envelope_high = simulated.max(axis=0)
 
@@ -9211,6 +9242,153 @@ def _pair_statistic(
         "simulated_z": simulated_z if use_z and not cross else None,
         "cross_null": cross_null if cross else None,
     }
+
+
+def _check_pair_statistic_arguments(
+    locs: pd.DataFrame,
+    partner_locs: pd.DataFrame | None,
+    r_max: float,
+    steps: int,
+    n_simulations: int,
+    use_z: bool,
+    z_range: tuple[float, float] | None,
+    simulated_z: Literal["uniform", "observed"],
+    cross_null: Literal["shift", "labels"],
+) -> None:
+    """For ``_pair_statistic``: raise ValueError for invalid
+    arguments."""
+    cross = partner_locs is not None
+    if r_max <= 0:
+        raise ValueError("r_max must be positive.")
+    if steps < 2:
+        raise ValueError("steps must be at least 2.")
+    if n_simulations < 0:
+        raise ValueError("n_simulations must not be negative.")
+    if cross and cross_null not in ("shift", "labels"):
+        raise ValueError(
+            f"Invalid cross_null: {cross_null!r}; choose 'shift' or "
+            "'labels'."
+        )
+    if not use_z:
+        return
+    if "z" not in locs.columns or (cross and "z" not in partner_locs.columns):
+        raise ValueError("3D requires z in the localizations.")
+    if z_range is not None and not z_range[0] < z_range[1]:
+        raise ValueError("z_range must be (z_min, z_max), z_min < z_max.")
+    if not cross and simulated_z not in ("uniform", "observed"):
+        raise ValueError(
+            f"Invalid simulated_z: {simulated_z!r}; choose 'uniform' "
+            "or 'observed'."
+        )
+
+
+def _pair_region_points(
+    region: _Region,
+    coordinates: list[tuple],
+    use_z: bool,
+    z_range: tuple[float, float] | None,
+) -> tuple[list[tuple], tuple[float, float]]:
+    """For ``_pair_statistic``: the coordinates ``(x, y, z)`` (z None
+    in 2D) of each channel's localizations in ``region`` (and in 3D in
+    ``z_range``, if given), and the z range of the region: ``z_range``
+    or that of the localizations (NaN in 2D or without
+    localizations)."""
+    points = []
+    for x_all, y_all, z_all in coordinates:
+        inside = _locs_in_region(x_all, y_all, region)
+        if use_z and z_range is not None:
+            z = z_all[inside]
+            inside = inside[(z >= z_range[0]) & (z <= z_range[1])]
+        points.append(
+            (
+                x_all[inside],
+                y_all[inside],
+                z_all[inside] if use_z else None,
+            )
+        )
+    region_z = (np.nan, np.nan)
+    if use_z and z_range is not None:
+        region_z = z_range
+    elif use_z and sum(len(x) for x, _, _ in points):
+        z = np.concatenate([z for _, _, z in points])
+        region_z = z.min(), z.max()
+    return points, region_z
+
+
+def _warn_thin_regions(
+    z_ranges: lib.FloatArray2D,
+    r_max: float,
+    statistic: Literal["h", "g"],
+) -> None:
+    """For ``_pair_statistic`` in 3D: warn if ``r_max`` exceeds a third
+    of the z range of some of the regions (``z_ranges`` of the valid
+    regions)."""
+    depths = z_ranges[:, 1] - z_ranges[:, 0]
+    n_thin = int((3 * r_max > depths).sum())
+    if n_thin:
+        warnings.warn(
+            f"r_max ({r_max:g} nm) exceeds a third of the z range "
+            f"of {n_thin} of {len(z_ranges)} regions (smallest z "
+            f"range: {depths.min():.0f} nm); {statistic.upper()} at "
+            "large radii relies on large edge correction weights and "
+            "is noisy.",
+            UserWarning,
+            stacklevel=4,
+        )
+
+
+def _pair_statistic_simulations(
+    region_points: list[tuple],
+    statistic: Literal["h", "g"],
+    *,
+    r_max: float,
+    steps: int,
+    edge_correction: bool,
+    n_simulations: int,
+    simulated_z: Literal["uniform", "observed"],
+    cross: bool,
+    cross_null: Literal["shift", "labels"],
+    random_seed: int | None,
+    progress: lib.Progress,
+) -> lib.FloatArray2D:
+    """For ``_pair_statistic``: the mean function over the regions of
+    each simulation, given ``(region, z range, points of each
+    channel)`` of the regions with a function. Reports "Simulating
+    envelope" over the simulations."""
+    rng = np.random.default_rng(random_seed)
+    simulated = np.zeros((n_simulations, steps))
+    lib.start_phase(
+        progress,
+        "Simulating envelope",
+        n_simulations,
+        unit="simulation",
+    )
+    progress.set_value(0)
+    for s in range(n_simulations):
+        for region, z_range, points in region_points:
+            points = _simulated_points(
+                points,
+                region,
+                z_range,
+                cross,
+                cross_null,
+                simulated_z,
+                rng,
+            )
+            simulated[s] += _pair_statistic_region(
+                *points[0],
+                region,
+                z_range,
+                r_max,
+                steps,
+                edge_correction,
+                statistic,
+                points[1] if cross else None,
+            )
+        simulated[s] /= len(region_points)
+        progress.set_value(s + 1)
+    progress.set_value(n_simulations)
+    return simulated
 
 
 def _simulated_points(
@@ -10105,37 +10283,18 @@ def nnd_distributions(
     if isinstance(locs, pd.DataFrame):
         locs = [locs]
     n_channels = len(locs)
-    if not n_channels:
-        raise ValueError("At least one channel is required.")
-    if names is None:
-        names = [str(i) for i in range(n_channels)]
-    names = [str(name) for name in names]
-    if len(names) != n_channels:
-        raise ValueError(
-            f"{len(names)} names given for {n_channels} channels."
-        )
-    if r_max <= 0:
-        raise ValueError("r_max must be positive.")
-    if steps < 1:
-        raise ValueError("steps must be at least 1.")
-    if n_simulations < 0:
-        raise ValueError("n_simulations must not be negative.")
+    names = _checked_nnd_arguments(
+        locs,
+        names,
+        r_max,
+        steps,
+        n_simulations,
+        use_z,
+        z_range,
+        simulated_z,
+        cross_null,
+    )
     cross = n_channels > 1
-    if cross and cross_null not in ("shift", "labels"):
-        raise ValueError(
-            f"Invalid cross_null: {cross_null!r}; choose 'shift' or "
-            "'labels'."
-        )
-    if use_z:
-        if not all("z" in locs_.columns for locs_ in locs):
-            raise ValueError("3D requires z in all channels.")
-        if z_range is not None and not z_range[0] < z_range[1]:
-            raise ValueError("z_range must be (z_min, z_max), z_min < z_max.")
-        if simulated_z not in ("uniform", "observed"):
-            raise ValueError(
-                f"Invalid simulated_z: {simulated_z!r}; choose 'uniform' "
-                "or 'observed'."
-            )
     regions = _statistic_regions(
         info, picks, pick_shape, pick_size, cross and cross_null == "shift"
     )
@@ -10181,66 +10340,21 @@ def nnd_distributions(
             )
         with np.errstate(invalid="ignore", divide="ignore"):
             histograms = counts / n_molecules[:, :, None]
-        medians = np.full((n_channels, n_channels), np.nan)
-        for a, b in pairs:
-            if n_molecules[a, b]:
-                medians[a, b] = np.median(np.concatenate(nnds[a, b]))
+        medians = _nnd_medians(nnds, n_molecules)
 
         simulated_mean = envelope_low = envelope_high = None
         simulated_medians = None
         if n_simulations:
-            rng = np.random.default_rng(random_seed)
-            simulated = np.zeros(
-                (n_simulations, n_channels, n_channels, steps)
+            simulated, medians_sim = _nnd_simulations(
+                region_points,
+                n_molecules,
+                edges,
+                n_simulations=n_simulations,
+                simulated_z=simulated_z,
+                cross_null=cross_null,
+                random_seed=random_seed,
+                progress=progress,
             )
-            medians_sim = np.full(
-                (n_simulations, n_channels, n_channels), np.nan
-            )
-            lib.start_phase(
-                progress,
-                "Simulating envelope",
-                n_simulations,
-                unit="simulation",
-            )
-            progress.set_value(0)
-            for s in range(n_simulations):
-                sim_counts = np.zeros((n_channels, n_channels, steps))
-                sim_nnds = {pair: [] for pair in pairs}
-                for region, region_z, points in region_points:
-                    for a, b in pairs:
-                        if a == b:
-                            simulated_points = _simulated_points(
-                                [points[a]],
-                                region,
-                                region_z,
-                                False,
-                                cross_null,
-                                simulated_z,
-                                rng,
-                            )
-                            source = target = simulated_points[0]
-                        else:
-                            source, target = _simulated_points(
-                                [points[a], points[b]],
-                                region,
-                                region_z,
-                                True,
-                                cross_null,
-                                simulated_z,
-                                rng,
-                            )
-                        region_nnds = _first_nnds(source, target, a == b)
-                        sim_nnds[a, b].append(region_nnds)
-                        sim_counts[a, b] += np.histogram(region_nnds, edges)[0]
-                with np.errstate(invalid="ignore", divide="ignore"):
-                    simulated[s] = sim_counts / n_molecules[:, :, None]
-                for a, b in pairs:
-                    if n_molecules[a, b]:
-                        medians_sim[s, a, b] = np.median(
-                            np.concatenate(sim_nnds[a, b])
-                        )
-                progress.set_value(s + 1)
-            progress.set_value(n_simulations)
             simulated_mean = simulated.mean(axis=0)
             envelope_low = simulated.min(axis=0)
             envelope_high = simulated.max(axis=0)
@@ -10262,6 +10376,141 @@ def nnd_distributions(
         "simulated_z": simulated_z if use_z else None,
         "cross_null": cross_null if cross else None,
     }
+
+
+def _checked_nnd_arguments(
+    locs: list[pd.DataFrame],
+    names: list[str] | None,
+    r_max: float,
+    steps: int,
+    n_simulations: int,
+    use_z: bool,
+    z_range: tuple[float, float] | None,
+    simulated_z: Literal["uniform", "observed"],
+    cross_null: Literal["shift", "labels"],
+) -> list[str]:
+    """For ``nnd_distributions``: the names of the channels (``locs``)
+    as strings; raise ValueError for invalid arguments."""
+    n_channels = len(locs)
+    names = _channel_names(names, n_channels)
+    if r_max <= 0:
+        raise ValueError("r_max must be positive.")
+    if steps < 1:
+        raise ValueError("steps must be at least 1.")
+    if n_simulations < 0:
+        raise ValueError("n_simulations must not be negative.")
+    if n_channels > 1 and cross_null not in ("shift", "labels"):
+        raise ValueError(
+            f"Invalid cross_null: {cross_null!r}; choose 'shift' or "
+            "'labels'."
+        )
+    if not use_z:
+        return names
+    if not all("z" in locs_.columns for locs_ in locs):
+        raise ValueError("3D requires z in all channels.")
+    if z_range is not None and not z_range[0] < z_range[1]:
+        raise ValueError("z_range must be (z_min, z_max), z_min < z_max.")
+    if simulated_z not in ("uniform", "observed"):
+        raise ValueError(
+            f"Invalid simulated_z: {simulated_z!r}; choose 'uniform' "
+            "or 'observed'."
+        )
+    return names
+
+
+def _channel_names(names: list | None, n_channels: int) -> list[str]:
+    """For ``nnd_distributions``: the names of ``n_channels`` channels
+    as strings, their indices if ``names`` is None."""
+    if not n_channels:
+        raise ValueError("At least one channel is required.")
+    if names is None:
+        names = [str(i) for i in range(n_channels)]
+    names = [str(name) for name in names]
+    if len(names) != n_channels:
+        raise ValueError(
+            f"{len(names)} names given for {n_channels} channels."
+        )
+    return names
+
+
+def _nnd_medians(
+    nnds: dict[tuple[int, int], list],
+    n_molecules: lib.IntArray2D,
+) -> lib.FloatArray2D:
+    """For ``nnd_distributions``: the median of the nearest neighbor
+    distances ``nnds`` (of each region) of each pair of channels, NaN
+    for pairs without molecules."""
+    medians = np.full(n_molecules.shape, np.nan)
+    for a, b in nnds:
+        if n_molecules[a, b]:
+            medians[a, b] = np.median(np.concatenate(nnds[a, b]))
+    return medians
+
+
+def _nnd_simulations(
+    region_points: list[tuple],
+    n_molecules: lib.IntArray2D,
+    edges: lib.FloatArray1D,
+    *,
+    n_simulations: int,
+    simulated_z: Literal["uniform", "observed"],
+    cross_null: Literal["shift", "labels"],
+    random_seed: int | None,
+    progress: lib.Progress,
+) -> tuple[np.ndarray, np.ndarray]:
+    """For ``nnd_distributions``: the histograms of the nearest
+    neighbor distances of each pair of channels in each simulation and
+    their medians, given ``(region, z range, points of each channel)``
+    of the regions. Reports "Simulating envelope" over the
+    simulations."""
+    n_channels = len(n_molecules)
+    steps = len(edges) - 1
+    pairs = [(a, b) for a in range(n_channels) for b in range(n_channels)]
+    rng = np.random.default_rng(random_seed)
+    simulated = np.zeros((n_simulations, n_channels, n_channels, steps))
+    medians_sim = np.full((n_simulations, n_channels, n_channels), np.nan)
+    lib.start_phase(
+        progress,
+        "Simulating envelope",
+        n_simulations,
+        unit="simulation",
+    )
+    progress.set_value(0)
+    for s in range(n_simulations):
+        sim_counts = np.zeros((n_channels, n_channels, steps))
+        sim_nnds = {pair: [] for pair in pairs}
+        for region, region_z, points in region_points:
+            for a, b in pairs:
+                if a == b:
+                    simulated_points = _simulated_points(
+                        [points[a]],
+                        region,
+                        region_z,
+                        False,
+                        cross_null,
+                        simulated_z,
+                        rng,
+                    )
+                    source = target = simulated_points[0]
+                else:
+                    source, target = _simulated_points(
+                        [points[a], points[b]],
+                        region,
+                        region_z,
+                        True,
+                        cross_null,
+                        simulated_z,
+                        rng,
+                    )
+                region_nnds = _first_nnds(source, target, a == b)
+                sim_nnds[a, b].append(region_nnds)
+                sim_counts[a, b] += np.histogram(region_nnds, edges)[0]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            simulated[s] = sim_counts / n_molecules[:, :, None]
+        medians_sim[s] = _nnd_medians(sim_nnds, n_molecules)
+        progress.set_value(s + 1)
+    progress.set_value(n_simulations)
+    return simulated, medians_sim
 
 
 def _nnd_region_points(
@@ -11023,26 +11272,17 @@ def knn_density(
     >>> result = postprocess.knn_density(molecules, info)
     >>> print(f"{result['density'] * 1e6:.0f} molecules per um^2")
     """
-    if isinstance(k_max, bool) or int(k_max) != k_max or k_max < 1:
-        raise ValueError(f"k_max must be a positive integer, not {k_max!r}.")
-    if isinstance(k_min, bool) or int(k_min) != k_min:
-        raise ValueError(f"k_min must be an integer, not {k_min!r}.")
-    if not 1 <= k_min <= k_max:
-        raise ValueError("k_min must be between 1 and k_max.")
-    k_max, k_min = int(k_max), int(k_min)
-    if not r_min >= 0:
-        raise ValueError("r_min must not be negative.")
-    if r_max is not None and not r_max > r_min:
-        raise ValueError("r_max must be larger than r_min.")
-    if steps < 1:
-        raise ValueError("steps must be at least 1.")
-    if n_simulations < 0:
-        raise ValueError("n_simulations must not be negative.")
-    if use_z:
-        if "z" not in locs.columns:
-            raise ValueError("3D requires z in the localizations.")
-        if z_range is not None and not z_range[0] < z_range[1]:
-            raise ValueError("z_range must be (z_min, z_max), z_min < z_max.")
+    k_max, k_min = _checked_knn_arguments(
+        locs,
+        k_max,
+        k_min,
+        r_min,
+        r_max,
+        steps,
+        n_simulations,
+        use_z,
+        z_range,
+    )
     dim = 3 if use_z else 2
     regions = _statistic_regions(info, picks, pick_shape, pick_size, False)
     _warn_if_not_molecules(locs, "The localizations are", stacklevel=3)
@@ -11055,51 +11295,22 @@ def knn_density(
         )
     ]
     n_regions = len(regions)
-    observed = []
-    region_counts = []  # (region, z range, number of molecules)
-    n_molecules = 0
-    size = 0.0  # total area (volume) of the regions
     with lib.tracked_progress(
         progress, "Calculating k-NN distances", unit="region"
     ) as progress:
-        lib.start_phase(
-            progress, "Calculating k-NN distances", n_regions, unit="region"
+        observed, region_counts, n_molecules, size = _knn_observed(
+            regions,
+            coordinates,
+            use_z,
+            z_range,
+            k_max,
+            edge_correction,
+            progress,
         )
-        progress.set_value(0)
-        for i, region in enumerate(regions):
-            region_data = _nnd_region_points(
-                region, coordinates, use_z, z_range
-            )
-            if region_data is not None:
-                region_z, (points,) = region_data
-                n = len(points[0])
-                n_molecules += n
-                size += region.area * (
-                    region_z[1] - region_z[0] if use_z else 1.0
-                )
-                if n:
-                    observed.append(
-                        _knn_region_distances(
-                            points, region, region_z, k_max, edge_correction
-                        )
-                    )
-                    region_counts.append((region, region_z, n))
-            progress.set_value(i + 1)
-        progress.set_value(n_regions)
         if not observed:
             raise ValueError("No region contains molecules.")
-        samples = _knn_samples(observed, k_max, r_min)
         if r_max is None:
-            exact = next(
-                (s.exact for s in reversed(samples) if len(s.exact)), None
-            )
-            if exact is None:
-                raise ValueError(
-                    "No molecule has a neighbor in its region at a "
-                    f"distance of at least r_min ({r_min} nm)."
-                )
-            r_max = float(np.quantile(exact, 0.99))
-            r_max = r_max if r_max > r_min else r_min + 1.0
+            r_max = _knn_r_max(_knn_samples(observed, k_max, r_min), r_min)
         edges = np.linspace(0.0, r_max, steps + 1)
         data = _knn_analysis(observed, k_max, k_min, r_min, dim, edges)
         if np.isnan(data["densities"]).all():
@@ -11110,44 +11321,20 @@ def knn_density(
 
         densities_se = density_se = p_values = None
         if n_simulations:
-            rng = np.random.default_rng(random_seed)
-            simulated_densities = np.full((n_simulations, k_max), np.nan)
-            simulated_density = np.full(n_simulations, np.nan)
-            simulated_ks = np.full((n_simulations, k_max), np.nan)
-            lib.start_phase(
-                progress, "Simulating CSR", n_simulations, unit="simulation"
+            simulated = _knn_simulations(
+                region_counts,
+                k_max,
+                k_min,
+                r_min,
+                use_z=use_z,
+                edge_correction=edge_correction,
+                n_simulations=n_simulations,
+                random_seed=random_seed,
+                progress=progress,
             )
-            progress.set_value(0)
-            for s in range(n_simulations):
-                simulated = []
-                for region, region_z, n in region_counts:
-                    x, y = _uniform_in_region(n, region, rng)
-                    z = rng.uniform(*region_z, n) if use_z else None
-                    simulated.append(
-                        _knn_region_distances(
-                            (x, y, z), region, region_z, k_max, edge_correction
-                        )
-                    )
-                fit = _knn_analysis(simulated, k_max, k_min, r_min, dim)
-                simulated_densities[s] = fit["densities"]
-                simulated_density[s] = fit["density"]
-                simulated_ks[s] = fit["ks_distances"]
-                progress.set_value(s + 1)
-            progress.set_value(n_simulations)
-            with warnings.catch_warnings(), np.errstate(invalid="ignore"):
-                # orders without distances in all simulations
-                warnings.simplefilter("ignore", RuntimeWarning)
-                densities_se = data["densities"] * _relative_spread(
-                    simulated_densities
-                )
-                density_se = data["density"] * _relative_spread(
-                    simulated_density
-                )
-            valid = ~np.isnan(simulated_ks)
-            p_values = (
-                1 + np.sum(valid & (simulated_ks >= data["ks_distances"]), 0)
-            ) / (1 + valid.sum(axis=0))
-            p_values[np.isnan(data["ks_distances"])] = np.nan
+            densities_se, density_se, p_values = _knn_uncertainties(
+                data, *simulated
+            )
 
     return {
         "k": np.arange(1, k_max + 1),
@@ -11170,6 +11357,175 @@ def knn_density(
         "edge_correction": edge_correction,
         "use_z": use_z,
     }
+
+
+def _checked_knn_arguments(
+    locs: pd.DataFrame,
+    k_max: int,
+    k_min: int,
+    r_min: float,
+    r_max: float | None,
+    steps: int,
+    n_simulations: int,
+    use_z: bool,
+    z_range: tuple[float, float] | None,
+) -> tuple[int, int]:
+    """For ``knn_density``: ``k_max`` and ``k_min`` as integers; raise
+    ValueError for invalid arguments."""
+    k_max, k_min = _checked_k_range(k_max, k_min)
+    if not r_min >= 0:
+        raise ValueError("r_min must not be negative.")
+    if r_max is not None and not r_max > r_min:
+        raise ValueError("r_max must be larger than r_min.")
+    if steps < 1:
+        raise ValueError("steps must be at least 1.")
+    if n_simulations < 0:
+        raise ValueError("n_simulations must not be negative.")
+    if use_z:
+        if "z" not in locs.columns:
+            raise ValueError("3D requires z in the localizations.")
+        if z_range is not None and not z_range[0] < z_range[1]:
+            raise ValueError("z_range must be (z_min, z_max), z_min < z_max.")
+    return k_max, k_min
+
+
+def _checked_k_range(k_max: int, k_min: int) -> tuple[int, int]:
+    """For ``knn_density``: ``k_max`` and ``k_min`` as integers; raise
+    ValueError if they are not integers with 1 <= k_min <= k_max."""
+    if isinstance(k_max, bool) or int(k_max) != k_max or k_max < 1:
+        raise ValueError(f"k_max must be a positive integer, not {k_max!r}.")
+    if isinstance(k_min, bool) or int(k_min) != k_min:
+        raise ValueError(f"k_min must be an integer, not {k_min!r}.")
+    if not 1 <= k_min <= k_max:
+        raise ValueError("k_min must be between 1 and k_max.")
+    return int(k_max), int(k_min)
+
+
+def _knn_observed(
+    regions: list[_Region | None],
+    coordinates: list[tuple],
+    use_z: bool,
+    z_range: tuple[float, float] | None,
+    k_max: int,
+    edge_correction: bool,
+    progress: lib.Progress,
+) -> tuple[list, list[tuple], int, float]:
+    """For ``knn_density``: the distances to the ``k_max`` nearest
+    neighbors in each region with molecules (see
+    ``_knn_region_distances``), ``(region, z range, number of
+    molecules)`` of those regions, the number of molecules and the
+    total area (volume in 3D) of the regions. Reports "Calculating
+    k-NN distances" over the regions."""
+    n_regions = len(regions)
+    observed = []
+    region_counts = []  # (region, z range, number of molecules)
+    n_molecules = 0
+    size = 0.0  # total area (volume) of the regions
+    lib.start_phase(
+        progress, "Calculating k-NN distances", n_regions, unit="region"
+    )
+    progress.set_value(0)
+    for i, region in enumerate(regions):
+        region_data = _nnd_region_points(region, coordinates, use_z, z_range)
+        if region_data is not None:
+            region_z, (points,) = region_data
+            n = len(points[0])
+            n_molecules += n
+            size += region.area * (region_z[1] - region_z[0] if use_z else 1.0)
+            if n:
+                observed.append(
+                    _knn_region_distances(
+                        points, region, region_z, k_max, edge_correction
+                    )
+                )
+                region_counts.append((region, region_z, n))
+        progress.set_value(i + 1)
+    progress.set_value(n_regions)
+    return observed, region_counts, n_molecules, size
+
+
+def _knn_r_max(samples: list, r_min: float) -> float:
+    """For ``knn_density``: the default largest distance of the
+    histograms, the 99th percentile of the distances to the farthest
+    neighbor order with exact distances in ``samples``."""
+    exact = next((s.exact for s in reversed(samples) if len(s.exact)), None)
+    if exact is None:
+        raise ValueError(
+            "No molecule has a neighbor in its region at a "
+            f"distance of at least r_min ({r_min} nm)."
+        )
+    r_max = float(np.quantile(exact, 0.99))
+    return r_max if r_max > r_min else r_min + 1.0
+
+
+def _knn_simulations(
+    region_counts: list[tuple],
+    k_max: int,
+    k_min: int,
+    r_min: float,
+    *,
+    use_z: bool,
+    edge_correction: bool,
+    n_simulations: int,
+    random_seed: int | None,
+    progress: lib.Progress,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """For ``knn_density``: the densities by order, the combined
+    density and the Kolmogorov-Smirnov distances by order of each
+    simulation of complete spatial randomness, given ``(region, z
+    range, number of molecules)`` of the regions. Reports "Simulating
+    CSR" over the simulations."""
+    dim = 3 if use_z else 2
+    rng = np.random.default_rng(random_seed)
+    simulated_densities = np.full((n_simulations, k_max), np.nan)
+    simulated_density = np.full(n_simulations, np.nan)
+    simulated_ks = np.full((n_simulations, k_max), np.nan)
+    lib.start_phase(
+        progress, "Simulating CSR", n_simulations, unit="simulation"
+    )
+    progress.set_value(0)
+    for s in range(n_simulations):
+        simulated = []
+        for region, region_z, n in region_counts:
+            x, y = _uniform_in_region(n, region, rng)
+            z = rng.uniform(*region_z, n) if use_z else None
+            simulated.append(
+                _knn_region_distances(
+                    (x, y, z), region, region_z, k_max, edge_correction
+                )
+            )
+        fit = _knn_analysis(simulated, k_max, k_min, r_min, dim)
+        simulated_densities[s] = fit["densities"]
+        simulated_density[s] = fit["density"]
+        simulated_ks[s] = fit["ks_distances"]
+        progress.set_value(s + 1)
+    progress.set_value(n_simulations)
+    return simulated_densities, simulated_density, simulated_ks
+
+
+def _knn_uncertainties(
+    data: dict,
+    simulated_densities: np.ndarray,
+    simulated_density: np.ndarray,
+    simulated_ks: np.ndarray,
+) -> tuple[np.ndarray, float, np.ndarray]:
+    """For ``knn_density``: the standard errors of the densities by
+    order and of the combined density, and the p-values of the
+    Kolmogorov-Smirnov distances, from the observed ``data`` (of
+    ``_knn_analysis``) and the simulations (of ``_knn_simulations``)."""
+    with warnings.catch_warnings(), np.errstate(invalid="ignore"):
+        # orders without distances in all simulations
+        warnings.simplefilter("ignore", RuntimeWarning)
+        densities_se = data["densities"] * _relative_spread(
+            simulated_densities
+        )
+        density_se = data["density"] * _relative_spread(simulated_density)
+    valid = ~np.isnan(simulated_ks)
+    p_values = (
+        1 + np.sum(valid & (simulated_ks >= data["ks_distances"]), 0)
+    ) / (1 + valid.sum(axis=0))
+    p_values[np.isnan(data["ks_distances"])] = np.nan
+    return densities_se, density_se, p_values
 
 
 def _relative_spread(values: np.ndarray) -> np.ndarray | float:

@@ -924,8 +924,9 @@ class TaskProgress(QtCore.QObject):
     """Progress tracker handed to the function run by :func:`run_task`.
 
     Implements the ``lib.Progress`` interface, so analysis functions that
-    take a ``progress`` argument run unchanged on the worker thread. Updates reach the dialog on the
-    GUI thread through queued signals, at most every ``INTERVAL`` seconds.
+    take a ``progress`` argument run unchanged on the worker thread.
+    Updates reach the dialog on the GUI thread through queued signals,
+    at most every ``INTERVAL`` seconds.
 
     Once the user canceled the task, the next ``set_value`` (or
     ``zero_progress``, ``check_canceled``) raises
@@ -2190,9 +2191,10 @@ class WrappingLabel(QtWidgets.QLabel):
 
     The text may break after these characters, too, and a stretch
     without any of them that is wider than the label is split where it
-    reaches the edge. A layout inside a scroll area or a fixed-size window does not always give a wrapped
-    label the height its lines need, so the label sets its minimum
-    height for its current width itself.
+    reaches the edge. A layout inside a scroll area or a fixed-size
+    window does not always give a wrapped label the height its lines
+    need, so the label sets its minimum height for its current width
+    itself.
 
     Parameters
     ----------

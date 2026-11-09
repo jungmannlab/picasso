@@ -1800,25 +1800,10 @@ class Window(QtWidgets.QMainWindow):
             return
 
         title = "Apply filters from metadata"
-        try:
-            steps, to_remove, missing = lib.extract_filter_recipe(
-                info, self.locs_full.columns
-            )
-        except expression.ExpressionError as e:
-            QtWidgets.QMessageBox.warning(
-                self, title, f"The metadata has an invalid filter:\n{e}"
-            )
+        recipe = self._read_filter_recipe(info, title)
+        if recipe is None:
             return
-
-        if not steps and not to_remove:
-            msg = "No applicable filter steps found in metadata."
-            if missing:
-                msg += (
-                    "\n\nReferenced columns not found in current data:\n  "
-                    + "\n  ".join(missing)
-                )
-            QtWidgets.QMessageBox.information(self, title, msg)
-            return
+        steps, to_remove, missing = recipe
 
         reply = QtWidgets.QMessageBox.question(
             self,
@@ -1829,8 +1814,41 @@ class Window(QtWidgets.QMainWindow):
         )
         if reply != QtWidgets.QMessageBox.StandardButton.Yes:
             return
+        self._replay_filter_recipe(steps, to_remove, title)
 
-        # one step to undo
+    def _read_filter_recipe(
+        self, info: list[dict], title: str
+    ) -> tuple[list[str], list[str], list[str]] | None:
+        """The filter steps, columns to remove and missing columns
+        recorded in ``info`` (see ``lib.extract_filter_recipe``); None,
+        with a message, if they are invalid or none apply."""
+        try:
+            steps, to_remove, missing = lib.extract_filter_recipe(
+                info, self.locs_full.columns
+            )
+        except expression.ExpressionError as e:
+            QtWidgets.QMessageBox.warning(
+                self, title, f"The metadata has an invalid filter:\n{e}"
+            )
+            return None
+
+        if not steps and not to_remove:
+            msg = "No applicable filter steps found in metadata."
+            if missing:
+                msg += (
+                    "\n\nReferenced columns not found in current data:\n  "
+                    + "\n  ".join(missing)
+                )
+            QtWidgets.QMessageBox.information(self, title, msg)
+            return None
+        return steps, to_remove, missing
+
+    def _replay_filter_recipe(
+        self, steps: list[str], to_remove: list[str], title: str
+    ) -> None:
+        """Apply the filter ``steps`` and remove the columns ``to_remove``
+        as one undo step; a failing step stops the replay, keeping the
+        steps before it."""
         with self._undo_step():
             for step in steps:
                 try:

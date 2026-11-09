@@ -39,7 +39,6 @@ if TYPE_CHECKING:
 
 from . import lib, __version__, docs_url
 
-from .ext import bitplane
 from .ext.bitplane import IMSFile
 
 # Optional vendor readers for Zeiss .czi and Leica .lif movies and
@@ -507,6 +506,16 @@ class SpilledFrame:
             )
         # private to the user (mode 0700)
         self.path = tempfile.mkdtemp(prefix=f"{os.getpid()}-", dir=directory)
+        self._write_arrays(arrays)
+        self._remove = weakref.finalize(
+            self, shutil.rmtree, self.path, ignore_errors=True
+        )
+        self._loaded = None  # weak reference to the table read back
+
+    def _write_arrays(self, arrays: list[np.ndarray]) -> None:
+        """Write ``arrays`` to the table's folder and check that they
+        were written completely; on failure, remove the folder and raise
+        a ``SpillError``."""
         try:
             for i, array in enumerate(arrays):
                 np.save(self._file(i), array, allow_pickle=False)
@@ -528,10 +537,6 @@ class SpilledFrame:
             raise SpillError(f"writing to {self.path} failed: {error}") from (
                 error
             )
-        self._remove = weakref.finalize(
-            self, shutil.rmtree, self.path, ignore_errors=True
-        )
-        self._loaded = None  # weak reference to the table read back
 
     def _file(self, i: int) -> str:
         return os.path.join(self.path, f"{i}.npy")
@@ -2564,36 +2569,51 @@ def load_picks(
         regions = legacy.picks_to_nm(regions, pixelsize)
 
     if shape == _MIXED_PICKS_SHAPE:
-        picks, shapes, sizes = [], [], []
-        for entry in regions.get("Picks", []):
-            pick, size = _pick_from_entry(entry)
-            picks.append(pick)
-            shapes.append(entry["Shape"])
-            sizes.append(size)
-        shape, size = lib._compact_pick_shapes_and_sizes(shapes, sizes)
-        if shape is None:  # no picks: one shape per pick
-            shape = []
-        lib.pick_shapes_and_sizes(picks, shape, size)  # e.g., a size of 0
-        return picks, shape, size
+        picks, shape, size = _mixed_picks_from_regions(regions)
+    else:
+        picks, size = _picks_from_regions(regions, shape)
+    lib.pick_shapes_and_sizes(picks, shape, size)  # e.g., a size of 0
+    return picks, shape, size
 
-    # assign loaded picks and pick size
+
+def _mixed_picks_from_regions(regions: dict) -> tuple[list, list, list]:
+    """Picks (nm) of different shapes, from the "Picks" list of a picks
+    file, with their shapes and sizes, compacted to one shape or size
+    if all share it (see ``lib._compact_pick_shapes_and_sizes``)."""
+    picks, shapes, sizes = [], [], []
+    for entry in regions.get("Picks", []):
+        pick, size = _pick_from_entry(entry)
+        picks.append(pick)
+        shapes.append(entry["Shape"])
+        sizes.append(size)
+    shape, size = lib._compact_pick_shapes_and_sizes(shapes, sizes)
+    if shape is None:  # no picks: one shape per pick
+        shape = []
+    return picks, shape, size
+
+
+def _picks_from_regions(
+    regions: dict, shape: str
+) -> tuple[list, float | list[float] | None]:
+    """Picks (nm) of one ``shape`` from a picks file and their size;
+    None for the shapes without a size."""
     if shape == "Circle":
         picks = regions["Centers"]
-        size = _pick_size_from_regions(regions, "Diameter", len(picks))
-    elif shape == "Rectangle":
+        return picks, _pick_size_from_regions(regions, "Diameter", len(picks))
+    if shape == "Rectangle":
         picks = regions["Center-Axis-Points"]
-        size = _pick_size_from_regions(regions, "Width", len(picks))
-    elif shape == "Polygon":
-        picks = regions["Vertices"]
-        size = None
-    elif shape == "Square":
+        return picks, _pick_size_from_regions(regions, "Width", len(picks))
+    if shape == "Polygon":
+        return regions["Vertices"], None
+    if shape == "Square":
         picks = regions["Centers"]
-        size = _pick_size_from_regions(regions, "Side Length", len(picks))
-    elif shape == "Box":
+        return picks, _pick_size_from_regions(
+            regions, "Side Length", len(picks)
+        )
+    if shape == "Box":
         # each box carries its own extent, so there is no size
-        picks = regions["Corners"]
-        size = None
-    elif shape == "Brush":
+        return regions["Corners"], None
+    if shape == "Brush":
         # the file holds a flat, ordered list of strokes; which of them
         # form one pick follows from their geometry, so the grouping is
         # re-derived rather than stored
@@ -2601,12 +2621,8 @@ def load_picks(
             (stroke["Width (nm)"], stroke["Path"])
             for stroke in regions["Strokes"]
         ]
-        picks = lib.merge_brush_strokes(strokes)
-        size = None
-    else:
-        raise ValueError(f"Unrecognized pick shape: {shape}")
-    lib.pick_shapes_and_sizes(picks, shape, size)  # e.g., a size of 0
-    return picks, shape, size
+        return lib.merge_brush_strokes(strokes), None
+    raise ValueError(f"Unrecognized pick shape: {shape}")
 
 
 def _pick_from_entry(entry: dict) -> tuple[list, float | None]:
@@ -2671,6 +2687,48 @@ def _pick_size_from_regions(
     return float(size)
 
 
+def _pick_point(p) -> list[float]:
+    """A point of a pick as a list of floats, for a picks file."""
+    return [float(p[0]), float(p[1])]
+
+
+def _pick_coordinates(pick, shape: str):
+    """The positions of a pick of ``shape`` as stored in a picks file
+    (see ``picks_dict``)."""
+    if shape in ("Circle", "Square"):
+        return _pick_point(pick)
+    if shape in ("Rectangle", "Box"):
+        return [_pick_point(pick[0]), _pick_point(pick[1])]
+    if shape == "Polygon":
+        return [_pick_point(v) for v in pick]
+    return [  # brush strokes
+        {
+            "Width (nm)": float(stroke[0]),
+            "Path": [_pick_point(_) for _ in stroke[1]],
+        }
+        for stroke in pick
+    ]
+
+
+def _mixed_pick_entries(
+    picks: list, shapes: list[str], sizes: list[float | None]
+) -> list[dict]:
+    """The "Picks" list of a picks file with picks of different shapes
+    (see ``picks_dict``): the shape, size and positions of each pick;
+    polygons without vertices are left out."""
+    entries = []
+    for pick, shape, size in zip(picks, shapes, sizes):
+        if shape == "Polygon" and not len(pick):
+            continue
+        key, size_key = _MIXED_PICK_KEYS[shape]
+        entry = {"Shape": shape}
+        if size_key is not None:
+            entry[f"{size_key} (nm)"] = size
+        entry[key] = _pick_coordinates(pick, shape)
+        entries.append(entry)
+    return entries
+
+
 def picks_dict(
     picks: list,
     shape: str | list[str],
@@ -2719,42 +2777,17 @@ def picks_dict(
         if shape is None:  # no picks
             shape = _MIXED_PICKS_SHAPE
 
-    def point(p) -> list[float]:
-        return [float(p[0]), float(p[1])]
-
-    def coordinates(pick, shape: str):
-        if shape in ("Circle", "Square"):
-            return point(pick)
-        if shape in ("Rectangle", "Box"):
-            return [point(pick[0]), point(pick[1])]
-        if shape == "Polygon":
-            return [point(v) for v in pick]
-        return [  # brush strokes
-            {
-                "Width (nm)": float(stroke[0]),
-                "Path": [point(_) for _ in stroke[1]],
-            }
-            for stroke in pick
-        ]
-
     regions = {}
     if not isinstance(shape, str) or shape == _MIXED_PICKS_SHAPE:
-        regions["Picks"] = []
-        for pick, shape_, size_ in zip(picks, shapes, sizes):
-            if shape_ == "Polygon" and not len(pick):
-                continue
-            key, size_key = _MIXED_PICK_KEYS[shape_]
-            entry = {"Shape": shape_}
-            if size_key is not None:
-                entry[f"{size_key} (nm)"] = size_
-            entry[key] = coordinates(pick, shape_)
-            regions["Picks"].append(entry)
+        regions["Picks"] = _mixed_pick_entries(picks, shapes, sizes)
         shape = _MIXED_PICKS_SHAPE
     elif shape == "Brush":
         # a flat, ordered stroke list: which strokes form one pick
         # follows from their geometry and is re-derived on loading
         regions["Strokes"] = [
-            stroke for pick in picks for stroke in coordinates(pick, shape)
+            stroke
+            for pick in picks
+            for stroke in _pick_coordinates(pick, shape)
         ]
     else:
         key, size_key = _MIXED_PICK_KEYS[shape]
@@ -2765,7 +2798,7 @@ def picks_dict(
             )
         key = "Centers" if shape in ("Circle", "Square") else key
         regions[key] = [
-            coordinates(pick, shape)
+            _pick_coordinates(pick, shape)
             for pick in picks
             if shape != "Polygon" or len(pick)
         ]
@@ -8508,6 +8541,117 @@ def _pyme_restore_info(
     return info
 
 
+def _pyme_frames(t: np.ndarray | None, n: int) -> np.ndarray:
+    """Frames of the localizations from PyME's ``t`` (``tIndex``),
+    starting at 0; all 0 without ``t``."""
+    if t is None:
+        return np.zeros(n, dtype=np.int64)
+    frames = np.rint(np.nan_to_num(t)).astype(np.int64)
+    if n and frames.min() < 0:
+        frames -= frames.min()
+    return frames
+
+
+def _pyme_precisions(take: Callable, n: int, is_3d: bool) -> dict:
+    """``lpx``, ``lpy`` and, in 3D, ``lpz`` (float32) from the columns
+    of a PyME file that ``take`` returns, see ``import_pyme``: one of
+    ``lpx`` and ``lpy`` for both if only one is present, 0 if neither
+    is."""
+    lpx = take("error_x", "fitError_x0")
+    lpy = take("error_y", "fitError_y0")
+    if lpx is None:
+        lpx = lpy
+    if lpy is None:
+        lpy = lpx
+    if lpx is None:
+        lpx = lpy = np.zeros(n)
+    precisions = {"lpx": lpx.astype(np.float32), "lpy": lpy.astype(np.float32)}
+    if is_3d:
+        lpz = take("error_z", "fitError_z0")
+        if lpz is not None:
+            precisions["lpz"] = lpz.astype(np.float32)
+    return precisions
+
+
+def _pyme_sigmas(
+    take: Callable, n: int, pixelsize: float
+) -> tuple[np.ndarray, np.ndarray, bool]:
+    """PSF widths in x and y (nm) from the columns of a PyME file that
+    ``take`` returns, see ``import_pyme``, and whether the file has
+    any; one camera pixel if not."""
+    sx = take("sigx", "fitResults_sigmax")
+    sy = take("sigy", "fitResults_sigmay")
+    if sx is None or sy is None:
+        sigma = take("sig", "fitResults_sigma")
+        sx = sigma if sx is None else sx
+        sy = sigma if sy is None else sy
+    if sx is None:
+        sx = sy
+    if sy is None:
+        sy = sx
+    has_sigma = sx is not None
+    if not has_sigma:
+        sx = sy = np.full(n, pixelsize)  # one camera pixel
+    return sx, sy, has_sigma
+
+
+def _pyme_photons_from_amplitude(
+    amplitude: np.ndarray | None,
+    sx: np.ndarray,
+    sy: np.ndarray,
+    pixelsize: float,
+    to_photons: float,
+    n: int,
+) -> np.ndarray:
+    """Photons as the integral of the fitted Gaussian, ``2 pi A sx sy``,
+    see ``import_pyme``; 1 without an amplitude (or PSF width)."""
+    if amplitude is None:
+        return np.ones(n)
+    # the amplitude is per camera pixel, so the widths are taken in
+    # camera pixels
+    return (
+        amplitude.astype(np.float64)
+        * 2
+        * np.pi
+        * (sx / pixelsize)
+        * (sy / pixelsize)
+        * to_photons
+    )
+
+
+def _pyme_background(take: Callable, to_photons: float, n: int) -> np.ndarray:
+    """Background (photons per pixel) from the columns of a PyME file
+    that ``take`` returns, see ``import_pyme``: ``bg``, else the fitted
+    background plus the subtracted one, converted to photons, else 0."""
+    bg = take("bg")
+    if bg is not None:
+        return bg
+    bg = take("fitResults_background")
+    if bg is None:
+        return np.zeros(n)
+    subtracted = take("subtractedBackground")
+    if subtracted is not None:
+        bg = bg + subtracted
+    return bg * to_photons
+
+
+def _pyme_add_extra_columns(
+    data: dict, columns: dict[str, np.ndarray], used: set[str]
+) -> None:
+    """Add the numeric PyME ``columns`` not ``used`` for Picasso's
+    columns to ``data``, with sanitized names; float columns as
+    float32."""
+    for name, values in columns.items():
+        if name in used or values.dtype.kind not in "biuf":
+            continue
+        name = _sanitize_column_name(name)
+        if name in data:
+            continue
+        if values.dtype.kind == "f":
+            values = values.astype(np.float32)
+        data[name] = values
+
+
 def import_pyme(
     path: str, pixelsize: float | None = None
 ) -> tuple[pd.DataFrame, list[dict]]:
@@ -8605,14 +8749,7 @@ def import_pyme(
     if x is None or y is None:
         raise ValueError(f"PyME file {path} has no x and y columns.")
     n = len(x)
-
-    t = take("t", "tIndex")
-    if t is None:
-        frames = np.zeros(n, dtype=np.int64)
-    else:
-        frames = np.rint(np.nan_to_num(t)).astype(np.int64)
-        if n and frames.min() < 0:
-            frames -= frames.min()
+    frames = _pyme_frames(take("t", "tIndex"), n)
 
     data = {
         "frame": frames.astype(np.uint32),
@@ -8624,80 +8761,23 @@ def import_pyme(
     is_3d = z is not None and bool(np.any(np.nan_to_num(z) != 0))
     if is_3d:
         data["z"] = z.astype(np.float32)  # nm in both PyME and Picasso
+    data.update(_pyme_precisions(take, n, is_3d))
 
-    lpx = take("error_x", "fitError_x0")
-    lpy = take("error_y", "fitError_y0")
-    if lpx is None:
-        lpx = lpy
-    if lpy is None:
-        lpy = lpx
-    if lpx is None:
-        lpx = lpy = np.zeros(n)
-    data["lpx"] = lpx.astype(np.float32)
-    data["lpy"] = lpy.astype(np.float32)
-    if is_3d:
-        lpz = take("error_z", "fitError_z0")
-        if lpz is not None:
-            data["lpz"] = lpz.astype(np.float32)
-
-    sx = take("sigx", "fitResults_sigmax")
-    sy = take("sigy", "fitResults_sigmay")
-    if sx is None or sy is None:
-        sigma = take("sig", "fitResults_sigma")
-        sx = sigma if sx is None else sx
-        sy = sigma if sy is None else sy
-    if sx is None:
-        sx = sy
-    if sy is None:
-        sy = sx
-    has_sigma = sx is not None
-    if not has_sigma:
-        sx = sy = np.full(n, pixelsize)  # one camera pixel
-
+    sx, sy, has_sigma = _pyme_sigmas(take, n, pixelsize)
     per_count = _pyme_photons_per_count(metadata)
     to_photons = 1.0 if per_count is None else per_count
     photons = take("nPhotons")
     if photons is None:
         # the amplitude is kept as an extra column, too
         amplitude = columns.get("A", columns.get("fitResults_A"))
-        if amplitude is not None and has_sigma:
-            # the amplitude is per camera pixel, so the widths are taken
-            # in camera pixels
-            photons = (
-                amplitude.astype(np.float64)
-                * 2
-                * np.pi
-                * (sx / pixelsize)
-                * (sy / pixelsize)
-                * to_photons
-            )
-        else:
-            photons = np.ones(n)
+        photons = _pyme_photons_from_amplitude(
+            amplitude if has_sigma else None, sx, sy, pixelsize, to_photons, n
+        )
     data["photons"] = photons.astype(np.float32)
     data["sx"] = sx.astype(np.float32)
     data["sy"] = sy.astype(np.float32)
-
-    bg = take("bg")
-    if bg is None:
-        bg = take("fitResults_background")
-        if bg is not None:
-            subtracted = take("subtractedBackground")
-            if subtracted is not None:
-                bg = bg + subtracted
-            bg = bg * to_photons
-        else:
-            bg = np.zeros(n)
-    data["bg"] = bg.astype(np.float32)
-
-    for name, values in columns.items():
-        if name in used or values.dtype.kind not in "biuf":
-            continue
-        name = _sanitize_column_name(name)
-        if name in data:
-            continue
-        if values.dtype.kind == "f":
-            values = values.astype(np.float32)
-        data[name] = values
+    data["bg"] = _pyme_background(take, to_photons, n).astype(np.float32)
+    _pyme_add_extra_columns(data, columns, used)
 
     locs = pd.DataFrame(data)
     locs.sort_values(kind="quicksort", by="frame", inplace=True)
@@ -8859,7 +8939,14 @@ def _pyme_channel_table(
         if values.dtype.kind == "f":
             table[key] = values.astype(np.float32)
     table["probe"] = np.full(n, probe, dtype=np.int32)
+    _pyme_copy_other_columns(table, locs)
+    return pd.DataFrame(table)
 
+
+def _pyme_copy_other_columns(table: dict, locs: pd.DataFrame) -> None:
+    """Copy the numeric columns of ``locs`` that are not converted to
+    PyME's (``_PYME_EXPORTED_COLUMNS``) to ``table`` as they are, with
+    sanitized names, see ``export_pyme_multi``."""
     for name in locs.columns:
         if name in _PYME_EXPORTED_COLUMNS:
             continue
@@ -8869,7 +8956,6 @@ def _pyme_channel_table(
         name = _sanitize_column_name(name)
         if name not in table:
             table[name] = values
-    return pd.DataFrame(table)
 
 
 def _pyme_write_metadata(h5file, entries: dict) -> None:
@@ -8903,6 +8989,57 @@ def export_pyme(path: str, locs: pd.DataFrame, info: list[dict]) -> None:
         Metadata dictionaries.
     """
     export_pyme_multi(path, [locs], [info])
+
+
+def _pyme_camera_size(infos: list[list[dict]], axis: int) -> int:
+    """Size of the camera image along x (0) or y (1) of the largest of
+    the channels' ``infos``, i.e., the canvas without its translation
+    (see ``lib.fit_canvas``); 0 if none is recorded."""
+    sizes = []
+    for info in infos:
+        size = lib.get_from_metadata(info, lib.CAMERA_SIZE_KEYS[axis])
+        if size is None:
+            size = lib.get_from_metadata(info, ("Width", "Height")[axis])
+        if size is not None:
+            sizes.append(int(size))
+    return max(sizes, default=0)
+
+
+def _pyme_export_metadata(
+    infos: list[list[dict]],
+    pixelsize: float,
+    channel_names: list[str] | None,
+) -> dict:
+    """The PyME metadata of a file written by ``export_pyme_multi``:
+    the pixel size, the camera image size, the Picasso metadata of each
+    channel and, if given, the channel names."""
+    metadata = {
+        "voxelsize.x": pixelsize / 1000,
+        "voxelsize.y": pixelsize / 1000,
+        "voxelsize.units": "um",
+    }
+    width = _pyme_camera_size(infos, 0)
+    height = _pyme_camera_size(infos, 1)
+    if width and height:
+        metadata["Camera.ROIWidth"] = width
+        metadata["Camera.ROIHeight"] = height
+    try:
+        metadata["Picasso.Info"] = json.dumps(
+            [list(info) for info in infos],
+            default=_json_default,
+            ensure_ascii=True,
+        )
+    except (TypeError, ValueError) as e:
+        warnings.warn(
+            "Could not store the Picasso metadata in the PyME file "
+            f"({type(e).__name__}: {e}).",
+            stacklevel=3,
+        )
+    if channel_names is not None:
+        metadata["Picasso.ChannelNames"] = json.dumps(
+            list(channel_names), ensure_ascii=True
+        )
+    return metadata
 
 
 def export_pyme_multi(
@@ -8992,44 +9129,7 @@ def export_pyme_multi(
     # only the columns present in all channels
     records = pd.concat(tables_, join="inner", ignore_index=True)
     records = records.to_records(index=False)
-
-    def camera_size(axis: int) -> int:
-        """Size of the camera image along x (0) or y (1), i.e., the
-        canvas without its translation (see lib.fit_canvas)."""
-        sizes = []
-        for info in infos:
-            size = lib.get_from_metadata(info, lib.CAMERA_SIZE_KEYS[axis])
-            if size is None:
-                size = lib.get_from_metadata(info, ("Width", "Height")[axis])
-            if size is not None:
-                sizes.append(int(size))
-        return max(sizes, default=0)
-
-    metadata = {
-        "voxelsize.x": pixelsize / 1000,
-        "voxelsize.y": pixelsize / 1000,
-        "voxelsize.units": "um",
-    }
-    width, height = camera_size(0), camera_size(1)
-    if width and height:
-        metadata["Camera.ROIWidth"] = width
-        metadata["Camera.ROIHeight"] = height
-    try:
-        metadata["Picasso.Info"] = json.dumps(
-            [list(info) for info in infos],
-            default=_json_default,
-            ensure_ascii=True,
-        )
-    except (TypeError, ValueError) as e:
-        warnings.warn(
-            "Could not store the Picasso metadata in the PyME file "
-            f"({type(e).__name__}: {e}).",
-            stacklevel=2,
-        )
-    if channel_names is not None:
-        metadata["Picasso.ChannelNames"] = json.dumps(
-            list(channel_names), ensure_ascii=True
-        )
+    metadata = _pyme_export_metadata(infos, pixelsize, channel_names)
 
     filters = tables.Filters(complevel=5, complib="zlib", shuffle=True)
     with tables.open_file(path, "w") as h5file:
@@ -9131,6 +9231,38 @@ def is_minflux_file(path: str) -> bool:
     return set(_MINFLUX_REQUIRED_COLUMNS) <= columns
 
 
+def _minflux_pmx_parameters(parameters: h5py.Group) -> dict:
+    """The datasets of the ``/parameters`` group of a pyMINFLUX ``.pmx``
+    file that can be stored in the metadata, by name."""
+    values = {}
+    for key, item in parameters.items():
+        if isinstance(item, h5py.Dataset):
+            value = _pyme_metadata_value(item[()])
+            if value is not None:
+                values[key] = value
+    return values
+
+
+def _minflux_pmx_names(parameters: h5py.Group, path: str) -> dict[int, str]:
+    """Fluorophore names by ID, stored as JSON in the
+    ``fluorophore_names`` attribute of the ``/parameters`` group of a
+    pyMINFLUX ``.pmx`` file at ``path``; empty if not stored or not
+    readable."""
+    names_json = _pyme_metadata_value(
+        parameters.attrs.get("fluorophore_names")
+    )
+    if not isinstance(names_json, str):
+        return {}
+    try:
+        return {
+            int(key): str(value)
+            for key, value in json.loads(names_json).items()
+        }
+    except (ValueError, AttributeError) as error:
+        _log.debug("Fluorophore names of %s not read: %s", path, error)
+        return {}
+
+
 def _minflux_read_pmx(
     path: str,
 ) -> tuple[pd.DataFrame, dict, dict[int, str]]:
@@ -9184,24 +9316,8 @@ def _minflux_read_pmx(
         names = {}
         parameters = file.get("parameters")
         if isinstance(parameters, h5py.Group):
-            for key, item in parameters.items():
-                if isinstance(item, h5py.Dataset):
-                    value = _pyme_metadata_value(item[()])
-                    if value is not None:
-                        metadata[key] = value
-            names_json = _pyme_metadata_value(
-                parameters.attrs.get("fluorophore_names")
-            )
-            if isinstance(names_json, str):
-                try:
-                    names = {
-                        int(key): str(value)
-                        for key, value in json.loads(names_json).items()
-                    }
-                except (ValueError, AttributeError) as error:
-                    _log.debug(
-                        "Fluorophore names of %s not read: %s", path, error
-                    )
+            metadata.update(_minflux_pmx_parameters(parameters))
+            names = _minflux_pmx_names(parameters, path)
 
     table = pd.DataFrame(values, columns=columns)
     for column, dtype in zip(columns, types):
@@ -9393,6 +9509,43 @@ def _minflux_trace_means(table: pd.DataFrame, is_3d: bool) -> dict:
     return data
 
 
+def _minflux_read(path: str) -> tuple[pd.DataFrame, dict, dict[int, str]]:
+    """Read a pyMINFLUX ``.pmx`` or a MINFLUX ``.csv`` file, see
+    ``_minflux_read_pmx``.
+
+    Raises
+    ------
+    FileFormatError
+        If ``path`` is neither.
+    """
+    if os.path.splitext(path)[1].lower() in MINFLUX_EXTENSIONS:
+        return _minflux_read_pmx(path)
+    if is_minflux_file(path):
+        return _minflux_read_csv(path)
+    raise FileFormatError(
+        f"{path} is not a MINFLUX localization file (pyMINFLUX .pmx, "
+        "or .csv with the columns tid, tim (or t), x and y)."
+    )
+
+
+def _minflux_move_to_origin(
+    table: pd.DataFrame, pixelsize: float
+) -> dict[str, float]:
+    """Move the MINFLUX localizations in ``table`` (in place) to start
+    ``_MINFLUX_MARGIN`` from the origin, by whole nominal pixels so
+    that the shift is exact in the metadata. Returns the shift (nm) of
+    x and y, see ``import_minflux``."""
+    offsets = {}
+    for axis in ("x", "y"):
+        values = table[axis].to_numpy(dtype=np.float64)
+        offset = (
+            np.floor((values.min() - _MINFLUX_MARGIN) / pixelsize) * pixelsize
+        )
+        table[axis] = values - offset
+        offsets[axis] = float(offset)
+    return offsets
+
+
 def import_minflux(
     path: str,
     *,
@@ -9495,15 +9648,7 @@ def import_minflux(
             f"not {origin!r}."
         )
     _check_path_length(path)
-    if os.path.splitext(path)[1].lower() in MINFLUX_EXTENSIONS:
-        table, metadata, names = _minflux_read_pmx(path)
-    elif is_minflux_file(path):
-        table, metadata, names = _minflux_read_csv(path)
-    else:
-        raise FileFormatError(
-            f"{path} is not a MINFLUX localization file (pyMINFLUX .pmx, "
-            "or .csv with the columns tid, tim (or t), x and y)."
-        )
+    table, metadata, names = _minflux_read(path)
     missing = [c for c in _MINFLUX_REQUIRED_COLUMNS if c not in table.columns]
     if missing:
         raise FileFormatError(
@@ -9522,15 +9667,7 @@ def import_minflux(
     pixelsize = float(pixelsize)
     offsets = {}
     if origin == "data":
-        # whole nominal pixels, so the shift is exact in the metadata
-        for axis in ("x", "y"):
-            values = table[axis].to_numpy(dtype=np.float64)
-            offset = (
-                np.floor((values.min() - _MINFLUX_MARGIN) / pixelsize)
-                * pixelsize
-            )
-            table[axis] = values - offset
-            offsets[axis] = float(offset)
+        offsets = _minflux_move_to_origin(table, pixelsize)
 
     is_3d = "z" in table.columns and bool(
         np.nanmax(np.abs(table["z"].to_numpy(dtype=np.float64)))

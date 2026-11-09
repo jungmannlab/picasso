@@ -64,9 +64,8 @@ from __future__ import annotations
 import copy
 import logging
 import os
-import re
 import tempfile
-from typing import Literal
+from typing import Callable, Literal
 
 import h5py
 import numpy as np
@@ -798,47 +797,66 @@ def convert_file(
             pixelsize = io.load_yaml(path).get("Camera pixelsize (nm)")
         pixelsize = _check_pixelsize(pixelsize, path)
 
-    def write(target: str) -> None:
-        if kind == "locs":
-            _convert_locs_file(path, pixelsize, target, progress)
-            return
-        name = os.path.basename(path)
-        lib.start_phase(progress, f"Converting {name}", 1, unit="file")
-        if kind == "drift":
-            drift = io.load_drift(path, pixelsize=pixelsize)
-            io.save_drift(target, drift)
-        elif kind == "spline":
-            # the loader converts it, with the pixel size the calibration
-            # records unless one is given
-            io.save_spline_calibration(
-                target, io.load_spline_calibration(path, pixelsize=pixelsize)
-            )
-        else:
-            _convert_yaml_file(path, kind, pixelsize, target)
-        progress.set_value(1)
-
     with lib.tracked_progress(progress, unit="file") as progress:
+
+        def write(target: str) -> None:
+            _write_converted(path, kind, pixelsize, target, progress)
+
         if os.path.abspath(output) != os.path.abspath(path):
             write(output)
             return output
-        # in place: write next to the file, then replace it (and its .yaml)
-        directory = os.path.dirname(os.path.abspath(path))
-        base, ext = os.path.splitext(os.path.basename(path))
-        handle, temporary = tempfile.mkstemp(
-            prefix=base + "_", suffix=ext, dir=directory
-        )
-        os.close(handle)
-        temporary_yaml = os.path.splitext(temporary)[0] + ".yaml"
-        try:
-            write(temporary)
-            os.replace(temporary, path)
-            if os.path.isfile(temporary_yaml):
-                os.replace(temporary_yaml, os.path.splitext(path)[0] + ".yaml")
-        finally:
-            for leftover in (temporary, temporary_yaml):
-                if os.path.isfile(leftover):
-                    os.remove(leftover)
+        _replace_in_place(path, write)
     return output
+
+
+def _write_converted(
+    path: str,
+    kind: str,
+    pixelsize: float | None,
+    target: str,
+    progress: lib.Progress,
+) -> None:
+    """Write the file at ``path`` of ``kind`` (see ``file_kind``),
+    converted to nm, to ``target``, see ``convert_file``."""
+    if kind == "locs":
+        _convert_locs_file(path, pixelsize, target, progress)
+        return
+    name = os.path.basename(path)
+    lib.start_phase(progress, f"Converting {name}", 1, unit="file")
+    if kind == "drift":
+        drift = io.load_drift(path, pixelsize=pixelsize)
+        io.save_drift(target, drift)
+    elif kind == "spline":
+        # the loader converts it, with the pixel size the calibration
+        # records unless one is given
+        io.save_spline_calibration(
+            target, io.load_spline_calibration(path, pixelsize=pixelsize)
+        )
+    else:
+        _convert_yaml_file(path, kind, pixelsize, target)
+    progress.set_value(1)
+
+
+def _replace_in_place(path: str, write: Callable[[str], None]) -> None:
+    """Replace the file at ``path`` (and its .yaml) with what ``write``
+    writes to a path it is given: the file is written next to it first,
+    so that a failed write leaves it as it was."""
+    directory = os.path.dirname(os.path.abspath(path))
+    base, ext = os.path.splitext(os.path.basename(path))
+    handle, temporary = tempfile.mkstemp(
+        prefix=base + "_", suffix=ext, dir=directory
+    )
+    os.close(handle)
+    temporary_yaml = os.path.splitext(temporary)[0] + ".yaml"
+    try:
+        write(temporary)
+        os.replace(temporary, path)
+        if os.path.isfile(temporary_yaml):
+            os.replace(temporary_yaml, os.path.splitext(path)[0] + ".yaml")
+    finally:
+        for leftover in (temporary, temporary_yaml):
+            if os.path.isfile(leftover):
+                os.remove(leftover)
 
 
 def convert_files(

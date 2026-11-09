@@ -228,6 +228,25 @@ _DENSITY_METRICS = {
 }
 
 
+#: Returned by ``_setting_value`` for a value of the wrong type.
+_INVALID = object()
+
+
+def _setting_value(default, value):
+    """A saved ``value`` of an ``Appearance`` field whose default is
+    ``default``, as the type of the field: a bool for a bool, a number
+    (not a bool, rounded) for an int and a string otherwise;
+    ``_INVALID`` if it is of another type."""
+    if isinstance(default, bool):
+        return value if isinstance(value, bool) else _INVALID
+    if isinstance(default, int):
+        is_number = isinstance(value, (int, float)) and not isinstance(
+            value, bool
+        )
+        return int(round(value)) if is_number else _INVALID
+    return value if isinstance(value, str) else _INVALID
+
+
 @dataclass(frozen=True)
 class Appearance:
     """Look of the windows.
@@ -280,26 +299,23 @@ class Appearance:
             return default
         values = {}
         for field in fields(cls):
-            value = settings.get(field.name)
-            if isinstance(getattr(default, field.name), bool):
-                if isinstance(value, bool):
-                    values[field.name] = value
-            elif isinstance(getattr(default, field.name), int):
-                if isinstance(value, (int, float)) and not isinstance(
-                    value, bool
-                ):
-                    values[field.name] = int(round(value))
-            elif isinstance(value, str):
+            value = _setting_value(
+                getattr(default, field.name), settings.get(field.name)
+            )
+            if value is not _INVALID:
                 values[field.name] = value
         appearance = replace(default, **values)
-        if appearance.mode not in MODES:
-            appearance = replace(appearance, mode=default.mode)
-        if appearance.contrast not in CONTRASTS:
-            appearance = replace(appearance, contrast=default.contrast)
-        if appearance.toolbar not in TOOLBAR_STYLES:
-            appearance = replace(appearance, toolbar=default.toolbar)
-        if appearance.density not in DENSITIES:
-            appearance = replace(appearance, density=default.density)
+        # replace choices that are no longer offered by their default
+        for name, options in (
+            ("mode", MODES),
+            ("contrast", CONTRASTS),
+            ("toolbar", TOOLBAR_STYLES),
+            ("density", DENSITIES),
+        ):
+            if getattr(appearance, name) not in options:
+                appearance = replace(
+                    appearance, **{name: getattr(default, name)}
+                )
         accent = QtGui.QColor(appearance.accent)
         if accent.isValid():
             appearance = replace(appearance, accent=accent.name().upper())

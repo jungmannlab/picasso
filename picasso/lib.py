@@ -3530,26 +3530,7 @@ def minimize_shifts(
             raise ValueError(
                 "The shifts must have the shape (n_segments, n_segments)."
             )
-    if weights is None:
-        dim_weights = [None] * len(measured)
-    else:
-        if np.ndim(weights) == 2:
-            weights = [weights] * len(measured)
-        elif len(weights) != len(measured):
-            raise ValueError(
-                f"{len(weights)} weight arrays given for {len(measured)} "
-                "dimensions."
-            )
-        else:  # x, y(, z) -> y, x(, z)
-            weights = [weights[1], weights[0], *weights[2:]]
-        dim_weights = []
-        for weights_ in weights:
-            weights_ = np.asarray(weights_, dtype=np.float64)
-            if weights_.shape != (n_segments, n_segments):
-                raise ValueError(
-                    "The weights must have the shape (n_segments, n_segments)."
-                )
-            dim_weights.append(weights_)
+    dim_weights = _shift_weights(weights, len(measured), n_segments)
     rows, columns = np.triu_indices(n_segments, 1)
     n_pairs = len(rows)
     # unknowns: the steps between consecutive segments, whose cumulative
@@ -3557,8 +3538,6 @@ def minimize_shifts(
     A = np.zeros((n_pairs, n_segments - 1))
     for flag, (i, j) in enumerate(zip(rows, columns)):
         A[flag, i:j] = 1
-    # the shifts from the steps
-    to_shifts = np.tril(np.ones((n_segments - 1, n_segments - 1)))
     results, covariances = [], []
     for shifts, weights_ in zip(measured, dim_weights):
         r = np.asarray(shifts, dtype=np.float64)[rows, columns]
@@ -3572,34 +3551,106 @@ def minimize_shifts(
         if valid.all() and weights_ is None:
             steps = np.dot(np.linalg.pinv(A), r)  # the original solution
         else:
-            if not _pairs_connect(rows[valid], columns[valid], n_segments):
-                raise ValueError(
-                    "The measured pairs do not connect every segment to "
-                    "the first one, so their shifts are undetermined."
-                )
-            A_valid = A[valid]
-            normal = A_valid.T @ (w[valid, None] * A_valid)
-            steps = np.linalg.solve(normal, A_valid.T @ (w[valid] * r[valid]))
+            steps = _weighted_steps(A, r, w, valid, rows, columns)
         results.append(np.insert(np.cumsum(steps), 0, 0))
         if return_covariance:
-            covariance = np.zeros((n_segments, n_segments))
-            if n_segments > 1:
-                A_valid = A[valid]
-                normal = A_valid.T @ (w[valid, None] * A_valid)
-                steps_covariance = np.linalg.inv(normal)
-                if weights_ is None:
-                    # the variance of the measured shifts from the
-                    # residuals
-                    n_free = int(valid.sum()) - (n_segments - 1)
-                    residuals = r[valid] - A_valid @ steps
-                    steps_covariance *= (
-                        residuals @ residuals / n_free if n_free else np.nan
-                    )
-                covariance[1:, 1:] = to_shifts @ steps_covariance @ to_shifts.T
-            covariances.append(covariance)
+            covariances.append(
+                _shift_covariance(
+                    A[valid], w[valid], r[valid], steps, weights_ is None
+                )
+            )
     if return_covariance:
         return *results, tuple(covariances)
     return tuple(results)
+
+
+def _shift_weights(
+    weights: FloatArray2D | list[FloatArray2D] | None,
+    n_dims: int,
+    n_segments: int,
+) -> list[FloatArray2D | None]:
+    """The weights of ``minimize_shifts`` for each dimension, in the
+    order of the returned shifts (y, x, z), checked: one array for all
+    dimensions or one per dimension (x, y, z), or None for each."""
+    if weights is None:
+        return [None] * n_dims
+    if np.ndim(weights) == 2:
+        weights = [weights] * n_dims
+    elif len(weights) != n_dims:
+        raise ValueError(
+            f"{len(weights)} weight arrays given for {n_dims} dimensions."
+        )
+    else:  # x, y(, z) -> y, x(, z)
+        weights = [weights[1], weights[0], *weights[2:]]
+    dim_weights = []
+    for weights_ in weights:
+        weights_ = np.asarray(weights_, dtype=np.float64)
+        if weights_.shape != (n_segments, n_segments):
+            raise ValueError(
+                "The weights must have the shape (n_segments, n_segments)."
+            )
+        dim_weights.append(weights_)
+    return dim_weights
+
+
+def _weighted_steps(
+    A: FloatArray2D,
+    r: FloatArray1D,
+    w: FloatArray1D,
+    valid: np.ndarray,
+    rows: IntArray1D,
+    columns: IntArray1D,
+) -> FloatArray1D:
+    """The steps between consecutive segments of ``minimize_shifts``
+    from the ``valid`` measured pairs ``(rows, columns)``, by weighted
+    least squares (design matrix ``A``, measured shifts ``r``, weights
+    ``w``).
+
+    Raises
+    ------
+    ValueError
+        If the valid pairs do not connect every segment to the first
+        one.
+    """
+    n_segments = A.shape[1] + 1
+    if not _pairs_connect(rows[valid], columns[valid], n_segments):
+        raise ValueError(
+            "The measured pairs do not connect every segment to "
+            "the first one, so their shifts are undetermined."
+        )
+    A_valid = A[valid]
+    normal = A_valid.T @ (w[valid, None] * A_valid)
+    return np.linalg.solve(normal, A_valid.T @ (w[valid] * r[valid]))
+
+
+def _shift_covariance(
+    A_valid: FloatArray2D,
+    w_valid: FloatArray1D,
+    r_valid: FloatArray1D,
+    steps: FloatArray1D,
+    estimate_variance: bool,
+) -> FloatArray2D:
+    """Covariance matrix of the shifts of one dimension of
+    ``minimize_shifts`` from its measured pairs (design matrix
+    ``A_valid``, weights ``w_valid``, measured shifts ``r_valid``) and
+    the fitted ``steps``; the variance of the measured shifts is
+    estimated from the residuals if ``estimate_variance``."""
+    n_segments = A_valid.shape[1] + 1
+    covariance = np.zeros((n_segments, n_segments))
+    if n_segments > 1:
+        normal = A_valid.T @ (w_valid[:, None] * A_valid)
+        steps_covariance = np.linalg.inv(normal)
+        if estimate_variance:
+            # the variance of the measured shifts from the residuals
+            n_free = len(r_valid) - (n_segments - 1)
+            residuals = r_valid - A_valid @ steps
+            steps_covariance *= (
+                residuals @ residuals / n_free if n_free else np.nan
+            )
+        # the shifts are the cumulative sums of the steps
+        to_shifts = np.tril(np.ones((n_segments - 1, n_segments - 1)))
+        covariance[1:, 1:] = to_shifts @ steps_covariance @ to_shifts.T
+    return covariance
 
 
 def _pairs_connect(
@@ -4022,24 +4073,7 @@ def pick_shapes_and_sizes(
     (['Circle', 'Circle', 'Box'], [100.0, 140.0, None])
     """
     n_picks = len(picks)
-    if isinstance(pick_shape, str) or pick_shape is None:
-        if pick_shape is None and n_picks:
-            raise ValueError("The shape of the picks (pick_shape) is needed.")
-        shapes = [pick_shape] * n_picks
-        checked = [pick_shape] if pick_shape is not None else []
-    else:
-        shapes = list(pick_shape)
-        checked = shapes
-        if len(shapes) != n_picks:
-            raise ValueError(
-                f"pick_shape holds {len(shapes)} shapes for {n_picks} picks."
-            )
-    for shape in checked:
-        if shape not in PICK_SHAPES:
-            raise ValueError(
-                f"Unrecognized pick shape: {shape}. Choose one of "
-                f"{PICK_SHAPES}."
-            )
+    shapes = _pick_shapes(pick_shape, n_picks)
     if np.ndim(pick_size) == 0:  # one size (or None) for all picks
         sizes = [pick_size] * n_picks
     else:
@@ -4063,6 +4097,32 @@ def pick_shapes_and_sizes(
             )
         sizes[i] = value
     return shapes, sizes
+
+
+def _pick_shapes(
+    pick_shape: str | Sequence[str] | None, n_picks: int
+) -> list[str]:
+    """The shape of each of ``n_picks`` picks, checked, see
+    ``pick_shapes_and_sizes``."""
+    if isinstance(pick_shape, str) or pick_shape is None:
+        if pick_shape is None and n_picks:
+            raise ValueError("The shape of the picks (pick_shape) is needed.")
+        shapes = [pick_shape] * n_picks
+        checked = [pick_shape] if pick_shape is not None else []
+    else:
+        shapes = list(pick_shape)
+        checked = shapes
+        if len(shapes) != n_picks:
+            raise ValueError(
+                f"pick_shape holds {len(shapes)} shapes for {n_picks} picks."
+            )
+    for shape in checked:
+        if shape not in PICK_SHAPES:
+            raise ValueError(
+                f"Unrecognized pick shape: {shape}. Choose one of "
+                f"{PICK_SHAPES}."
+            )
+    return shapes
 
 
 def _compact_pick_shapes_and_sizes(

@@ -9781,18 +9781,9 @@ class SpatialStatisticDialog(lib.Dialog):
             + 2 * self.channels_list.frameWidth()
         )
         grid.addWidget(self.channels_list, 1, 1, 2, 1)
-        if self.multichannel:
-            hidden = [channel_label, self.channel, partner_label, self.partner]
-            if len(view.locs_paths) < 2:
-                hidden += [channels_label, self.channels_list]
-        else:
-            hidden = [channels_label, self.channels_list]
-            if len(view.locs_paths) < 2:
-                hidden += [channel_label, self.channel]
-            if len(view.locs_paths) < 2 or not self.statistic["partner"]:
-                hidden += [partner_label, self.partner]
-        for widget in hidden:
-            widget.hide()
+        self._hide_unused_channel_widgets(
+            channel_label, partner_label, channels_label
+        )
 
         region_label = QtWidgets.QLabel("Regions:")
         region_label.setToolTip(
@@ -9809,13 +9800,7 @@ class SpatialStatisticDialog(lib.Dialog):
         )
         grid.addWidget(region_label, 3, 0)
         self.region = QtWidgets.QComboBox()
-        n_picks = len(view._picks)
-        for key, text in self.REGIONS.items():
-            if key == "picks":
-                if not n_picks:
-                    continue
-                text = f"{text} ({n_picks})"
-            self.region.addItem(text, key)
+        self._add_regions(len(view._picks))
         grid.addWidget(self.region, 3, 1)
         # random shifts work in rectangles and circles only
         self._picks_shiftable = bool(view._picks) and all(
@@ -10028,6 +10013,39 @@ class SpatialStatisticDialog(lib.Dialog):
         vbox.addWidget(self.buttons)
         self.buttons.accepted.connect(self.accept)
         self.buttons.rejected.connect(self.reject)
+
+    def _hide_unused_channel_widgets(
+        self,
+        channel_label: QtWidgets.QLabel,
+        partner_label: QtWidgets.QLabel,
+        channels_label: QtWidgets.QLabel,
+    ) -> None:
+        """Show either the checkable channels (multichannel statistics)
+        or the channel and the partner, each only with several channels
+        loaded; the partner only for statistics that take one."""
+        several = len(self.window.view.locs_paths) >= 2
+        if self.multichannel:
+            hidden = [channel_label, self.channel, partner_label, self.partner]
+            if not several:
+                hidden += [channels_label, self.channels_list]
+        else:
+            hidden = [channels_label, self.channels_list]
+            if not several:
+                hidden += [channel_label, self.channel]
+            if not several or not self.statistic["partner"]:
+                hidden += [partner_label, self.partner]
+        for widget in hidden:
+            widget.hide()
+
+    def _add_regions(self, n_picks: int) -> None:
+        """Add the region choices of ``REGIONS``, the picks only if there
+        are any (``n_picks``)."""
+        for key, text in self.REGIONS.items():
+            if key == "picks":
+                if not n_picks:
+                    continue
+                text = f"{text} ({n_picks})"
+            self.region.addItem(text, key)
 
     def channels(self) -> list[int]:
         """Indices of the checked channels (multichannel statistics) or
@@ -12666,6 +12684,34 @@ def _expand_viewport(
     return ((y_min - dy, x_min - dx), (y_max + dy, x_max + dx))
 
 
+def _statistic_channels(spec: dict, params: dict) -> list[int]:
+    """The channels a spatial statistic (``spec``, see
+    ``SPATIAL_STATISTICS``) is computed of, from the parameters of
+    ``SpatialStatisticDialog``: the checked channels of a multichannel
+    statistic, else the channel and, if chosen, the partner."""
+    if spec["multichannel"]:
+        return params["channels"]
+    if params["partner"] is None:
+        return [params["channel"]]
+    return [params["channel"], params["partner"]]
+
+
+def _join_names(names: list[str]) -> str:
+    """``names`` as in a sentence: "a", "a and b" or "a, b and c"."""
+    if len(names) > 2:
+        return ", ".join(names[:-1]) + " and " + names[-1]
+    return " and ".join(names)
+
+
+def _permute_channels(items: list, order: list[int]) -> None:
+    """Reorder the per-channel list ``items`` in place, the item at
+    index ``order[k]`` moving to index ``k`` (see
+    ``View.reorder_channels``); a list of another length is left
+    alone."""
+    if len(items) == len(order):
+        items[:] = [items[old] for old in order]
+
+
 class View(QtWidgets.QLabel, idle.SpillableChannels):
     """Display localization datasets. Render localizations and draw
     objects on top, such as scale bar, legend, etc.
@@ -12967,8 +13013,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         size.
 
         Localization coordinates are in nm, so channels of different
-        camera pixel sizes render together correctly; the pixel size only sets the
-        extent of the field of view of each channel (see
+        camera pixel sizes render together correctly; the pixel size only
+        sets the extent of the field of view of each channel (see
         ``lib.field_of_view``) and the default for converting files
         written before Picasso 1.0. A mismatch is therefore usually a
         typo in one file's metadata, which the user is told about; the
@@ -13482,11 +13528,6 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             index ``order[k]`` moves to index ``k``.
         """
         new_index = {old: new for new, old in enumerate(order)}
-
-        def permute(items: list) -> None:
-            if len(items) == len(order):
-                items[:] = [items[old] for old in order]
-
         for items in (
             self.locs,
             self.infos,
@@ -13496,7 +13537,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             self._drift,
             self._driftfiles,
         ):
-            permute(items)
+            _permute_channels(items, order)
         # the cached image holds one plane per channel; render again
         self.image = None
         self.median_lp = np.mean(
@@ -13509,12 +13550,19 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             ]
         if isinstance(getattr(self, "channel", None), int):
             self.channel = new_index.get(self.channel, self.channel)
+        self._reorder_window_channels(order, new_index)
 
+    def _reorder_window_channels(
+        self, order: list[int], new_index: dict[int, int]
+    ) -> None:
+        """Reorder the channels in the dialogs and windows of the Render
+        window, see ``reorder_channels``; ``new_index`` maps the old
+        channel indices to the new ones."""
         window = self.window
         if window.slicer_dialog.isVisible():
             window.slicer_dialog.calculate_histogram()
         tools_dialog = window.tools_settings_dialog
-        permute(tools_dialog._move_selection)
+        _permute_channels(tools_dialog._move_selection, order)
         tools_dialog._update_move_channels_label()
         clusterer = window.test_clusterer_dialog
         current = clusterer.channels.currentIndex()
@@ -13536,8 +13584,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 mask_dialog.channel, mask_dialog.channel
             )
         if mask_dialog.save_all.isChecked():
-            permute(mask_dialog.index_locs)
-            permute(mask_dialog.index_locs_out)
+            _permute_channels(mask_dialog.index_locs, order)
+            _permute_channels(mask_dialog.index_locs_out, order)
         if window.metadata_dialog.isVisible():
             window.show_metadata()
         # linked windows compare the channels position by position to
@@ -13548,8 +13596,8 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         window_rot = getattr(window, "window_rot", None)
         if window_rot is not None:
             view_rot = window_rot.view_rot
-            permute(view_rot.locs)
-            permute(view_rot.infos)
+            _permute_channels(view_rot.locs, order)
+            _permute_channels(view_rot.infos, order)
             view_rot.image = None
 
     def _finish_load(self) -> None:
@@ -13940,18 +13988,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         (see ``keep_non_overlapping_setting``), or if the channels do
         not overlap."""
         locs, infos = self.locs, self.infos
-        if method is None:
-            method = "picked" if len(self._picks) > 0 else "rcc"
-        kwargs = {"paths": list(self.locs_paths), "method": method}
-        if method == "picked":  # shift from picked
-            kwargs |= {
-                **self._pick_args(),
-                "index_blocks": [
-                    self._circle_pick_index(c) for c in range(len(self.locs))
-                ],
-            }
-        elif method == "points":
-            kwargs["max_shift"] = max_shift
+        kwargs = self._align_kwargs(method, max_shift)
         keep = keep_non_overlapping_setting()
 
         def align():
@@ -13989,6 +14026,28 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 "The aligned channels do not overlap, so all"
                 " localizations were kept.",
             )
+
+    def _align_kwargs(
+        self,
+        method: Literal["rcc", "picked", "points"] | None,
+        max_shift: float,
+    ) -> dict:
+        """The arguments of ``postprocess.align`` besides the
+        localizations for ``align``: the method (from the picks if there
+        are any, else by RCC, if ``method`` is None) and what it needs."""
+        if method is None:
+            method = "picked" if len(self._picks) > 0 else "rcc"
+        kwargs = {"paths": list(self.locs_paths), "method": method}
+        if method == "picked":  # shift from picked
+            kwargs |= {
+                **self._pick_args(),
+                "index_blocks": [
+                    self._circle_pick_index(c) for c in range(len(self.locs))
+                ],
+            }
+        elif method == "points":
+            kwargs["max_shift"] = max_shift
+        return kwargs
 
     @check_pick
     def combine(self) -> None:
@@ -14065,38 +14124,43 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 results.append((c, linked_locs, linked_info))
             return results
 
-        def apply(results: list[tuple]) -> None:
-            with self.undo_step("Link localizations"):
-                for c, linked_locs, linked_info in results:
-                    self.locs[c] = linked_locs
-                    # a new list, the old one may be shared with linked
-                    # windows
-                    self.infos[c] = linked_info
-                grouped = [
-                    locs for _, locs, _ in results if "group" in locs.columns
-                ]
-                if grouped:
-                    self.group_color = render.get_group_color(
-                        grouped[-1], shuffle=True
-                    )
-                self.update_scene(resample_locs=True)
-            if skipped:
-                names = "\n".join(
-                    os.path.basename(self.locs_paths[c]) for c in skipped
-                )
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "Link",
-                    f"Skipped the already linked channels:\n{names}",
-                )
-
         lib.run_task(
             compute,
             "Linking localizations...",
             self,
-            apply,
+            partial(self._apply_link_results, skipped=skipped),
             title="Link localizations",
         )
+
+    def _apply_link_results(
+        self, results: list[tuple], skipped: list[int]
+    ) -> None:
+        """Put the linked localizations of ``link`` (channel,
+        localizations, metadata) in place as one undo step and name the
+        ``skipped`` channels, which were linked already."""
+        with self.undo_step("Link localizations"):
+            for c, linked_locs, linked_info in results:
+                self.locs[c] = linked_locs
+                # a new list, the old one may be shared with linked
+                # windows
+                self.infos[c] = linked_info
+            grouped = [
+                locs for _, locs, _ in results if "group" in locs.columns
+            ]
+            if grouped:
+                self.group_color = render.get_group_color(
+                    grouped[-1], shuffle=True
+                )
+            self.update_scene(resample_locs=True)
+        if skipped:
+            names = "\n".join(
+                os.path.basename(self.locs_paths[c]) for c in skipped
+            )
+            QtWidgets.QMessageBox.information(
+                self,
+                "Link",
+                f"Skipped the already linked channels:\n{names}",
+            )
 
     def select_binding_event_cores(self) -> None:
         """Keep only the localizations that are not at the borders of
@@ -15856,10 +15920,10 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     def dropEvent(self, event: QtGui.QDropEvent) -> None:
         """When a file is dropped onto the window, if the file ends with
         ``.hdf5`` (or is a PyME ``.h5r``/``.hdf`` or pyMINFLUX ``.pmx``
-        file), try loading localizations. If it ends with ``.txt``, try loading a fov file.
-        If it ends with ``.yaml``, try loading pick regions. If it is a
-        single ``.png`` or ``.tif`` image, overlay it (see
-        ``ImageOverlayDialog``)."""
+        file), try loading localizations. If it ends with ``.txt``, try
+        loading a fov file. If it ends with ``.yaml``, try loading pick
+        regions. If it is a single ``.png`` or ``.tif`` image, overlay it
+        (see ``ImageOverlayDialog``)."""
         urls = event.mimeData().urls()
         paths = [_.toLocalFile() for _ in urls]
         extensions = [os.path.splitext(_)[1].lower() for _ in paths]
@@ -16972,7 +17036,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.window.update_undo_actions()
         return changed
 
-    def _apply_history_step(self, step: render_undo.Step) -> None:
+    # the locs are put back here, next to the index invalidation, as
+    # the undo and index guards of the tests require
+    def _apply_history_step(  # noqa: C901
+        self, step: render_undo.Step
+    ) -> None:
         """Put back what ``step`` holds (see ``undo``) and redraw.
 
         Picks, measured points and the viewport follow the canvas if the
@@ -17592,43 +17660,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             if reply != QtWidgets.QMessageBox.StandardButton.Yes:
                 return
 
-        # where to save
-        if pair is not None:
-            path, ext = lib.get_save_filename_ext_dialog(
-                self,
-                "Save localizations with CBC",
-                os.path.splitext(self.locs_paths[pair[0]])[0] + "_cbc.hdf5",
-                filter="*.hdf5",
-                check_ext=".yaml",
-            )
-            if not path:
-                return
-            out_paths = [path]
-        else:
-            folder = QtWidgets.QFileDialog.getExistingDirectory(
-                self,
-                "Folder to save the localizations with CBC",
-                os.path.dirname(self.locs_paths[0]),
-            )
-            if not folder:
-                return
-            out_paths = [
-                os.path.join(
-                    folder,
-                    os.path.splitext(os.path.basename(path))[0] + "_cbc.hdf5",
-                )
-                for path in self.locs_paths
-            ]
-            existing = [p for p in out_paths if os.path.exists(p)]
-            if existing:
-                reply = QtWidgets.QMessageBox.question(
-                    self,
-                    "CBC",
-                    "These files exist already and will be overwritten:\n"
-                    + "\n".join(os.path.basename(p) for p in existing),
-                )
-                if reply != QtWidgets.QMessageBox.StandardButton.Yes:
-                    return
+        out_paths = self._cbc_out_paths(pair)
+        if out_paths is None:
+            return
 
         # snapshot the inputs for the worker thread
         locs = [self.locs[i] for i in used]
@@ -17675,6 +17709,48 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             title="CBC",
         )
 
+    def _cbc_out_paths(self, pair: tuple[int, int] | None) -> list | None:
+        """Ask where ``cbc`` saves the scored channels: a file for the
+        first channel of ``pair``, or a folder for all channels (None),
+        confirming that existing files are overwritten. Returns None if
+        canceled."""
+        if pair is not None:
+            path, ext = lib.get_save_filename_ext_dialog(
+                self,
+                "Save localizations with CBC",
+                os.path.splitext(self.locs_paths[pair[0]])[0] + "_cbc.hdf5",
+                filter="*.hdf5",
+                check_ext=".yaml",
+            )
+            if not path:
+                return None
+            return [path]
+        folder = QtWidgets.QFileDialog.getExistingDirectory(
+            self,
+            "Folder to save the localizations with CBC",
+            os.path.dirname(self.locs_paths[0]),
+        )
+        if not folder:
+            return None
+        out_paths = [
+            os.path.join(
+                folder,
+                os.path.splitext(os.path.basename(path))[0] + "_cbc.hdf5",
+            )
+            for path in self.locs_paths
+        ]
+        existing = [p for p in out_paths if os.path.exists(p)]
+        if existing:
+            reply = QtWidgets.QMessageBox.question(
+                self,
+                "CBC",
+                "These files exist already and will be overwritten:\n"
+                + "\n".join(os.path.basename(p) for p in existing),
+            )
+            if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+                return None
+        return out_paths
+
     def spatial_statistic(self, statistic: str) -> None:
         """Ask for the channel, regions and parameters of a spatial
         statistic (a key of ``SPATIAL_STATISTICS``, e.g., Ripley's H
@@ -17689,87 +17765,21 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return
         spec = SPATIAL_STATISTICS[statistic]
         name = spec["title"]
-        partner = params["partner"]
-        if spec["multichannel"]:
-            used = params["channels"]
-        elif partner is None:
-            used = [params["channel"]]
-        else:
-            used = [params["channel"], partner]
+        used = _statistic_channels(spec, params)
         channel = used[0]
         titles = [self.window.dataset_dialog.checks[i].text() for i in used]
-        if len(titles) > 2:
-            title = ", ".join(titles[:-1]) + " and " + titles[-1]
-        else:
-            title = " and ".join(titles)
-
-        # each molecule of localizations counts as many times as it was
-        # localized, which looks like clustering
-        not_molecules = [
-            t
-            for i, t in zip(used, titles)
-            if not postprocess._are_molecules(self.locs[i])
-        ]
-        if not_molecules:
-            reply = QtWidgets.QMessageBox.warning(
-                self,
-                name,
-                f"{' and '.join(not_molecules)} "
-                f"{'do' if len(not_molecules) > 1 else 'does'} not contain "
-                "molecules (no 'n_events' or 'std_frame' column), so each "
-                "molecule is counted as many times as it was localized, "
-                "which appears as clustering at short distances.\n\n"
-                "Consider finding the molecules first, e.g., with "
-                "Postprocess > Molecular mapping (G5M) or by clustering "
-                "with 'Save cluster centers'.\n\nContinue anyway?",
-                QtWidgets.QMessageBox.StandardButton.Yes
-                | QtWidgets.QMessageBox.StandardButton.No,
-                QtWidgets.QMessageBox.StandardButton.No,
-            )
-            if reply != QtWidgets.QMessageBox.StandardButton.Yes:
-                return
+        title = _join_names(titles)
+        if not self._confirm_molecules(name, used, titles):
+            return
 
         # snapshot the inputs for the worker thread
-        locs = self.locs[channel]
         info = self.infos[channel]
-        if params["region"] == "picks":
-            pick_args = self._pick_args()
-            picks = pick_args["picks"]
-            pick_shape = pick_args["pick_shape"]
-            pick_size = pick_args["pick_size"]
-        elif params["region"] == "view":
-            (y_min, x_min), (y_max, x_max) = self.viewport
-            picks = [((x_min, y_min), (x_max, y_max))]
-            pick_shape, pick_size = "Box", None
-        else:
-            picks, pick_shape, pick_size = None, None, None
-        kwargs = dict(
-            n_simulations=params["n_simulations"],
-            use_z=params["use_z"],
-            z_range=params["z_range"],
+        picks, pick_shape, pick_size = self._statistic_regions(
+            params["region"]
         )
-        if spec["neighbors"]:
-            kwargs.update(
-                k_max=params["k_max"],
-                k_min=params["k_min"],
-                r_min=params["r_min"],
-                edge_correction=params["edge_correction"],
-            )
-        else:
-            kwargs.update(
-                r_max=params["r_max"],
-                steps=params["steps"],
-                simulated_z=params["simulated_z"],
-                cross_null=params["cross_null"],
-            )
-        if spec["multichannel"]:
-            locs = [self.locs[i] for i in used]
-            kwargs["names"] = titles
-        elif spec["partner"]:
-            kwargs["edge_correction"] = params["edge_correction"]
-            kwargs["partner_locs"] = (
-                None if partner is None else self.locs[partner]
-            )
+        locs, kwargs = self._spatial_statistic_inputs(
+            spec, params, used, titles
+        )
 
         def compute(progress: lib.TaskProgress) -> tuple[dict, list[str]]:
             with warnings.catch_warnings(record=True) as caught:
@@ -17820,6 +17830,93 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             on_failed=failed,
             title=name,
         )
+
+    def _confirm_molecules(
+        self, name: str, used: list[int], titles: list[str]
+    ) -> bool:
+        """Whether to compute the spatial statistic ``name`` of the
+        channels ``used`` (named ``titles``): asks the user if some do
+        not contain molecules, since each molecule of localizations
+        counts as many times as it was localized, which looks like
+        clustering."""
+        not_molecules = [
+            t
+            for i, t in zip(used, titles)
+            if not postprocess._are_molecules(self.locs[i])
+        ]
+        if not not_molecules:
+            return True
+        reply = QtWidgets.QMessageBox.warning(
+            self,
+            name,
+            f"{' and '.join(not_molecules)} "
+            f"{'do' if len(not_molecules) > 1 else 'does'} not contain "
+            "molecules (no 'n_events' or 'std_frame' column), so each "
+            "molecule is counted as many times as it was localized, "
+            "which appears as clustering at short distances.\n\n"
+            "Consider finding the molecules first, e.g., with "
+            "Postprocess > Molecular mapping (G5M) or by clustering "
+            "with 'Save cluster centers'.\n\nContinue anyway?",
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.No,
+            QtWidgets.QMessageBox.StandardButton.No,
+        )
+        return reply == QtWidgets.QMessageBox.StandardButton.Yes
+
+    def _statistic_regions(self, region: str) -> tuple:
+        """The picks, their shape and size in which a spatial statistic
+        is computed: those of the picks, the current view as a box or
+        None for the whole field of view (``region`` of
+        ``SpatialStatisticDialog.REGIONS``)."""
+        if region == "picks":
+            pick_args = self._pick_args()
+            return (
+                pick_args["picks"],
+                pick_args["pick_shape"],
+                pick_args["pick_size"],
+            )
+        if region == "view":
+            (y_min, x_min), (y_max, x_max) = self.viewport
+            return [((x_min, y_min), (x_max, y_max))], "Box", None
+        return None, None, None
+
+    def _spatial_statistic_inputs(
+        self, spec: dict, params: dict, used: list[int], titles: list[str]
+    ) -> tuple:
+        """The localizations (of the first channel ``used``, or of all of
+        them for a multichannel statistic) and the keyword arguments of
+        the function of a spatial statistic (``spec``, see
+        ``SPATIAL_STATISTICS``) from the dialog's ``params``."""
+        locs = self.locs[used[0]]
+        partner = params["partner"]
+        kwargs = dict(
+            n_simulations=params["n_simulations"],
+            use_z=params["use_z"],
+            z_range=params["z_range"],
+        )
+        if spec["neighbors"]:
+            kwargs.update(
+                k_max=params["k_max"],
+                k_min=params["k_min"],
+                r_min=params["r_min"],
+                edge_correction=params["edge_correction"],
+            )
+        else:
+            kwargs.update(
+                r_max=params["r_max"],
+                steps=params["steps"],
+                simulated_z=params["simulated_z"],
+                cross_null=params["cross_null"],
+            )
+        if spec["multichannel"]:
+            locs = [self.locs[i] for i in used]
+            kwargs["names"] = titles
+        elif spec["partner"]:
+            kwargs["edge_correction"] = params["edge_correction"]
+            kwargs["partner_locs"] = (
+                None if partner is None else self.locs[partner]
+            )
+        return locs, kwargs
 
     def _camera_origin(self, channel: int) -> tuple[float, float]:
         """Where the camera frame of ``channel`` starts in the displayed
@@ -19593,10 +19690,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """locs/infos for the render-by-property branch.
 
         x_locs is split once (see ``property_locs``) and reused as-is
-        until the localizations change. It is precomputed and shares an index that depends on the property
-        binning; the renderer's own brute-force in-view filter handles
-        this case, since the pyramid pre-filter is only applied to the
-        multichannel path below, the common redraw cost driver.
+        until the localizations change. It is precomputed and shares an
+        index that depends on the property binning; the renderer's own
+        brute-force in-view filter handles this case, since the pyramid
+        pre-filter is only applied to the multichannel path below, the
+        common redraw cost driver.
         """
         locs = self.property_locs().copy()
         infos = [self.infos[0]] * len(locs)
@@ -21436,26 +21534,7 @@ class Window(QtWidgets.QMainWindow):
         overlay_action.triggered.connect(self.open_image_overlay)
         self.add_color_vision_menu(view_menu)
 
-        # moving and zooming are not in the menu (the mouse does them),
-        # but their shortcuts work in the whole window; a rebuilt UI
-        # replaces them, as two actions with one shortcut block each other
-        for action in getattr(self, "_navigation_actions", []):
-            self.removeAction(action)
-            action.deleteLater()
-        self._navigation_actions = []
-        for text, shortcuts, slot in (
-            ("Left", ["Left", "A"], self.view.to_left),
-            ("Right", ["Right", "D"], self.view.to_right),
-            ("Up", ["Up", "W"], self.view.to_up),
-            ("Down", ["Down", "S"], self.view.to_down),
-            ("Zoom in", ["Ctrl++", "Ctrl+="], self.view.zoom_in),
-            ("Zoom out", ["Ctrl+-"], self.view.zoom_out),
-        ):
-            action = QtGui.QAction(text, self)
-            action.setShortcuts(shortcuts)
-            action.triggered.connect(slot)
-            self.addAction(action)
-            self._navigation_actions.append(action)
+        self._add_navigation_actions()
 
         view_menu.addSeparator()
         fit_in_view_action = view_menu.addAction("Fit image to window")
@@ -21866,6 +21945,29 @@ class Window(QtWidgets.QMainWindow):
         # reconnect the rebuilt view and dialogs (``remove_locs``)
         if self.link_group is not None:
             self.link_group.attach(self)
+
+    def _add_navigation_actions(self) -> None:
+        """Add the shortcuts of moving and zooming, which are not in the
+        menu (the mouse does them) but work in the whole window. A
+        rebuilt UI replaces them, as two actions with one shortcut block
+        each other."""
+        for action in getattr(self, "_navigation_actions", []):
+            self.removeAction(action)
+            action.deleteLater()
+        self._navigation_actions = []
+        for text, shortcuts, slot in (
+            ("Left", ["Left", "A"], self.view.to_left),
+            ("Right", ["Right", "D"], self.view.to_right),
+            ("Up", ["Up", "W"], self.view.to_up),
+            ("Down", ["Down", "S"], self.view.to_down),
+            ("Zoom in", ["Ctrl++", "Ctrl+="], self.view.zoom_in),
+            ("Zoom out", ["Ctrl+-"], self.view.zoom_out),
+        ):
+            action = QtGui.QAction(text, self)
+            action.setShortcuts(shortcuts)
+            action.triggered.connect(slot)
+            self.addAction(action)
+            self._navigation_actions.append(action)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Update user settings and close all dialogs. A linked window
@@ -23068,78 +23170,83 @@ class Window(QtWidgets.QMainWindow):
         channel = self.view.get_channel_save_locs(
             "Save picked localizations separately"
         )
-        if channel is not None:
-            # if more than 10 picks are present, make sure that the user
-            # knows that the picks will be saved separately
-            if len(self.view._picks) > 10:
-                warning = (
-                    f"{len(self.view._picks)} picks were selected. Proceeding "
-                    "will save each pick separately. Are you sure to continue?"
-                )
-                reply = QtWidgets.QMessageBox.question(
-                    self,
-                    "Warning",
-                    warning,
-                    QtWidgets.QMessageBox.StandardButton.Yes
-                    | QtWidgets.QMessageBox.StandardButton.No,
-                )
-                if reply == QtWidgets.QMessageBox.StandardButton.No:
-                    return
+        if channel is None:
+            return
+        # if more than 10 picks are present, make sure that the user
+        # knows that the picks will be saved separately
+        if len(self.view._picks) > 10 and not self._confirm_many_picks():
+            return
 
-            # combine channels to one .hdf5
-            if channel is (len(self.view.locs_paths) + 1):
-                base, ext = os.path.splitext(self.view.locs_paths[0])
-                out_path = base + "_multi_pick.hdf5"
-                check_ext = [
-                    f"_{i}.hdf5" for i in range(len(self.view._picks))
-                ]
-                check_ext.extend(
-                    [f"_{i}.yaml" for i in range(len(self.view._picks))]
-                )
-                path, ext = lib.get_save_filename_ext_dialog(
-                    self,
-                    "Save picked localizations",
-                    out_path,
-                    filter="*.hdf5",
-                    check_ext=check_ext,
-                )
-                if path:
-                    self.view.save_picked_locs_multi_sep(path)
-            # save channels one by one
-            elif channel is (len(self.view.locs_paths)):
-                suffix, ok = QtWidgets.QInputDialog.getText(
-                    self,
-                    "Input Dialog",
-                    "Enter suffix",
-                    QtWidgets.QLineEdit.EchoMode.Normal,
-                    "_pick",
-                )
-                if ok:
-                    for channel in range(len(self.view.locs_paths)):
-                        base, ext = os.path.splitext(
-                            self.view.locs_paths[channel]
-                        )
-                        out_path = base + suffix + ".hdf5"
-                        self.view.save_picked_locs_sep(out_path, channel)
-            # save one channel only
-            else:
+        # combine channels to one .hdf5
+        if channel is (len(self.view.locs_paths) + 1):
+            base, ext = os.path.splitext(self.view.locs_paths[0])
+            out_path = base + "_multi_pick.hdf5"
+            path, ext = lib.get_save_filename_ext_dialog(
+                self,
+                "Save picked localizations",
+                out_path,
+                filter="*.hdf5",
+                check_ext=self._separate_picks_check_ext(),
+            )
+            if path:
+                self.view.save_picked_locs_multi_sep(path)
+        # save channels one by one
+        elif channel is (len(self.view.locs_paths)):
+            self._save_picked_locs_each_channel_sep()
+        # save one channel only
+        else:
+            base, ext = os.path.splitext(self.view.locs_paths[channel])
+            out_path = base + "_pick.hdf5"
+            path, ext = lib.get_save_filename_ext_dialog(
+                self,
+                "Save picked localizations (separate picks)",
+                out_path,
+                filter="*.hdf5",
+                check_ext=self._separate_picks_check_ext(),
+            )
+            if path:
+                self.view.save_picked_locs_sep(path, channel)
+
+    def _confirm_many_picks(self) -> bool:
+        """Whether to save each of the (more than 10) picks separately,
+        asking the user."""
+        warning = (
+            f"{len(self.view._picks)} picks were selected. Proceeding "
+            "will save each pick separately. Are you sure to continue?"
+        )
+        reply = QtWidgets.QMessageBox.question(
+            self,
+            "Warning",
+            warning,
+            QtWidgets.QMessageBox.StandardButton.Yes
+            | QtWidgets.QMessageBox.StandardButton.No,
+        )
+        return reply != QtWidgets.QMessageBox.StandardButton.No
+
+    def _separate_picks_check_ext(self) -> list[str]:
+        """Endings of the files saved for each pick (see
+        ``save_picked_locs_separately``), checked for existing files."""
+        n_picks = len(self.view._picks)
+        check_ext = [f"_{i}.hdf5" for i in range(n_picks)]
+        check_ext.extend([f"_{i}.yaml" for i in range(n_picks)])
+        return check_ext
+
+    def _save_picked_locs_each_channel_sep(self) -> None:
+        """Save the picked localizations of each channel, each pick
+        separately, to files named after the channel with a suffix that
+        the user enters."""
+        suffix, ok = QtWidgets.QInputDialog.getText(
+            self,
+            "Input Dialog",
+            "Enter suffix",
+            QtWidgets.QLineEdit.EchoMode.Normal,
+            "_pick",
+        )
+        if ok:
+            for channel in range(len(self.view.locs_paths)):
                 base, ext = os.path.splitext(self.view.locs_paths[channel])
-                out_path = base + "_pick.hdf5"
-                check_ext = [
-                    f"_{i}.hdf5" for i in range(len(self.view._picks))
-                ]
-                check_ext.extend(
-                    [f"_{i}.yaml" for i in range(len(self.view._picks))]
-                )
-                path, ext = lib.get_save_filename_ext_dialog(
-                    self,
-                    "Save picked localizations (separate picks)",
-                    out_path,
-                    filter="*.hdf5",
-                    check_ext=check_ext,
-                )
-                if path:
-                    self.view.save_picked_locs_sep(path, channel)
+                out_path = base + suffix + ".hdf5"
+                self.view.save_picked_locs_sep(out_path, channel)
 
     def save_picks(self) -> None:
         """Save pick regions as .yaml."""

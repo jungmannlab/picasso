@@ -6724,21 +6724,7 @@ class ParametersDialog(lib.Dialog):
         if self.vectorfit_groupbox is not None:
             self.vectorfit_groupbox.setVisible(needs_vectorfit)
         if getattr(self, "peak_search_z_edit", None) is not None:
-            # the spline takes its PSF from the calibration, and searches
-            # in z with a 3D one
-            for widget in (
-                self.psf_sigma_label,
-                self.psf_sigma_spinbox,
-                self.psf_sigma_estimate_checkbox,
-            ):
-                widget.setVisible(not spline_psf)
-            search_z = spline_psf and (
-                (self.spline_calibration or {}).get("model") == "spline-3d"
-            )
-            self.peak_search_z_label.setVisible(search_z)
-            self.peak_search_z_edit.setVisible(search_z)
-            self.fit_region_label.setVisible(spline_psf)
-            self.fit_region_spinbox.setVisible(spline_psf)
+            self._update_spline_psf_widgets(spline_psf)
         if self.channel_registration_groupbox is not None:
             # only meaningful with several channels to register
             self.channel_registration_groupbox.setVisible(
@@ -6756,6 +6742,30 @@ class ParametersDialog(lib.Dialog):
         # The multichannel rows keep their space while hidden (see
         # _retain_size_when_hidden), but the multi-emitter fit takes one
         # channel, so it does not reserve it.
+        self._retain_multichannel_rows(not multi_emitter)
+
+    def _update_spline_psf_widgets(self, spline_psf: bool) -> None:
+        """Show the PSF sigma, or for the spline PSF of the multi-emitter
+        fit the fit region and, with a 3D calibration, the peak search in
+        z: the spline takes its PSF from the calibration, and searches in z
+        with a 3D one."""
+        for widget in (
+            self.psf_sigma_label,
+            self.psf_sigma_spinbox,
+            self.psf_sigma_estimate_checkbox,
+        ):
+            widget.setVisible(not spline_psf)
+        search_z = spline_psf and (
+            (self.spline_calibration or {}).get("model") == "spline-3d"
+        )
+        self.peak_search_z_label.setVisible(search_z)
+        self.peak_search_z_edit.setVisible(search_z)
+        self.fit_region_label.setVisible(spline_psf)
+        self.fit_region_spinbox.setVisible(spline_psf)
+
+    def _retain_multichannel_rows(self, retain: bool) -> None:
+        """Whether the rows of the multichannel settings (identify on,
+        fit mode) keep their space while hidden."""
         for widget in (
             getattr(self, "identify_mode_label", None),
             getattr(self, "identify_mode_combo", None),
@@ -6764,7 +6774,7 @@ class ParametersDialog(lib.Dialog):
         ):
             if widget is not None:
                 policy = widget.sizePolicy()
-                policy.setRetainSizeWhenHidden(not multi_emitter)
+                policy.setRetainSizeWhenHidden(retain)
                 widget.setSizePolicy(policy)
 
     def multi_emitter_psf_model(self) -> str:
@@ -7297,6 +7307,19 @@ class ParametersDialog(lib.Dialog):
                 continue
             transforms.extend(found)
             loaded.append(path)
+        self._warn_skipped_lateral_transforms(empty, already, repeated)
+        if not transforms:
+            self.update_affine_calib(None)
+            return
+        self._set_affine_state(transforms, loaded)
+
+    def _warn_skipped_lateral_transforms(
+        self, empty: list[str], already: list[dict], repeated: list[dict]
+    ) -> None:
+        """Warn about the lateral corrections ``update_affine_calib`` did
+        not load: files without any (``empty``, file names), corrections
+        the loaded 3D / spline calibration carries (``already``) and ones
+        selected more than once (``repeated``)."""
         if empty:
             QtWidgets.QMessageBox.warning(
                 self,
@@ -7325,10 +7348,6 @@ class ParametersDialog(lib.Dialog):
                 "(the same file or a copy of it). Applying it twice would "
                 "correct the coordinates twice.",
             )
-        if not transforms:
-            self.update_affine_calib(None)
-            return
-        self._set_affine_state(transforms, loaded)
 
     def _calibration_lateral_transforms(self) -> list[dict]:
         """The affine corrections the currently loaded 3D and spline
@@ -7425,27 +7444,8 @@ class ParametersDialog(lib.Dialog):
             )
             self.spline_calib_label.setText(os.path.basename(path))
             self.spline_calib_label.setToolTip(path)
-            # split-FOV: drop the calibration's channel regions into the
-            # view and enter split-FOV mode, so the registration can be
-            # inspected and fine-tuned on this data (arrow-key nudge /
-            # drag) and re-drawn if the split moved. The fit then uses
-            # whatever regions are shown.
             if self.spline_calibration.get("split_fov"):
-                regions = self.spline_calibration.get("regions") or []
-                self.window.view.rois = [
-                    [
-                        [int(r[0][0]), int(r[0][1])],
-                        [int(r[1][0]), int(r[1][1])],
-                    ]
-                    for r in regions
-                ]
-                self.window.view.selected_roi = None
-                self.split_fov_checkbox.blockSignals(True)
-                self.split_fov_checkbox.setChecked(True)
-                self.split_fov_checkbox.blockSignals(False)
-                self.window.set_split_fov_mode(True)
-                self.update_roi_display()
-                self.window.draw_frame()
+                self._show_spline_calib_regions()
         else:
             nothing_loaded = not (
                 self.spline_calibration or self.spline_calibration_path
@@ -7474,12 +7474,39 @@ class ParametersDialog(lib.Dialog):
         # a calibration is loaded while 'Identify on' is set to the sum (see
         # ``Window.ensure_channel_sum``).
         self.window.drop_channel_sum()
+        self._redraw_for_new_calib()
+
+    def _redraw_for_new_calib(self) -> None:
+        """Reset the contrast and redraw the frame of the loaded movie
+        after a calibration changed (see ``update_spline_calib``)."""
         try:
             if self.window.movie is not None:
                 self.window._reset_contrast_to_frame()
                 self.window.draw_frame()
         except (AttributeError, RuntimeError):
             pass  # called during startup, before the window is fully built
+
+    def _show_spline_calib_regions(self) -> None:
+        """Split-FOV: drop the channel regions of the spline calibration
+        into the view and enter split-FOV mode, so the registration can be
+        inspected and fine-tuned on this data (arrow-key nudge / drag) and
+        re-drawn if the split moved. The fit then uses whatever regions
+        are shown."""
+        regions = self.spline_calibration.get("regions") or []
+        self.window.view.rois = [
+            [
+                [int(r[0][0]), int(r[0][1])],
+                [int(r[1][0]), int(r[1][1])],
+            ]
+            for r in regions
+        ]
+        self.window.view.selected_roi = None
+        self.split_fov_checkbox.blockSignals(True)
+        self.split_fov_checkbox.setChecked(True)
+        self.split_fov_checkbox.blockSignals(False)
+        self.window.set_split_fov_mode(True)
+        self.update_roi_display()
+        self.window.draw_frame()
 
     def _update_link_photons_visibility(self) -> None:
         """Show the 'Link photons across channels' checkbox only for a
@@ -9275,8 +9302,10 @@ class Window(QtWidgets.QMainWindow):
         register_menu = threed_menu.addMenu("Register channels (2D)")
         register_menu.setToolTip(
             "Measure the channel registration - one coordinate transform per\n"
-            "channel that maps a position in the reference (first) channel to\n"
-            "where the same molecule appears in that channel - and save it as\n"
+            "channel that maps a position in the reference (first) channel "
+            "to\n"
+            "where the same molecule appears in that channel - and save it "
+            "as\n"
             "a standalone registration for the multichannel 2D spherical\n"
             "Gaussian fit."
         )
@@ -14767,6 +14796,28 @@ class Window(QtWidgets.QMainWindow):
         )
         max_it = self.parameters_dialog.max_it.value() if iterates else None
         use_gpu = self.parameters_dialog.gpu_checkbox.isChecked()
+        if self._start_joint_fit(model, method, use_gpu, eps, max_it):
+            return
+        worker = self._single_channel_fit_worker(calibrate_z=calibrate_z)
+        if worker is None:
+            self.status_bar.showMessage("")
+            return
+        self.fit_worker = worker
+        self.fit_worker.finished.connect(self.on_fit_finished)
+        self._start_fit_worker(self.fit_worker)
+
+    def _start_joint_fit(
+        self,
+        model: str,
+        method: str,
+        use_gpu: bool,
+        eps: float | None,
+        max_it: int | None,
+    ) -> bool:
+        """Start the joint fit across channels that the loaded channel
+        registration or multichannel spline calibration asks for (see
+        ``fit``). Returns whether the fit was handled here: started, or
+        stopped by the box size check."""
         # A loaded channel registration turns the spherical Gaussian into a
         # joint fit across every channel; with none loaded the fit stays
         # single-channel, exactly as before.
@@ -14783,24 +14834,18 @@ class Window(QtWidgets.QMainWindow):
                 self._start_multichannel_gauss_fit(
                     registration, method, use_gpu, eps, max_it
                 )
-                return
+                return True
         if method.startswith("spline"):
             spline_calibration = self.parameters_dialog.spline_calibration
             if spline_calibration.get("model") == "spline-3d-multichannel":
                 if not self._check_spline_box_size(spline_calibration):
                     self.status_bar.showMessage("")
-                    return
+                    return True
                 self._start_multichannel_spline_fit(
                     spline_calibration, method, eps, max_it
                 )
-                return
-        worker = self._single_channel_fit_worker(calibrate_z=calibrate_z)
-        if worker is None:
-            self.status_bar.showMessage("")
-            return
-        self.fit_worker = worker
-        self.fit_worker.finished.connect(self.on_fit_finished)
-        self._start_fit_worker(self.fit_worker)
+                return True
+        return False
 
     def _start_multi_emitter_fit(self) -> None:
         """Fit overlapping emitters in the whole movie, frame by frame (see
@@ -18001,12 +18046,15 @@ class AffineCalibrationWorker(QtCore.QThread):
         # io.load_movie returns None when the user cancels the info prompt
         return io.load_movie(path, prompt_info=prompt)
 
-    def run(self) -> None:
+    def _load_movies(self) -> tuple | None:
+        """The reference movie, its metadata and the target movie; None,
+        after emitting ``canceled`` or ``failed``, if a prompt was
+        canceled or a movie could not be loaded."""
         try:
             loaded_ref = self._load(self.ref_path, "reference")
             if loaded_ref is None:
                 self.canceled.emit()
-                return
+                return None
             movie_ref, info_ref = loaded_ref
             label = (
                 "cylindrical lens"
@@ -18016,11 +18064,18 @@ class AffineCalibrationWorker(QtCore.QThread):
             loaded_target = self._load(self.target_path, label)
             if loaded_target is None:
                 self.canceled.emit()
-                return
+                return None
             movie_target, _ = loaded_target
         except Exception as e:  # noqa: BLE001 - reported to the GUI
             self.failed.emit(f"Could not load inputs:\n{e}")
+            return None
+        return movie_ref, info_ref, movie_target
+
+    def run(self) -> None:
+        movies = self._load_movies()
+        if movies is None:
             return
+        movie_ref, info_ref, movie_target = movies
 
         pixelsize = lib.get_from_metadata(info_ref, "Pixelsize", default=None)
         if pixelsize is None:

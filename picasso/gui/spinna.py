@@ -3145,6 +3145,18 @@ class NNDPlotSettingsDialog(lib.Dialog):
         self.rehist_sim = True
 
 
+def _mark_loaded(
+    buttons: list[QtWidgets.QPushButton], name: str, target: str
+) -> None:
+    """Show on the button called ``name`` among ``buttons`` that the data
+    of ``target`` (molecules or a mask) are loaded."""
+    for button in buttons:
+        if button.objectName() == name:
+            theme.set_button_state(button, "ok")
+            button.setText(f"{target} loaded")
+            break
+
+
 class SimulationsTab(lib.Dialog):
     """Tab for running simulations and finding the proportions of
     structure in the experimental data.
@@ -3735,15 +3747,7 @@ class SimulationsTab(lib.Dialog):
             if loaded is None:  # the pixel size prompt was canceled
                 return
             locs, info = loaded
-            pick_area = lib.get_from_metadata(info, "Area (um^2)")
-            if pick_area is not None:
-                idx = self.targets.index(target)
-                # if 3D, take z range into account for density calculation
-                if self.dim_widget.currentIndex() == 1:
-                    if self.depth is not None:
-                        # this is clearly pick volume, not area
-                        pick_area *= self.depth / 1000  # convert nm to um
-                self.densities_spins[idx].setValue(len(locs) / pick_area)
+            self._set_observed_density(target, len(locs), info)
 
             if "z" in locs.columns:
                 coords = locs[["x", "y", "z"]].to_numpy()
@@ -3755,12 +3759,7 @@ class SimulationsTab(lib.Dialog):
             # the histograms of the previous data are outdated
             self.nnd_hist_data_sim = []
             self.nnd_hist_data_exp = []
-            # change the color of the button
-            for button in self.load_exp_data_buttons:
-                if button.objectName() == name:
-                    theme.set_button_state(button, "ok")
-                    button.setText(f"{target} loaded")
-                    break
+            _mark_loaded(self.load_exp_data_buttons, name, target)
 
             # check if all channels have been loaded, if yes, plot NNDs
             # for experimental data only
@@ -3770,6 +3769,23 @@ class SimulationsTab(lib.Dialog):
             # reset search space
             self.granularity = None
             self.n_sim_fit = None
+
+    def _set_observed_density(
+        self, target: str, n_molecules: int, info: list[dict]
+    ) -> None:
+        """Set the observed density of ``target`` from its
+        ``n_molecules`` and the pick area in their metadata ``info`` (in
+        3D with a depth, the pick volume), if recorded."""
+        pick_area = lib.get_from_metadata(info, "Area (um^2)")
+        if pick_area is None:
+            return
+        idx = self.targets.index(target)
+        # if 3D, take z range into account for density calculation
+        if self.dim_widget.currentIndex() == 1:
+            if self.depth is not None:
+                # this is clearly pick volume, not area
+                pick_area *= self.depth / 1000  # convert nm to um
+        self.densities_spins[idx].setValue(n_molecules / pick_area)
 
     def load_mask(self, name: str) -> None:
         """Load mask for the given molecular target species."""
@@ -3791,12 +3807,7 @@ class SimulationsTab(lib.Dialog):
             self.masks[target] = mask
             self.mask_infos[target] = info
             self.mask_paths[target] = path
-            # change the color of the button
-            for button in self.load_mask_buttons:
-                if button.objectName() == name:
-                    theme.set_button_state(button, "ok")
-                    button.setText(f"{target} loaded")
-                    break
+            _mark_loaded(self.load_mask_buttons, name, target)
 
             # reset search space
             self.granularity = None

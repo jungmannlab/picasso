@@ -5011,6 +5011,31 @@ def _gauss_model(rotated: bool, spherical: bool) -> int:
     return gaussfit.ELLIPTIC
 
 
+def _gauss_photons(
+    parameters: lib.FloatArray2D, spherical: bool
+) -> lib.FloatArray2D:
+    """The fitted parameters of ``fit_spots_gauss`` with the peak height
+    converted to total photons (in place); those of the isotropic
+    models, ``[amplitude, x, y, s, bg]``, expanded to the elliptical
+    layout with ``sx == sy``."""
+    if spherical:
+        # Expand to the standard elliptical layout with sx == sy so the
+        # rest of the pipeline (CRLB, column building) is unchanged.
+        s = parameters[:, 3]
+        expanded = np.empty((len(parameters), 6), dtype=parameters.dtype)
+        expanded[:, 0] = parameters[:, 0]
+        expanded[:, 1] = parameters[:, 1]
+        expanded[:, 2] = parameters[:, 2]
+        expanded[:, 3] = s
+        expanded[:, 4] = s
+        expanded[:, 5] = parameters[:, 4]
+        expanded[:, 0] *= 2.0 * np.pi * s * s
+        return expanded
+    # The models fit a peak height; convert to total photons.
+    parameters[:, 0] *= 2.0 * np.pi * parameters[:, 3] * parameters[:, 4]
+    return parameters
+
+
 def fit_spots_gauss(
     spots: lib.FloatArray3D,
     *,
@@ -5166,26 +5191,8 @@ def fit_spots_gauss(
                 return None
             result = job.results()
     parameters, chi_squares, _states, number_iterations = result
-    parameters = parameters.astype(np.float32)
+    parameters = _gauss_photons(parameters.astype(np.float32), spherical)
     chi_squares = chi_squares.astype(np.float32)
-
-    if spherical:
-        # The isotropic models return [amplitude, x, y, s, bg]. Expand to the
-        # standard elliptical layout with sx == sy so the rest of the pipeline
-        # (CRLB, column building) is unchanged.
-        s = parameters[:, 3]
-        expanded = np.empty((len(parameters), 6), dtype=parameters.dtype)
-        expanded[:, 0] = parameters[:, 0]
-        expanded[:, 1] = parameters[:, 1]
-        expanded[:, 2] = parameters[:, 2]
-        expanded[:, 3] = s
-        expanded[:, 4] = s
-        expanded[:, 5] = parameters[:, 4]
-        expanded[:, 0] *= 2.0 * np.pi * s * s
-        parameters = expanded
-    else:
-        # The models fit a peak height; convert to total photons.
-        parameters[:, 0] *= 2.0 * np.pi * parameters[:, 3] * parameters[:, 4]
 
     if return_stats:
         # The MLE chi-square equals twice the negative Poisson
@@ -10189,6 +10196,71 @@ _PSF_SIGMA_MIN_SPOTS = 10
 _PSF_SIGMA_P_VALUE = 0.01
 
 
+def _checked_psf_sigma(sigma, psf_model: str) -> float | None:
+    """``MultiEmitterParameters.psf_sigma`` as a float, or None,
+    checked."""
+    if sigma is None:
+        return None
+    if not _is_positive_number(sigma) or not np.isfinite(sigma):
+        raise ValueError(
+            "psf_sigma must be None (estimated from the movie) or a "
+            f"positive number of nm, got {sigma!r}."
+        )
+    if psf_model == "spline":
+        raise ValueError(
+            "psf_sigma does not apply to psf_model='spline', which "
+            "takes its PSF from the spline calibration."
+        )
+    return float(sigma)
+
+
+def _checked_peak_search_z(search_z) -> tuple[float, ...]:
+    """``MultiEmitterParameters.peak_search_z`` as a tuple of floats,
+    checked; a single number is taken as one."""
+    given = search_z
+    if isinstance(search_z, (int, float, np.number)) and not isinstance(
+        search_z, (bool, np.bool_)
+    ):
+        search_z = (search_z,)
+    try:
+        values = tuple(float(z) for z in search_z)
+    except (TypeError, ValueError):
+        values = ()
+    if (
+        not values
+        or any(isinstance(z, (bool, np.bool_)) for z in search_z)
+        or not all(np.isfinite(values))
+    ):
+        raise ValueError(
+            "peak_search_z must be one or more finite numbers of nm, "
+            f"got {given!r}."
+        )
+    return values
+
+
+def _checked_fit_region_size(size, psf_model: str) -> int | None:
+    """``MultiEmitterParameters.fit_region_size`` as an int, or None,
+    checked."""
+    if size is None:
+        return None
+    if (
+        isinstance(size, (bool, np.bool_))
+        or not isinstance(size, (int, np.integer))
+        or size < 3
+    ):
+        raise ValueError(
+            "fit_region_size must be None (from the calibration) "
+            f"or an integer of at least 3 pixels, got {size!r}."
+        )
+    if psf_model != "spline":
+        raise ValueError(
+            "fit_region_size applies to psf_model='spline' only; "
+            "the Gaussian models take their region from the PSF "
+            "sigma."
+        )
+    return int(size)
+
+
 @dataclass(frozen=True, kw_only=True)
 class MultiEmitterParameters:
     """Settings of the multi-emitter fitting, see
@@ -10313,56 +10385,19 @@ class MultiEmitterParameters:
                 f"max_cycles must be a positive integer, got {cycles!r}."
             )
         object.__setattr__(self, "max_cycles", int(cycles))
-        sigma = self.psf_sigma
-        if sigma is not None:
-            if not _is_positive_number(sigma) or not np.isfinite(sigma):
-                raise ValueError(
-                    "psf_sigma must be None (estimated from the movie) or a "
-                    f"positive number of nm, got {sigma!r}."
-                )
-            object.__setattr__(self, "psf_sigma", float(sigma))
-            if self.psf_model == "spline":
-                raise ValueError(
-                    "psf_sigma does not apply to psf_model='spline', which "
-                    "takes its PSF from the spline calibration."
-                )
-        search_z = self.peak_search_z
-        if isinstance(search_z, (int, float, np.number)) and not isinstance(
-            search_z, (bool, np.bool_)
-        ):
-            search_z = (search_z,)
-        try:
-            values = tuple(float(z) for z in search_z)
-        except (TypeError, ValueError):
-            values = ()
-        if (
-            not values
-            or any(isinstance(z, (bool, np.bool_)) for z in search_z)
-            or not all(np.isfinite(values))
-        ):
-            raise ValueError(
-                "peak_search_z must be one or more finite numbers of nm, "
-                f"got {self.peak_search_z!r}."
-            )
-        object.__setattr__(self, "peak_search_z", values)
-        size = self.fit_region_size
-        if size is not None:
-            if (
-                isinstance(size, (bool, np.bool_))
-                or not isinstance(size, (int, np.integer))
-                or size < 3
-            ):
-                raise ValueError(
-                    "fit_region_size must be None (from the calibration) "
-                    f"or an integer of at least 3 pixels, got {size!r}."
-                )
-            object.__setattr__(self, "fit_region_size", int(size))
-            if self.psf_model != "spline":
-                raise ValueError(
-                    "fit_region_size applies to psf_model='spline' only; "
-                    "the Gaussian models take their region from the PSF "
-                    "sigma."
-                )
+        object.__setattr__(
+            self,
+            "psf_sigma",
+            _checked_psf_sigma(self.psf_sigma, self.psf_model),
+        )
+        object.__setattr__(
+            self, "peak_search_z", _checked_peak_search_z(self.peak_search_z)
+        )
+        object.__setattr__(
+            self,
+            "fit_region_size",
+            _checked_fit_region_size(self.fit_region_size, self.psf_model),
+        )
 
     def to_info(self) -> dict:
         """The settings under the keys of the fit's metadata.
@@ -10936,6 +10971,195 @@ def _locs_from_multi_emitter_fits(
     return locs[finite].reset_index(drop=True)
 
 
+def _checked_multi_emitter_arguments(
+    parameters: MultiEmitterParameters | None,
+    seed_identification: IdentificationParameters | None,
+    camera_info: dict,
+    parallel: bool,
+    fit_z_gpu: bool,
+) -> MultiEmitterParameters:
+    """The parameters of ``localize_multi_emitter`` (the defaults for
+    None), after checking its arguments' types and the pixel size."""
+    if parameters is None:
+        parameters = MultiEmitterParameters()
+    if not isinstance(parameters, MultiEmitterParameters):
+        raise TypeError(
+            "parameters must be a MultiEmitterParameters, got "
+            f"{type(parameters).__name__}."
+        )
+    if seed_identification is not None and not isinstance(
+        seed_identification, IdentificationParameters
+    ):
+        raise TypeError(
+            "seed_identification must be an IdentificationParameters or "
+            f"None, got {type(seed_identification).__name__}."
+        )
+    assert isinstance(camera_info, dict), "camera_info must be a dict"
+    assert isinstance(parallel, bool), "parallel must be a boolean"
+    assert isinstance(fit_z_gpu, bool), "fit_z_gpu must be a boolean"
+    pixelsize = camera_info.get("Pixelsize")
+    if not _is_positive_number(pixelsize):
+        raise ValueError(
+            "camera_info needs 'Pixelsize', the effective camera pixel size "
+            "in nm (after magnification): coordinates are stored in nm, "
+            f"so the fit cannot run without it. Got {pixelsize!r}."
+        )
+    return parameters
+
+
+def _multi_emitter_camera_maps(
+    camera_calibration: dict | None, camera_info: dict
+) -> tuple[np.ndarray | None, np.ndarray | None, np.ndarray | None]:
+    """The per-pixel offset, gain and variance (photons) of a camera
+    calibration for ``localize_multi_emitter``; None without one (and
+    the gain without a gain map)."""
+    if camera_calibration is None:
+        return None, None, None
+    offset = np.asarray(camera_calibration["offset"], dtype=np.float64)
+    gain = None
+    if camera_calibration.get("gain") is not None:
+        gain = np.asarray(camera_calibration["gain"], dtype=np.float64)
+    variance = np.asarray(
+        _variance_to_photons(
+            camera_calibration["variance"], camera_info, gain
+        ),
+        dtype=np.float64,
+    )
+    return offset, gain, variance
+
+
+def _multi_emitter_calibration_3d(
+    calibration_3d: dict | str | None,
+    parameters: MultiEmitterParameters,
+    fit_z_gpu: bool,
+    pixelsize: float,
+) -> dict | None:
+    """The astigmatic calibration of ``localize_multi_emitter``, loaded
+    if a path, after checking that it can be used, before the frames
+    are fitted."""
+    if calibration_3d is None:
+        return None
+    if parameters.psf_model != "elliptical":
+        raise ValueError(
+            "calibration_3d needs psf_model='elliptical': z is read from "
+            "the sigmas in x and y each emitter is fitted with, got "
+            f"psf_model={parameters.psf_model!r}."
+        )
+    if fit_z_gpu and not zfit.CUDA_AVAILABLE:
+        raise RuntimeError(
+            "GPU z fitting requested (fit_z_gpu) but no CUDA-capable "
+            "GPU is available."
+        )
+    if isinstance(calibration_3d, str):
+        calibration_3d = io.load_calibration(
+            calibration_3d, pixelsize=pixelsize
+        )
+    return calibration_3d
+
+
+def _multi_emitter_spline_psf(
+    spline_calibration: dict | str | None,
+    parameters: MultiEmitterParameters,
+    pixelsize: float,
+) -> tuple:
+    """The spline PSF of ``localize_multi_emitter``, its sigma (camera
+    pixels) and the spline calibration, loaded if a path;
+    ``residualfit.NO_SPLINE`` and None for the Gaussian models.
+
+    Raises
+    ------
+    ValueError
+        If the spline model is not given a calibration, or another model
+        is.
+    """
+    is_spline = parameters.psf_model == "spline"
+    if is_spline != (spline_calibration is not None):
+        raise ValueError(
+            "psf_model='spline' needs a spline_calibration, and only it "
+            f"takes one; got psf_model={parameters.psf_model!r}"
+            + (" without one." if is_spline else " and one.")
+        )
+    if not is_spline:
+        return residualfit.NO_SPLINE, None, spline_calibration
+    if isinstance(spline_calibration, str):
+        spline_calibration = io.load_spline_calibration(
+            spline_calibration, pixelsize=pixelsize
+        )
+    spline, spline_sigma = _multi_emitter_spline(
+        spline_calibration, parameters
+    )
+    return spline, spline_sigma, spline_calibration
+
+
+def _multi_emitter_seeds(
+    movie: LoadedMovie,
+    info: list[dict] | None,
+    seed_identification: IdentificationParameters,
+    roi,
+    frame_bounds,
+    parallel: bool,
+    progress: lib.Progress,
+    abort_callback: Callable[[], bool] | None,
+) -> dict[int, np.ndarray] | None:
+    """The spots ``seed_identification`` identifies, as starting peaks
+    of ``localize_multi_emitter``: their x and y (camera pixels) by
+    frame. None if aborted."""
+    identified = identify(
+        movie,
+        info,
+        parameters=seed_identification,
+        roi=roi,
+        frame_bounds=frame_bounds,
+        parallel=parallel,
+        progress=progress,
+        abort_callback=abort_callback,
+    )
+    if identified is None:  # aborted
+        return None
+    seeds = {}
+    for frame_number, group in identified[0].groupby("frame"):
+        seeds[int(frame_number)] = group[["x", "y"]].to_numpy(dtype=np.int64)
+    return seeds
+
+
+def _multi_emitter_info(
+    parameters: MultiEmitterParameters,
+    spline,
+    spline_calibration: dict | None,
+    sigma_nm: float | None,
+    seed_identification: IdentificationParameters | None,
+) -> dict:
+    """The metadata entry of ``localize_multi_emitter`` on its settings:
+    the region the spline (if not None) was fitted in and its
+    calibration, or the PSF sigma (nm) used, if any, and the seed
+    identification."""
+    entry = {
+        **lib.step_info("Fit multi-emitter"),
+        **parameters.to_info(),
+    }
+    if spline is not None:
+        # the region the fit used, given or from the calibration
+        entry["Fit Region Size"] = spline.roi
+        entry["Spline calibration model"] = spline_calibration.get("model")
+        entry["Spline calibration path"] = spline_calibration.get(
+            "Path", "N/A"
+        )
+        # the lateral corrections the calibration carries, applied by
+        # the fit
+        own = lib.describe_lateral_transforms(spline_calibration)
+        if own:
+            entry["Lateral corrections applied"] = own
+    else:
+        if sigma_nm is not None:
+            # the sigma the fit used (or started from), given or
+            # estimated
+            entry["PSF Sigma (nm)"] = sigma_nm
+        entry["PSF Sigma Estimated"] = parameters.psf_sigma is None
+    if seed_identification is not None:
+        entry["Seed Identification"] = seed_identification.to_info()
+    return entry
+
+
 def localize_multi_emitter(
     movie: LoadedMovie,
     info: list[dict] | None = None,
@@ -11167,76 +11391,21 @@ def localize_multi_emitter(
     ...     spline_calibration="spline_calib.hdf5",
     ... )
     """
-    if parameters is None:
-        parameters = MultiEmitterParameters()
-    if not isinstance(parameters, MultiEmitterParameters):
-        raise TypeError(
-            "parameters must be a MultiEmitterParameters, got "
-            f"{type(parameters).__name__}."
-        )
-    if seed_identification is not None and not isinstance(
-        seed_identification, IdentificationParameters
-    ):
-        raise TypeError(
-            "seed_identification must be an IdentificationParameters or "
-            f"None, got {type(seed_identification).__name__}."
-        )
-    assert isinstance(camera_info, dict), "camera_info must be a dict"
-    assert isinstance(parallel, bool), "parallel must be a boolean"
-    assert isinstance(fit_z_gpu, bool), "fit_z_gpu must be a boolean"
-    pixelsize = camera_info.get("Pixelsize")
-    if not _is_positive_number(pixelsize):
-        raise ValueError(
-            "camera_info needs 'Pixelsize', the effective camera pixel size "
-            "in nm (after magnification): coordinates are stored in nm, "
-            f"so the fit cannot run without it. Got {pixelsize!r}."
-        )
-    pixelsize = float(pixelsize)
+    parameters = _checked_multi_emitter_arguments(
+        parameters, seed_identification, camera_info, parallel, fit_z_gpu
+    )
+    pixelsize = float(camera_info["Pixelsize"])
     _validate_camera_calibration(camera_calibration, movie, camera_info)
-    offset = gain = variance = None
-    if camera_calibration is not None:
-        offset = np.asarray(camera_calibration["offset"], dtype=np.float64)
-        if camera_calibration.get("gain") is not None:
-            gain = np.asarray(camera_calibration["gain"], dtype=np.float64)
-        variance = np.asarray(
-            _variance_to_photons(
-                camera_calibration["variance"], camera_info, gain
-            ),
-            dtype=np.float64,
-        )
-    if calibration_3d is not None:
-        if parameters.psf_model != "elliptical":
-            raise ValueError(
-                "calibration_3d needs psf_model='elliptical': z is read from "
-                "the sigmas in x and y each emitter is fitted with, got "
-                f"psf_model={parameters.psf_model!r}."
-            )
-        # before the frames are fitted, not after
-        if fit_z_gpu and not zfit.CUDA_AVAILABLE:
-            raise RuntimeError(
-                "GPU z fitting requested (fit_z_gpu) but no CUDA-capable "
-                "GPU is available."
-            )
-        if isinstance(calibration_3d, str):
-            calibration_3d = io.load_calibration(
-                calibration_3d, pixelsize=pixelsize
-            )
+    offset, gain, variance = _multi_emitter_camera_maps(
+        camera_calibration, camera_info
+    )
+    calibration_3d = _multi_emitter_calibration_3d(
+        calibration_3d, parameters, fit_z_gpu, pixelsize
+    )
     is_spline = parameters.psf_model == "spline"
-    if is_spline != (spline_calibration is not None):
-        raise ValueError(
-            "psf_model='spline' needs a spline_calibration, and only it "
-            f"takes one; got psf_model={parameters.psf_model!r}"
-            + (" without one." if is_spline else " and one.")
-        )
-    spline = residualfit.NO_SPLINE
-    if is_spline:
-        if isinstance(spline_calibration, str):
-            spline_calibration = io.load_spline_calibration(
-                spline_calibration, pixelsize=pixelsize
-            )
-        spline, spline_sigma = _multi_emitter_spline(
-            spline_calibration, parameters
-        )
+    spline, spline_sigma, spline_calibration = _multi_emitter_spline_psf(
+        spline_calibration, parameters, pixelsize
+    )
     em = camera_info["Gain"] > 1
     n_frames = len(movie)
     frame_numbers = np.array(
@@ -11277,23 +11446,18 @@ def localize_multi_emitter(
             psf_sigma_callback(sigma * pixelsize)
         seeds = {}
         if sigma is not None and seed_identification is not None:
-            identified = identify(
+            seeds = _multi_emitter_seeds(
                 movie,
                 info,
-                parameters=seed_identification,
-                roi=roi,
-                frame_bounds=frame_bounds,
-                parallel=parallel,
-                progress=progress,
-                abort_callback=abort_callback,
+                seed_identification,
+                roi,
+                frame_bounds,
+                parallel,
+                progress,
+                abort_callback,
             )
-            if identified is None:  # aborted
+            if seeds is None:  # aborted
                 sigma = None
-            else:
-                for frame_number, group in identified[0].groupby("frame"):
-                    seeds[int(frame_number)] = group[["x", "y"]].to_numpy(
-                        dtype=np.int64
-                    )
         if sigma is not None:
             pad = residualfit.padding(sigma, parameters.psf_model, spline)
             height, width = np.shape(movie[0])
@@ -11325,30 +11489,13 @@ def localize_multi_emitter(
                 progress,
                 abort_callback,
             )
-        entry = {
-            **lib.step_info("Fit multi-emitter"),
-            **parameters.to_info(),
-        }
-        if is_spline:
-            # the region the fit used, given or from the calibration
-            entry["Fit Region Size"] = spline.roi
-            entry["Spline calibration model"] = spline_calibration.get("model")
-            entry["Spline calibration path"] = spline_calibration.get(
-                "Path", "N/A"
-            )
-            # the lateral corrections the calibration carries, applied
-            # below
-            own = lib.describe_lateral_transforms(spline_calibration)
-            if own:
-                entry["Lateral corrections applied"] = own
-        else:
-            if sigma is not None:
-                # the sigma the fit used (or started from), given or
-                # estimated
-                entry["PSF Sigma (nm)"] = sigma * pixelsize
-            entry["PSF Sigma Estimated"] = parameters.psf_sigma is None
-        if seed_identification is not None:
-            entry["Seed Identification"] = seed_identification.to_info()
+        entry = _multi_emitter_info(
+            parameters,
+            spline if is_spline else None,
+            spline_calibration,
+            None if sigma is None else sigma * pixelsize,
+            seed_identification,
+        )
         entry["ROI"] = roi
         entry["Frame Bounds"] = frame_bounds
         entry.update(camera_calibration_info(camera_calibration))
