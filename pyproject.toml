@@ -11,15 +11,23 @@ authors = [
     {name = "Maximilian T. Strauss", email = "straussmaximilian@gmail.com"},
 ]
 maintainers = [{name = "Rafal Kowalewski", email = "rafalkowalewski998@gmail.com"}]
-keywords = ["super-resolution", "DNA-PAINT", "microscopy"]
-description = "Collection of tools for painting super-resolution images"
+keywords = [
+    "super-resolution",
+    "DNA-PAINT",
+    "microscopy",
+    "SMLM",
+    "single-molecule localization microscopy",
+]
+description = "Single-molecule localization microscopy (SMLM) analysis, from raw movies to localization, rendering and quantification"
 readme = "readme.rst"
 requires-python = ">=3.11,<3.15"
 license = "MIT"
 license-files = ["LICENSE.txt", "LICENSES/*.txt"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
