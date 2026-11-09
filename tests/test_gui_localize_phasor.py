@@ -111,8 +111,8 @@ def test_localize_saves_phasor_localizations(loaded, tmp_path, monkeypatch):
     assert "sx" not in locs.columns
     entry = next(e for e in info if e.get("Step") == "Fit 2D")
     assert entry["Fit method"] == "phasor"
-    # labeled where the user looks: the status bar and the metadata
-    assert "error-propagation estimate" in _status(loaded)
+    # the precision's origin is in the metadata, not in the status bar
+    assert _status(loaded) == f"Saved {len(locs)} localizations."
     assert "Localization precision" in entry
 
 

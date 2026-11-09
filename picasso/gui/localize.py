@@ -686,9 +686,9 @@ def _compile_multi_emitter_fit() -> None:
 
 def _outliers_note(info: list[dict]) -> str:
     """The status bar's notes on a fit, read from its metadata: the
-    outliers a VectorFit fit discarded, or, for a phasor fit, where its
-    precision comes from and how many localizations fell outside the
-    calibrated z range; "" for any other fit."""
+    outliers a VectorFit fit discarded, or, for a phasor fit with a z
+    calibration, how many localizations fell outside its range; "" for any
+    other fit."""
     n_outliers = vectorfit.outliers_discarded(info)
     if n_outliers is not None:
         return f" Discarded {n_outliers:,} outliers."
@@ -709,11 +709,10 @@ def _phasor_note(info: list[dict]) -> str:
     )
     if entry is None:
         return ""
-    note = " lpx/lpy: Picasso's error-propagation estimate (not a CRLB)."
     n_outside = entry.get("Outside calibrated z range")
-    if n_outside:
-        note += f" {n_outside:,} outside the calibrated z range removed."
-    return note
+    if not n_outside:
+        return ""
+    return f" {n_outside:,} outside the calibrated z range removed."
 
 
 def _fit_code(model: str, optimizer: str) -> str:
@@ -16480,11 +16479,7 @@ class Window(QtWidgets.QMainWindow):
 
         # restore the GPU checkbox state for the selected model
         self.parameters_dialog.on_fit_optimizer_changed()
-        # the phasor fit's note stays: its precision is not the paper's
-        self.status_bar.showMessage(
-            f"Saved {len(self.locs):,} localizations."
-            + _phasor_note(self.extra_info)
-        )
+        self.status_bar.showMessage(f"Saved {len(self.locs):,} localizations.")
 
         # apply drift if requested
         aim_check = self.parameters_dialog.aim_undrift_checkbox.isChecked()
