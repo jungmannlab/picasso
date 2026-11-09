@@ -145,7 +145,11 @@ installer = [
     "wgpu==0.32.0",
     "pyinstaller==6.19.0",
     "PyImarisWriter==0.7.0; sys_platform=='win32'",
-    "hdf5plugin==6.0.0"
+    "hdf5plugin==6.0.0",
+    # VectorFit's CPU build, also in installer_cuda: its GPU build needs
+    # CUDA 13 and would clash with this one (both install vectorfit_py).
+    # No macOS wheels.
+    "vectorfit-py==0.3.2; sys_platform=='win32' or sys_platform=='linux'",
 ]
 # CUDA build: identical to the CPU installer plus the CUDA runtime
 # (GPU rendering via wgpu is in both; this one adds CUDA fitting).

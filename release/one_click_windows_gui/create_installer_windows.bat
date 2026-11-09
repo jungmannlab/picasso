@@ -17,6 +17,10 @@ call python release\install_picasso.py installer
 if errorlevel 1 exit /b 1
 call cd release/one_click_windows_gui
 
+REM VectorFit (vectorfit-py, the optional vectorial PSF fit) is imported
+REM dynamically, so PyInstaller cannot see it: --hidden-import names it and
+REM ../pyinstaller/hooks/hook-vectorfit_py.py adds its compiled extension, its
+REM metadata (it reads its own version) and the DLLs in vectorfit_py.libs.
 call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --onedir ^
     --collect-all picasso ^
@@ -24,6 +28,8 @@ call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --collect-all streamlit ^
     --collect-all numba ^
     --collect-all llvmlite ^
+    --hidden-import vectorfit_py ^
+    --additional-hooks-dir "../pyinstaller/hooks" ^
     --collect-submodules matplotlib.backends ^
     --copy-metadata streamlit ^
     --copy-metadata imageio ^
@@ -38,6 +44,8 @@ call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --collect-all streamlit ^
     --collect-all numba ^
     --collect-all llvmlite ^
+    --hidden-import vectorfit_py ^
+    --additional-hooks-dir "../pyinstaller/hooks" ^
     --collect-submodules matplotlib.backends ^
     --copy-metadata streamlit ^
     --copy-metadata imageio ^

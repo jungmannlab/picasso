@@ -40,6 +40,10 @@ REM                              bundle the cuda_bindings.libs / cuda_core.libs
 REM                              DLLs (delvewheel-vendored msvcp140); without them
 REM                              the app fails with "DLL load failed while
 REM                              importing runtime".
+REM   --hidden-import vectorfit_py : VectorFit (CPU build, as in the CPU
+REM                              installer) is imported dynamically;
+REM                              hook-vectorfit_py.py adds its extension,
+REM                              metadata and vectorfit_py.libs DLLs.
 REM Note: numba-cuda redirects "numba.cuda" to its own target via a
 REM site-packages .pth file that PyInstaller does not run, so the frozen app
 REM would keep Numba's built-in CUDA stub and GPU-accelerated (numba.cuda) code
@@ -62,6 +66,7 @@ call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --collect-all numba_cuda ^
     --collect-all nvidia ^
     --collect-all cuda ^
+    --hidden-import vectorfit_py ^
     --additional-hooks-dir "../pyinstaller/hooks" ^
     --copy-metadata numba-cuda ^
     --copy-metadata cuda-bindings ^
@@ -86,6 +91,7 @@ call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --collect-all numba_cuda ^
     --collect-all nvidia ^
     --collect-all cuda ^
+    --hidden-import vectorfit_py ^
     --additional-hooks-dir "../pyinstaller/hooks" ^
     --copy-metadata numba-cuda ^
     --copy-metadata cuda-bindings ^

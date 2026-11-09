@@ -51,7 +51,7 @@ VectorFit runs on the CPU and is an optional dependency:
 
    pip install picassosr[vectorfit]
 
-VectorFit is available for **Windows and Linux** (x86-64) only, not for macOS.
+VectorFit is available for **Windows and Linux** (x86-64) only, not for macOS. The Windows one-click installers include its CPU build, so nothing needs to be installed there.
 
 .. _localize-vectorfit-gpu:
 
