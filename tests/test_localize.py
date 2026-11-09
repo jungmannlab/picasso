@@ -2062,6 +2062,23 @@ class TestLocalize:
         assert "Min. Net Gradient" in info[-2]
         assert "Fit method" in info[-1]
 
+    def test_without_movie_info_records_movie_size(self, picasso_movie):
+        """Without ``movie_info``, the metadata still has every key a
+        localization file needs, so e.g. ``zfit`` and ``save_locs`` accept
+        the result."""
+        locs, info = localize.localize(
+            picasso_movie,
+            camera_info=CAMERA_INFO_WITH_PIXELSIZE,
+            identification_parameters=_params(),
+            fitting_method="gausslq",
+            parallel=False,
+        )
+        n_frames, height, width = picasso_movie.shape
+        assert lib.get_from_metadata(info, "Frames") == n_frames
+        assert lib.get_from_metadata(info, "Height") == height
+        assert lib.get_from_metadata(info, "Width") == width
+        io.validate_locs(locs, info)
+
     def test_mm_metadata_carried_over_unless_disabled(
         self, picasso_movie, movie_info, monkeypatch
     ):

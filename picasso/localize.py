@@ -11515,7 +11515,9 @@ def localize(
         Minimum and maximum frame numbers to consider for the
         identification. If None, all frames are used. Default is None.
     movie_info : list[dict], optional
-        Movie metadata. If None, an empty list is used. Default is None.
+        Movie metadata, as returned by ``io.load_movie``. If None, only
+        the movie size (``Frames``, ``Height`` and ``Width``) is
+        recorded. Default is None.
     fitting_method : {"gausslq", "gausslq-spherical", "gausslq-rotated", \
             "gausslq-gpu", "gausslq-rotated-gpu", "gausslq-spherical-gpu", \
             "gaussmle", "gaussmle-spherical", "gaussmle-gpu", \
@@ -11662,9 +11664,11 @@ def localize(
             calibration_3d, pixelsize=camera_info.get("Pixelsize")
         )
 
-    # Use empty list as default for movie_info
+    # Without movie metadata, record at least the movie size, which every
+    # localization file needs (io.MINIMUM_METADATA_KEYS)
     if movie_info is None:
-        movie_info = []
+        n_frames, height, width = movie.shape
+        movie_info = [{"Frames": n_frames, "Height": height, "Width": width}]
 
     with lib.tracked_progress(
         progress, "Identifying spots", "frame"
