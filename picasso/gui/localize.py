@@ -6172,7 +6172,14 @@ class ParametersDialog(lib.Dialog):
                 10,
                 "Peak emission wavelength of the fluorophore.",
             ),
-            ("NA", "Numerical aperture:", (0.1, 2), 3, 0.01, ""),
+            (
+                "NA",
+                "Numerical aperture:",
+                (0.1, 2),
+                3,
+                0.01,
+                "Of the objective (e.g. 1.49 for a TIRF oil objective).",
+            ),
             (
                 "Refractive index medium",
                 "Refractive index medium:",
@@ -6187,7 +6194,7 @@ class ParametersDialog(lib.Dialog):
                 (1, 3),
                 3,
                 0.01,
-                "",
+                "Of the cover slip glass (e.g. 1.525 for #1.5 borosilicate).",
             ),
             (
                 "Refractive index immersion",
