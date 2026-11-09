@@ -6160,7 +6160,9 @@ class ParametersDialog(lib.Dialog):
         self.vectorfit_model.addItems(["2D", "3D"])
         self.vectorfit_model.setCurrentText(defaults["Fit model"])
         self.vectorfit_model.setToolTip(
-            "2D fits x, y, photons and background; 3D also fits z."
+            "2D fits x, y, photons and background; 3D also fits z.\n"
+            "3D needs the astigmatism or the spherical aberration below:\n"
+            "without them the PSF is the same above and below focus."
         )
         # (key, label, range, decimals, step, tooltip)
         spinboxes = [
@@ -6240,6 +6242,8 @@ class ParametersDialog(lib.Dialog):
             spinbox.setToolTip(tip)
             vectorfit_grid.addWidget(spinbox, row, 1)
             self.vectorfit_spinboxes[key] = spinbox
+            if key in vectorfit.Z_ABERRATIONS:
+                spinbox.valueChanged.connect(self.update_vectorfit_3d)
         self.vectorfit_outliers_checkbox = QtWidgets.QCheckBox(
             "Discard outliers"
         )
@@ -6254,6 +6258,7 @@ class ParametersDialog(lib.Dialog):
         vectorfit_grid.addWidget(
             self.vectorfit_outliers_checkbox, len(spinboxes) + 1, 0, 1, 2
         )
+        self.update_vectorfit_3d()
 
         # Channel registration for the multichannel (joint) 2D spherical
         # Gaussian fit. Shown only for that model; unlike the spline path this
@@ -6798,14 +6803,47 @@ class ParametersDialog(lib.Dialog):
 
     def set_vectorfit_parameters(self, parameters: dict | None) -> None:
         """Put VectorFit settings on the dialog; missing ones take their
-        defaults."""
+        defaults. A 3D set without an aberration that makes ``z``
+        measurable falls back to 2D, as the dialog offers 3D only then
+        (see ``update_vectorfit_3d``)."""
+        parameters = dict(parameters or {})
+        if parameters.get("Fit model") == "3D" and not (
+            vectorfit.z_measurable(parameters)
+        ):
+            parameters["Fit model"] = "2D"
         parameters = vectorfit.parameters_with_defaults(parameters)
-        self.vectorfit_model.setCurrentText(parameters["Fit model"])
+        # the aberrations first: they decide whether 3D can be selected
         for key, spinbox in self.vectorfit_spinboxes.items():
             spinbox.setValue(parameters[key])
+        self.vectorfit_model.setCurrentText(parameters["Fit model"])
+        self.update_vectorfit_3d()
         self.vectorfit_outliers_checkbox.setChecked(
             parameters["Discard outliers"]
         )
+
+    def update_vectorfit_3d(self, _value: float = 0.0) -> None:
+        """Enable the 3D VectorFit model only while an aberration that
+        makes ``z`` measurable is set (see ``vectorfit.Z_ABERRATIONS``);
+        otherwise select 2D."""
+        allowed = vectorfit.z_measurable(
+            {
+                key: spinbox.value()
+                for key, spinbox in self.vectorfit_spinboxes.items()
+            }
+        )
+        item = self.vectorfit_model.model().item(
+            self.vectorfit_model.findText("3D")
+        )
+        item.setEnabled(allowed)
+        item.setToolTip(
+            ""
+            if allowed
+            else "Set the astigmatism or the spherical aberration first:\n"
+            "without them the PSF is the same above and below focus, so\n"
+            "z cannot be measured."
+        )
+        if not allowed and self.vectorfit_model.currentText() == "3D":
+            self.vectorfit_model.setCurrentText("2D")
 
     def current_fit_code(self) -> str:
         """The ``fit`` code the current selection would run."""

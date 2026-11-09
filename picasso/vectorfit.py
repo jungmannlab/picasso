@@ -127,6 +127,37 @@ _PRIMARY_ABERRATIONS = {
     "Spherical aberration": 12,
 }
 
+#: The aberrations that make ``z`` measurable. Without aberrations the PSF
+#: is the same above and below focus, so the sign of ``z`` is undetermined
+#: and a spot in focus carries no information on ``z``. Astigmatism (the
+#: cylindrical lens) and spherical aberration make the two sides differ;
+#: coma does not, as it mirrors the spot sideways only.
+Z_ABERRATIONS = (
+    "Vertical astigmatism",
+    "Oblique astigmatism",
+    "Spherical aberration",
+)
+
+
+def z_measurable(parameters: dict | None) -> bool:
+    """Whether the aberrations of VectorFit ``parameters`` make ``z``
+    measurable, i.e. whether one of ``Z_ABERRATIONS`` is non-zero. The 3D
+    model needs this; :func:`parameters_with_defaults` rejects it
+    otherwise.
+
+    Parameters
+    ----------
+    parameters : dict or None
+        VectorFit settings, see ``DEFAULT_PARAMETERS``; missing ones take
+        their defaults.
+
+    Returns
+    -------
+    measurable : bool
+    """
+    parameters = DEFAULT_PARAMETERS | dict(parameters or {})
+    return any(parameters[key] != 0 for key in Z_ABERRATIONS)
+
 
 #: Metadata key ``localize.fit`` records the number of discarded outliers
 #: under.
@@ -307,7 +338,9 @@ def parameters_with_defaults(parameters: dict | None = None) -> dict:
     Raises
     ------
     ValueError
-        If a key is unknown or a value is out of range.
+        If a key is unknown or a value is out of range, or if the 3D model
+        is asked for without an aberration that makes ``z`` measurable
+        (see :func:`z_measurable`).
     """
     parameters = dict(parameters or {})
     unknown = set(parameters) - set(DEFAULT_PARAMETERS)
@@ -331,6 +364,14 @@ def parameters_with_defaults(parameters: dict | None = None) -> dict:
     ):
         if not parameters[key] > 0:
             raise ValueError(f"VectorFit '{key}' must be positive.")
+    if parameters["Fit model"] == "3D" and not z_measurable(parameters):
+        raise ValueError(
+            "The VectorFit 3D model needs the vertical or oblique "
+            "astigmatism or the spherical aberration: without them the PSF "
+            "is the same above and below focus, so z cannot be measured. "
+            "Set the aberration of your setup (e.g. the astigmatism of the "
+            "cylindrical lens), or fit in 2D."
+        )
     return parameters
 
 

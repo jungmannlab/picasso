@@ -3568,6 +3568,11 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
     args.gradient = gradients[0]
     spline_paths = args.spline_calibration or []
     args.spline_calibration = spline_paths[0] if spline_paths else ""
+    if any(str(m).startswith("vectorfit") for m in fit_methods):
+        # before any movie is read: e.g. 3D needs astigmatism
+        from .vectorfit import parameters_with_defaults
+
+        parameters_with_defaults(_vectorfit_parameters_from_args(args))
     if localize.resolve_fit_method(args.fit_method)[0].endswith("-gpu"):
         if args.fit_method == "vectorfit-gpu":
             # VectorFit's own GPU build, with its own requirements

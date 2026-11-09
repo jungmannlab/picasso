@@ -185,6 +185,21 @@ class TestParameters:
         parameters = vectorfit.parameters_with_defaults({key: -25.0})
         assert parameters[key] == -25.0
 
+    def test_3d_without_z_aberrations_is_rejected(self):
+        with pytest.raises(ValueError, match="astigmatism"):
+            vectorfit.parameters_with_defaults({"Fit model": "3D"})
+        with pytest.raises(ValueError, match="astigmatism"):
+            vectorfit.parameters_with_defaults(
+                {"Fit model": "3D", "Horizontal coma": 50.0}
+            )
+
+    @pytest.mark.parametrize("key", vectorfit.Z_ABERRATIONS)
+    def test_3d_with_a_z_aberration_passes(self, key):
+        parameters = vectorfit.parameters_with_defaults(
+            {"Fit model": "3D", key: 40.0}
+        )
+        assert parameters["Fit model"] == "3D"
+
     def test_unknown_model_is_rejected(self):
         with pytest.raises(ValueError, match="Fit model"):
             vectorfit.parameters_with_defaults({"Fit model": "4D"})
@@ -231,6 +246,14 @@ class TestParameters:
         assert vectorfit.outliers_discarded([{key: 1}, {key: 2}]) == 2
         assert vectorfit.outliers_discarded([{"Fit method": "avg"}]) is None
         assert vectorfit.outliers_discarded({}) is None
+
+    def test_z_needs_astigmatism_or_spherical_aberration(self):
+        assert not vectorfit.z_measurable(None)
+        assert not vectorfit.z_measurable(
+            {"Horizontal coma": 50.0, "Vertical coma": -50.0}
+        )
+        for key in vectorfit.Z_ABERRATIONS:
+            assert vectorfit.z_measurable({key: -20.0})
 
 
 # ---------------------------------------------------------------------------
@@ -713,6 +736,25 @@ class TestCommandLine:
             False,
         )
 
+    def test_3d_without_astigmatism_stops_before_reading(
+        self, tmp_path, monkeypatch
+    ):
+        from picasso import __main__ as cli
+
+        argv = [
+            "picasso",
+            "localize",
+            # never read: the settings are checked first
+            str(tmp_path / "missing.raw"),
+            "-a",
+            "vectorfit",
+            "--vf-model",
+            "3D",
+        ]
+        monkeypatch.setattr(sys, "argv", argv)
+        with pytest.raises(ValueError, match="astigmatism"):
+            cli.main()
+
     def test_options_left_out_take_the_defaults(self):
         from picasso import __main__ as cli
 
@@ -1046,10 +1088,57 @@ class TestGui:
         finally:
             dialog.deleteLater()
 
+    def test_3d_needs_an_aberration_that_makes_z_measurable(
+        self, qt_offscreen
+    ):
+        dialog = self._dialog()
+        try:
+            model = dialog.vectorfit_model
+            item = model.model().item(model.findText("3D"))
+            spinboxes = dialog.vectorfit_spinboxes
+            assert not item.isEnabled()
+            spinboxes["Horizontal coma"].setValue(50.0)
+            assert not item.isEnabled()
+            spinboxes["Oblique astigmatism"].setValue(80.0)
+            assert item.isEnabled()
+            model.setCurrentText("3D")
+            # clearing it falls back to 2D
+            spinboxes["Oblique astigmatism"].setValue(0.0)
+            assert not item.isEnabled()
+            assert model.currentText() == "2D"
+        finally:
+            dialog.deleteLater()
+
+    def test_restored_3d_settings_keep_3d(self, qt_offscreen):
+        """Restoring settings sets the aberrations before the model, so a
+        3D set whose aberration differs from the dialog's stays 3D."""
+        dialog = self._dialog()
+        try:
+            dialog.set_vectorfit_parameters(
+                {"Fit model": "3D", "Vertical astigmatism": 80.0}
+            )
+            dialog.set_vectorfit_parameters(
+                {"Fit model": "3D", "Oblique astigmatism": 80.0}
+            )
+            assert dialog.vectorfit_model.currentText() == "3D"
+            # a 3D set without such an aberration falls back to 2D
+            dialog.set_vectorfit_parameters({"Fit model": "3D"})
+            assert dialog.vectorfit_model.currentText() == "2D"
+        finally:
+            dialog.deleteLater()
+
 
 # ---------------------------------------------------------------------------
 # The fit itself (needs vectorfit_py)
 # ---------------------------------------------------------------------------
+
+
+def _model(model):
+    """VectorFit settings of the ``model`` ("2D" or "3D"); 3D gets the
+    astigmatism it needs to measure z."""
+    if model == "3D":
+        return {"Fit model": "3D", "Vertical astigmatism": 80.0}
+    return {"Fit model": model}
 
 
 def _fit_spots(spots, identifications, **kwargs):
@@ -1128,7 +1217,7 @@ class TestFit:
         n_spots = 20
         spots, _, _ = _gaussian_spots(n_spots)
         result = _fit_spots(
-            spots, _identifications(n_spots), parameters={"Fit model": model}
+            spots, _identifications(n_spots), parameters=_model(model)
         )
         n_parameters = 5 if model == "3D" else 4
         assert result["theta"].shape == (n_spots, n_parameters)
@@ -1260,7 +1349,7 @@ class TestFit:
         result = _fit_spots(
             np.zeros((0, BOX, BOX)),
             _identifications(0),
-            parameters={"Fit model": "3D"},
+            parameters=_model("3D"),
         )
         assert result["theta"].shape == (0, 5)
         locs = vectorfit.locs_from_fits(
@@ -1306,7 +1395,7 @@ class TestFit:
         positions where the CPU fit puts them."""
         spots, _, _ = _gaussian_spots(300)
         identifications = _identifications(300)
-        parameters = {"Fit model": model}
+        parameters = _model(model)
         cpu = _fit_spots(spots, identifications, parameters=parameters)
         gpu = _fit_spots(
             spots, identifications, parameters=parameters, use_gpu=True
