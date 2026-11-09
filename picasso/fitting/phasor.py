@@ -164,6 +164,80 @@ def _tables(box: int) -> tuple:
     return cos_t, sin_t, signal_idx, ring_idx, min(bg_rank, len(ring_idx) - 1)
 
 
+@numba.njit(nogil=True, cache=True)
+def _pixel_variance(value, var_ij, use_var, em_factor):
+    """Variance of one pixel: shot noise (times the EM excess factor) plus,
+    with ``use_var``, the camera's readout variance."""
+    v = em_factor * value if value > 0 else 0.0
+    if use_var:
+        v += var_ij
+    return v
+
+
+@numba.njit(nogil=True, cache=True)
+def _aperture_photometry(spot, signal_idx, ring_idx, bg_rank, ring, out):
+    """Background-subtracted photons and background (``out[2]``,
+    ``out[3]``). ``ring`` is a scratch buffer."""
+    flat = spot.ravel()
+    signal = 0.0
+    for m in range(signal_idx.shape[0]):
+        signal += flat[signal_idx[m]]
+    for m in range(ring_idx.shape[0]):
+        ring[m] = flat[ring_idx[m]]
+    ring.sort()
+    bg = ring[bg_rank]
+    out[2] = max(0.0, signal - signal_idx.shape[0] * bg)
+    out[3] = bg
+
+
+# error_model="numpy": an empty box gives inf/NaN instead of raising
+@numba.njit(nogil=True, cache=True, error_model="numpy")
+def _propagated_variances(
+    spot,
+    var,
+    use_var,
+    em_factor,
+    cos_t,
+    sin_t,
+    omega,
+    re_x,
+    im_x,
+    re_y,
+    im_y,
+    col_var,
+    row_var,
+    out,
+):
+    """Variances of x, y and of the log ratio of the moduli (``out[6]`` to
+    ``out[8]``), propagated from the pixel variances."""
+    size = spot.shape[0]
+    abs_x = math.hypot(re_x, im_x)
+    abs_y = math.hypot(re_y, im_y)
+    # sin/cos(omega k + theta) from the tables, with
+    # cos/sin(theta) = re/|F|, im/|F|
+    cx = re_x / abs_x
+    sx = im_x / abs_x
+    cy = re_y / abs_y
+    sy = im_y / abs_y
+    var_x = 0.0
+    var_y = 0.0
+    for j in range(size):
+        s_x = sin_t[j] * cx + cos_t[j] * sx
+        s_y = sin_t[j] * cy + cos_t[j] * sy
+        var_x += s_x * s_x * col_var[j]
+        var_y += s_y * s_y * row_var[j]
+    out[6] = var_x / (abs_x * abs_x * omega * omega)
+    out[7] = var_y / (abs_y * abs_y * omega * omega)
+    var_log_ratio = 0.0
+    for i in range(size):
+        g_y = (cos_t[i] * cy - sin_t[i] * sy) / abs_y
+        for j in range(size):
+            g = (cos_t[j] * cx - sin_t[j] * sx) / abs_x - g_y
+            v = _pixel_variance(spot[i, j], var[i, j], use_var, em_factor)
+            var_log_ratio += g * g * v
+    out[8] = var_log_ratio
+
+
 # error_model="numpy": an empty box gives inf/NaN instead of raising
 @numba.njit(nogil=True, cache=True, error_model="numpy")
 def _fit_spot(
@@ -196,9 +270,7 @@ def _fit_spot(
     for i in range(size):
         for j in range(size):
             value = spot[i, j]
-            v = em_factor * value if value > 0 else 0.0
-            if use_var:
-                v += var[i, j]
+            v = _pixel_variance(value, var[i, j], use_var, em_factor)
             col_sum[j] += value
             row_sum[i] += value
             col_var[j] += v
@@ -215,52 +287,30 @@ def _fit_spot(
         im_x -= col_sum[j] * sin_t[j]
         re_y += row_sum[j] * cos_t[j]
         im_y -= row_sum[j] * sin_t[j]
-    abs_x = math.hypot(re_x, im_x)
-    abs_y = math.hypot(re_y, im_y)
     out[0] = -math.atan2(im_x, re_x) / omega
     out[1] = -math.atan2(im_y, re_y) / omega
 
-    # aperture photometry
-    flat = spot.ravel()
-    signal = 0.0
-    for m in range(signal_idx.shape[0]):
-        signal += flat[signal_idx[m]]
-    for m in range(ring_idx.shape[0]):
-        ring[m] = flat[ring_idx[m]]
-    ring.sort()
-    bg = ring[bg_rank]
-    out[2] = max(0.0, signal - signal_idx.shape[0] * bg)
-    out[3] = bg
+    _aperture_photometry(spot, signal_idx, ring_idx, bg_rank, ring, out)
 
-    out[4] = abs_x / total
-    out[5] = abs_y / total
+    out[4] = math.hypot(re_x, im_x) / total
+    out[5] = math.hypot(re_y, im_y) / total
 
-    # propagated variances; sin/cos(omega k + theta) from the tables,
-    # with cos/sin(theta) = re/|F|, im/|F|
-    cx = re_x / abs_x
-    sx = im_x / abs_x
-    cy = re_y / abs_y
-    sy = im_y / abs_y
-    var_x = 0.0
-    var_y = 0.0
-    for j in range(size):
-        s_x = sin_t[j] * cx + cos_t[j] * sx
-        s_y = sin_t[j] * cy + cos_t[j] * sy
-        var_x += s_x * s_x * col_var[j]
-        var_y += s_y * s_y * row_var[j]
-    out[6] = var_x / (abs_x * abs_x * omega * omega)
-    out[7] = var_y / (abs_y * abs_y * omega * omega)
-    var_log_ratio = 0.0
-    for i in range(size):
-        g_y = (cos_t[i] * cy - sin_t[i] * sy) / abs_y
-        for j in range(size):
-            g = (cos_t[j] * cx - sin_t[j] * sx) / abs_x - g_y
-            value = spot[i, j]
-            v = em_factor * value if value > 0 else 0.0
-            if use_var:
-                v += var[i, j]
-            var_log_ratio += g * g * v
-    out[8] = var_log_ratio
+    _propagated_variances(
+        spot,
+        var,
+        use_var,
+        em_factor,
+        cos_t,
+        sin_t,
+        omega,
+        re_x,
+        im_x,
+        re_y,
+        im_y,
+        col_var,
+        row_var,
+        out,
+    )
 
 
 @numba.njit(nogil=True, cache=True, error_model="numpy")

@@ -11838,6 +11838,49 @@ def _fit_z_multi_emitter(
     return z_locs.reset_index(drop=True), z_info
 
 
+def _prepare_calibration_3d(
+    calibration_3d: dict | str | None,
+    fitting_method: str,
+    pixelsize: float | None,
+    box: int,
+) -> tuple[bool, dict | None, dict | None]:
+    """Load and check ``localize``'s 3D calibration before the spots are
+    identified, which can take a while.
+
+    Returns whether to fit z astigmatically after the 2D fit, the
+    calibration for that z fit and the phasor calibration (None when the
+    fit is not a phasor fit or has no calibration).
+    """
+    if fitting_method == "phasor":
+        # the phasor fit takes z from its own kind of calibration itself
+        if calibration_3d is None:
+            return False, None, None
+        phasor_calibration = (
+            io.load_calibration(calibration_3d, pixelsize=pixelsize)
+            if isinstance(calibration_3d, str)
+            else calibration_3d
+        )
+        if _is_positive_number(pixelsize):  # else fit() reports it
+            _validate_phasor_calibration(
+                phasor_calibration, fitting_method, box, float(pixelsize)
+            )
+        return False, calibration_3d, phasor_calibration
+    fit_z = _validate_calibration_3d(calibration_3d, fitting_method)
+    if not fit_z:
+        return False, calibration_3d, None
+    if isinstance(calibration_3d, str):
+        calibration_3d = io.load_calibration(
+            calibration_3d, pixelsize=pixelsize
+        )
+    if zfit._is_phasor_calibration(calibration_3d):
+        raise ValueError(
+            "calibration_3d is a phasor calibration, which only the phasor "
+            "fit (fitting_method='phasor') can use; the Gaussian z fit "
+            "needs a Gaussian astigmatism calibration (zfit.calibrate_z)."
+        )
+    return True, calibration_3d, None
+
+
 def localize(
     movie: LoadedMovie,
     *,
@@ -12068,39 +12111,12 @@ def localize(
             "identification_parameters must be an IdentificationParameters, "
             f"got {type(identification_parameters).__name__}."
         )
-    phasor_calibration = None
-    if fitting_method == "phasor":
-        # the phasor fit takes z from its own kind of calibration itself;
-        # checked before the spots are identified, which can take a while
-        fit_z = False
-        if calibration_3d is not None:
-            phasor_calibration = (
-                io.load_calibration(
-                    calibration_3d, pixelsize=camera_info.get("Pixelsize")
-                )
-                if isinstance(calibration_3d, str)
-                else calibration_3d
-            )
-            pixelsize = camera_info.get("Pixelsize")
-            if _is_positive_number(pixelsize):  # else fit() reports it
-                _validate_phasor_calibration(
-                    phasor_calibration,
-                    fitting_method,
-                    identification_parameters.box,
-                    float(pixelsize),
-                )
-    else:
-        fit_z = _validate_calibration_3d(calibration_3d, fitting_method)
-    if fit_z and isinstance(calibration_3d, str):
-        calibration_3d = io.load_calibration(
-            calibration_3d, pixelsize=camera_info.get("Pixelsize")
-        )
-    if fit_z and zfit._is_phasor_calibration(calibration_3d):
-        raise ValueError(
-            "calibration_3d is a phasor calibration, which only the phasor "
-            "fit (fitting_method='phasor') can use; the Gaussian z fit "
-            "needs a Gaussian astigmatism calibration (zfit.calibrate_z)."
-        )
+    fit_z, calibration_3d, phasor_calibration = _prepare_calibration_3d(
+        calibration_3d,
+        fitting_method,
+        camera_info.get("Pixelsize"),
+        identification_parameters.box,
+    )
 
     # Without movie metadata, record at least the movie size, which every
     # localization file needs (io.MINIMUM_METADATA_KEYS)

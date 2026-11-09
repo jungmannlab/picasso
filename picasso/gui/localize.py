@@ -15041,105 +15041,27 @@ class Window(QtWidgets.QMainWindow):
         use_gpu = dialog.gpu_checkbox.isChecked()
         spline_calibration = None
         if method.startswith("spline"):
-            spline_calibration = dialog.spline_calibration
-            if not spline_calibration:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Spline PSF fit",
-                    "Load a spline PSF calibration first (Experimental "
-                    "PSF (spline) > Load calibration), or build one via "
-                    "3D > Calibrate spline PSF.",
-                )
-                return None
-            if spline_calibration.get("model") == "spline-3d-multichannel":
-                # it describes every channel at once and only means anything
-                # to the joint fit; fitting one channel against it would use
-                # the reference channel's PSF everywhere
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Spline PSF fit",
-                    "This is a multichannel spline calibration, which "
-                    "belongs to the joint fit. Fitting the channels "
-                    "separately needs one single-channel calibration per "
-                    "channel: load each channel's own calibration (untick "
-                    "'PSF calibration' under 'Same settings across "
-                    "channels'), or set 'Fit' back to "
-                    f"'{FIT_MODE_JOINT}'.",
-                )
-                return None
-            # The spline fit requires the box size to match the one the
-            # calibration was built with.
-            if not self._check_spline_box_size(spline_calibration):
+            spline_calibration = self._spline_calibration_for_fit()
+            if spline_calibration is None:
                 return None
             # A 3D spline fit recovers z directly, so the separate
             # astigmatism z-fitting step must not run.
             fit_z = False
         vectorfit_parameters = None
         if method == "vectorfit":
-            if not vectorfit.VECTORFIT_AVAILABLE:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "VectorFit",
-                    "The vectorial PSF fit requires the optional VectorFit "
-                    "library. Install it with\n\n"
-                    "pip install picassosr[vectorfit]",
-                )
+            vectorfit_parameters = self._vectorfit_parameters_for_fit(use_gpu)
+            if vectorfit_parameters is None:
                 return None
-            # the checkbox is disabled then, but restoring saved settings
-            # can tick it
-            if use_gpu and not vectorfit.gpu_available():
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "VectorFit",
-                    "VectorFit cannot fit on the GPU. "
-                    f"{vectorfit.gpu_unavailable_reason()}\n\n"
-                    "Untick Use GPU to fit on the CPU.",
-                )
-                return None
-            box = self.parameters["Box Size"]
-            if box not in vectorfit.N_PUPIL:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "VectorFit",
-                    f"VectorFit does not support a box size of {box}. "
-                    "Supported box sizes are "
-                    f"{vectorfit.supported_boxes_text()}.",
-                )
-                return None
-            vectorfit_parameters = dialog.vectorfit_parameters()
             # VectorFit's 3D model fits z itself
             fit_z = False
-        phasor_calibration = None
-        z_calibration = dialog.z_calibration
-        phasor_calibration_loaded = zfit._is_phasor_calibration(z_calibration)
+        usable, phasor_calibration = self._phasor_calibration_for_fit(
+            method, fit_z, calibrate_z
+        )
+        if not usable:
+            return None
         if method == PHASOR_CODE:
-            if fit_z and z_calibration and not calibrate_z:
-                if not phasor_calibration_loaded:
-                    QtWidgets.QMessageBox.warning(
-                        self,
-                        "Phasor fit",
-                        "The loaded 3D calibration is a Gaussian astigmatism "
-                        "calibration (fitted spot widths), which the phasor "
-                        "fit cannot use. Load a phasor calibration, made "
-                        "with Calibration > Calibrate astigmatism (phasor), "
-                        "or untick Fit Z.",
-                    )
-                    return None
-                phasor_calibration = dict(z_calibration)
-                phasor_calibration["Magnification factor"] = (
-                    dialog.magnification_factor.value()
-                )
             # the phasor fit takes z from its calibration itself
             fit_z = False
-        elif fit_z and phasor_calibration_loaded and not calibrate_z:
-            QtWidgets.QMessageBox.warning(
-                self,
-                "Fit",
-                "The loaded 3D calibration is a phasor calibration, which "
-                f"only the '{PHASOR_MODEL}' model can use. Select it, load a "
-                "Gaussian astigmatism calibration, or untick Fit Z.",
-            )
-            return None
         return FitWorker(
             self.movie,
             self.identifications_info if info is None else info,
@@ -15166,6 +15088,117 @@ class Window(QtWidgets.QMainWindow):
             vectorfit_parameters=vectorfit_parameters,
             phasor_calibration=phasor_calibration,
         )
+
+    def _spline_calibration_for_fit(self) -> dict | None:
+        """The Parameters dialog's spline calibration if a single-channel
+        spline fit can use it, else None, having said why."""
+        spline_calibration = self.parameters_dialog.spline_calibration
+        if not spline_calibration:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Spline PSF fit",
+                "Load a spline PSF calibration first (Experimental "
+                "PSF (spline) > Load calibration), or build one via "
+                "3D > Calibrate spline PSF.",
+            )
+            return None
+        if spline_calibration.get("model") == "spline-3d-multichannel":
+            # it describes every channel at once and only means anything
+            # to the joint fit; fitting one channel against it would use
+            # the reference channel's PSF everywhere
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Spline PSF fit",
+                "This is a multichannel spline calibration, which "
+                "belongs to the joint fit. Fitting the channels "
+                "separately needs one single-channel calibration per "
+                "channel: load each channel's own calibration (untick "
+                "'PSF calibration' under 'Same settings across "
+                "channels'), or set 'Fit' back to "
+                f"'{FIT_MODE_JOINT}'.",
+            )
+            return None
+        # The spline fit requires the box size to match the one the
+        # calibration was built with.
+        if not self._check_spline_box_size(spline_calibration):
+            return None
+        return spline_calibration
+
+    def _vectorfit_parameters_for_fit(self, use_gpu: bool) -> dict | None:
+        """The Parameters dialog's VectorFit settings if VectorFit can fit
+        with them, else None, having said why."""
+        if not vectorfit.VECTORFIT_AVAILABLE:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "VectorFit",
+                "The vectorial PSF fit requires the optional VectorFit "
+                "library. Install it with\n\n"
+                "pip install picassosr[vectorfit]",
+            )
+            return None
+        # the checkbox is disabled then, but restoring saved settings
+        # can tick it
+        if use_gpu and not vectorfit.gpu_available():
+            QtWidgets.QMessageBox.warning(
+                self,
+                "VectorFit",
+                "VectorFit cannot fit on the GPU. "
+                f"{vectorfit.gpu_unavailable_reason()}\n\n"
+                "Untick Use GPU to fit on the CPU.",
+            )
+            return None
+        box = self.parameters["Box Size"]
+        if box not in vectorfit.N_PUPIL:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "VectorFit",
+                f"VectorFit does not support a box size of {box}. "
+                "Supported box sizes are "
+                f"{vectorfit.supported_boxes_text()}.",
+            )
+            return None
+        return self.parameters_dialog.vectorfit_parameters()
+
+    def _phasor_calibration_for_fit(
+        self, method: str, fit_z: bool, calibrate_z: bool
+    ) -> tuple[bool, dict | None]:
+        """Whether the loaded 3D calibration suits the fit, and the phasor
+        calibration to pass it (None unless a phasor fit fits z). Says why
+        when it does not suit."""
+        dialog = self.parameters_dialog
+        z_calibration = dialog.z_calibration
+        phasor_calibration_loaded = zfit._is_phasor_calibration(z_calibration)
+        uses_z_calibration = fit_z and not calibrate_z
+        if method != PHASOR_CODE:
+            if uses_z_calibration and phasor_calibration_loaded:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Fit",
+                    "The loaded 3D calibration is a phasor calibration, "
+                    f"which only the '{PHASOR_MODEL}' model can use. Select "
+                    "it, load a Gaussian astigmatism calibration, or untick "
+                    "Fit Z.",
+                )
+                return False, None
+            return True, None
+        if not (uses_z_calibration and z_calibration):
+            return True, None
+        if not phasor_calibration_loaded:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Phasor fit",
+                "The loaded 3D calibration is a Gaussian astigmatism "
+                "calibration (fitted spot widths), which the phasor "
+                "fit cannot use. Load a phasor calibration, made "
+                "with Calibration > Calibrate astigmatism (phasor), "
+                "or untick Fit Z.",
+            )
+            return False, None
+        phasor_calibration = dict(z_calibration)
+        phasor_calibration["Magnification factor"] = (
+            dialog.magnification_factor.value()
+        )
+        return True, phasor_calibration
 
     def _start_fit_worker(self, worker: FitWorker) -> None:
         """Wire a ``FitWorker``'s progress/abort signals up and start it.
