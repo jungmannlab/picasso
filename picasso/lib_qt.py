@@ -1157,7 +1157,8 @@ class _InputBlocker(QtCore.QObject):
         # which are filtered below
         if not isinstance(obj, QtWidgets.QWidget):
             return False
-        if obj.window().isModal():
+        # unbound: many widgets shadow window() with a ``window`` attribute
+        if QtWidgets.QWidget.window(obj).isModal():
             return False
         if event.type() in (
             QtCore.QEvent.Type.Close,

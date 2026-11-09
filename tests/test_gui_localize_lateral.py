@@ -464,6 +464,7 @@ class TestTheFitLeavesARecord:
             fit_z=fit_z,
             calibrate_z=False,
             spline_calibration=None,
+            phasor_calibration=None,
             vectorfit_parameters=None,
             lateral_transforms=lateral_transforms,
             camera_calibration=None,

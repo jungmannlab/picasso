@@ -9246,14 +9246,16 @@ class TestFitAffineTransform:
         return _affine_bead_image(ref_xy), _affine_bead_image(cyl_xy), ref_xy
 
     @pytest.mark.parametrize(
-        "model", [m for m in transforms.MODELS if m != "translation"]
+        "model",
+        [m for m in transforms.MODELS if m not in ("translation", "rigid")],
     )
     def test_every_model_recovers_the_applied_transform(
         self, bead_movies, model
     ):
         """The correction is a pure affine here, which every model except the
-        translation can represent - so each must recover it, and record which
-        one it is. The translation is covered on a pure shift below."""
+        translation and the rigid transform can represent - so each must
+        recover it, and record which one it is. The translation and the rigid
+        transform are covered on their own corrections below."""
         movie_ref, movie_cyl, ref_xy = bead_movies
         calibration, _ = localize.fit_lateral_transform(
             movie_ref,
@@ -9317,6 +9319,36 @@ class TestFitAffineTransform:
             ref_xy * PIXELSIZE,
             atol=0.3 * PIXELSIZE,
         )
+
+    def test_a_rigid_transform_recovers_a_rotation_and_shift(self):
+        """The rotation + shift model on the only correction it claims to
+        fit. The class-wide ``TRUTH`` also scales anisotropically, which a
+        rigid transform cannot represent."""
+        angle = np.radians(0.5)
+        truth = np.array(
+            [
+                [np.cos(angle), -np.sin(angle), 3.0],
+                [np.sin(angle), np.cos(angle), -2.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        ref_xy = _affine_bead_grid()
+        moved_xy = _apply_homogeneous(np.linalg.inv(truth), ref_xy)
+        calibration, _ = localize.fit_lateral_transform(
+            _affine_bead_image(ref_xy),
+            _affine_bead_image(moved_xy),
+            calibration={},
+            box=BOX,
+            identification_method=LATERAL_NG,
+            model="rigid",
+            pixelsize=PIXELSIZE,
+        )
+        (entry,) = lib.lateral_transforms(calibration)
+        assert entry["Transform"]["model"] == "rigid"
+        mapped = transforms.from_dict(entry["Transform"]).apply(
+            moved_xy * PIXELSIZE
+        )
+        assert np.allclose(mapped, ref_xy * PIXELSIZE, atol=0.3 * PIXELSIZE)
 
     def test_too_few_pairs_for_the_model_raises(self):
         """Enough beads for an affine, too few for a degree-3 polynomial: the
