@@ -20,6 +20,13 @@ calibration, and recovers ``z`` directly for the 3D model.
 The spots are fitted in batches; within a batch VectorFit parallelizes over
 its own threads, or over the GPU, so no worker processes are started here.
 
+References
+----------
+Droste, I. et al. "Calibration-free estimation of field-dependent
+aberrations for single-molecule localization microscopy across large
+fields of view." Optica 12, 1220-1229 (2025).
+https://doi.org/10.1364/OPTICA.560721
+
 :author: Thomas Bonte, 2026
 """
 

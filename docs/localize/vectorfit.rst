@@ -5,7 +5,7 @@ Vectorial PSF (VectorFit)
 
 Picasso can fit a **vectorial PSF model** to every spot with the VectorFit library. The model is computed from the optics of the microscope, so no bead calibration is needed, and its 3D variant recovers ``z`` directly.
 
-VectorFit is described in `Droste et al., Optica, 2024 <https://doi.org/10.1364/OPTICA.560721>`_. That work also estimates field-dependent aberrations from the single-molecule data itself; Picasso does not do this yet and only uses the aberrations you set (see below).
+VectorFit is described in `Droste et al., Optica, 2025 <https://doi.org/10.1364/OPTICA.560721>`_. That work also estimates field-dependent aberrations from the single-molecule data itself; Picasso does not do this yet and only uses the aberrations you set (see below).
 
 Theory
 ------
