@@ -125,6 +125,10 @@ ENV/
 # CUDA installer build artifacts
 build_cuda/
 dist_cuda/
+build_cuda12/
+dist_cuda12/
+build_cuda13/
+dist_cuda13/
 build_gpu/
 dist_gpu/
 

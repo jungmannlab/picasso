@@ -84,8 +84,10 @@ The steps
 
 .. _first-steps-design:
 
-1 · Plan the experiment (optional)
-----------------------------------
+1 · Design
+----------
+
+*Only for DNA origami samples; skip this step if you already have a movie.*
 
 If you image DNA origami, :doc:`/design` lets you lay out DNA-PAINT docking
 sites on a rectangular origami and gives you the staple sequences and
@@ -93,8 +95,10 @@ pipetting schemes to make it. Its designs can also be loaded into Simulate.
 
 .. _first-steps-simulate:
 
-2 · Test imaging conditions (optional)
---------------------------------------
+2 · Simulate
+------------
+
+*You can skip this step if you already have a movie.*
 
 :doc:`/simulate` generates a DNA-PAINT movie of known structures under the
 imaging conditions you choose (imager concentration, laser power, number of
@@ -319,8 +323,10 @@ More: :doc:`/localize`, :doc:`/localize/identification` and
 
 .. _first-steps-filter:
 
-4 · Filter (optional)
----------------------
+4 · Filter
+----------
+
+*Recommended, but you can go straight to Render.*
 
 Some localizations are of poor quality, for example two molecules blinking
 so close together that they were fitted as one wide spot. :doc:`/filter`

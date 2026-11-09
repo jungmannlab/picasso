@@ -187,6 +187,7 @@ _EXEMPT = {
     ("TestClustererView", "__init__"),  # own copy
     ("MaskSettingsDialog", "init_dialog"),  # reference, read only
     ("RESIDialog", "__init__"),  # reference, read only
+    ("FRCRoisWindow", "__init__"),  # reference, read only
 }
 
 

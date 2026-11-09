@@ -2775,32 +2775,35 @@ class ViewRotation(QtWidgets.QLabel, idle.SpillableChannels):
             event.accept()
             return
         if self._mode == "Measure":
-            # add a measure point on left click; the first right click
-            # freezes the current set so a new one can be started; a
-            # further right click then deletes the last finalized set
-            if event.button() == QtCore.Qt.MouseButton.LeftButton:
-                # start a new set if the previous one was frozen
-                if not self._measure_following:
-                    self._measure_following = True
-                    self.update_cursor()
-                x, y = self.map_to_movie(event.pos())
-                self.add_point((x, y))
-                event.accept()
-            elif event.button() == QtCore.Qt.MouseButton.RightButton:
-                if self._measure_following:
-                    # freeze the current selection (stop following)
-                    self.finalize_measure_set()
-                else:
-                    # delete the last finalized set of measurements
-                    self.remove_last_measure_set()
-                event.accept()
-            else:
-                event.ignore()
-
+            self._measure_release(event)
         elif self._mode == "Rotate":
             # stop rotation
             if event.button() == QtCore.Qt.MouseButton.LeftButton:
                 event.accept()
+
+    def _measure_release(self, event: QtGui.QMouseEvent) -> None:
+        """Release of a mouse button with the Measure tool: add a
+        measure point on left click; the first right click freezes the
+        current set so a new one can be started; a further right click
+        then deletes the last finalized set."""
+        if event.button() == QtCore.Qt.MouseButton.LeftButton:
+            # start a new set if the previous one was frozen
+            if not self._measure_following:
+                self._measure_following = True
+                self.update_cursor()
+            x, y = self.map_to_movie(event.pos())
+            self.add_point((x, y))
+            event.accept()
+        elif event.button() == QtCore.Qt.MouseButton.RightButton:
+            if self._measure_following:
+                # freeze the current selection (stop following)
+                self.finalize_measure_set()
+            else:
+                # delete the last finalized set of measurements
+                self.remove_last_measure_set()
+            event.accept()
+        else:
+            event.ignore()
 
     def map_to_movie(self, position: QtCore.QPoint) -> tuple[float, float]:
         """Convert coordinates from screen pixels to nm."""

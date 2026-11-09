@@ -1088,20 +1088,7 @@ def _paint_scalebar(
     ``height`` display pixels that shows ``viewport`` (nm), e.g., the
     viewport of a widget. See ``draw_scalebar`` for the parameters; the
     painter's state is restored afterwards."""
-    if position not in SCALEBAR_POSITIONS:
-        raise ValueError(
-            f"Unknown position {position!r}, use one of "
-            f"{', '.join(SCALEBAR_POSITIONS)}."
-        )
-    if label_position not in SCALEBAR_LABEL_POSITIONS:
-        raise ValueError(
-            f"Unknown label_position {label_position!r}, use one of "
-            f"{', '.join(SCALEBAR_LABEL_POSITIONS)}."
-        )
-    if units not in SCALEBAR_UNITS:
-        raise ValueError(
-            f"Unknown units {units!r}, use one of {', '.join(SCALEBAR_UNITS)}."
-        )
+    _check_scalebar_options(position, label_position, units)
     if color is None:
         color = QtGui.QColor("white")
     color = QtGui.QColor(color)
@@ -1117,36 +1104,31 @@ def _paint_scalebar(
     # the length's text and its height, with a small gap to the bar
     text_height = gap = 0
     if display_length:
-        font = painter.font()
-        if font_family:
-            font.setFamily(font_family)
-        font.setPixelSize(text_fontsize)
-        font.setBold(bold)
-        font.setItalic(italic)
-        painter.setFont(font)
-        text = _format_scalebar_length(scalebar_length_nm, units)
-        metrics = QtGui.QFontMetrics(font)
-        text_advance = metrics.horizontalAdvance(text)
-        text_height = metrics.height()
-        gap = max(1, round(0.1 * text_fontsize))
+        text, text_advance, text_height, gap = _set_scalebar_font(
+            painter,
+            scalebar_length_nm,
+            units,
+            text_fontsize,
+            font_family,
+            bold,
+            italic,
+        )
 
     # the bar with its text keeps the margins from the nearest edges
-    vertical, horizontal = position.split()
     block_height = display_height + text_height + gap
-    if vertical == "top":
-        block_top = margin[1]
-    else:
-        block_top = height - block_height - margin[1]
-    if display_length and label_position == "above":
-        y = block_top + text_height + gap
-    else:
-        y = block_top
-    if horizontal == "left":
-        x = margin[0]
-    elif horizontal == "center":
-        x = int(round((width - length_displaypxl) / 2))
-    else:
-        x = width - length_displaypxl - margin[0]
+    block_top, x, y = _scalebar_block_position(
+        position,
+        width,
+        height,
+        length_displaypxl,
+        block_height,
+        margin,
+        (
+            text_height + gap
+            if display_length and label_position == "above"
+            else 0
+        ),
+    )
 
     # the text is centered on the bar, but kept inside the device
     if display_length:
@@ -1161,21 +1143,16 @@ def _paint_scalebar(
         )
 
     if background_opacity > 0:
-        background = QtGui.QColor(
-            "black" if color.lightness() >= 128 else "white"
-        )
-        background.setAlphaF(min(1.0, float(background_opacity)))
         left, right = x, x + length_displaypxl
         if display_length:
             left = min(left, text_left)
             right = max(right, text_left + text_advance)
-        padding = max(3, round(0.25 * (text_fontsize or display_height)))
-        painter.setBrush(QtGui.QBrush(background))
-        painter.drawRect(
-            left - padding,
-            block_top - padding,
-            right - left + 2 * padding,
-            block_height + 2 * padding,
+        _paint_scalebar_background(
+            painter,
+            color,
+            background_opacity,
+            (left, block_top, right - left, block_height),
+            max(3, round(0.25 * (text_fontsize or display_height))),
         )
 
     # draw a rectangle
@@ -1193,6 +1170,103 @@ def _paint_scalebar(
             text,
         )
     painter.restore()
+
+
+def _check_scalebar_options(
+    position: str,
+    label_position: str,
+    units: str,
+) -> None:
+    """For ``_paint_scalebar``: raise ValueError for an unknown
+    position, label position or unit."""
+    if position not in SCALEBAR_POSITIONS:
+        raise ValueError(
+            f"Unknown position {position!r}, use one of "
+            f"{', '.join(SCALEBAR_POSITIONS)}."
+        )
+    if label_position not in SCALEBAR_LABEL_POSITIONS:
+        raise ValueError(
+            f"Unknown label_position {label_position!r}, use one of "
+            f"{', '.join(SCALEBAR_LABEL_POSITIONS)}."
+        )
+    if units not in SCALEBAR_UNITS:
+        raise ValueError(
+            f"Unknown units {units!r}, use one of {', '.join(SCALEBAR_UNITS)}."
+        )
+
+
+def _set_scalebar_font(
+    painter: QtGui.QPainter,
+    scalebar_length_nm: int | float,
+    units: Literal["nm", "um", "auto"],
+    text_fontsize: int,
+    font_family: str | None,
+    bold: bool,
+    italic: bool,
+) -> tuple[str, int, int, int]:
+    """For ``_paint_scalebar``: set the painter's font for the length's
+    text and return the text, its width and height and the gap
+    between it and the bar (display pixels)."""
+    font = painter.font()
+    if font_family:
+        font.setFamily(font_family)
+    font.setPixelSize(text_fontsize)
+    font.setBold(bold)
+    font.setItalic(italic)
+    painter.setFont(font)
+    text = _format_scalebar_length(scalebar_length_nm, units)
+    metrics = QtGui.QFontMetrics(font)
+    gap = max(1, round(0.1 * text_fontsize))
+    return text, metrics.horizontalAdvance(text), metrics.height(), gap
+
+
+def _scalebar_block_position(
+    position: str,
+    width: int,
+    height: int,
+    length: int,
+    block_height: int,
+    margin: tuple[int, int],
+    text_above: int,
+) -> tuple[int, int, int]:
+    """For ``_paint_scalebar``: the top of the scale bar with its text
+    (``block_height`` high), and the left and top of the bar
+    (``length`` long, below ``text_above`` pixels of text), kept
+    ``margin`` from the nearest edges of the device."""
+    vertical, horizontal = position.split()
+    if vertical == "top":
+        block_top = margin[1]
+    else:
+        block_top = height - block_height - margin[1]
+    if horizontal == "left":
+        x = margin[0]
+    elif horizontal == "center":
+        x = int(round((width - length) / 2))
+    else:
+        x = width - length - margin[0]
+    return block_top, x, block_top + text_above
+
+
+def _paint_scalebar_background(
+    painter: QtGui.QPainter,
+    color: QtGui.QColor,
+    opacity: float,
+    rect: tuple[int, int, int, int],
+    padding: int,
+) -> None:
+    """For ``_paint_scalebar``: paint a background contrasting with
+    ``color`` behind ``rect`` (left, top, width, height), enlarged by
+    ``padding``."""
+    background = QtGui.QColor("black" if color.lightness() >= 128 else "white")
+    background.setAlphaF(min(1.0, float(opacity)))
+    left, top, width, height = rect
+    painter.setBrush(QtGui.QBrush(background))
+    painter.drawRect(
+        left - padding,
+        top - padding,
+        width + 2 * padding,
+        height + 2 * padding,
+    )
 
 
 def draw_legend(

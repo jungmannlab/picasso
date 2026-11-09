@@ -6,20 +6,28 @@ build-backend = "setuptools.build_meta"
 name = "picassosr"
 dynamic = ["version"]
 authors = [
+    {name = "Rafal Kowalewski", email = "rafalkowalewski998@gmail.com"},
     {name = "Joerg Schnitzbauer", email = "joschnitzbauer@gmail.com"},
     {name = "Maximilian T. Strauss", email = "straussmaximilian@gmail.com"},
-    {name = "Rafal Kowalewski", email = "rafalkowalewski998@gmail.com"},
 ]
 maintainers = [{name = "Rafal Kowalewski", email = "rafalkowalewski998@gmail.com"}]
-keywords = ["super-resolution", "DNA-PAINT", "microscopy"]
-description = "Collection of tools for painting super-resolution images"
+keywords = [
+    "super-resolution",
+    "DNA-PAINT",
+    "microscopy",
+    "SMLM",
+    "single-molecule localization microscopy",
+]
+description = "Single-molecule localization microscopy (SMLM) analysis, from raw movies to localization, rendering and quantification"
 readme = "readme.rst"
 requires-python = ">=3.11,<3.15"
 license = "MIT"
 license-files = ["LICENSE.txt", "LICENSES/*.txt"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Programming Language :: Python",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
@@ -110,12 +118,14 @@ vectorfit = [
 vectorfit-gpu = [
     "vectorfit-py-cu12>=0.3.2",
 ]
-# Not for general use: the installer / installer_cuda extras exist only to
-# build the one-click installers, where every version is pinned exactly so
-# the frozen bundles stay reproducible and stable. Regular users should
-# install picassosr (optionally with [gpu] / [formats] / [server]) instead.
-# 'installer' uses python 3.14, see, e.g., create_installer_windows.bat
-installer = [
+# Not for general use: the installer* extras exist only to build the
+# one-click installers, where every version is pinned exactly so the frozen
+# bundles stay reproducible and stable. Regular users should install
+# picassosr (optionally with [gpu] / [formats] / [server]) instead.
+# They use python 3.14, see, e.g., create_installer_windows.bat.
+# installer_base: everything but VectorFit, whose CPU and GPU builds clash
+# (both install vectorfit_py), so each edition below adds one of them.
+installer_base = [
     "PyQt6==6.11.0",
     "numpy==2.3.5",  # 2.4 breaks HDBSCAN, see picasso/clusterer.py
     "matplotlib==3.10.8",
@@ -146,15 +156,19 @@ installer = [
     "pyinstaller==6.19.0",
     "PyImarisWriter==0.7.0; sys_platform=='win32'",
     "hdf5plugin==6.0.0",
-    # VectorFit's CPU build, also in installer_cuda: its GPU build needs
-    # CUDA 13 and would clash with this one (both install vectorfit_py).
-    # No macOS wheels.
+]
+# CPU build (also used for the macOS installer)
+installer = [
+    "picassosr[installer_base]",
+    # VectorFit's CPU build, also in installer_cuda12. No macOS wheels.
     "vectorfit-py==0.3.2; sys_platform=='win32' or sys_platform=='linux'",
 ]
-# CUDA build: identical to the CPU installer plus the CUDA runtime
-# (GPU rendering via wgpu is in both; this one adds CUDA fitting).
+# CUDA 12 build (create_installer_windows_cuda12.bat): identical to the CPU
+# installer plus the CUDA 12 runtime (GPU rendering via wgpu is in all
+# builds; this one adds CUDA fitting).
 # Reuse picassosr[installer] so the pinned versions never drift apart.
-installer_cuda = [
+# VectorFit stays the CPU build: its GPU build needs CUDA 13.
+installer_cuda12 = [
     "picassosr[installer]",
     "numba-cuda[cu12]==0.30.2",
     # numba-cuda's NVIDIA dependencies are pinned too: their wheel layout
@@ -163,6 +177,23 @@ installer_cuda = [
     "cuda-bindings==12.9.9",
     "cuda-core==1.2.1",
     "cuda-pathfinder==1.8.2"
+]
+# CUDA 13 build: CUDA fitting with the CUDA 13 runtime plus VectorFit's GPU
+# build (vectorfit-py-cu12, which despite its name is compiled with
+# CUDA 13). Needs an NVIDIA driver R580+ and a Turing or newer GPU (compute
+# capability >= 7.5); installer_cuda12 covers older drivers and GPUs.
+# Windows only (create_installer_windows_cuda13.bat).
+installer_cuda13 = [
+    "picassosr[installer_base]",
+    "numba-cuda[cu13]==0.30.2",
+    # pinned for the same reason as in installer_cuda12; cuda-toolkit pins
+    # the exact versions of the nvidia-* runtime wheels it pulls
+    "cuda-bindings==13.5.0",
+    "cuda-core==1.2.2",
+    "cuda-pathfinder==1.8.6",
+    "cuda-toolkit==13.5.0",
+    "nvidia-nvjitlink==13.5.37",
+    "vectorfit-py-cu12==0.3.2; sys_platform=='win32'",
 ]
 
 [project.urls]

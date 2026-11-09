@@ -189,6 +189,66 @@ def _color_code(color: str) -> str:
     return to_hex(PRESET_COLORS.get(color, color))
 
 
+#: Returned by ``_setting_value`` for a value of the wrong type.
+_INVALID = object()
+
+
+def _setting_value(default, value):
+    """A saved ``value`` of a ``PlotStyle`` field whose default is
+    ``default``, as the type of the field: a bool for a bool, a number
+    (not a bool) for a float or an int (only an int for an int), a list
+    or tuple for a tuple and a string otherwise; ``_INVALID`` if it is
+    of another type."""
+    is_number = isinstance(value, (int, float)) and not isinstance(value, bool)
+    if isinstance(default, bool):
+        return value if isinstance(value, bool) else _INVALID
+    if isinstance(default, float):
+        return float(value) if is_number else _INVALID
+    if isinstance(default, int):
+        return value if is_number and isinstance(value, int) else _INVALID
+    if isinstance(default, tuple):
+        return tuple(value) if isinstance(value, (list, tuple)) else _INVALID
+    return value if isinstance(value, str) else _INVALID
+
+
+def _with_valid_choices(style: PlotStyle) -> PlotStyle:
+    """``style`` with the choices that are no longer offered (theme,
+    colormap, scales, histogram style, palette) and an invalid
+    selection color replaced by their default."""
+    default = type(style)()
+    for name, options in (
+        ("theme", THEME_CHOICES),
+        ("colormap", COLORMAPS),
+        ("color_scale", SCALES),
+        ("count_scale", SCALES),
+        ("hist_style", HIST_STYLES),
+    ):
+        if getattr(style, name) not in options:
+            style = replace(style, **{name: getattr(default, name)})
+    if style.palette not in PALETTES and style.palette != CUSTOM_PALETTE:
+        style = replace(style, palette=default.palette)
+    try:
+        _color_code(style.selection_color)
+    except ValueError:
+        style = replace(style, selection_color=default.selection_color)
+    return style
+
+
+def _with_valid_colors(style: PlotStyle) -> PlotStyle:
+    """``style`` with exactly ``N_COLORS`` valid colors, missing or
+    invalid ones taken from its palette."""
+    fallback = PALETTES.get(style.palette, PALETTES["Picasso"])
+    colors = []
+    for i in range(N_COLORS):
+        color = style.colors[i] if i < len(style.colors) else None
+        try:
+            _color_code(color)
+        except (ValueError, TypeError):
+            color = fallback[i]
+        colors.append(str(color))
+    return replace(style, colors=tuple(colors))
+
+
 @dataclass(frozen=True)
 class PlotStyle:
     """Appearance of the chart windows.
@@ -283,7 +343,6 @@ class PlotStyle:
         style = cls()
         if not isinstance(settings, dict):
             return style
-        values = {}
         # data_color was the first color before colors existed
         if "colors" not in settings and "data_color" in settings:
             settings = dict(settings)
@@ -291,57 +350,17 @@ class PlotStyle:
                 style.colors[1:]
             )
             settings.setdefault("palette", CUSTOM_PALETTE)
+        values = {}
         for field in fields(cls):
             if field.name not in settings:
                 continue
-            value = settings[field.name]
-            default = getattr(style, field.name)
-            if isinstance(default, bool):
-                if isinstance(value, bool):
-                    values[field.name] = value
-            elif isinstance(default, float):
-                if isinstance(value, (int, float)) and not isinstance(
-                    value, bool
-                ):
-                    values[field.name] = float(value)
-            elif isinstance(default, int):
-                if isinstance(value, int) and not isinstance(value, bool):
-                    values[field.name] = value
-            elif isinstance(default, tuple):
-                if isinstance(value, (list, tuple)):
-                    values[field.name] = tuple(value)
-            elif isinstance(value, str):
+            value = _setting_value(
+                getattr(style, field.name), settings[field.name]
+            )
+            if value is not _INVALID:
                 values[field.name] = value
-        style = replace(style, **values)
-        # replace choices that are no longer offered by their default
-        default = cls()
-        for name, options in (
-            ("theme", THEME_CHOICES),
-            ("colormap", COLORMAPS),
-            ("color_scale", SCALES),
-            ("count_scale", SCALES),
-            ("hist_style", HIST_STYLES),
-        ):
-            if getattr(style, name) not in options:
-                style = replace(style, **{name: getattr(default, name)})
-        if style.palette not in PALETTES and style.palette != CUSTOM_PALETTE:
-            style = replace(style, palette=default.palette)
-        try:
-            _color_code(style.selection_color)
-        except ValueError:
-            style = replace(style, selection_color=default.selection_color)
-        # exactly N_COLORS valid colors, missing or invalid ones from
-        # the palette
-        fallback = PALETTES.get(style.palette, PALETTES["Picasso"])
-        colors = []
-        for i in range(N_COLORS):
-            color = style.colors[i] if i < len(style.colors) else None
-            try:
-                _color_code(color)
-            except (ValueError, TypeError):
-                color = fallback[i]
-            colors.append(str(color))
-        return replace(style, colors=tuple(colors))
+        style = _with_valid_choices(replace(style, **values))
+        return _with_valid_colors(style)
 
     def to_settings(self) -> dict:
         """The style as a plain dict for the user settings."""
@@ -689,6 +708,48 @@ def _text_scale() -> float:
     return theme.text_scale()
 
 
+def _saved_size(sizes: dict, size: float) -> float | None:
+    """The size set in the plot settings of text shown at ``size`` on
+    screen, from ``sizes`` (screen -> saved); None if it was not sized
+    by a ``PlotStyle``."""
+    for screen, size_saved in sizes.items():
+        if abs(size - screen) < 1e-6:
+            return size_saved
+    return None
+
+
+def _set_saved_text_sizes(figure: Figure, sizes: dict) -> list:
+    """Give the texts of ``figure`` their sizes of the plot settings,
+    see ``_saved_size``. Returns the texts changed and their screen
+    sizes."""
+    texts = []
+    for text in figure.findobj(matplotlib.text.Text):
+        size = _saved_size(sizes, text.get_fontsize())
+        if size is not None:
+            texts.append((text, text.get_fontsize()))
+            text.set_fontsize(size)
+    return texts
+
+
+def _set_saved_tick_sizes(figure: Figure, sizes: dict) -> list:
+    """Give the tick labels of the axes of ``figure`` their sizes of the
+    plot settings, see ``_saved_size``: ticks created while saving take
+    the size from the axis. Returns the axes, ``which`` and the screen
+    sizes changed."""
+    ticks = []
+    for axes in figure.axes:
+        for axis in (axes.xaxis, axes.yaxis):
+            for which in ("major", "minor"):
+                size = axis.get_tick_params(which=which).get("labelsize")
+                if size is None or _saved_size(sizes, size) is None:
+                    continue
+                ticks.append((axis, which, size))
+                axis.set_tick_params(
+                    which=which, labelsize=_saved_size(sizes, size)
+                )
+    return ticks
+
+
 @contextlib.contextmanager
 def _saved_text_sizes(figure: Figure):
     """Context in which the text of ``figure`` that a ``PlotStyle``
@@ -698,29 +759,8 @@ def _saved_text_sizes(figure: Figure):
     if not sizes or all(abs(a - b) < 1e-6 for a, b in sizes.items()):
         yield
         return
-
-    def saved(size: float) -> float | None:
-        for screen, size_saved in sizes.items():
-            if abs(size - screen) < 1e-6:
-                return size_saved
-        return None
-
-    texts = []
-    for text in figure.findobj(matplotlib.text.Text):
-        size = saved(text.get_fontsize())
-        if size is not None:
-            texts.append((text, text.get_fontsize()))
-            text.set_fontsize(size)
-    # ticks created while saving take the size from the axis
-    ticks = []
-    for axes in figure.axes:
-        for axis in (axes.xaxis, axes.yaxis):
-            for which in ("major", "minor"):
-                size = axis.get_tick_params(which=which).get("labelsize")
-                if size is None or saved(size) is None:
-                    continue
-                ticks.append((axis, which, size))
-                axis.set_tick_params(which=which, labelsize=saved(size))
+    texts = _set_saved_text_sizes(figure, sizes)
+    ticks = _set_saved_tick_sizes(figure, sizes)
     try:
         yield
     finally:

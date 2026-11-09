@@ -386,6 +386,11 @@ MULTI_EMITTER_PSF_MODELS = {
     "Experimental PSF (cubic spline)": "spline",
 }
 
+# The non-iterative phasor localization model and its ``fit`` code; it
+# takes z from an astigmatic phasor calibration of its own.
+PHASOR_MODEL = "Phasor (pSMLM)"
+PHASOR_CODE = "phasor"
+
 # Fitting models offered in the GUI, decoupled from the optimizer. Each
 # model maps its optimizer labels to the internal ``fit`` codes;
 # models without an optimizer (e.g. averaging) declare a fixed ``code``
@@ -439,6 +444,13 @@ FIT_MODELS = {
         "needs_vectorfit_parameters": True,
         "docs": "localize/vectorfit.html#localize-vectorfit",
     },
+    # last, so that the per-channel snapshots, which keep the model as an
+    # index, keep pointing at the models they did before
+    PHASOR_MODEL: {
+        "optimizers": None,
+        "code": PHASOR_CODE,
+        "docs": "localize/phasor.html#localize-phasor",
+    },
 }
 
 # The only model whose widths (sx, sy) an astigmatism z calibration can
@@ -474,6 +486,19 @@ MODEL_TOOLTIP = (
     "x/y stay at the identified pixel (no sub-pixel position)."
 )
 
+# The model tooltip's paragraph on phasor localization.
+PHASOR_MODEL_TOOLTIP = (
+    "Phasor (pSMLM):\n"
+    "No fit: x/y from the phase of the first Fourier coefficients of the\n"
+    "box, photons and background from aperture photometry (Martens et\n"
+    "al., J. Chem. Phys. 2018). Very fast (CPU), no PSF model, no widths.\n"
+    "z with an astigmatic phasor calibration (Calibration > Calibrate\n"
+    "astigmatism (phasor)). Box: 5 below and 7 above ~1,000 photons,\n"
+    "11 for astigmatic 3D (paper). The published method gives no\n"
+    "precision: lpx/lpy/lpz are Picasso's error-propagation estimate,\n"
+    "not a Cramer-Rao bound."
+)
+
 # The model tooltip's paragraph on VectorFit, shown only where the model is
 # offered (see ``offered_fit_models``).
 VECTORFIT_MODEL_TOOLTIP = (
@@ -499,10 +524,12 @@ def offered_fit_models() -> list[str]:
 
 
 def model_tooltip() -> str:
-    """The tooltip of the Model combo box: a paragraph per offered model."""
+    """The tooltip of the Model combo box: a paragraph per offered model,
+    in the order of the combo box."""
+    tooltip = MODEL_TOOLTIP
     if "Vectorial PSF (VectorFit)" in offered_fit_models():
-        return MODEL_TOOLTIP + "\n\n" + VECTORFIT_MODEL_TOOLTIP
-    return MODEL_TOOLTIP
+        tooltip += "\n\n" + VECTORFIT_MODEL_TOOLTIP
+    return tooltip + "\n\n" + PHASOR_MODEL_TOOLTIP
 
 
 GPU_TOOLTIP = (
@@ -658,12 +685,34 @@ def _compile_multi_emitter_fit() -> None:
 
 
 def _outliers_note(info: list[dict]) -> str:
-    """The status bar's note on the outliers a VectorFit fit discarded,
-    read from the fit's metadata; "" for any other fit."""
+    """The status bar's notes on a fit, read from its metadata: the
+    outliers a VectorFit fit discarded, or, for a phasor fit with a z
+    calibration, how many localizations fell outside its range; "" for any
+    other fit."""
     n_outliers = vectorfit.outliers_discarded(info)
-    if n_outliers is None:
+    if n_outliers is not None:
+        return f" Discarded {n_outliers:,} outliers."
+    return _phasor_note(info)
+
+
+def _phasor_note(info: list[dict]) -> str:
+    """The status bar's note on a phasor fit (see ``_outliers_note``)."""
+    entry = next(
+        (
+            e
+            for e in reversed(info or [])
+            if isinstance(e, dict)
+            and e.get("Localization precision")
+            == localize.PHASOR_PRECISION_NOTE
+        ),
+        None,
+    )
+    if entry is None:
         return ""
-    return f" Discarded {n_outliers:,} outliers."
+    n_outside = entry.get("Outside calibrated z range")
+    if not n_outside:
+        return ""
+    return f" {n_outside:,} outside the calibrated z range removed."
 
 
 def _fit_code(model: str, optimizer: str) -> str:
@@ -694,8 +743,9 @@ def _effective_fit_code(code: str, use_gpu: bool) -> str:
 
 
 # Fit codes that iterate, and the default convergence schedule of each. Every
-# method except "avg" is here: all of them run an iterative solver, so all of
-# them honor the convergence criterion and the maximum-iteration count.
+# method except "avg" and "phasor" is here: all of them run an iterative
+# solver, so all of them honor the convergence criterion and the
+# maximum-iteration count.
 #
 # The Gaussian defaults come from ``localize.gauss_schedule`` rather than
 # being repeated, so the boxes cannot show a schedule the fit does not use.
@@ -713,7 +763,7 @@ _CONVERGENCE_DEFAULTS = {
         )
     )
     for code in localize.FIT_METHODS
-    if code != "avg" and not code.startswith("vectorfit")
+    if code not in ("avg", PHASOR_CODE) and not code.startswith("vectorfit")
 }
 # the same on either device
 _VECTORFIT_CODES = ("vectorfit", "vectorfit-gpu")
@@ -6724,21 +6774,7 @@ class ParametersDialog(lib.Dialog):
         if self.vectorfit_groupbox is not None:
             self.vectorfit_groupbox.setVisible(needs_vectorfit)
         if getattr(self, "peak_search_z_edit", None) is not None:
-            # the spline takes its PSF from the calibration, and searches
-            # in z with a 3D one
-            for widget in (
-                self.psf_sigma_label,
-                self.psf_sigma_spinbox,
-                self.psf_sigma_estimate_checkbox,
-            ):
-                widget.setVisible(not spline_psf)
-            search_z = spline_psf and (
-                (self.spline_calibration or {}).get("model") == "spline-3d"
-            )
-            self.peak_search_z_label.setVisible(search_z)
-            self.peak_search_z_edit.setVisible(search_z)
-            self.fit_region_label.setVisible(spline_psf)
-            self.fit_region_spinbox.setVisible(spline_psf)
+            self._update_spline_psf_widgets(spline_psf)
         if self.channel_registration_groupbox is not None:
             # only meaningful with several channels to register
             self.channel_registration_groupbox.setVisible(
@@ -6756,6 +6792,30 @@ class ParametersDialog(lib.Dialog):
         # The multichannel rows keep their space while hidden (see
         # _retain_size_when_hidden), but the multi-emitter fit takes one
         # channel, so it does not reserve it.
+        self._retain_multichannel_rows(not multi_emitter)
+
+    def _update_spline_psf_widgets(self, spline_psf: bool) -> None:
+        """Show the PSF sigma, or for the spline PSF of the multi-emitter
+        fit the fit region and, with a 3D calibration, the peak search in
+        z: the spline takes its PSF from the calibration, and searches in z
+        with a 3D one."""
+        for widget in (
+            self.psf_sigma_label,
+            self.psf_sigma_spinbox,
+            self.psf_sigma_estimate_checkbox,
+        ):
+            widget.setVisible(not spline_psf)
+        search_z = spline_psf and (
+            (self.spline_calibration or {}).get("model") == "spline-3d"
+        )
+        self.peak_search_z_label.setVisible(search_z)
+        self.peak_search_z_edit.setVisible(search_z)
+        self.fit_region_label.setVisible(spline_psf)
+        self.fit_region_spinbox.setVisible(spline_psf)
+
+    def _retain_multichannel_rows(self, retain: bool) -> None:
+        """Whether the rows of the multichannel settings (identify on,
+        fit mode) keep their space while hidden."""
         for widget in (
             getattr(self, "identify_mode_label", None),
             getattr(self, "identify_mode_combo", None),
@@ -6764,7 +6824,7 @@ class ParametersDialog(lib.Dialog):
         ):
             if widget is not None:
                 policy = widget.sizePolicy()
-                policy.setRetainSizeWhenHidden(not multi_emitter)
+                policy.setRetainSizeWhenHidden(retain)
                 widget.setSizePolicy(policy)
 
     def multi_emitter_psf_model(self) -> str:
@@ -7297,6 +7357,19 @@ class ParametersDialog(lib.Dialog):
                 continue
             transforms.extend(found)
             loaded.append(path)
+        self._warn_skipped_lateral_transforms(empty, already, repeated)
+        if not transforms:
+            self.update_affine_calib(None)
+            return
+        self._set_affine_state(transforms, loaded)
+
+    def _warn_skipped_lateral_transforms(
+        self, empty: list[str], already: list[dict], repeated: list[dict]
+    ) -> None:
+        """Warn about the lateral corrections ``update_affine_calib`` did
+        not load: files without any (``empty``, file names), corrections
+        the loaded 3D / spline calibration carries (``already``) and ones
+        selected more than once (``repeated``)."""
         if empty:
             QtWidgets.QMessageBox.warning(
                 self,
@@ -7325,10 +7398,6 @@ class ParametersDialog(lib.Dialog):
                 "(the same file or a copy of it). Applying it twice would "
                 "correct the coordinates twice.",
             )
-        if not transforms:
-            self.update_affine_calib(None)
-            return
-        self._set_affine_state(transforms, loaded)
 
     def _calibration_lateral_transforms(self) -> list[dict]:
         """The affine corrections the currently loaded 3D and spline
@@ -7425,27 +7494,8 @@ class ParametersDialog(lib.Dialog):
             )
             self.spline_calib_label.setText(os.path.basename(path))
             self.spline_calib_label.setToolTip(path)
-            # split-FOV: drop the calibration's channel regions into the
-            # view and enter split-FOV mode, so the registration can be
-            # inspected and fine-tuned on this data (arrow-key nudge /
-            # drag) and re-drawn if the split moved. The fit then uses
-            # whatever regions are shown.
             if self.spline_calibration.get("split_fov"):
-                regions = self.spline_calibration.get("regions") or []
-                self.window.view.rois = [
-                    [
-                        [int(r[0][0]), int(r[0][1])],
-                        [int(r[1][0]), int(r[1][1])],
-                    ]
-                    for r in regions
-                ]
-                self.window.view.selected_roi = None
-                self.split_fov_checkbox.blockSignals(True)
-                self.split_fov_checkbox.setChecked(True)
-                self.split_fov_checkbox.blockSignals(False)
-                self.window.set_split_fov_mode(True)
-                self.update_roi_display()
-                self.window.draw_frame()
+                self._show_spline_calib_regions()
         else:
             nothing_loaded = not (
                 self.spline_calibration or self.spline_calibration_path
@@ -7474,12 +7524,39 @@ class ParametersDialog(lib.Dialog):
         # a calibration is loaded while 'Identify on' is set to the sum (see
         # ``Window.ensure_channel_sum``).
         self.window.drop_channel_sum()
+        self._redraw_for_new_calib()
+
+    def _redraw_for_new_calib(self) -> None:
+        """Reset the contrast and redraw the frame of the loaded movie
+        after a calibration changed (see ``update_spline_calib``)."""
         try:
             if self.window.movie is not None:
                 self.window._reset_contrast_to_frame()
                 self.window.draw_frame()
         except (AttributeError, RuntimeError):
             pass  # called during startup, before the window is fully built
+
+    def _show_spline_calib_regions(self) -> None:
+        """Split-FOV: drop the channel regions of the spline calibration
+        into the view and enter split-FOV mode, so the registration can be
+        inspected and fine-tuned on this data (arrow-key nudge / drag) and
+        re-drawn if the split moved. The fit then uses whatever regions
+        are shown."""
+        regions = self.spline_calibration.get("regions") or []
+        self.window.view.rois = [
+            [
+                [int(r[0][0]), int(r[0][1])],
+                [int(r[1][0]), int(r[1][1])],
+            ]
+            for r in regions
+        ]
+        self.window.view.selected_roi = None
+        self.split_fov_checkbox.blockSignals(True)
+        self.split_fov_checkbox.setChecked(True)
+        self.split_fov_checkbox.blockSignals(False)
+        self.window.set_split_fov_mode(True)
+        self.update_roi_display()
+        self.window.draw_frame()
 
     def _update_link_photons_visibility(self) -> None:
         """Show the 'Link photons across channels' checkbox only for a
@@ -7698,7 +7775,13 @@ class ParametersDialog(lib.Dialog):
                 self.z_calib_label.setToolTip("")
                 return
             self.z_calib_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-            self.z_calib_label.setText(os.path.basename(path))
+            # the two kinds are not interchangeable (see PHASOR_MODEL)
+            kind = (
+                " (phasor)"
+                if zfit._is_phasor_calibration(self.z_calibration)
+                else ""
+            )
+            self.z_calib_label.setText(os.path.basename(path) + kind)
             self.z_calib_label.setToolTip(path)
             self.fit_z_checkbox.setEnabled(True)
             self.fit_z_checkbox.setChecked(True)
@@ -9257,6 +9340,15 @@ class Window(QtWidgets.QMainWindow):
             "Calibrate astigmatism (Gaussian)"
         )
         calibrate_z_action.triggered.connect(self.calibrate_z)
+        calibrate_z_phasor_action = threed_menu.addAction(
+            "Calibrate astigmatism (phasor)"
+        )
+        calibrate_z_phasor_action.setToolTip(
+            "Calibrate astigmatic z for the phasor model from a bead z\n"
+            "stack: the ratio of the x and y phasor magnitudes against z\n"
+            "(Martens et al., J. Chem. Phys. 2018)."
+        )
+        calibrate_z_phasor_action.triggered.connect(self.calibrate_z_phasor)
 
         calibrate_affine_action = threed_menu.addAction(
             "Calibrate lateral transform (astigmatism / chromatic)..."
@@ -9275,8 +9367,10 @@ class Window(QtWidgets.QMainWindow):
         register_menu = threed_menu.addMenu("Register channels (2D)")
         register_menu.setToolTip(
             "Measure the channel registration - one coordinate transform per\n"
-            "channel that maps a position in the reference (first) channel to\n"
-            "where the same molecule appears in that channel - and save it as\n"
+            "channel that maps a position in the reference (first) channel "
+            "to\n"
+            "where the same molecule appears in that channel - and save it "
+            "as\n"
             "a standalone registration for the multichannel 2D spherical\n"
             "Gaussian fit."
         )
@@ -9389,6 +9483,11 @@ class Window(QtWidgets.QMainWindow):
         """Use the loaded movie to obtain z-calibration data for 3D
         fitting using astigmatism."""
         self.localize(calibrate_z=True)
+
+    def calibrate_z_phasor(self) -> None:
+        """Use the loaded movie to obtain an astigmatic z calibration for
+        the phasor model."""
+        self.localize(calibrate_z=True, calibration_model=PHASOR_MODEL)
 
     def calibrate_affine(self) -> None:
         """Open the affine-transform calibration dialog (astigmatism or
@@ -14767,6 +14866,28 @@ class Window(QtWidgets.QMainWindow):
         )
         max_it = self.parameters_dialog.max_it.value() if iterates else None
         use_gpu = self.parameters_dialog.gpu_checkbox.isChecked()
+        if self._start_joint_fit(model, method, use_gpu, eps, max_it):
+            return
+        worker = self._single_channel_fit_worker(calibrate_z=calibrate_z)
+        if worker is None:
+            self.status_bar.showMessage("")
+            return
+        self.fit_worker = worker
+        self.fit_worker.finished.connect(self.on_fit_finished)
+        self._start_fit_worker(self.fit_worker)
+
+    def _start_joint_fit(
+        self,
+        model: str,
+        method: str,
+        use_gpu: bool,
+        eps: float | None,
+        max_it: int | None,
+    ) -> bool:
+        """Start the joint fit across channels that the loaded channel
+        registration or multichannel spline calibration asks for (see
+        ``fit``). Returns whether the fit was handled here: started, or
+        stopped by the box size check."""
         # A loaded channel registration turns the spherical Gaussian into a
         # joint fit across every channel; with none loaded the fit stays
         # single-channel, exactly as before.
@@ -14783,24 +14904,18 @@ class Window(QtWidgets.QMainWindow):
                 self._start_multichannel_gauss_fit(
                     registration, method, use_gpu, eps, max_it
                 )
-                return
+                return True
         if method.startswith("spline"):
             spline_calibration = self.parameters_dialog.spline_calibration
             if spline_calibration.get("model") == "spline-3d-multichannel":
                 if not self._check_spline_box_size(spline_calibration):
                     self.status_bar.showMessage("")
-                    return
+                    return True
                 self._start_multichannel_spline_fit(
                     spline_calibration, method, eps, max_it
                 )
-                return
-        worker = self._single_channel_fit_worker(calibrate_z=calibrate_z)
-        if worker is None:
-            self.status_bar.showMessage("")
-            return
-        self.fit_worker = worker
-        self.fit_worker.finished.connect(self.on_fit_finished)
-        self._start_fit_worker(self.fit_worker)
+                return True
+        return False
 
     def _start_multi_emitter_fit(self) -> None:
         """Fit overlapping emitters in the whole movie, frame by frame (see
@@ -14822,6 +14937,15 @@ class Window(QtWidgets.QMainWindow):
             and dialog.fit_z_checkbox.isChecked()
             and dialog.z_calibration
         ):
+            if zfit._is_phasor_calibration(dialog.z_calibration):
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Fit",
+                    "The loaded 3D calibration is a phasor calibration, "
+                    f"which only the '{PHASOR_MODEL}' model can use. Load a "
+                    "Gaussian astigmatism calibration, or untick Fit Z.",
+                )
+                return
             calibration_3d = dict(dialog.z_calibration)
             calibration_3d["Magnification factor"] = (
                 dialog.magnification_factor.value()
@@ -14917,73 +15041,26 @@ class Window(QtWidgets.QMainWindow):
         use_gpu = dialog.gpu_checkbox.isChecked()
         spline_calibration = None
         if method.startswith("spline"):
-            spline_calibration = dialog.spline_calibration
-            if not spline_calibration:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Spline PSF fit",
-                    "Load a spline PSF calibration first (Experimental "
-                    "PSF (spline) > Load calibration), or build one via "
-                    "3D > Calibrate spline PSF.",
-                )
-                return None
-            if spline_calibration.get("model") == "spline-3d-multichannel":
-                # it describes every channel at once and only means anything
-                # to the joint fit; fitting one channel against it would use
-                # the reference channel's PSF everywhere
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "Spline PSF fit",
-                    "This is a multichannel spline calibration, which "
-                    "belongs to the joint fit. Fitting the channels "
-                    "separately needs one single-channel calibration per "
-                    "channel: load each channel's own calibration (untick "
-                    "'PSF calibration' under 'Same settings across "
-                    "channels'), or set 'Fit' back to "
-                    f"'{FIT_MODE_JOINT}'.",
-                )
-                return None
-            # The spline fit requires the box size to match the one the
-            # calibration was built with.
-            if not self._check_spline_box_size(spline_calibration):
+            spline_calibration = self._spline_calibration_for_fit()
+            if spline_calibration is None:
                 return None
             # A 3D spline fit recovers z directly, so the separate
             # astigmatism z-fitting step must not run.
             fit_z = False
         vectorfit_parameters = None
         if method == "vectorfit":
-            if not vectorfit.VECTORFIT_AVAILABLE:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "VectorFit",
-                    "The vectorial PSF fit requires the optional VectorFit "
-                    "library. Install it with\n\n"
-                    "pip install picassosr[vectorfit]",
-                )
+            vectorfit_parameters = self._vectorfit_parameters_for_fit(use_gpu)
+            if vectorfit_parameters is None:
                 return None
-            # the checkbox is disabled then, but restoring saved settings
-            # can tick it
-            if use_gpu and not vectorfit.gpu_available():
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "VectorFit",
-                    "VectorFit cannot fit on the GPU. "
-                    f"{vectorfit.gpu_unavailable_reason()}\n\n"
-                    "Untick Use GPU to fit on the CPU.",
-                )
-                return None
-            box = self.parameters["Box Size"]
-            if box not in vectorfit.N_PUPIL:
-                QtWidgets.QMessageBox.warning(
-                    self,
-                    "VectorFit",
-                    f"VectorFit does not support a box size of {box}. "
-                    "Supported box sizes are "
-                    f"{vectorfit.supported_boxes_text()}.",
-                )
-                return None
-            vectorfit_parameters = dialog.vectorfit_parameters()
             # VectorFit's 3D model fits z itself
+            fit_z = False
+        usable, phasor_calibration = self._phasor_calibration_for_fit(
+            method, fit_z, calibrate_z
+        )
+        if not usable:
+            return None
+        if method == PHASOR_CODE:
+            # the phasor fit takes z from its calibration itself
             fit_z = False
         return FitWorker(
             self.movie,
@@ -15003,13 +15080,125 @@ class Window(QtWidgets.QMainWindow):
             use_gpu,
             spline_calibration=spline_calibration,
             lateral_transforms=self._extra_lateral_transforms(
-                spline_calibration
+                spline_calibration or phasor_calibration
             ),
             camera_calibration=(
                 self.parameters_dialog.camera_calibration or None
             ),
             vectorfit_parameters=vectorfit_parameters,
+            phasor_calibration=phasor_calibration,
         )
+
+    def _spline_calibration_for_fit(self) -> dict | None:
+        """The Parameters dialog's spline calibration if a single-channel
+        spline fit can use it, else None, having said why."""
+        spline_calibration = self.parameters_dialog.spline_calibration
+        if not spline_calibration:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Spline PSF fit",
+                "Load a spline PSF calibration first (Experimental "
+                "PSF (spline) > Load calibration), or build one via "
+                "3D > Calibrate spline PSF.",
+            )
+            return None
+        if spline_calibration.get("model") == "spline-3d-multichannel":
+            # it describes every channel at once and only means anything
+            # to the joint fit; fitting one channel against it would use
+            # the reference channel's PSF everywhere
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Spline PSF fit",
+                "This is a multichannel spline calibration, which "
+                "belongs to the joint fit. Fitting the channels "
+                "separately needs one single-channel calibration per "
+                "channel: load each channel's own calibration (untick "
+                "'PSF calibration' under 'Same settings across "
+                "channels'), or set 'Fit' back to "
+                f"'{FIT_MODE_JOINT}'.",
+            )
+            return None
+        # The spline fit requires the box size to match the one the
+        # calibration was built with.
+        if not self._check_spline_box_size(spline_calibration):
+            return None
+        return spline_calibration
+
+    def _vectorfit_parameters_for_fit(self, use_gpu: bool) -> dict | None:
+        """The Parameters dialog's VectorFit settings if VectorFit can fit
+        with them, else None, having said why."""
+        if not vectorfit.VECTORFIT_AVAILABLE:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "VectorFit",
+                "The vectorial PSF fit requires the optional VectorFit "
+                "library. Install it with\n\n"
+                "pip install picassosr[vectorfit]",
+            )
+            return None
+        # the checkbox is disabled then, but restoring saved settings
+        # can tick it
+        if use_gpu and not vectorfit.gpu_available():
+            QtWidgets.QMessageBox.warning(
+                self,
+                "VectorFit",
+                "VectorFit cannot fit on the GPU. "
+                f"{vectorfit.gpu_unavailable_reason()}\n\n"
+                "Untick Use GPU to fit on the CPU.",
+            )
+            return None
+        box = self.parameters["Box Size"]
+        if box not in vectorfit.N_PUPIL:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "VectorFit",
+                f"VectorFit does not support a box size of {box}. "
+                "Supported box sizes are "
+                f"{vectorfit.supported_boxes_text()}.",
+            )
+            return None
+        return self.parameters_dialog.vectorfit_parameters()
+
+    def _phasor_calibration_for_fit(
+        self, method: str, fit_z: bool, calibrate_z: bool
+    ) -> tuple[bool, dict | None]:
+        """Whether the loaded 3D calibration suits the fit, and the phasor
+        calibration to pass it (None unless a phasor fit fits z). Says why
+        when it does not suit."""
+        dialog = self.parameters_dialog
+        z_calibration = dialog.z_calibration
+        phasor_calibration_loaded = zfit._is_phasor_calibration(z_calibration)
+        uses_z_calibration = fit_z and not calibrate_z
+        if method != PHASOR_CODE:
+            if uses_z_calibration and phasor_calibration_loaded:
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Fit",
+                    "The loaded 3D calibration is a phasor calibration, "
+                    f"which only the '{PHASOR_MODEL}' model can use. Select "
+                    "it, load a Gaussian astigmatism calibration, or untick "
+                    "Fit Z.",
+                )
+                return False, None
+            return True, None
+        if not (uses_z_calibration and z_calibration):
+            return True, None
+        if not phasor_calibration_loaded:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Phasor fit",
+                "The loaded 3D calibration is a Gaussian astigmatism "
+                "calibration (fitted spot widths), which the phasor "
+                "fit cannot use. Load a phasor calibration, made "
+                "with Calibration > Calibrate astigmatism (phasor), "
+                "or untick Fit Z.",
+            )
+            return False, None
+        phasor_calibration = dict(z_calibration)
+        phasor_calibration["Magnification factor"] = (
+            dialog.magnification_factor.value()
+        )
+        return True, phasor_calibration
 
     def _start_fit_worker(self, worker: FitWorker) -> None:
         """Wire a ``FitWorker``'s progress/abort signals up and start it.
@@ -16141,7 +16330,13 @@ class Window(QtWidgets.QMainWindow):
             )
             if ok:
                 base = self.channel_output_base()
-                out_path = base + "_3d_calib.yaml"
+                # the phasor calibration needs phasor localizations
+                phasor_fit = (
+                    lib.get_from_metadata(info, "Fit method") == PHASOR_CODE
+                )
+                out_path = base + (
+                    "_phasor_3d_calib.yaml" if phasor_fit else "_3d_calib.yaml"
+                )
                 path, exe = lib.get_save_filename_ext_dialog(
                     self, "Save 3D calibration", out_path, filter="*.yaml"
                 )
@@ -16150,11 +16345,16 @@ class Window(QtWidgets.QMainWindow):
                     magnification = (
                         self.parameters_dialog.magnification_factor.value()
                     )
+                    calibrate = (
+                        zfit.calibrate_z_phasor
+                        if phasor_fit
+                        else zfit.calibrate_z
+                    )
                     try:
                         # the metadata of the fit give the Pixelsize and the
                         # identification parameters, which the calibration
                         # records
-                        zfit.calibrate_z(
+                        calibrate(
                             locs,
                             info,
                             d=step,
@@ -16623,7 +16823,11 @@ class Window(QtWidgets.QMainWindow):
             if path:
                 self.save_identifications(path)
 
-    def localize(self, calibrate_z: bool = False) -> None:
+    def localize(
+        self,
+        calibrate_z: bool = False,
+        calibration_model: str = ASTIGMATISM_FIT_MODEL,
+    ) -> None:
         """Identify and fit, see ``identify`` and ``fit``.
 
         Parameters
@@ -16631,6 +16835,10 @@ class Window(QtWidgets.QMainWindow):
         calibrate_z : bool, optional
             Whether to run z-calibration for 3D fitting afterwards
             Default is False.
+        calibration_model : str, optional
+            The fit model the z calibration needs (``ASTIGMATISM_FIT_MODEL``
+            for the Gaussian one, ``PHASOR_MODEL`` for the phasor one).
+            Default is ``ASTIGMATISM_FIT_MODEL``.
         """
         if self.movie is None:
             title = "Calibrate astigmatism" if calibrate_z else "Localize"
@@ -16640,14 +16848,15 @@ class Window(QtWidgets.QMainWindow):
             return
         # the astigmatism calibration models the x and y widths of an
         # axis-aligned elliptical Gaussian; other models do not report them
-        # (spline, averaging) or report them along other axes (rotated)
+        # (spline, averaging) or report them along other axes (rotated).
+        # The phasor calibration models the phasor magnitudes instead.
         model = self.parameters_dialog.fit_model.currentText()
-        if calibrate_z and model != ASTIGMATISM_FIT_MODEL:
+        if calibrate_z and model != calibration_model:
             QtWidgets.QMessageBox.warning(
                 self,
                 "Calibrate astigmatism",
-                "The astigmatism calibration requires the "
-                f"'{ASTIGMATISM_FIT_MODEL}' fitting model, but "
+                "This astigmatism calibration requires the "
+                f"'{calibration_model}' fitting model, but "
                 f"'{model}' is selected.\n\n"
                 "Select it under Fit Settings in the Parameters dialog and "
                 "run the calibration again.",
@@ -16839,6 +17048,7 @@ class FitWorker(QtCore.QThread):
             "avg",
             "vectorfit",
             "vectorfit-gpu",
+            "phasor",
         ],
         eps: float | None,
         max_it: int | None,
@@ -16849,6 +17059,7 @@ class FitWorker(QtCore.QThread):
         lateral_transforms: list | None = None,
         camera_calibration: dict | None = None,
         vectorfit_parameters: dict | None = None,
+        phasor_calibration: dict | None = None,
     ) -> None:
         super().__init__()
         self.movie = movie
@@ -16865,6 +17076,7 @@ class FitWorker(QtCore.QThread):
         self.lateral_transforms = lateral_transforms or []
         self.camera_calibration = camera_calibration
         self.vectorfit_parameters = vectorfit_parameters
+        self.phasor_calibration = phasor_calibration
         self.N = len(identifications)
         self.method = _effective_fit_code(method, use_gpu)
 
@@ -16904,6 +17116,7 @@ class FitWorker(QtCore.QThread):
                 max_it=self.max_it,
                 spline_calibration=self.spline_calibration,
                 vectorfit_parameters=self.vectorfit_parameters,
+                phasor_calibration=self.phasor_calibration,
                 camera_calibration=self.camera_calibration,
                 # With a z fit to follow, FitZWorker applies them after it,
                 # so that they land on the final coordinates either way.
@@ -18001,12 +18214,15 @@ class AffineCalibrationWorker(QtCore.QThread):
         # io.load_movie returns None when the user cancels the info prompt
         return io.load_movie(path, prompt_info=prompt)
 
-    def run(self) -> None:
+    def _load_movies(self) -> tuple | None:
+        """The reference movie, its metadata and the target movie; None,
+        after emitting ``canceled`` or ``failed``, if a prompt was
+        canceled or a movie could not be loaded."""
         try:
             loaded_ref = self._load(self.ref_path, "reference")
             if loaded_ref is None:
                 self.canceled.emit()
-                return
+                return None
             movie_ref, info_ref = loaded_ref
             label = (
                 "cylindrical lens"
@@ -18016,11 +18232,18 @@ class AffineCalibrationWorker(QtCore.QThread):
             loaded_target = self._load(self.target_path, label)
             if loaded_target is None:
                 self.canceled.emit()
-                return
+                return None
             movie_target, _ = loaded_target
         except Exception as e:  # noqa: BLE001 - reported to the GUI
             self.failed.emit(f"Could not load inputs:\n{e}")
+            return None
+        return movie_ref, info_ref, movie_target
+
+    def run(self) -> None:
+        movies = self._load_movies()
+        if movies is None:
             return
+        movie_ref, info_ref, movie_target = movies
 
         pixelsize = lib.get_from_metadata(info_ref, "Pixelsize", default=None)
         if pixelsize is None:

@@ -437,7 +437,7 @@ With the same settings, these results differ from Picasso 0.11:
 - **Apply expression** in Render enlarges ``Width`` and ``Height`` of the
   metadata when it moves localizations beyond the field of view; 0.11 lost
   them on saving.
-- **Astigmatism (3D) calibrations made with Picasso 0.11.3 or 0.11.4**
+- **Astigmatism (3D) calibrations made with Picasso 0.11.3**
   without z binning placed z = 0 away from the focus, by the distance between
   the focus and the middle of the calibration stack, so every z fitted with
   them is shifted by that distance. Calibrate again with 1.0.
@@ -1491,12 +1491,15 @@ Installing
 - Picasso Server is an optional extra of the Python package, as it alone needs
   Streamlit and Plotly: ``pip install "picassosr[server]"``. The one-click
   installers include it.
-- The Windows installer's *GPU* edition is called *CUDA*. It installs as
-  another program (``C:\Picasso-CUDA``, was ``C:\Picasso-GPU``), so the
-  *GPU* edition of 0.11 stays installed, and ``picasso`` in a terminal keeps
-  running 0.11, which comes first on the ``PATH``. **Uninstall
-  Picasso-GPU** (Windows *Settings* > *Apps*) before or after installing
-  the *CUDA* edition. The standard edition updates in place.
+- The Windows installer's *GPU* edition is called *CUDA12*, and a *CUDA13*
+  edition (CUDA 13, for recent GPUs and drivers) joins it. Either installs as
+  another program (``C:\Picasso-CUDA12`` or ``C:\Picasso-CUDA13``, was
+  ``C:\Picasso-GPU``), so the *GPU* edition of 0.11 stays installed, and
+  ``picasso`` in a terminal keeps running 0.11, which comes first on the
+  ``PATH``. **Uninstall Picasso-GPU** (Windows *Settings* > *Apps*) before
+  or after installing a CUDA edition. The standard edition updates in
+  place. The CUDA13 edition needs a Turing or newer NVIDIA GPU and a driver
+  of version 580 or newer, see :doc:`getting-started/installation`.
 - With pip, Picasso installs ``wgpu`` (GPU rendering), ``dask``,
   ``statsmodels``, ``requests`` and, on every platform, ``hdf5plugin``. It
   no longer installs ``sqlalchemy``, ``watchdog`` and ``plotly-express``;

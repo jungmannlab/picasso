@@ -893,14 +893,70 @@ def _axes_3d(
     like the axes of a 3D plot. The corner is chosen so that no two
     axes leave it in nearly the same direction on screen (where they
     would cover each other), then so that as many axes as possible run
-    along the outline of the box, then at the bottom left. The ticks point away from the
-    box, with the labels past them and the axis name past the labels,
-    at the middle of the edge. An axis pointing at the viewer is not
-    drawn.
+    along the outline of the box, then at the bottom left. The ticks
+    point away from the box, with the labels past them and the axis
+    name past the labels, at the middle of the edge. An axis pointing
+    at the viewer is not drawn.
 
     ``to_display`` maps points ``(..., 3)`` to display pixels
     ``(..., 2)``."""
     lower, upper = grid_box(bounds, step, origin)
+    edges = _axes_corner_edges(lower, upper, to_display)
+    metrics = QtGui.QFontMetricsF(_label_font(grid))
+    lines, names, ticks = [], [], []
+    for axis, edge in enumerate(edges):
+        if edge is None:
+            continue
+        axis_lines, axis_ticks, name = _axis_lines_and_labels(
+            grid, axis, edge, lower, upper, step, origin, to_display, metrics
+        )
+        lines += axis_lines
+        ticks += axis_ticks
+        names.append(name)
+    return lines, names + ticks
+
+
+def _axis_edge(
+    corner: np.ndarray,
+    axis: int,
+    lower: np.ndarray,
+    upper: np.ndarray,
+    corners_display: np.ndarray,
+    to_display,
+) -> tuple | None:
+    """For ``_axes_3d``: the edge of ``axis`` through ``corner`` of the
+    box from ``lower`` to ``upper`` (corners on screen
+    ``corners_display``): its 3D start and display end points,
+    direction and outward normal on screen and whether it lies on the
+    outline; None if it points at the viewer."""
+    start, end = corner.copy(), corner.copy()
+    start[axis], end[axis] = lower[axis], upper[axis]
+    d0, d1 = to_display(np.stack((start, end)))
+    length = float(np.linalg.norm(d1 - d0))
+    if length < 1:
+        return None
+    along = (d1 - d0) / length
+    normal = np.array([-along[1], along[0]])
+    sides = (corners_display - d0) @ normal
+    # on the outline, all corners lie on one side of the edge
+    if sides.max() <= 0.5:
+        return start, d0, d1, along, normal, True
+    if sides.min() >= -0.5:
+        return start, d0, d1, along, -normal, True
+    # inside the outline: away from the center of the box
+    center = corners_display.mean(axis=0)
+    if np.dot((d0 + d1) / 2 - center, normal) < 0:
+        normal = -normal
+    return start, d0, d1, along, normal, False
+
+
+def _axes_corner_edges(
+    lower: np.ndarray,
+    upper: np.ndarray,
+    to_display,
+) -> list[tuple | None]:
+    """For ``_axes_3d``: the edges (see ``_axis_edge``) of the three
+    axes from the corner of the box where they are drawn."""
     corners = np.array(
         [
             [(lower, upper)[(k >> axis) & 1][axis] for axis in range(3)]
@@ -908,35 +964,12 @@ def _axes_3d(
         ]
     )
     corners_display = to_display(corners)
-    center = corners_display.mean(axis=0)
-
-    def axis_edge(corner: np.ndarray, axis: int):
-        """The edge of ``axis`` through ``corner``: its 3D start and
-        display end points, direction and outward normal on screen and
-        whether it lies on the outline; None if it points at the
-        viewer."""
-        start, end = corner.copy(), corner.copy()
-        start[axis], end[axis] = lower[axis], upper[axis]
-        d0, d1 = to_display(np.stack((start, end)))
-        length = float(np.linalg.norm(d1 - d0))
-        if length < 1:
-            return None
-        along = (d1 - d0) / length
-        normal = np.array([-along[1], along[0]])
-        sides = (corners_display - d0) @ normal
-        # on the outline, all corners lie on one side of the edge
-        if sides.max() <= 0.5:
-            return start, d0, d1, along, normal, True
-        if sides.min() >= -0.5:
-            return start, d0, d1, along, -normal, True
-        # inside the outline: away from the center of the box
-        if np.dot((d0 + d1) / 2 - center, normal) < 0:
-            normal = -normal
-        return start, d0, d1, along, normal, False
-
     best = None
     for corner, point in zip(corners, corners_display):
-        edges = [axis_edge(corner, axis) for axis in range(3)]
+        edges = [
+            _axis_edge(corner, axis, lower, upper, corners_display, to_display)
+            for axis in range(3)
+        ]
         # the directions in which the axes leave the corner on screen
         directions = [
             e[3] if np.allclose(e[1], point) else -e[3]
@@ -952,57 +985,66 @@ def _axes_3d(
         score = (apart, on_outline, point[1] - point[0])  # y points down
         if best is None or score > best[0]:
             best = (score, edges)
-    metrics = QtGui.QFontMetricsF(_label_font(grid))
-    height = metrics.height()
-    lines, names, ticks = [], [], []
-    for axis, edge in enumerate(best[1]):
-        if edge is None:
-            continue
-        start, d0, d1, along, outward, _ = edge
-        lines.append(QtCore.QLineF(*d0, *d1))
-        levels = grid_levels(lower[axis], upper[axis], step, origin[axis])
-        points = np.repeat(start[None], len(levels), axis=0)
-        points[:, axis] = levels
-        positions = to_display(points)
-        tips = positions + outward * _TICK_LENGTH
-        lines += [QtCore.QLineF(*p, *t) for p, t in zip(positions, tips)]
+    return best[1]
 
-        values = levels - origin[axis]
-        texts = format_grid_labels(values, grid.spacing_nm, unit=False)
-        widths = [metrics.horizontalAdvance(t) for t in texts]
-        extents = [
-            abs(outward[0]) * w + abs(outward[1]) * height for w in widths
-        ]
-        spacing = (
-            float(np.linalg.norm(positions[1] - positions[0]))
-            if len(positions) > 1
-            else np.inf
-        )
-        stride = _label_stride(
-            max(
-                (abs(along[0]) * w + abs(along[1]) * height for w in widths),
-                default=0,
-            ),
-            spacing,
-        )
-        for index, tip, text, w, extent in zip(
-            (levels - origin[axis]) / step, tips, texts, widths, extents
-        ):
-            if round(index) % stride:
-                continue
-            middle = tip + outward * (_LABEL_GAP + extent / 2)
-            ticks.append((text, _centered_rect(middle, w, height)))
-        name = f"{'xyz'[axis]} ({grid_label_unit(values, grid.spacing_nm)})"
-        name_width = metrics.horizontalAdvance(name)
-        name_extent = abs(outward[0]) * name_width + abs(outward[1]) * height
-        middle = (d0 + d1) / 2 + outward * (
-            _TICK_LENGTH
-            + 2 * _LABEL_GAP
-            + max(extents, default=0)
-            + name_extent / 2
-        )
-        names.append((name, _centered_rect(middle, name_width, height)))
-    return lines, names + ticks
+
+def _axis_lines_and_labels(
+    grid: GridOverlay,
+    axis: int,
+    edge: tuple,
+    lower: np.ndarray,
+    upper: np.ndarray,
+    step: float,
+    origin: tuple[float, float, float],
+    to_display,
+    metrics: QtGui.QFontMetricsF,
+) -> tuple[list[QtCore.QLineF], list[tuple[str, QtCore.QRectF]], tuple]:
+    """For ``_axes_3d``: the line and ticks of one axis along ``edge``
+    (see ``_axis_edge``), the tick labels and the axis name."""
+    height = metrics.height()
+    start, d0, d1, along, outward, _ = edge
+    lines = [QtCore.QLineF(*d0, *d1)]
+    levels = grid_levels(lower[axis], upper[axis], step, origin[axis])
+    points = np.repeat(start[None], len(levels), axis=0)
+    points[:, axis] = levels
+    positions = to_display(points)
+    tips = positions + outward * _TICK_LENGTH
+    lines += [QtCore.QLineF(*p, *t) for p, t in zip(positions, tips)]
+
+    values = levels - origin[axis]
+    texts = format_grid_labels(values, grid.spacing_nm, unit=False)
+    widths = [metrics.horizontalAdvance(t) for t in texts]
+    extents = [abs(outward[0]) * w + abs(outward[1]) * height for w in widths]
+    spacing = (
+        float(np.linalg.norm(positions[1] - positions[0]))
+        if len(positions) > 1
+        else np.inf
+    )
+    stride = _label_stride(
+        max(
+            (abs(along[0]) * w + abs(along[1]) * height for w in widths),
+            default=0,
+        ),
+        spacing,
+    )
+    ticks = []
+    for index, tip, text, w, extent in zip(
+        (levels - origin[axis]) / step, tips, texts, widths, extents
+    ):
+        if round(index) % stride:
+            continue
+        middle = tip + outward * (_LABEL_GAP + extent / 2)
+        ticks.append((text, _centered_rect(middle, w, height)))
+    name = f"{'xyz'[axis]} ({grid_label_unit(values, grid.spacing_nm)})"
+    name_width = metrics.horizontalAdvance(name)
+    name_extent = abs(outward[0]) * name_width + abs(outward[1]) * height
+    middle = (d0 + d1) / 2 + outward * (
+        _TICK_LENGTH
+        + 2 * _LABEL_GAP
+        + max(extents, default=0)
+        + name_extent / 2
+    )
+    return lines, ticks, (name, _centered_rect(middle, name_width, height))
 
 
 def _outline(ends: np.ndarray) -> QtGui.QPolygonF | None:

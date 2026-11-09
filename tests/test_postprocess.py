@@ -3480,6 +3480,22 @@ class TestRipleyH:
             500.0, 500.0, 300.0, *geometry
         ) == pytest.approx(1.0)
 
+    def test_zero_radius_fraction_in_a_circle(self):
+        region = postprocess._pick_region((0.0, 0.0), "Circle", 10.0)
+        geometry = (region.kind, region.circle, region.segments)
+        fractions = [
+            postprocess._circle_fraction_inside(x, 0.0, 0.0, *geometry)
+            for x in (0.0, 2.0, 7.0)
+        ]
+        assert fractions == [1.0, 1.0, 0.0]
+
+    def test_no_uniform_points(self):
+        region = postprocess._pick_region((0.0, 0.0), "Circle", 10.0)
+        x, y = postprocess._uniform_in_region(
+            0, region, np.random.default_rng(0)
+        )
+        assert x.shape == y.shape == (0,)
+
     def test_localizations_that_are_not_molecules_warn(self, random_locs):
         locs = random_locs.drop(columns="n_events")
         locs["len"] = 1  # linked localizations are still not molecules
@@ -4126,6 +4142,26 @@ class TestNndDistributions:
         assert result["n_molecules"][0, 1] == len(n_a[1])
         assert result["n_molecules"][0, 0] == len(n_a[0]) + len(n_a[1])
         assert result["simulated_mean"] is None
+
+    @pytest.mark.parametrize("cross_null", ["shift", "labels"])
+    def test_simulations_with_a_channel_missing_from_a_region(
+        self, cross_null
+    ):
+        # b has no molecules in the left pick, which is simulated with
+        # no points of b instead of failing
+        a, b = self._random(4000, 0), self._random(4000, 1)
+        b = b[b["x"] > 5000]
+        result = postprocess.nnd_distributions(
+            [a, b],
+            self.INFO,
+            picks=[(2500, 5000), (7500, 5000)],
+            pick_shape="Circle",
+            pick_size=3000,
+            n_simulations=3,
+            cross_null=cross_null,
+        )
+        assert np.isfinite(result["simulated_medians"]).all()
+        assert np.isfinite(result["envelope_high"]).all()
 
     def test_3d(self):
         a, b = self._random(8000, 0, z=True), self._random(8000, 1, z=True)

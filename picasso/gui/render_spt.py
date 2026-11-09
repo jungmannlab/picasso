@@ -30,6 +30,7 @@ from __future__ import annotations
 import os
 import weakref
 from dataclasses import replace
+from functools import partial
 
 import numpy as np
 from PyQt6 import QtCore, QtGui, QtWidgets
@@ -947,24 +948,9 @@ class SPTController:
         if channel is None:
             return
         n_channels = len(view.locs_paths)
-        channels = (
+        channels, skipped = self._trackable_channels(
             list(range(n_channels)) if channel == n_channels else [channel]
         )
-        linked = [c for c in channels if "len" in view.locs[c].columns]
-        tracked = [
-            c
-            for c in channels
-            if c not in linked and spt.is_tracked(view.locs[c], view.infos[c])
-        ]
-        channels = [c for c in channels if c not in linked + tracked]
-        skipped = []
-        if linked:
-            skipped.append(
-                "Linked localizations (binding events) cannot be "
-                "tracked:\n" + self._names(linked)
-            )
-        if tracked:
-            skipped.append("Already tracked:\n" + self._names(tracked))
         if not channels:
             QtWidgets.QMessageBox.information(
                 view, "Track particles", "\n\n".join(skipped)
@@ -1000,48 +986,77 @@ class SPTController:
                 results.append((c, tracked_locs, new_info))
             return results
 
-        def apply(results: list[tuple]) -> None:
-            empty = []
-            applied = False
-            with view.undo_step("Track particles"):
-                for c, tracked_locs, new_info in results:
-                    if len(tracked_locs) == 0:
-                        empty.append(c)
-                        continue
-                    view.locs[c] = tracked_locs
-                    # new list, the old one may be shared with linked
-                    # windows
-                    view.infos[c] = new_info
-                    applied = True
-                if applied:
-                    if len(view.locs_paths) == 1:
-                        view.group_color = render.get_group_color(
-                            view.locs[0], shuffle=True
-                        )
-                    self.invalidate()
-                    # show the tracks, drawn by the redraw below
-                    box = view.window.display_settings_dlg.tracks_box
-                    box.blockSignals(True)
-                    box.setChecked(True)
-                    box.blockSignals(False)
-                    view.update_scene(resample_locs=True)
-            if empty:
-                skipped.append(
-                    "No tracks found, the localizations were left "
-                    "unchanged:\n" + self._names(empty)
-                )
-            if skipped:
-                QtWidgets.QMessageBox.information(
-                    view, "Track particles", "\n\n".join(skipped)
-                )
-
         lib.run_task(
             compute,
             "Tracking particles...",
             view,
-            apply,
+            partial(self._apply_tracks, skipped=skipped),
             title="Track particles",
         )
+
+    def _trackable_channels(
+        self, channels: list[int]
+    ) -> tuple[list[int], list[str]]:
+        """The ``channels`` that can be tracked, and the messages naming
+        the ones that cannot: linked localizations (with a ``len``
+        column) and channels that are already tracked."""
+        view = self.view
+        linked = [c for c in channels if "len" in view.locs[c].columns]
+        tracked = [
+            c
+            for c in channels
+            if c not in linked and spt.is_tracked(view.locs[c], view.infos[c])
+        ]
+        channels = [c for c in channels if c not in linked + tracked]
+        skipped = []
+        if linked:
+            skipped.append(
+                "Linked localizations (binding events) cannot be "
+                "tracked:\n" + self._names(linked)
+            )
+        if tracked:
+            skipped.append("Already tracked:\n" + self._names(tracked))
+        return channels, skipped
+
+    def _apply_tracks(self, results: list[tuple], skipped: list[str]) -> None:
+        """Put the tracked localizations of ``track`` (channel,
+        localizations, metadata) in place as one undo step, show the
+        tracks and name the channels ``skipped`` and those without any
+        tracks, which are left unchanged."""
+        view = self.view
+        empty = []
+        applied = False
+        with view.undo_step("Track particles"):
+            for c, tracked_locs, new_info in results:
+                if len(tracked_locs) == 0:
+                    empty.append(c)
+                    continue
+                view.locs[c] = tracked_locs
+                # new list, the old one may be shared with linked
+                # windows
+                view.infos[c] = new_info
+                applied = True
+            if applied:
+                if len(view.locs_paths) == 1:
+                    view.group_color = render.get_group_color(
+                        view.locs[0], shuffle=True
+                    )
+                self.invalidate()
+                # show the tracks, drawn by the redraw below
+                box = view.window.display_settings_dlg.tracks_box
+                box.blockSignals(True)
+                box.setChecked(True)
+                box.blockSignals(False)
+                view.update_scene(resample_locs=True)
+        if empty:
+            skipped.append(
+                "No tracks found, the localizations were left "
+                "unchanged:\n" + self._names(empty)
+            )
+        if skipped:
+            QtWidgets.QMessageBox.information(
+                view, "Track particles", "\n\n".join(skipped)
+            )
 
     def analyze(self) -> None:
         """Analyze the tracks of a channel (MSD, jump distances and a

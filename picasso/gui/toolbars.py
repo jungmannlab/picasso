@@ -384,6 +384,24 @@ def _set_tooltip(action: QtGui.QAction) -> None:
     action.setToolTip(f"{text} ({shortcut})" if shortcut else text)
 
 
+def _shown_buttons(
+    layout: Layout, actions: dict[str, QtGui.QAction]
+) -> list[tuple[str, QtGui.QAction] | None]:
+    """The buttons of ``layout`` whose action is among ``actions`` (by
+    path), as ``(path, action)``, and its separators as None; no
+    separator first, twice in a row or last."""
+    shown = []
+    for item in layout.items:
+        action = actions.get(item)
+        if action is not None:
+            shown.append((item, action))
+        elif item == SEPARATOR and shown and shown[-1] is not None:
+            shown.append(None)  # no separator first or twice
+    if shown and shown[-1] is None:
+        shown.pop()
+    return shown
+
+
 class ToolBar(QtWidgets.QToolBar):
     """Toolbar holding actions of the menus of its window, see
     ``add_toolbar``.
@@ -430,21 +448,8 @@ class ToolBar(QtWidgets.QToolBar):
         """Show the buttons of ``layout``; paths whose action is not in
         the menus are kept for later, see ``refresh``."""
         self.current = layout
-        for action, (icon, label) in self._own_looks.items():
-            if not sip.isdeleted(action):
-                action.setIcon(icon)
-                action.setIconText(label)
-        self._own_looks = {}
-        actions = self.available_actions()
-        shown = []
-        for item in layout.items:
-            action = actions.get(item)
-            if action is not None:
-                shown.append((item, action))
-            elif item == SEPARATOR and shown and shown[-1] is not None:
-                shown.append(None)  # no separator first or twice
-        if shown and shown[-1] is None:
-            shown.pop()
+        self._restore_own_looks()
+        shown = _shown_buttons(layout, self.available_actions())
         for action in self.actions():
             self.removeAction(action)
             if action.isSeparator():  # made by addSeparator
@@ -464,6 +469,15 @@ class ToolBar(QtWidgets.QToolBar):
                 action.setIcon(button_icon(name))
             _set_tooltip(action)
             self.addAction(action)
+
+    def _restore_own_looks(self) -> None:
+        """Give the actions back their own icon and label, which the
+        layout shown replaced."""
+        for action, (icon, label) in self._own_looks.items():
+            if not sip.isdeleted(action):
+                action.setIcon(icon)
+                action.setIconText(label)
+        self._own_looks = {}
 
     def refresh(self) -> None:
         """Show the layout again, e.g., with the actions of plugins

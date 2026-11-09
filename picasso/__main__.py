@@ -4,8 +4,8 @@ __main__.py
 
 Picasso command line interface.
 
-:authors: Joerg Schnitzbauer, Maximilian Thomas Strauss,
-    Rafal Kowalewski
+:authors: Rafal Kowalewski, Joerg Schnitzbauer,
+    Maximilian Thomas Strauss
 :copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry
 """
 
@@ -23,6 +23,8 @@ from . import deprecation, docs_url
 from .transforms import MODELS as TRANSFORM_MODELS
 
 if TYPE_CHECKING:  # imported lazily, like every analysis module here
+    import numpy as np
+    from matplotlib.figure import Figure
     from .localize import (
         IdentificationMethod,
         IdentificationParameters,
@@ -285,8 +287,9 @@ def _minflux2hdf(
     path: str, average_traces: bool = False, origin: str = "data"
 ) -> None:
     """Convert MINFLUX localizations (pyMINFLUX .pmx, or a .csv table
-    such as pyMINFLUX's export) to HDF5 format. A file with several fluorophores is
-    saved as one file per fluorophore, ``<base>_<fluorophore>_locs.hdf5``.
+    such as pyMINFLUX's export) to HDF5 format. A file with several
+    fluorophores is saved as one file per fluorophore,
+    ``<base>_<fluorophore>_locs.hdf5``.
 
     Parameters
     ----------
@@ -783,45 +786,16 @@ def _cbc(
     remove them. See ``postprocess.cbc`` and
     ``postprocess.cbc_all_pairs`` for details."""
     import warnings
-    from glob import glob
-    from itertools import chain
     from . import io, postprocess
 
-    paths = list(chain(*[sorted(glob(_)) for _ in files]))
-    if len(paths) < 2:
-        raise SystemExit("CBC requires at least two localization files.")
-    if names is None:
-        names = [os.path.splitext(os.path.basename(p))[0] for p in paths]
-    elif len(names) != len(paths):
-        raise SystemExit(
-            f"{len(names)} names given for {len(paths)} files:\n"
-            + "\n".join(f"  {p}" for p in paths)
-        )
-    try:
-        columns = [postprocess._cbc_column(name) for name in names]
-    except ValueError as e:
-        raise SystemExit(str(e))
-    if len(set(columns)) < len(columns):
-        raise SystemExit(
-            f"The names give the same CBC column ({', '.join(columns)}); "
-            "please give distinct names with --names."
-        )
+    paths = _glob_paths(
+        files, 2, "CBC requires at least two localization files."
+    )
+    names = _channel_names(names, paths)
+    columns = _cbc_columns(names)
     locs_infos = [io.load_locs(path) for path in paths]
-    unlinked = [p for p, (l_, _) in zip(paths, locs_infos) if "len" not in l_]
-    if unlinked:
-        print(
-            "WARNING: these localizations are not linked (no 'len' column),"
-            " so each binding event is counted several times in the CBC:"
-        )
-        for path in unlinked:
-            print(f"  {path}")
-        print("Consider linking them first with 'picasso link'.")
-    scored = range(len(paths)) if all_pairs else [0]
-    for i in scored:
-        print(f"CBC of {paths[i]} against:")
-        for j in range(len(paths)):
-            if j != i:
-                print(f"  {paths[j]} -> column {columns[j]}")
+    _warn_if_unlinked(paths, [locs for locs, _ in locs_infos])
+    _print_cbc_plan(paths, columns, all_pairs)
     kwargs = dict(
         r_max=r_max,
         steps=steps,
@@ -851,6 +825,51 @@ def _cbc(
         base, ext = os.path.splitext(paths[i])
         io.save_locs(base + "_cbc.hdf5", locs, info)
         print(f"Saved {base}_cbc.hdf5")
+
+
+def _cbc_columns(names: list[str]) -> list[str]:
+    """Return the CBC column of each name; exit if a name is invalid or
+    two names give the same column."""
+    from . import postprocess
+
+    try:
+        columns = [postprocess._cbc_column(name) for name in names]
+    except ValueError as e:
+        raise SystemExit(str(e))
+    if len(set(columns)) < len(columns):
+        raise SystemExit(
+            f"The names give the same CBC column ({', '.join(columns)}); "
+            "please give distinct names with --names."
+        )
+    return columns
+
+
+def _warn_if_unlinked(paths: list[str], all_locs: list[pd.DataFrame]) -> None:
+    """Print a warning listing the files whose localizations are not
+    linked (no 'len' column)."""
+    unlinked = [p for p, locs in zip(paths, all_locs) if "len" not in locs]
+    if not unlinked:
+        return
+    print(
+        "WARNING: these localizations are not linked (no 'len' column),"
+        " so each binding event is counted several times in the CBC:"
+    )
+    for path in unlinked:
+        print(f"  {path}")
+    print("Consider linking them first with 'picasso link'.")
+
+
+def _print_cbc_plan(
+    paths: list[str], columns: list[str], all_pairs: bool
+) -> None:
+    """Print which file is scored against which, and the CBC column
+    each partner gives."""
+    scored = range(len(paths)) if all_pairs else [0]
+    for i in scored:
+        print(f"CBC of {paths[i]} against:")
+        for j in range(len(paths)):
+            if j != i:
+                print(f"  {paths[j]} -> column {columns[j]}")
 
 
 def _parse_bool(value: str) -> bool:
@@ -909,10 +928,8 @@ def _pair_statistic(
     each file. See ``postprocess.ripley_h`` and ``postprocess.rdf``
     for details."""
     import warnings
-    from glob import glob
-    from itertools import chain
     import numpy as np
-    from . import io, lib, postprocess
+    from . import io, postprocess
 
     title, compute, plot, tables, key = {
         "ripley_h": (
@@ -930,7 +947,7 @@ def _pair_statistic(
             "g",
         ),
     }[statistic]
-    paths = list(chain(*[sorted(glob(_)) for _ in files]))
+    paths = _glob_paths(files, 0)
     partner_locs = None
     if partner_path is not None:
         partner_locs, _ = io.load_locs(partner_path)
@@ -946,12 +963,7 @@ def _pair_statistic(
     for path in paths:
         locs, info = io.load_locs(path)
         _warn_if_not_molecules(path, locs)
-        picks, shape, size = None, None, None
-        if picks_path is not None:
-            # the pixel size converts picks saved before Picasso 1.0
-            picks, shape, size = io.load_picks(
-                picks_path, lib.get_from_metadata(info, "Pixelsize")
-            )
+        picks, shape, size = _load_picks_for(picks_path, info)
         if partner_locs is None:
             print(f"{title} of {path}:")
         else:
@@ -978,9 +990,7 @@ def _pair_statistic(
                 )
         except ValueError as e:
             raise SystemExit(f"{path}: {e}")
-        for warning in caught:
-            if "not molecules" not in str(warning.message):  # see above
-                print(f"WARNING: {warning.message}")
+        _print_warnings(caught, skip="not molecules")  # see above
         n_used = int((~np.isnan(result[key][:, 0])).sum())
         summary = f"  {n_used} of {len(result['n_locs'])} regions used"
         if statistic == "ripley_h":
@@ -1021,29 +1031,14 @@ def _nnd(
     (``<first file>_nnd.png``). See ``postprocess.nnd_distributions``
     for details."""
     import warnings
-    from glob import glob
-    from itertools import chain
-    from . import io, lib, postprocess
+    from . import io, postprocess
 
-    paths = list(chain(*[sorted(glob(_)) for _ in files]))
-    if not paths:
-        raise SystemExit("No localization files found.")
-    if names is None:
-        names = [os.path.splitext(os.path.basename(p))[0] for p in paths]
-    elif len(names) != len(paths):
-        raise SystemExit(
-            f"{len(names)} names given for {len(paths)} files:\n"
-            + "\n".join(f"  {p}" for p in paths)
-        )
+    paths = _glob_paths(files)
+    names = _channel_names(names, paths)
     all_locs, infos = zip(*[io.load_locs(path) for path in paths])
     for path, locs in zip(paths, all_locs):
         _warn_if_not_molecules(path, locs)
-    picks, shape, size = None, None, None
-    if picks_path is not None:
-        # the pixel size converts picks saved before Picasso 1.0
-        picks, shape, size = io.load_picks(
-            picks_path, lib.get_from_metadata(infos[0], "Pixelsize")
-        )
+    picks, shape, size = _load_picks_for(picks_path, infos[0])
     print("Nearest neighbor distances of:")
     for path, name in zip(paths, names):
         print(f"  {path} ({name})")
@@ -1068,9 +1063,7 @@ def _nnd(
             )
     except ValueError as e:
         raise SystemExit(str(e))
-    for warning in caught:
-        if "not molecules" not in str(warning.message):  # see above
-            print(f"WARNING: {warning.message}")
+    _print_warnings(caught, skip="not molecules")  # see above
     curves, summary = postprocess._nnd_tables(result)
     print(summary.to_string(index=False))
     base = os.path.splitext(paths[0])[0] + "_nnd"
@@ -1253,12 +1246,8 @@ def _dye_performance_cli(
     (``<file>_dye_performance.csv``), the values of each site
     (``..._sites.csv``) and a plot (``.png``) next to each file. See
     ``postprocess.dye_performance`` for details."""
-    from glob import glob
-    from itertools import chain
-    import numpy as np
     import pandas as pd
-    import matplotlib.pyplot as plt
-    from . import io, lib, postprocess
+    from . import io, postprocess
 
     if max_dark_time < 0:
         raise SystemExit("--max-dark-time must not be negative.")
@@ -1266,99 +1255,21 @@ def _dye_performance_cli(
         raise SystemExit("--cutoff must be positive.")
     if not 0 < fraction <= 0.5:
         raise SystemExit("--fraction must be in (0, 0.5].")
-    paths = list(chain(*[sorted(glob(_)) for _ in files]))
-    if not paths:
-        raise SystemExit("No localization files found.")
+    paths = _glob_paths(files)
     for path in paths:
         locs, info = io.load_locs(path)
-        if picks_path is not None:
-            # the pixel size converts picks saved before Picasso 1.0
-            picks, shape, size = io.load_picks(
-                picks_path, lib.get_from_metadata(info, "Pixelsize")
-            )
-            picked = postprocess.picked_locs(
-                locs,
-                info,
-                picks=picks,
-                pick_shape=shape,
-                pick_size=size,
-                progress="console",
-            )
-            sites = np.arange(len(picked))
-        elif "group" in locs.columns:
-            sites, picked = zip(*locs.groupby("group", sort=True))
-            sites = np.asarray(sites)
-        else:
-            raise SystemExit(
-                f"{path}: each docking site must be a pick (-p) or a group of"
-                " the localizations (e.g., picked localizations saved in"
-                " Render)."
-            )
+        sites, picked = _docking_sites(locs, info, path, picks_path)
         print(f"Dye performance of {path} ({len(picked):,} docking sites):")
         result = postprocess.dye_performance(
-            list(picked),
+            picked,
             info,
             max_dark_time=max_dark_time,
             cutoff=cutoff,
             fraction=fraction,
             progress="console",
         )
-        errors = result["errors"]
-        sbr, damage = result["sbr"], result["damage"]
-        drop = result["localization_drop"]
         summary = {"n_sites": len(picked)}
-        if sbr is not None and np.isfinite(sbr).any():
-            n_sbr = int(np.isfinite(sbr).sum())
-            summary |= {
-                "sbr_mean": np.nanmean(sbr),
-                "sbr_std": np.nanstd(sbr),
-                "n_sbr_localizations": n_sbr,
-            }
-            print(
-                f"  SBR {summary['sbr_mean']:.2f} +/- {summary['sbr_std']:.2f}"
-                f" ({n_sbr:,} localizations in the centers of binding"
-                " events)"
-            )
-        else:
-            reason = errors.get(
-                "sbr",
-                "no localization in the center of a binding event of at"
-                " least three frames",
-            )
-            print(f"  SBR not available: {reason}")
-        if drop is not None:
-            summary["localization_drop_percent"] = 100 * drop
-            print(
-                f"  localization drop {100 * drop:.1f}% (first vs. last"
-                f" {100 * fraction:g}% of the frames)"
-            )
-        else:
-            print(
-                "  localization drop not available:"
-                f" {errors['localization_drop']}"
-            )
-        if damage is not None:
-            summary |= {
-                "n_sites_with_r": damage["n_sites"],
-                "mu": damage["mu"],
-                "r_cutoff": damage["r_cutoff"],
-                "sites_above_cutoff_percent": (
-                    100 * damage["fraction_above_cutoff"]
-                ),
-                "destroyed_sites_percent": 100 * damage["fraction_destroyed"],
-            }
-            print(
-                "  destroyed docking sites"
-                f" {100 * damage['fraction_destroyed']:.1f}% (r >"
-                f" {damage['r_cutoff']:.2f} = {cutoff:g} mu, mu ="
-                f" {damage['mu']:.2f}; {damage['n_sites']:,} sites with a"
-                " mean dark time)"
-            )
-        else:
-            print(
-                "  destroyed docking sites not available:"
-                f" {errors['damage']}"
-            )
+        summary |= _dye_performance_summary(result, cutoff, fraction)
         summary |= {
             "max_dark_time": max_dark_time,
             "cutoff": cutoff,
@@ -1366,35 +1277,156 @@ def _dye_performance_cli(
         }
         base = os.path.splitext(path)[0] + "_dye_performance"
         pd.DataFrame([summary]).to_csv(base + ".csv", index=False)
-        site_table = pd.DataFrame(
-            {
-                "site": sites,
-                "n_locs": [len(site_locs) for site_locs in picked],
-            }
+        _dye_performance_sites(sites, picked, result["damage"]).to_csv(
+            base + "_sites.csv", index=False
         )
-        if damage is not None:
-            site_table["t_end_frames"] = damage["t_end"]
-            site_table["dark_time_frames"] = damage["dark"]
-            site_table["r"] = damage["r"]
-        site_table.to_csv(base + "_sites.csv", index=False)
         saved = [".csv", "_sites.csv"]
         if result["locs"] is not None:
-            figure = plt.Figure(constrained_layout=True, figsize=(11, 4.5))
-            ax_damage, ax_rate = figure.subplots(1, 2)
-            if damage is not None:
-                postprocess.plot_docking_site_damage(damage, ax=ax_damage)
-            else:
-                ax_damage.set_axis_off()
-            if drop is not None:
-                postprocess.plot_localization_rate(
-                    result["locs"], info, fraction=fraction, ax=ax_rate
-                )
-            else:
-                ax_rate.set_axis_off()
-            figure.savefig(base + ".png", dpi=150)
+            _dye_performance_figure(result, info, fraction).savefig(
+                base + ".png", dpi=150
+            )
             saved.append(".png")
         for suffix in saved:
             print(f"  saved {base + suffix}")
+
+
+def _docking_sites(
+    locs: pd.DataFrame,
+    info: list[dict],
+    path: str,
+    picks_path: str | None,
+) -> tuple:
+    """Return the docking site labels and the localizations of each
+    docking site (list of DataFrames) in ``locs``: the picks of
+    ``picks_path`` or, without picks, the groups."""
+    import numpy as np
+    from . import postprocess
+
+    if picks_path is not None:
+        picks, shape, size = _load_picks_for(picks_path, info)
+        picked = postprocess.picked_locs(
+            locs,
+            info,
+            picks=picks,
+            pick_shape=shape,
+            pick_size=size,
+            progress="console",
+        )
+        return np.arange(len(picked)), list(picked)
+    if "group" in locs.columns:
+        sites, picked = zip(*locs.groupby("group", sort=True))
+        return np.asarray(sites), list(picked)
+    raise SystemExit(
+        f"{path}: each docking site must be a pick (-p) or a group of"
+        " the localizations (e.g., picked localizations saved in"
+        " Render)."
+    )
+
+
+def _dye_performance_summary(
+    result: dict, cutoff: float, fraction: float
+) -> dict:
+    """Print the SBR, the localization drop and the destroyed docking
+    sites of a ``postprocess.dye_performance`` result and return them
+    as a summary row."""
+    import numpy as np
+
+    errors = result["errors"]
+    sbr, damage = result["sbr"], result["damage"]
+    drop = result["localization_drop"]
+    summary = {}
+    if sbr is not None and np.isfinite(sbr).any():
+        n_sbr = int(np.isfinite(sbr).sum())
+        summary |= {
+            "sbr_mean": np.nanmean(sbr),
+            "sbr_std": np.nanstd(sbr),
+            "n_sbr_localizations": n_sbr,
+        }
+        print(
+            f"  SBR {summary['sbr_mean']:.2f} +/- {summary['sbr_std']:.2f}"
+            f" ({n_sbr:,} localizations in the centers of binding"
+            " events)"
+        )
+    else:
+        reason = errors.get(
+            "sbr",
+            "no localization in the center of a binding event of at"
+            " least three frames",
+        )
+        print(f"  SBR not available: {reason}")
+    if drop is not None:
+        summary["localization_drop_percent"] = 100 * drop
+        print(
+            f"  localization drop {100 * drop:.1f}% (first vs. last"
+            f" {100 * fraction:g}% of the frames)"
+        )
+    else:
+        print(
+            "  localization drop not available:"
+            f" {errors['localization_drop']}"
+        )
+    if damage is not None:
+        summary |= {
+            "n_sites_with_r": damage["n_sites"],
+            "mu": damage["mu"],
+            "r_cutoff": damage["r_cutoff"],
+            "sites_above_cutoff_percent": (
+                100 * damage["fraction_above_cutoff"]
+            ),
+            "destroyed_sites_percent": 100 * damage["fraction_destroyed"],
+        }
+        print(
+            "  destroyed docking sites"
+            f" {100 * damage['fraction_destroyed']:.1f}% (r >"
+            f" {damage['r_cutoff']:.2f} = {cutoff:g} mu, mu ="
+            f" {damage['mu']:.2f}; {damage['n_sites']:,} sites with a"
+            " mean dark time)"
+        )
+    else:
+        print(f"  destroyed docking sites not available: {errors['damage']}")
+    return summary
+
+
+def _dye_performance_sites(
+    sites: np.ndarray, picked: list[pd.DataFrame], damage: dict | None
+) -> pd.DataFrame:
+    """Table of the docking sites: the number of localizations and,
+    with ``damage``, the end time, the mean dark time and r."""
+    site_table = pd.DataFrame(
+        {
+            "site": sites,
+            "n_locs": [len(site_locs) for site_locs in picked],
+        }
+    )
+    if damage is not None:
+        site_table["t_end_frames"] = damage["t_end"]
+        site_table["dark_time_frames"] = damage["dark"]
+        site_table["r"] = damage["r"]
+    return site_table
+
+
+def _dye_performance_figure(
+    result: dict, info: list[dict], fraction: float
+) -> Figure:
+    """Figure of the docking site damage and the localization rate of a
+    ``postprocess.dye_performance`` result (axes without a result are
+    hidden)."""
+    import matplotlib.pyplot as plt
+    from . import postprocess
+
+    figure = plt.Figure(constrained_layout=True, figsize=(11, 4.5))
+    ax_damage, ax_rate = figure.subplots(1, 2)
+    if result["damage"] is not None:
+        postprocess.plot_docking_site_damage(result["damage"], ax=ax_damage)
+    else:
+        ax_damage.set_axis_off()
+    if result["localization_drop"] is not None:
+        postprocess.plot_localization_rate(
+            result["locs"], info, fraction=fraction, ax=ax_rate
+        )
+    else:
+        ax_rate.set_axis_off()
+    return figure
 
 
 def _pick_similar_cli(
@@ -1426,9 +1458,7 @@ def _pick_similar_cli(
     saved : list of str
         Paths of the picks files written.
     """
-    from glob import glob
-    from itertools import chain
-    from . import io, lib, postprocess
+    from . import io, postprocess
 
     by_ranges = n_locs_range is not None or rmsd_range is not None
     if (picks_path is not None) + by_ranges + bool(classes) != 1:
@@ -1440,9 +1470,7 @@ def _pick_similar_cli(
         raise SystemExit(
             "--pick-size (the diameter in nm) is needed without --picks."
         )
-    paths = list(chain(*[sorted(glob(_)) for _ in files]))
-    if not paths:
-        raise SystemExit("No localization files found.")
+    paths = _glob_paths(files)
     saved = []
     for path in paths:
         locs, info = io.load_locs(path)
@@ -1454,15 +1482,7 @@ def _pick_similar_cli(
                 )
             )
             continue
-        if min_n_locs is None:
-            n_frames = lib.get_from_metadata(info, "Frames", 0)
-            n_min = max(2, int(0.01 * n_frames))
-        else:
-            n_min = min_n_locs
-        if n_locs_range is not None:
-            # smaller candidates must not exclude the structures they
-            # overlap, as in postprocess.pick_similar
-            n_min = max(n_min, postprocess._range_min_n_locs(n_locs_range))
+        n_min = _candidate_min_n_locs(info, min_n_locs, n_locs_range)
         print(
             f"{path}: candidate picks of {pick_size:g} nm with at least "
             f"{n_min} localizations"
@@ -1476,26 +1496,9 @@ def _pick_similar_cli(
         )
         print(f"{len(candidates)} candidate picks")
         if classes:
-            if len(candidates) < 2:
-                raise SystemExit(
-                    f"{path}: too few candidate picks for classes."
-                )
-            labels, table = postprocess.structure_classes(candidates)
-            candidates = candidates.assign(**{"class": labels + 1})
-            if not len(table):
-                print("No classes found.")
-            else:
-                table.index = table.index + 1
-                table.index.name = "class"
-                print(table.round(1).to_string())
-            ranges = [
-                (
-                    (row["n_locs_min"], row["n_locs_max"]),
-                    (row["rmsd_min"], row["rmsd_max"]),
-                    f"{base}_class{index}.yaml",
-                )
-                for index, row in table.iterrows()
-            ]
+            candidates, ranges = _structure_class_ranges(
+                candidates, path, base
+            )
         else:
             ranges = [(n_locs_range, rmsd_range, base + ".yaml")]
         for n_range, r_range, out in ranges:
@@ -1511,6 +1514,58 @@ def _pick_similar_cli(
             candidates.to_csv(out, index=False)
             print(f"saved {out}")
     return saved
+
+
+def _candidate_min_n_locs(
+    info: list[dict],
+    min_n_locs: int | None,
+    n_locs_range: list[float] | None,
+) -> int:
+    """Minimum number of localizations of a candidate pick:
+    ``min_n_locs`` or, if None, 1% of the frames (at least 2), and at
+    least the lower bound of ``n_locs_range``."""
+    from . import lib, postprocess
+
+    if min_n_locs is None:
+        n_frames = lib.get_from_metadata(info, "Frames", 0)
+        n_min = max(2, int(0.01 * n_frames))
+    else:
+        n_min = min_n_locs
+    if n_locs_range is not None:
+        # smaller candidates must not exclude the structures they
+        # overlap, as in postprocess.pick_similar
+        n_min = max(n_min, postprocess._range_min_n_locs(n_locs_range))
+    return n_min
+
+
+def _structure_class_ranges(
+    candidates: pd.DataFrame, path: str, base: str
+) -> tuple[pd.DataFrame, list[tuple]]:
+    """Classify the candidate picks with
+    ``postprocess.structure_classes``, print the classes and return
+    the candidates with a "class" column and the (n_locs range, RMSD
+    range, output path) of each class."""
+    from . import postprocess
+
+    if len(candidates) < 2:
+        raise SystemExit(f"{path}: too few candidate picks for classes.")
+    labels, table = postprocess.structure_classes(candidates)
+    candidates = candidates.assign(**{"class": labels + 1})
+    if not len(table):
+        print("No classes found.")
+    else:
+        table.index = table.index + 1
+        table.index.name = "class"
+        print(table.round(1).to_string())
+    ranges = [
+        (
+            (row["n_locs_min"], row["n_locs_max"]),
+            (row["rmsd_min"], row["rmsd_max"]),
+            f"{base}_class{index}.yaml",
+        )
+        for index, row in table.iterrows()
+    ]
+    return candidates, ranges
 
 
 def _pick_similar_seeded(
@@ -1555,6 +1610,54 @@ def _pick_similar_seeded(
         f"{picks_path}; saved all {len(picks)} to {out}"
     )
     return out
+
+
+def _glob_paths(
+    files: list[str],
+    min_files: int = 1,
+    message: str = "No localization files found.",
+) -> list[str]:
+    """Expand the unix style patterns in ``files`` (each sorted) and
+    exit with ``message`` if fewer than ``min_files`` paths match."""
+    from glob import glob
+    from itertools import chain
+
+    paths = list(chain(*[sorted(glob(_)) for _ in files]))
+    if len(paths) < min_files:
+        raise SystemExit(message)
+    return paths
+
+
+def _channel_names(names: list[str] | None, paths: list[str]) -> list[str]:
+    """Return ``names`` or, if None, the base names of ``paths``; exit
+    if the numbers of names and paths differ."""
+    if names is None:
+        return [os.path.splitext(os.path.basename(p))[0] for p in paths]
+    if len(names) != len(paths):
+        raise SystemExit(
+            f"{len(names)} names given for {len(paths)} files:\n"
+            + "\n".join(f"  {p}" for p in paths)
+        )
+    return names
+
+
+def _load_picks_for(picks_path: str | None, info: list[dict]) -> tuple:
+    """Load the picks of ``picks_path`` as (picks, shape, size), or
+    (None, None, None) without a path. The pixel size in ``info``
+    converts picks saved before Picasso 1.0."""
+    from . import io, lib
+
+    if picks_path is None:
+        return None, None, None
+    return io.load_picks(picks_path, lib.get_from_metadata(info, "Pixelsize"))
+
+
+def _print_warnings(caught: list, skip: str | None = None) -> None:
+    """Print the caught warnings, except those whose message contains
+    ``skip``."""
+    for warning in caught:
+        if skip is None or skip not in str(warning.message):
+            print(f"WARNING: {warning.message}")
 
 
 def _warn_if_not_molecules(path: str, locs: pd.DataFrame) -> None:
@@ -1920,13 +2023,9 @@ def _stitch(
     different targets (in the order given); the tiles of each target are
     saved as one file. See ``stitch.stitch`` for details."""
     import warnings
-    from glob import glob
-    from itertools import chain
     from . import io, stitch
 
-    paths = list(chain(*[sorted(glob(_)) for _ in files]))
-    if len(paths) < 2:
-        raise SystemExit("Stitching requires at least two files.")
+    paths = _glob_paths(files, 2, "Stitching requires at least two files.")
     locs_infos = [io.load_locs(path) for path in paths]
     locs = [locs_ for locs_, _ in locs_infos]
     infos = [info for _, info in locs_infos]
@@ -1946,8 +2045,25 @@ def _stitch(
             )
         except ValueError as e:
             raise SystemExit(str(e))
-    for warning in caught:
-        print(f"WARNING: {warning.message}")
+    _print_warnings(caught)
+    _print_stitch_report(report, paths)
+    for k, (locs_, info) in enumerate(zip(out_locs, out_infos)):
+        if output is None:
+            base = os.path.splitext(info[-1]["Stitched files"][0])[0]
+            path = base + "_stitched.hdf5"
+        elif len(out_locs) == 1:
+            path = output
+        else:
+            base, ext = os.path.splitext(output)
+            path = f"{base}_target{k + 1}{ext or '.hdf5'}"
+        io.save_locs(path, locs_, info)
+        print(f"Saved {path}")
+
+
+def _print_stitch_report(report: dict, paths: list[str]) -> None:
+    """Print the tiles, the stage orientation and the overlaps of a
+    ``stitch.stitch`` report."""
+    from . import stitch
 
     tiles = report["tiles"]
     print(f"Stitched {tiles.max() + 1} tiles:")
@@ -1975,18 +2091,6 @@ def _stitch(
             )
         else:
             print(f"  Tiles {a} and {b}: not used ({pair['status']})")
-
-    for k, (locs_, info) in enumerate(zip(out_locs, out_infos)):
-        if output is None:
-            base = os.path.splitext(info[-1]["Stitched files"][0])[0]
-            path = base + "_stitched.hdf5"
-        elif len(out_locs) == 1:
-            path = output
-        else:
-            base, ext = os.path.splitext(output)
-            path = f"{base}_target{k + 1}{ext or '.hdf5'}"
-        io.save_locs(path, locs_, info)
-        print(f"Saved {path}")
 
 
 def _groupprops(files: str) -> None:
@@ -3008,6 +3112,14 @@ def _localize_movie(
             lateral_transforms=lateral_transforms,
             suffix=suffix,
         )
+    phasor_calibration = None
+    if fitting_method == "phasor" and z_params is not None:
+        # the phasor fit takes z from its calibration itself, so no z fit
+        # follows (and the fit applies the lateral corrections)
+        _, magnification_factor, z_calibration = z_params
+        phasor_calibration = dict(z_calibration)
+        phasor_calibration["Magnification factor"] = magnification_factor
+        z_params = None
     with _lateral_report_only():
         locs, info = localize(
             movie,
@@ -3023,6 +3135,7 @@ def _localize_movie(
             max_it=max_iterations if max_iterations > 0 else None,
             spline_calibration=spline_calibration,
             vectorfit_parameters=_vectorfit_parameters_from_args(args),
+            calibration_3d=phasor_calibration,
             camera_calibration=camera_calibration,
             # in 3D, the z fit applies them (see _localize_finish)
             affine_calibration=None if z_params else lateral_transforms,
@@ -3037,10 +3150,36 @@ def _localize_movie(
         args,
         z_params,
         lateral_transforms,
-        spline_calibration,
+        spline_calibration or phasor_calibration,
         suffix=suffix,
     )
     return [saved]
+
+
+def _check_3d_calibration_kind(
+    args: argparse.Namespace, calibration: dict | None
+) -> None:
+    """Refuse a 3D calibration of the wrong kind before any movie is
+    read: the phasor fit ('phasor-3d') needs an astigmatic phasor
+    calibration, the Gaussian z fit a Gaussian one."""
+    if calibration is None:  # written before Picasso 1.0: Gaussian
+        phasor_calibration = False
+    else:
+        from .zfit import _is_phasor_calibration
+
+        phasor_calibration = _is_phasor_calibration(calibration)
+    if args.fit_method == "phasor-3d" and not phasor_calibration:
+        raise Exception(
+            "'phasor-3d' needs an astigmatic phasor calibration (made in "
+            "Localize: Calibration > Calibrate astigmatism (phasor), or with "
+            "picasso.zfit.calibrate_z_phasor); this is a Gaussian one."
+        )
+    if args.fit_method != "phasor-3d" and phasor_calibration:
+        raise Exception(
+            "This is an astigmatic phasor calibration, which only "
+            "'--fit-method phasor-3d' can use; the Gaussian z fit needs a "
+            "Gaussian astigmatism calibration."
+        )
 
 
 def _multi_emitter_parameters_from_args(args: argparse.Namespace):
@@ -3359,8 +3498,9 @@ def _localize_finish(
         ``z_params``, the fit has applied them already, so they are
         only reported here; with it, the z fit applies them.
     spline_calibration : dict or None
-        Spline PSF calibration used for fitting, whose own lateral
-        corrections are not applied again; None if not a spline fit.
+        Spline PSF (or phasor) calibration used for fitting, whose own
+        lateral corrections are not applied again; None if not a spline
+        fit or a phasor fit in 3D.
     suffix : str, optional
         Inserted into the output name before ``_locs``, e.g. ``"_ref"`` for
         one region of a split field of view. Default "" (one file per movie).
@@ -3663,6 +3803,7 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
     # elliptical (see _check_multi_emitter_args)
     if "-3d" in args.fit_method or (args.multi_emitter and args.zc):
         z_params = _localize_load_3d_calibration(args)
+        _check_3d_calibration_kind(args, z_params[2])
         if args.fit_z_gpu:
             from . import zfit
 
@@ -3699,6 +3840,12 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
     )
     region_fit = None
     if args.regions_separately:
+        if "phasor-3d" in fit_methods:
+            raise Exception(
+                "'phasor-3d' cannot be combined with --regions-separately "
+                "yet; fit the regions with 'phasor' (2D), or fit them "
+                "together."
+            )
         region_fit = _localize_region_fit(
             fit_methods, spline_calibrations, n_regions
         )
@@ -4792,6 +4939,8 @@ def _build_parser() -> (
             "avg",
             "vectorfit",
             "vectorfit-gpu",
+            "phasor",
+            "phasor-3d",
         ],
         action="append",
         default=None,
@@ -4805,7 +4954,11 @@ def _build_parser() -> (
             "optional VectorFit library (pip install picassosr[vectorfit]), "
             "'vectorfit-gpu' does the same on the GPU with VectorFit's GPU "
             "build (pip install vectorfit-py-cu12), which, despite its "
-            "name, needs CUDA 13 (NVIDIA driver 580 or newer). "
+            "name, needs CUDA 13 (NVIDIA driver 580 or newer). 'phasor' "
+            "localizes by phasors (Martens et al. 2018; non-iterative, CPU; "
+            "its lpx/lpy are Picasso's error-propagation estimate, not part "
+            "of the published method), 'phasor-3d' adds z from an "
+            "astigmatic phasor calibration (-zc). "
             "With --regions-separately it may be given once per --roi, to "
             "fit each region its own way"
         ),
@@ -5057,7 +5210,11 @@ def _build_parser() -> (
         dest="zc",
         type=str,
         default="",
-        help="path to 3D calibration file (3D only)",
+        help=(
+            "path to 3D calibration file (3D only): a Gaussian astigmatism "
+            "calibration for the '-3d' Gaussian methods, an astigmatic "
+            "phasor calibration for 'phasor-3d'"
+        ),
     )
     localize_parser.add_argument(
         "-zg",

@@ -701,12 +701,34 @@ def _join_holes(
     if not holes:
         return outer
     rings = [outer] + sorted(holes, key=_signed_area)  # largest first
+    attached = _hole_attachments(rings)
+    # depth first without recursion, as holes may be joined to holes
+    joined = []
+    walks = [_walk_ring(rings, attached, 0, 0, False)]
+    while walks:
+        item = next(walks[-1], None)
+        if item is None:
+            walks.pop()
+        elif isinstance(item, tuple):
+            walks.append(_walk_ring(rings, attached, *item, True))
+        else:
+            joined.append(item)
+    return np.array(joined)
+
+
+def _hole_attachments(
+    rings: list[lib.FloatArray2D],
+) -> list[dict[int, list[tuple[int, int]]]]:
+    """For ``_join_holes``: the holes (``rings[1:]``, largest first)
+    joined at each corner of each outline, as ``(hole, corner of the
+    hole)``. Each hole is joined from its corner nearest to the
+    outlines before it to the nearest corner of them."""
+    outer = rings[0]
     ring_of = np.concatenate([np.full(len(r), k) for k, r in enumerate(rings)])
     corner_of = np.concatenate([np.arange(len(r)) for r in rings])
     tree = KDTree(np.concatenate(rings))
     n_neighbors = min(16, len(ring_of))
     outer_tree = None
-    # the holes joined at each corner of each outline: (hole, corner)
     attached = [{} for _ in rings]
     for k in range(1, len(rings)):
         distances, nearest = tree.query(rings[k], k=n_neighbors)
@@ -722,33 +744,29 @@ def _join_holes(
             j = int(np.argmin(distances))
             ring, corner = 0, nearest[j]
         attached[ring].setdefault(int(corner), []).append((k, int(j)))
+    return attached
 
-    def walk(ring: int, start: int, back: bool) -> Iterator:
-        """The corners of an outline from ``start`` on, each followed by
-        the holes joined at it (yielded as (hole, corner) tuples) and
-        by itself again, ending with ``start`` again if ``back``."""
-        corners = rings[ring]
-        for step in range(len(corners)):
-            corner = (start + step) % len(corners)
+
+def _walk_ring(
+    rings: list[lib.FloatArray2D],
+    attached: list[dict[int, list[tuple[int, int]]]],
+    ring: int,
+    start: int,
+    back: bool,
+) -> Iterator:
+    """For ``_join_holes``: the corners of an outline from ``start``
+    on, each followed by the holes joined at it (yielded as (hole,
+    corner) tuples) and by itself again, ending with ``start`` again if
+    ``back``."""
+    corners = rings[ring]
+    for step in range(len(corners)):
+        corner = (start + step) % len(corners)
+        yield corners[corner]
+        for hole in attached[ring].get(corner, ()):
+            yield hole
             yield corners[corner]
-            for hole in attached[ring].get(corner, ()):
-                yield hole
-                yield corners[corner]
-        if back:
-            yield corners[start]
-
-    # depth first without recursion, as holes may be joined to holes
-    joined = []
-    walks = [walk(0, 0, False)]
-    while walks:
-        item = next(walks[-1], None)
-        if item is None:
-            walks.pop()
-        elif isinstance(item, tuple):
-            walks.append(walk(*item, True))
-        else:
-            joined.append(item)
-    return np.array(joined)
+    if back:
+        yield corners[start]
 
 
 def threshold_isodata(image: lib.FloatArray2D) -> float:

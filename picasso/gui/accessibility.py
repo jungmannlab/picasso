@@ -149,33 +149,57 @@ def _label_next_to(
     (else a label above it that spans one column, i.e., a column
     header) and the label before it in a box layout."""
     if isinstance(layout, QtWidgets.QFormLayout):
-        row, role = layout.getItemPosition(index)
-        if role == QtWidgets.QFormLayout.ItemRole.FieldRole:
-            return _label_of(
-                layout.itemAt(row, QtWidgets.QFormLayout.ItemRole.LabelRole)
-            )
-        return None
+        return _form_label(layout, index)
     if isinstance(layout, QtWidgets.QGridLayout):
-        row, column, _, _ = layout.getItemPosition(index)
-        if column > 0:
-            label = _label_of(layout.itemAtPosition(row, column - 1))
-            if label is not None:
-                return label
-        if row > 0:
-            above = layout.itemAtPosition(row - 1, column)
-            label = _label_of(above)
-            if label is not None:
-                _, _, _, span = layout.getItemPosition(layout.indexOf(above))
-                if span == 1:
-                    return label
-        return None
+        return _grid_label(layout, index)
     if isinstance(layout, QtWidgets.QBoxLayout):
-        # skip spacers and stretches between the label and the input
-        for previous in range(index - 1, -1, -1):
-            item = layout.itemAt(previous)
-            if item.spacerItem() is not None:
-                continue
-            return _label_of(item)
+        return _box_label(layout, index)
+    return None
+
+
+def _form_label(
+    layout: QtWidgets.QFormLayout, index: int
+) -> QtWidgets.QLabel | None:
+    """``_label_next_to`` in a form layout: the label of the row of a
+    field."""
+    row, role = layout.getItemPosition(index)
+    if role == QtWidgets.QFormLayout.ItemRole.FieldRole:
+        return _label_of(
+            layout.itemAt(row, QtWidgets.QFormLayout.ItemRole.LabelRole)
+        )
+    return None
+
+
+def _grid_label(
+    layout: QtWidgets.QGridLayout, index: int
+) -> QtWidgets.QLabel | None:
+    """``_label_next_to`` in a grid layout: the label to the left, else
+    a label above that spans one column (a column header)."""
+    row, column, _, _ = layout.getItemPosition(index)
+    if column > 0:
+        label = _label_of(layout.itemAtPosition(row, column - 1))
+        if label is not None:
+            return label
+    if row > 0:
+        above = layout.itemAtPosition(row - 1, column)
+        label = _label_of(above)
+        if label is not None:
+            _, _, _, span = layout.getItemPosition(layout.indexOf(above))
+            if span == 1:
+                return label
+    return None
+
+
+def _box_label(
+    layout: QtWidgets.QBoxLayout, index: int
+) -> QtWidgets.QLabel | None:
+    """``_label_next_to`` in a box layout: the label before the item,
+    skipping spacers and stretches between the label and the input."""
+    for previous in range(index - 1, -1, -1):
+        item = layout.itemAt(previous)
+        if item.spacerItem() is not None:
+            continue
+        return _label_of(item)
     return None
 
 

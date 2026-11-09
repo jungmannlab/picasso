@@ -5,6 +5,8 @@
 
 In astigmatic 3D imaging, a cylindrical lens makes the fitted spot widths ``sx`` and ``sy`` (i.e., the standard deviations :math:`\sigma` of the fitted Gaussians) depend on the axial position. Picasso calibrates this dependence from a bead z-stack and uses it to recover ``z`` from the spot widths. The cylindrical lens also shifts and distorts ``x`` and ``y``; see :doc:`lateral-correction` for how to correct this.
 
+This calibration is for the Gaussian models. The phasor model (see :doc:`phasor`) has a calibration of its own, of the phasor magnitudes instead of the widths, see :ref:`localize-phasor-3d`.
+
 For better accuracy, use an experimentally measured PSF instead (see :doc:`spline`). A real astigmatic PSF is not an elliptical Gaussian and the spline model fits its actual shape and recovers ``z`` directly in the same fit as ``x`` and ``y``, rather than from the fitted widths afterwards.
 
 .. _localize-3d-calibration-gui:

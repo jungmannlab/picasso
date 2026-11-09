@@ -94,6 +94,7 @@ def _dialog(z_calibration=None, spline_calibration=None):
     for name in (
         "update_affine_calib",
         "_calibration_lateral_transforms",
+        "_warn_skipped_lateral_transforms",
         "_set_affine_state",
     ):
         setattr(
@@ -463,6 +464,7 @@ class TestTheFitLeavesARecord:
             fit_z=fit_z,
             calibrate_z=False,
             spline_calibration=None,
+            phasor_calibration=None,
             vectorfit_parameters=None,
             lateral_transforms=lateral_transforms,
             camera_calibration=None,

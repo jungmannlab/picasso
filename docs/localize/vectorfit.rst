@@ -5,7 +5,7 @@ Vectorial PSF (VectorFit)
 
 Picasso can fit a **vectorial PSF model** to every spot with the VectorFit library. The model is computed from the optics of the microscope, so no bead calibration is needed, and its 3D variant recovers ``z`` directly.
 
-VectorFit is described in `Droste et al., Optica, 2024 <https://doi.org/10.1364/OPTICA.560721>`_. That work also estimates field-dependent aberrations from the single-molecule data itself; Picasso does not do this yet and only uses the aberrations you set (see below).
+VectorFit is described in `Droste et al., Optica, 2025 <https://doi.org/10.1364/OPTICA.560721>`_. That work also estimates field-dependent aberrations from the single-molecule data itself; Picasso does not do this yet and only uses the aberrations you set (see below).
 
 Theory
 ------
@@ -63,7 +63,7 @@ VectorFit is available for **Windows and Linux** (x86-64) only, not for macOS. T
 
 .. warning::
 
-   **Despite its name, the GPU build (vectorfit-py-cu12) needs CUDA 13, not CUDA 12.** It is compiled with CUDA 13.1, so the NVIDIA driver must be version **580 or newer**. With an older driver, for example one that supports CUDA 12 only, VectorFit cannot use the GPU: **Use GPU** stays disabled for VectorFit (its tooltip says why), and ``--fit-method vectorfit-gpu`` and ``fitting_method="vectorfit-gpu"`` stop with an error. The CPU fit still works with the GPU build installed. ``nvidia-smi`` shows the driver version and the highest CUDA version it supports.
+   **Despite its name, the GPU build (vectorfit-py-cu12) needs CUDA 13, not CUDA 12.** It is compiled with CUDA 13.1, so the NVIDIA driver must be version **580 or newer**. With an older driver, for example one that supports CUDA 12 only, VectorFit cannot use the GPU: **Use GPU** stays disabled for VectorFit (its tooltip says why), and ``--fit-method vectorfit-gpu`` and ``fitting_method="vectorfit-gpu"`` stop with an error. The CPU fit still works with the GPU build installed. ``nvidia-smi`` shows the driver version and the highest CUDA version it supports, see :ref:`installation-check-cuda`.
 
    This concerns VectorFit only: Picasso's other GPU fits (``picassosr[gpu]``) still run with CUDA 12.
 

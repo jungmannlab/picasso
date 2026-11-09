@@ -453,6 +453,17 @@ def _convolve(image, kernel, out, tmp):
     _convolve_xy(image, kernel, kernel, out, tmp)
 
 
+@numba.njit(nogil=True, cache=True)
+def _wrap(i, size):
+    """Index ``i``, at most ``size`` outside ``0 .. size - 1``, wrapped
+    around into it."""
+    if i < 0:
+        return i + size
+    if i >= size:
+        return i - size
+    return i
+
+
 @numba.njit(nogil=True, cache=True, fastmath=_FASTMATH)
 def _convolve_xy(image, kernel, kernel_y, out, tmp):
     """:func:`_convolve` with ``kernel`` along x and ``kernel_y`` along y,
@@ -466,12 +477,7 @@ def _convolve_xy(image, kernel, kernel_y, out, tmp):
     row = np.empty(width + 2 * radius)
     for y in range(height):
         for x in range(width + 2 * radius):
-            xx = x - radius
-            if xx < 0:
-                xx += width
-            elif xx >= width:
-                xx -= width
-            row[x] = image[y, xx]
+            row[x] = image[y, _wrap(x - radius, width)]
         for x in range(width):
             tmp[y, x] = 0.0
         for k in range(2 * radius + 1):
@@ -482,11 +488,7 @@ def _convolve_xy(image, kernel, kernel_y, out, tmp):
         for x in range(width):
             out[y, x] = 0.0
         for k in range(2 * radius + 1):
-            yy = y + k - radius
-            if yy < 0:
-                yy += height
-            elif yy >= height:
-                yy -= height
+            yy = _wrap(y + k - radius, height)
             weight = kernel_y[k]
             for x in range(width):
                 out[y, x] += weight * tmp[yy, x]
@@ -697,6 +699,15 @@ def _spline_peak_shape(
         gz[j] = dvz
 
 
+@numba.njit(nogil=True, cache=True)
+def _symmetrize(hess, n):
+    """Mirror the upper triangle of ``hess[:n, :n]`` into its lower
+    one."""
+    for p in range(n):
+        for q in range(p):
+            hess[p, q] = hess[q, p]
+
+
 @numba.njit(nogil=True, cache=True, fastmath=_FASTMATH)
 def _spline_jacobian_hessian(
     photons,
@@ -740,9 +751,7 @@ def _spline_jacobian_hessian(
             jac[p] += t1 * jt[p]
             for q in range(p, n_par):
                 hess[p, q] += t2 * jt[p] * jt[q]
-    for p in range(n_par):
-        for q in range(p):
-            hess[p, q] = hess[q, p]
+    _symmetrize(hess, n_par)
 
 
 # ----------------------------------------------------------------------
@@ -848,17 +857,14 @@ def _jacobian_hessian(
             jac[p] += t1 * jt[p]
             for q in range(p, n_par):
                 hess[p, q] += t2 * jt[p] * jt[q]
-    for p in range(n_par):
-        for q in range(p):
-            hess[p, q] = hess[q, p]
+    _symmetrize(hess, n_par)
 
 
 # fastmath given, as that of its caller _iterate (see _pinv_symmetric)
 @numba.njit(nogil=True, cache=True, fastmath=_FASTMATH)
-def _solve_cholesky(a, b, n):
-    """Solve ``a x = b`` for symmetric positive definite ``a`` in place
-    (the solution is left in ``b``); False if ``a`` is not positive
-    definite or the solution is not finite (LAPACK dposv)."""
+def _cholesky_factor(a, n):
+    """Cholesky factor ``L`` of the symmetric ``a``, in place in its lower
+    triangle; False if ``a`` is not positive definite (LAPACK dpotrf)."""
     for j in range(n):
         s = a[j, j]
         for k in range(j):
@@ -871,6 +877,17 @@ def _solve_cholesky(a, b, n):
             for k in range(j):
                 s -= a[i, k] * a[j, k]
             a[i, j] = s / a[j, j]
+    return True
+
+
+# fastmath given, as that of its caller _iterate (see _pinv_symmetric)
+@numba.njit(nogil=True, cache=True, fastmath=_FASTMATH)
+def _solve_cholesky(a, b, n):
+    """Solve ``a x = b`` for symmetric positive definite ``a`` in place
+    (the solution is left in ``b``); False if ``a`` is not positive
+    definite or the solution is not finite (LAPACK dposv)."""
+    if not _cholesky_factor(a, n):
+        return False
     for i in range(n):
         s = b[i]
         for k in range(i):
@@ -891,7 +908,7 @@ def _solve_cholesky(a, b, n):
 # function that compiles it first (none for a direct call) and keeps that
 # one build per signature, so its rounding would depend on what ran first
 @numba.njit(nogil=True, cache=True, fastmath=False)
-def _pinv_symmetric(a):
+def _pinv_symmetric(a):  # noqa: C901
     """Pseudo-inverse of the symmetric ``a``, as ``numpy.linalg.pinv``
     gives it, without LAPACK: called by the threads of a frame pool at
     once, OpenBLAS (built for fewer threads) can crash. A positive
@@ -1098,7 +1115,7 @@ def _compact(
 
 
 @numba.njit(nogil=True, cache=True, fastmath=_FASTMATH)
-def _iterate(
+def _iterate(  # noqa: C901
     n,
     p_n,
     p_x,
@@ -1726,13 +1743,11 @@ def _prune(
                 break
         if dimmer:
             removed += 1
-            p_status[i] = _ERROR
-            m = _neighbors(
-                p_x[i],
-                p_y[i],
-                neighborhood,
+            _remove_peak(
+                i,
                 p_x,
                 p_y,
+                p_status,
                 counts,
                 order,
                 nx,
@@ -1742,22 +1757,17 @@ def _prune(
                 neighborhood,
                 out,
             )
-            for k in range(m):
-                if p_status[out[k]] == _CONVERGED:
-                    p_status[out[k]] = _RUNNING
     for i in range(n):
         if p_status[i] == _ERROR:
             continue
         if significance[i] > threshold:
             continue
-        p_status[i] = _ERROR
         removed += 1
-        m = _neighbors(
-            p_x[i],
-            p_y[i],
-            neighborhood,
+        _remove_peak(
+            i,
             p_x,
             p_y,
+            p_status,
             counts,
             order,
             nx,
@@ -1767,14 +1777,38 @@ def _prune(
             neighborhood,
             out,
         )
-        for k in range(m):
-            if p_status[out[k]] == _CONVERGED:
-                p_status[out[k]] = _RUNNING
     return removed
 
 
+@numba.njit(nogil=True, cache=True)
+def _remove_peak(
+    i, p_x, p_y, p_status, counts, order, nx, ny, x0, y0, neighborhood, out
+):
+    """Mark peak ``i`` for removal; its converged neighbors within
+    ``neighborhood`` (the cell size of the grid as well) run again."""
+    p_status[i] = _ERROR
+    m = _neighbors(
+        p_x[i],
+        p_y[i],
+        neighborhood,
+        p_x,
+        p_y,
+        counts,
+        order,
+        nx,
+        ny,
+        x0,
+        y0,
+        neighborhood,
+        out,
+    )
+    for k in range(m):
+        if p_status[out[k]] == _CONVERGED:
+            p_status[out[k]] = _RUNNING
+
+
 @numba.njit(nogil=True, cache=True, fastmath=_FASTMATH)
-def _local_crlb(
+def _local_crlb(  # noqa: C901
     i,
     n,
     p_n,
@@ -2008,7 +2042,7 @@ def _local_crlb(
 
 
 @numba.njit(nogil=True, cache=True)
-def analyze_frame(
+def analyze_frame(  # noqa: C901
     frame,
     variance,
     use_variance,
@@ -2815,6 +2849,16 @@ def _profile_sigma(center, sigma, size, e, de, ds):
         ds[c] = -norm_s * (a_plus * g_plus - a_minus * g_minus)
 
 
+@numba.njit(nogil=True, cache=True)
+def _copy_gradient_hessian(grad, hess, grad_out, hess_out, n):
+    """Copy ``grad[:n]`` and ``hess[:n, :n]`` into ``grad_out`` and
+    ``hess_out``."""
+    for p in range(n):
+        grad_out[p] = grad[p]
+        for q in range(n):
+            hess_out[p, q] = hess[p, q]
+
+
 @numba.njit(nogil=True, cache=True, fastmath=_FASTMATH)
 def _accumulate_free_sigma(
     spots,
@@ -2869,9 +2913,7 @@ def _accumulate_free_sigma(
                 wp = weight * d[p]
                 for q in range(p, 5):
                     hess[p, q] += wp * d[q]
-    for p in range(5):
-        for q in range(p):
-            hess[p, q] = hess[q, p]
+    _symmetrize(hess, 5)
     return chi_square, True
 
 
@@ -2936,10 +2978,7 @@ def _fit_free_sigma_spots(
         if not ok:
             state = FIT_STATE_NEG_CURVATURE_MLE
         else:
-            for p in range(n_params):
-                grad_ok[p] = grad[p]
-                for q in range(n_params):
-                    hess_ok[p, q] = hess[p, q]
+            _copy_gradient_hessian(grad, hess, grad_ok, hess_ok, n_params)
             lam = _LAMBDA_INITIAL
             previous_chi_square = chi_square
             for iteration in range(max_iterations):

@@ -761,18 +761,15 @@ def _build_animation(
     height = ((height + 15) // 16) * 16
 
     if scalebar_length_nm is not None:
-        scalebar_color = QtGui.QColor("black" if invert_colors else "white")
+        scalebar_style = {
+            "color": QtGui.QColor("black" if invert_colors else "white"),
+            **(scalebar_style or {}),
+        }
+    grid_color_range = None
     if grid is not None:
-        channels = locs if isinstance(locs, list) else [locs]
-        if grid_bounds is None:
-            xyz = np.concatenate(
-                [c[["x", "y", "z"]].to_numpy(dtype=float) for c in channels]
-            )
-            grid_bounds = (xyz.min(axis=0), xyz.max(axis=0))
-        # the colors of empty and full pixels, to draw behind the
-        # localizations
-        grid_color_range = color_range(
-            None if isinstance(locs, pd.DataFrame) else len(locs),
+        grid_bounds, grid_color_range = _animation_grid_setup(
+            locs,
+            grid_bounds,
             colors=colors,
             invert_colors=invert_colors,
             single_channel_colormap=single_channel_colormap,
@@ -819,31 +816,18 @@ def _build_animation(
                 height,
                 QtCore.Qt.AspectRatioMode.IgnoreAspectRatio,
             )
-            if grid is not None:
-                # the frame is stretched to the output size, so it spans
-                # the viewport in both directions
-                qimage = draw_grid_3d(
-                    qimage,
-                    viewports[i],
-                    grid,
-                    rotations[i],
-                    grid_bounds,
-                    origin=grid_origin,
-                    color_range=grid_color_range,
-                )
-            if scalebar_length_nm is not None:
-                # the frame is stretched to the output size, so its width
-                # spans the viewport's width; match the aspect ratio so that
-                # draw_scalebar keeps that horizontal scale
-                (y_min, x_min), (_, x_max) = viewports[i]
-                y_max = y_min + (x_max - x_min) * height / width
-                qimage = draw_scalebar(
-                    image=qimage,
-                    viewport=((y_min, x_min), (y_max, x_max)),
-                    scalebar_length_nm=scalebar_length_nm,
-                    display_length=scalebar_display_length,
-                    **{"color": scalebar_color, **(scalebar_style or {})},
-                )
+            qimage = _draw_animation_overlays(
+                qimage,
+                viewports[i],
+                rotations[i],
+                grid=grid,
+                grid_bounds=grid_bounds,
+                grid_origin=grid_origin,
+                grid_color_range=grid_color_range,
+                scalebar_length_nm=scalebar_length_nm,
+                scalebar_display_length=scalebar_display_length,
+                scalebar_style=scalebar_style,
+            )
 
             # convert to a np.array and append
             ptr = qimage.bits()
@@ -905,6 +889,78 @@ def _build_animation(
     info_path = os.path.splitext(path)[0] + ".yaml"
     io.save_info(info_path, [anim_settings])
     return True
+
+
+def _animation_grid_setup(
+    locs: pd.DataFrame | list[pd.DataFrame],
+    grid_bounds: tuple | None,
+    *,
+    colors: list | None,
+    invert_colors: bool,
+    single_channel_colormap: str | lib.FloatArray2D,
+    channel_contrast: list[tuple[float, float]] | None,
+) -> tuple[tuple, tuple]:
+    """For ``_build_animation``: the bounds of the 3D grid (those of
+    the localizations if ``grid_bounds`` is None) and the colors of
+    empty and full pixels, to draw the grid behind the
+    localizations."""
+    channels = locs if isinstance(locs, list) else [locs]
+    if grid_bounds is None:
+        xyz = np.concatenate(
+            [c[["x", "y", "z"]].to_numpy(dtype=float) for c in channels]
+        )
+        grid_bounds = (xyz.min(axis=0), xyz.max(axis=0))
+    grid_color_range = color_range(
+        None if isinstance(locs, pd.DataFrame) else len(locs),
+        colors=colors,
+        invert_colors=invert_colors,
+        single_channel_colormap=single_channel_colormap,
+        channel_contrast=channel_contrast,
+    )
+    return grid_bounds, grid_color_range
+
+
+def _draw_animation_overlays(
+    qimage: QtGui.QImage,
+    viewport: tuple,
+    rotation: Rotation,
+    *,
+    grid: GridOverlay | None,
+    grid_bounds: tuple | None,
+    grid_origin: tuple[float, float, float],
+    grid_color_range: tuple | None,
+    scalebar_length_nm: int | float | None,
+    scalebar_display_length: bool,
+    scalebar_style: dict | None,
+) -> QtGui.QImage:
+    """For ``_build_animation``: draw the 3D grid and the scale bar
+    (with ``scalebar_style`` holding its color) on a frame stretched
+    to the output size, so that it spans ``viewport`` in both
+    directions."""
+    if grid is not None:
+        qimage = draw_grid_3d(
+            qimage,
+            viewport,
+            grid,
+            rotation,
+            grid_bounds,
+            origin=grid_origin,
+            color_range=grid_color_range,
+        )
+    if scalebar_length_nm is not None:
+        # the frame's width spans the viewport's width; match the aspect
+        # ratio so that draw_scalebar keeps that horizontal scale
+        width, height = qimage.width(), qimage.height()
+        (y_min, x_min), (_, x_max) = viewport
+        y_max = y_min + (x_max - x_min) * height / width
+        qimage = draw_scalebar(
+            image=qimage,
+            viewport=((y_min, x_min), (y_max, x_max)),
+            scalebar_length_nm=scalebar_length_nm,
+            display_length=scalebar_display_length,
+            **scalebar_style,
+        )
+    return qimage
 
 
 def _adjust_disp_px_size(

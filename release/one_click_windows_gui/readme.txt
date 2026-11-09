@@ -15,6 +15,13 @@ How to install
 1. Download the latest release from the release page: https://github.com/jungmannlab/picasso/releases/
 2. Open the downloaded exe file and follow the installation instructions.
 
+Which edition? The standard edition runs on any PC. For GPU fitting on an NVIDIA graphics card, choose a CUDA edition. To find out which one your PC supports, open a Command Prompt and run "nvidia-smi": the first lines show "CUDA Version", the highest CUDA version your NVIDIA driver supports. Then run "nvidia-smi --query-gpu=name,compute_cap --format=csv" for the compute capability of the GPU.
+- CUDA Version 13.0 or higher and compute capability 7.5 or higher (Turing or newer, e.g., RTX 20xx): the CUDA13 edition. Its GPU VectorFit (vectorial PSF) fitting needs compute capability 8.0 or higher (Ampere or newer, e.g., RTX 30xx or A-series).
+- CUDA Version 12.x, or compute capability below 7.5: the CUDA12 edition.
+- CUDA Version below 12.0: update the NVIDIA driver (https://www.nvidia.com/drivers), or use the standard edition.
+- "nvidia-smi" not found: no NVIDIA GPU or no NVIDIA driver; use the standard edition.
+The CUDA editions bring their own CUDA runtime, so there is no need to install the CUDA toolkit. Updating the NVIDIA driver to version 580 or newer adds CUDA 13 support (Turing or newer GPUs). See https://picassosr.readthedocs.io/en/latest/getting-started/installation.html#installation-check-cuda
+
 [!] If installed in "Program Files", Render and Localize may not be available for non-administrator users. Therefore, we recommend installing Picasso outside of "Program Files". The current default location is C:\Picasso.
 [!] Camera config and plugins belong in C:\Users\<your user name>\.picasso, not in the installation folder, see "Adding camera configuration and plugins" below.
 [!] Windows Safety features and Windows Defender may ask multiple times for permission during the installation and download.
@@ -24,23 +31,26 @@ The installer adds the installation folder to the PATH, so Picasso's command lin
 How to update
 -------------
 
-When a new version is out, Picasso tells you about it (at most once a day). Click "Install Now" to download it, check it and install it; Picasso closes, the installer asks for administrator rights, installs the update into the same folder (keeping the selected modules) and Picasso opens again. Please close other Picasso programs and save your work first. Alternatively, download the new installer from the release page and run it; there is no need to uninstall the old version first. Exception: the "GPU" edition of versions before 1.0 is not replaced by the "CUDA" edition, which installs beside it; uninstall "Picasso-GPU" (Windows Settings > Apps), or "picasso" in a terminal keeps running the old version. Settings, camera configuration and plugins in C:\Users\<your user name>\.picasso are kept either way.
+When a new version is out, Picasso tells you about it (at most once a day). Click "Install Now" to download it, check it and install it; Picasso closes, the installer asks for administrator rights, installs the update into the same folder (keeping the selected modules) and Picasso opens again. Please close other Picasso programs and save your work first. Alternatively, download the new installer from the release page and run it; there is no need to uninstall the old version first. Exception: the "GPU" edition of versions before 1.0 is not replaced by the "CUDA12" or "CUDA13" edition, which install beside it; uninstall "Picasso-GPU" (Windows Settings > Apps), or "picasso" in a terminal keeps running the old version. Settings, camera configuration and plugins in C:\Users\<your user name>\.picasso are kept either way.
 
 Creating your own installer
 ---------------------------
 
 You can create the exe file yourself by cloning our GitHub repo and running the script picasso/release/one_click_windows_gui/create_installer_windows.bat from the Command Prompt. Note that you must have conda installed on your computer.
 
-There are two editions of the installer:
+There are three editions of the installer:
 - create_installer_windows.bat builds the standard (CPU) installer (Picasso-Windows-64bit-<version>.exe, installs to C:\Picasso).
-- create_installer_windows_cuda.bat builds the CUDA edition (Picasso-Windows-64bit-CUDA-<version>.exe, installs to C:\Picasso-CUDA). It additionally bundles the CUDA runtime (numba-cuda[cu12]) so GPU-accelerated (numba.cuda) code can run. It requires an NVIDIA (CUDA-capable) GPU and produces a noticeably larger installer. The two editions install to separate folders and can coexist. GPU rendering in Picasso: Render (via wgpu, any graphics card) is included in both editions; the CUDA edition is only needed for CUDA-accelerated fitting.
+- create_installer_windows_cuda12.bat builds the CUDA12 edition (Picasso-Windows-64bit-CUDA12-<version>.exe, installs to C:\Picasso-CUDA12). It additionally bundles the CUDA 12 runtime (numba-cuda[cu12]) so GPU-accelerated (numba.cuda) code can run. It requires an NVIDIA (CUDA-capable) GPU and produces a noticeably larger installer.
+- create_installer_windows_cuda13.bat builds the CUDA13 edition (Picasso-Windows-64bit-CUDA13-<version>.exe, installs to C:\Picasso-CUDA13). It bundles the CUDA 13 runtime (numba-cuda[cu13]) instead and also VectorFit's GPU build, so vectorial PSF fitting can run on the GPU ("vectorfit-gpu", on Ampere or newer GPUs, compute capability 8.0). It requires an NVIDIA GPU of the Turing generation or newer (compute capability 7.5, e.g., RTX 20xx, Quadro RTX, T4 or newer) and an NVIDIA driver of version 580 or newer. For older GPUs or drivers, use the CUDA12 edition.
 
-Both scripts write the installer, and a zip of it with this readme, to release\one_click_windows_gui\Output. The two scripts can run at the same time, e.g., in two Command Prompts.
+The editions install to separate folders and can coexist. GPU rendering in Picasso: Render (via wgpu, any graphics card) is included in all editions; the CUDA editions are only needed for CUDA-accelerated fitting.
+
+All scripts write the installer, and a zip of it with this readme, to release\one_click_windows_gui\Output. They can run at the same time, e.g., in separate Command Prompts.
 
 Adding camera configuration and plugins
 ---------------------------------------
 
-Since version 0.11, both the camera configuration and plugins live in your Picasso user folder, C:\Users\<your user name>\.picasso. This is the same folder that already holds settings.yaml and the log file, and it is the same for every installation type (one-click installer, PyPI, conda, source). Because it sits outside the installation folder, it survives updating or uninstalling Picasso, it is writable without administrator rights, and it is shared by the standard and CUDA editions.
+Since version 0.11, both the camera configuration and plugins live in your Picasso user folder, C:\Users\<your user name>\.picasso. This is the same folder that already holds settings.yaml and the log file, and it is the same for every installation type (one-click installer, PyPI, conda, source). Because it sits outside the installation folder, it survives updating or uninstalling Picasso, it is writable without administrator rights, and it is shared by all editions (standard, CUDA12 and CUDA13).
 
 Camera configuration is essential for correct photon conversion and thus correct localization precision calculation. Put your config file at C:\Users\<your user name>\.picasso\config.yaml. The file is never created for you - you have to create it yourself. The quickest way to get there is to open Picasso: Localize and select File > "Open camera config file location", which opens the folder in Explorer (creating it if needed) or reveals wherever a config already in use actually lives. To start from a template, copy config_template.yaml (bundled inside the picasso package, next to __init__.py) into that folder and rename it to config.yaml. For more details, see documentation: https://picassosr.readthedocs.io/en/latest/localize/camera.html#localize-camera-config
 
@@ -75,13 +85,14 @@ Nature Protocols (2017). 12: 1198-1228 DOI: 10.1038/nprot.2017.024 (https://doi.
 
 Many of the functionalities provided by Picasso were published independently, please also cite the respective publications:
 
-- Fitting. All methods are ports of Gpufit, see the Gpufit license (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpufit-LICENSE.txt): Przybylski et al., Sci. Rep., 2017; 10.1038/s41598-017-15313-9 (https://doi.org/10.1038/s41598-017-15313-9)
+- Single-emitter Gaussian and experimental-PSF (cubic-spline) fitting. A port of Gpufit, see the Gpufit license (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpufit-LICENSE.txt): Przybylski et al., Sci. Rep., 2017; 10.1038/s41598-017-15313-9 (https://doi.org/10.1038/s41598-017-15313-9)
 - Experimental PSF (cubic-spline) fitting. The calibration follows the coefficient scheme of Gpuspline, see the Gpuspline license (https://github.com/jungmannlab/picasso/blob/master/LICENSES/Gpuspline-LICENSE.txt): Li et al., Nat. Methods, 2018; Babcock & Zhuang, Sci. Rep., 2017; 10.1038/nmeth.4661 (https://doi.org/10.1038/nmeth.4661), 10.1038/s41598-017-00622-w (https://doi.org/10.1038/s41598-017-00622-w)
 - Multichannel (global) experimental-PSF fitting (globLoc): Li et al., Nat. Commun., 2022; 10.1038/s41467-022-30719-4 (https://doi.org/10.1038/s41467-022-30719-4)
 - 3D fitting via astigmatism: Huang et al., Science, 2008; 10.1126/science.1153529 (https://www.science.org/doi/10.1126/science.1153529)
 - Magnification factor of z (refractive-index mismatch, Calculate...): Loginov et al., Optica, 2024; Lyakin et al., Opt. Spectrosc., 2017; 10.1364/OPTICA.520595 (https://doi.org/10.1364/OPTICA.520595), 10.1134/S0030400X17090235 (https://doi.org/10.1134/S0030400X17090235)
 - B-spline wavelet spot identification: Izeddin et al., Opt. Express, 2012; 10.1364/OE.20.002081 (https://doi.org/10.1364/OE.20.002081)
 - Multi-emitter fitting (3D-DAOSTORM). A port of storm-analysis, see the storm-analysis license (https://github.com/jungmannlab/picasso/blob/master/LICENSES/storm-analysis-LICENSE.txt); its spline PSF is implemented from the paper: Babcock et al., Opt. Nanoscopy, 2012; Babcock & Zhuang, Sci. Rep., 2017; 10.1186/2192-2853-1-6 (https://doi.org/10.1186/2192-2853-1-6), 10.1038/s41598-017-00622-w (https://doi.org/10.1038/s41598-017-00622-w)
+- Phasor localization (pSMLM); its localization precision is Picasso's estimate: Martens et al., J. Chem. Phys., 2018; 10.1063/1.5005899 (https://doi.org/10.1063/1.5005899)
 - Vectorial PSF fitting with the VectorFit library: Droste et al., Optica, 2025; 10.1364/OPTICA.560721 (https://doi.org/10.1364/OPTICA.560721)
 - sCMOS pixel-dependent noise modeling: Huang et al., Nat. Methods, 2013; 10.1038/nmeth.2488 (https://doi.org/10.1038/nmeth.2488)
 - NeNA: Endesfelder et al., Histochem. Cell Biol., 2014; 10.1007/s00418-014-1192-3 (https://doi.org/10.1007/s00418-014-1192-3)
@@ -136,4 +147,4 @@ Credits
 Third-party licenses
 --------------------
 
-The installer bundles Python, Qt (PyQt6) and many other open-source libraries. Their licenses and copyright notices are collected in THIRD-PARTY-LICENSES.txt, in the installation folder (C:\Picasso, or C:\Picasso-CUDA for the CUDA edition).
+The installer bundles Python, Qt (PyQt6) and many other open-source libraries. Their licenses and copyright notices are collected in THIRD-PARTY-LICENSES.txt, in the installation folder (C:\Picasso, or C:\Picasso-CUDA12 / C:\Picasso-CUDA13 for the CUDA editions).

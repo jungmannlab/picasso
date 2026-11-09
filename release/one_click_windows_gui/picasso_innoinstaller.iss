@@ -1,13 +1,19 @@
-; VARIANT is an optional suffix used to build alternative editions (e.g.
-; the CUDA build passes /DVARIANT=-CUDA). When left undefined it defaults to
-; an empty string, reproducing the standard CPU installer names exactly.
+; VARIANT is an optional suffix used to build alternative editions: the CUDA
+; builds pass /DVARIANT=-CUDA12 (create_installer_windows_cuda12.bat) and
+; /DVARIANT=-CUDA13 (create_installer_windows_cuda13.bat). It names the
+; installer file, the program (AppName, so each edition is installed and
+; uninstalled as its own program) and its default folder. The in-app updater
+; (picasso/updater.py, find_installer) recognizes the editions by the
+; "CUDA12"/"CUDA13" in the file names. When left undefined it defaults to an
+; empty string, reproducing the standard CPU installer names exactly.
 #ifndef VARIANT
   #define VARIANT ""
 #endif
 
-; DISTDIR is the PyInstaller output folder to package. The CUDA build writes to
-; a separate "dist_cuda" tree (passed via /DDISTDIR=dist_cuda) so it does not
-; clash with the CPU build's "dist". Defaults to "dist" for the CPU installer.
+; DISTDIR is the PyInstaller output folder to package. The CUDA builds write
+; to separate trees ("dist_cuda12" / "dist_cuda13", passed via /DDISTDIR) so
+; they do not clash with the CPU build's "dist". Defaults to "dist" for the
+; CPU installer.
 #ifndef DISTDIR
   #define DISTDIR "dist"
 #endif

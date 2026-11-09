@@ -79,6 +79,31 @@ def _is_number(value) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def _valid_margins(margins) -> bool:
+    """Whether ``margins`` are the two numbers (x and y) of the margins
+    of a scale bar."""
+    return (
+        isinstance(margins, (list, tuple))
+        and len(margins) == 2
+        and all(_is_number(m) for m in margins)
+    )
+
+
+def _clamped_sizes(settings: dict) -> dict:
+    """The thickness, background opacity and font size in ``settings``
+    that are numbers, rounded and clipped to their ranges."""
+    sizes = {}
+    for key, low, high in (
+        ("Thickness (px)", 1, 200),
+        ("Background opacity (%)", 0, 100),
+        ("Font size (px)", 4, 200),
+    ):
+        value = settings.get(key)
+        if _is_number(value):
+            sizes[key] = min(high, max(low, int(round(value))))
+    return sizes
+
+
 def look_from_settings(settings: dict | None) -> dict:
     """The look of a scale bar in ``settings``, keyed as in
     ``LOOK_DEFAULTS``; missing or invalid values are the defaults.
@@ -99,20 +124,9 @@ def look_from_settings(settings: dict | None) -> dict:
     }
     if not isinstance(settings, dict):
         return look
-    for key, low, high in (
-        ("Thickness (px)", 1, 200),
-        ("Background opacity (%)", 0, 100),
-        ("Font size (px)", 4, 200),
-    ):
-        value = settings.get(key)
-        if _is_number(value):
-            look[key] = min(high, max(low, int(round(value))))
+    look.update(_clamped_sizes(settings))
     margins = settings.get("Margins (px)")
-    if (
-        isinstance(margins, (list, tuple))
-        and len(margins) == 2
-        and all(_is_number(m) for m in margins)
-    ):
+    if _valid_margins(margins):
         look["Margins (px)"] = [
             min(2000, max(0, int(round(m)))) for m in margins
         ]
@@ -462,37 +476,7 @@ class ScaleBarStyleWidget(QtWidgets.QWidget):
         for widget in widgets:
             widget.blockSignals(True)
         try:
-            for key, spin_box in (
-                ("Thickness (px)", self.thickness),
-                ("Background opacity (%)", self.background),
-                ("Font size (px)", self.font_size),
-            ):
-                if _is_number(settings.get(key)):
-                    spin_box.setValue(int(round(settings[key])))
-            margins = settings.get("Margins (px)")
-            if (
-                isinstance(margins, (list, tuple))
-                and len(margins) == 2
-                and all(_is_number(m) for m in margins)
-            ):
-                self.margin_x.setValue(int(round(margins[0])))
-                self.margin_y.setValue(int(round(margins[1])))
-            for key, check in (("Bold", self.bold), ("Italic", self.italic)):
-                if isinstance(settings.get(key), bool):
-                    check.setChecked(settings[key])
-            for key, combo, items in (
-                ("Position", self.position, POSITIONS),
-                ("Unit", self.units, UNITS),
-                ("Label", self.label_position, LABEL_POSITIONS),
-            ):
-                if settings.get(key) in items:
-                    combo.setCurrentText(settings[key])
-            font = settings.get("Font")
-            # a font missing on this computer keeps the current one
-            if isinstance(font, str) and self.font_family.findText(font) >= 0:
-                self.font_family.setCurrentText(font)
-            if "Color" in settings:
-                self.color.set_value(settings["Color"])
+            self._set_widgets(settings)
         finally:
             for widget in widgets:
                 widget.blockSignals(False)
@@ -500,6 +484,37 @@ class ScaleBarStyleWidget(QtWidgets.QWidget):
         self._update_margin_x()
         if notify:
             self.changed.emit()
+
+    def _set_widgets(self, settings: dict) -> None:
+        """Set the widgets to the valid values in ``settings``, see
+        ``load_settings``."""
+        for key, spin_box in (
+            ("Thickness (px)", self.thickness),
+            ("Background opacity (%)", self.background),
+            ("Font size (px)", self.font_size),
+        ):
+            if _is_number(settings.get(key)):
+                spin_box.setValue(int(round(settings[key])))
+        margins = settings.get("Margins (px)")
+        if _valid_margins(margins):
+            self.margin_x.setValue(int(round(margins[0])))
+            self.margin_y.setValue(int(round(margins[1])))
+        for key, check in (("Bold", self.bold), ("Italic", self.italic)):
+            if isinstance(settings.get(key), bool):
+                check.setChecked(settings[key])
+        for key, combo, items in (
+            ("Position", self.position, POSITIONS),
+            ("Unit", self.units, UNITS),
+            ("Label", self.label_position, LABEL_POSITIONS),
+        ):
+            if settings.get(key) in items:
+                combo.setCurrentText(settings[key])
+        font = settings.get("Font")
+        # a font missing on this computer keeps the current one
+        if isinstance(font, str) and self.font_family.findText(font) >= 0:
+            self.font_family.setCurrentText(font)
+        if "Color" in settings:
+            self.color.set_value(settings["Color"])
 
     def reset(self) -> None:
         """Restore the default look."""

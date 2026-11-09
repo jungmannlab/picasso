@@ -34,9 +34,11 @@ Picasso tells if the update was not installed
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import importlib.util
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -524,23 +526,44 @@ def _app_bundle() -> str | None:
     return bundle
 
 
-def _is_cuda_build() -> bool:
-    """Whether this is the CUDA edition of the Windows installer."""
-    return importlib.util.find_spec("numba_cuda") is not None
+def _cuda_edition() -> int:
+    """The CUDA version (major) of this edition of the Windows
+    installer: 12 or 13, or 0 for the standard (CPU) edition.
+
+    The CUDA editions bundle numba-cuda with NVIDIA's CUDA binding
+    (``cuda-bindings``) of their CUDA version, whose metadata they ship.
+    """
+    if importlib.util.find_spec("numba_cuda") is None:
+        return 0
+    try:
+        return int(importlib.metadata.version("cuda-bindings").split(".")[0])
+    except (importlib.metadata.PackageNotFoundError, ValueError):
+        return 12
+
+
+def _asset_cuda_edition(name: str) -> int:
+    """The CUDA version (major) of the Windows installer named ``name``
+    (lower case), 0 for the standard edition. The names without a
+    number, "cuda" (1.0 prereleases) and "gpu" (before 1.0), were the
+    CUDA 12 edition."""
+    match = re.search(r"cuda(\d+)", name)
+    if match:
+        return int(match.group(1))
+    return 12 if "cuda" in name or "gpu" in name else 0
 
 
 def find_installer(
     release: dict,
     platform: str | None = None,
-    cuda: bool | None = None,
+    cuda: int | None = None,
 ) -> dict | None:
     """Find the installer of this build among the assets of a release.
 
     The assets are recognized by name, as the release scripts in
     ``release/`` name them: "windows" in the Windows installers, with
-    "cuda" (or "gpu", before 1.0) for the CUDA edition, and "mac" or
-    "apple" in the macOS one. The installer itself is preferred to a
-    zip of it.
+    "cuda12" or "cuda13" for the CUDA editions ("cuda" or "gpu" in
+    older releases, both CUDA 12), and "mac" or "apple" in the macOS
+    one. The installer itself is preferred to a zip of it.
 
     Parameters
     ----------
@@ -549,9 +572,10 @@ def find_installer(
         ``get_latest_release``.
     platform : str, optional
         ``sys.platform`` of the build. Default None, the running one.
-    cuda : bool, optional
-        Whether the CUDA edition is wanted (Windows). Default None, the
-        running edition.
+    cuda : int, optional
+        The CUDA version (major) of the edition wanted (Windows): 12 or
+        13, or 0 for the standard edition. Default None, the running
+        edition.
 
     Returns
     -------
@@ -563,7 +587,7 @@ def find_installer(
     if platform == "win32":
         keywords, suffixes = ("windows",), (".exe", ".zip")
         if cuda is None:
-            cuda = _is_cuda_build()
+            cuda = _cuda_edition()
     elif platform == "darwin":
         keywords, suffixes = ("mac", "apple"), (".dmg", ".zip")
     else:
@@ -576,7 +600,7 @@ def find_installer(
         suffix = os.path.splitext(name)[1]
         if suffix not in suffixes:
             continue
-        if platform == "win32" and ("cuda" in name or "gpu" in name) != cuda:
+        if platform == "win32" and _asset_cuda_edition(name) != cuda:
             continue
         candidates.append((suffixes.index(suffix), asset))
     if not candidates:

@@ -3,9 +3,9 @@ picasso.gui.grid_settings
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Group box with the settings of the reference grid of Picasso: Render's
-2D and 3D windows: the full grid or only axes, spacing, the planes and their placement (3D only),
-whether the grid is drawn behind or over the localizations, and the
-look of its lines. The settings are turned into a
+2D and 3D windows: the full grid or only axes, spacing, the planes and
+their placement (3D only), whether the grid is drawn behind or over the
+localizations, and the look of its lines. The settings are turned into a
 ``picasso.render.GridOverlay`` for the drawing functions and saved in
 the user settings.
 
@@ -338,24 +338,7 @@ class GridGroupBox(lib.CollapsibleGroupBox):
         for widget in widgets:
             widget.blockSignals(True)
         try:
-            if settings.get("Show") in KINDS:
-                self.kind.setCurrentText(settings["Show"])
-            spacing = settings.get("Spacing (nm)")
-            if isinstance(spacing, (int, float)) and spacing >= 1:
-                self.spacing.setValue(int(round(spacing)))
-            auto = settings.get("Automatic spacing")
-            if isinstance(auto, bool):
-                self.auto_spacing.setChecked(auto)
-            if settings.get("Draw") in render.GRID_BLEND_MODES:
-                self.blend.setCurrentText(settings["Draw"])
-            if isinstance(settings.get("Labels"), bool):
-                self.labels.setChecked(settings["Labels"])
-            planes = settings.get("Planes")
-            if self.three_d and isinstance(planes, list):
-                for plane, check in self.planes.items():
-                    check.setChecked(plane in planes)
-            if self.three_d and settings.get("Position") in POSITIONS:
-                self.position.setCurrentText(settings["Position"])
+            self._set_widgets(settings)
         finally:
             for widget in widgets:
                 widget.blockSignals(False)
@@ -364,3 +347,25 @@ class GridGroupBox(lib.CollapsibleGroupBox):
         self.style_widget.load_settings(settings)
         self.style_widget.blockSignals(False)
         self.changed.emit()
+
+    def _set_widgets(self, settings: dict) -> None:
+        """Set the widgets (except the line appearance) to the valid
+        values in ``settings``, see ``load_settings``."""
+        if settings.get("Show") in KINDS:
+            self.kind.setCurrentText(settings["Show"])
+        spacing = settings.get("Spacing (nm)")
+        if isinstance(spacing, (int, float)) and spacing >= 1:
+            self.spacing.setValue(int(round(spacing)))
+        auto = settings.get("Automatic spacing")
+        if isinstance(auto, bool):
+            self.auto_spacing.setChecked(auto)
+        if settings.get("Draw") in render.GRID_BLEND_MODES:
+            self.blend.setCurrentText(settings["Draw"])
+        if isinstance(settings.get("Labels"), bool):
+            self.labels.setChecked(settings["Labels"])
+        planes = settings.get("Planes")
+        if self.three_d and isinstance(planes, list):
+            for plane, check in self.planes.items():
+                check.setChecked(plane in planes)
+        if self.three_d and settings.get("Position") in POSITIONS:
+            self.position.setCurrentText(settings["Position"])

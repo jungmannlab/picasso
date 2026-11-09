@@ -29,6 +29,7 @@ from .fitting import precision
 
 __all__ = [
     "calibrate_z",
+    "calibrate_z_phasor",
     "zfit",
     "axial_localization_precision",
     "axial_localization_precision_astig",
@@ -158,50 +159,9 @@ def calibrate_z(
     n_frames = info[0]["Frames"]
     pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
     frames_per_step = max(1, int(frames_per_step))
-    # number of distinct z (stage) positions; any trailing frames that do
-    # not complete a step are ignored
-    n_steps = n_frames // frames_per_step
-    if n_steps < 1:
-        raise ValueError(
-            "Number of frames per step is larger than the number of "
-            "frames in the movie."
-        )
-
-    # map each frame to the index of its z (stage) position
-    all_frames = np.arange(n_frames)
-    valid = all_frames < n_steps * frames_per_step
-    if frame_order == "z":
-        # full z stack scanned sequentially, then repeated
-        step_of_frame = all_frames % n_steps
-    else:  # "fov": consecutive frames share the same z position
-        step_of_frame = all_frames // frames_per_step
-    step_of_frame = np.where(valid, step_of_frame, -1)
-
-    # z position of each step; negative so that the first frames of a
-    # bottom-to-up scan are positive z coordinates
-    z_span = (n_steps - 1) * d
-    z_of_step = -(np.arange(n_steps) * d - z_span / 2)
-
-    if frame_bounds is not None:
-        # normalize to a list of inclusive (lo, hi) segments; a frame is
-        # kept if it falls in any segment (frame bounds are inclusive,
-        # like in picasso.localize)
-        segments = lib.normalize_frame_bounds(frame_bounds, n_frames - 1)
-        in_bounds = np.zeros(n_frames, dtype=bool)
-        for frame_min, frame_max in segments:
-            in_bounds |= (all_frames >= frame_min) & (all_frames <= frame_max)
-        step_of_frame = np.where(in_bounds, step_of_frame, -1)
-
-    # steps that still have at least one frame contributing to them
-    step_range = np.unique(step_of_frame[step_of_frame >= 0])
-    z_range = z_of_step[step_range]
-    # position of each step within the (bounded) step_range
-    step_to_pos = {int(s): i for i, s in enumerate(step_range)}
-
-    # assign each localization to its z (stage) position
-    locs = locs.copy()
-    locs_step = step_of_frame[locs["frame"].to_numpy()]
-    locs = locs[np.isin(locs_step, step_range)]
+    locs, step_of_frame, step_range, z_range, step_to_pos = _z_steps(
+        locs, n_frames, d, frame_bounds, frames_per_step, frame_order
+    )
     locs_step = step_of_frame[locs["frame"].to_numpy()]
 
     mean_sx = np.array([locs["sx"][locs_step == _].mean() for _ in step_range])
@@ -321,8 +281,415 @@ def calibrate_z(
     plt.ylabel("Spot width/height (nm)")
     plt.legend(loc="best")
 
+    _plot_z_accuracy(z_range, pos, locs["z"].to_numpy(), locs_step, step_range)
+    _finish_calibration_figure(path)
+    return calibration
+
+
+#: Keys of an astigmatic phasor calibration (see
+#: :func:`calibrate_z_phasor`): the coefficients of the quadratic of
+#: each normalized phasor magnitude against z (nm), highest power first,
+#: and the range of z (nm) over which their ratio is monotonic.
+_PHASOR_X = "Phasor X coefficients"
+_PHASOR_Y = "Phasor Y coefficients"
+_PHASOR_Z_RANGE = "Z range in nm"
+
+#: The locs columns a phasor calibration is built from.
+_PHASOR_MAGNITUDES = ("phasor_magnitude_x", "phasor_magnitude_y")
+
+
+def _is_phasor_calibration(calibration: dict | None) -> bool:
+    """Whether ``calibration`` is an astigmatic phasor calibration (see
+    :func:`calibrate_z_phasor`) rather than a Gaussian one."""
+    return isinstance(calibration, dict) and _PHASOR_X in calibration
+
+
+def calibrate_z_phasor(
+    locs: pd.DataFrame,
+    info: list[dict],
+    *,
+    d: float,
+    magnification_factor: float,
+    path: str | None = None,
+    frame_bounds: tuple[int, int] | None = None,
+    frames_per_step: int = 1,
+    frame_order: Literal["fov", "z"] = "fov",
+    z_binning: int = 1,
+) -> dict:
+    """Calibrate astigmatic z for phasor localization, from localizations
+    of a calibration sample (e.g., beads at different z positions) found
+    with ``fitting_method="phasor"``. Martens et al., J. Chem. Phys.,
+    2018, Sec. S6. DOI: 10.1063/1.5005899.
+
+    The normalized phasor magnitudes of a spot fall as it widens, in x and
+    in y separately (see ``picasso.fitting.phasor``). As in the paper
+    (Eq. S5), a quadratic in z is fitted to the mean magnitude in x and to
+    the one in y of each z (stage) position; z of a localization is then
+    the z at which the ratio of the two curves equals the ratio of its
+    magnitudes (Eq. S6), which does not depend on its brightness or on
+    the background. Of the two solutions, the one inside the calibrated
+    range is taken. The stage positions, outlier rejection (localizations
+    whose magnitude is more than one standard deviation off the mean of
+    their step are left out of the means), ``frames_per_step``,
+    ``frame_order``, ``frame_bounds`` and ``z_binning`` are those of
+    :func:`calibrate_z`, as is z = 0, where the two curves cross. The
+    calibrated range is the stretch of the scanned range around z = 0
+    over which the ratio is monotonic.
+
+    The magnitudes depend on the box the spots were fitted in and on the
+    camera pixel size, so the calibration records both and can only be
+    used with the same.
+
+    Parameters
+    ----------
+    locs : pd.DataFrame
+        Phasor localizations of a calibration sample, with the columns
+        ``phasor_magnitude_x`` and ``phasor_magnitude_y``.
+    info : list of dicts
+        Metadata of ``locs``, with the number of frames, the camera pixel
+        size and the box size of the fit ("Fit box size"). The
+        identification parameters of the localizations, if ``info`` has
+        them, are recorded in the calibration.
+    d : float
+        Step size in nm, i.e., the distance between the z positions of
+        the calibration sample.
+    magnification_factor : float
+        Magnification factor of the microscope, i.e., the ratio between
+        the actual z position of the calibration sample and the
+        estimated z position from the localization data.
+    path : str, optional
+        Path to save the calibration as a YAML file, and its figure next
+        to it (".png"). If None, nothing is saved. Default is None.
+    frame_bounds : tuple, list of tuples, optional
+        Frames to consider, as in :func:`calibrate_z`. Default is None
+        (all frames).
+    frames_per_step : int, optional
+        Number of frames acquired at each z (stage) position, as in
+        :func:`calibrate_z`. Default is 1.
+    frame_order : {"fov", "z"}, optional
+        Acquisition order of the frames when ``frames_per_step`` > 1, as
+        in :func:`calibrate_z`. Default is "fov".
+    z_binning : int, optional
+        Number of consecutive z (stage) steps merged into one axial bin
+        before the curves are fitted, as in :func:`calibrate_z`. Default
+        is 1.
+
+    Returns
+    -------
+    calibration : dict
+        The coefficients of the two quadratics (``"Phasor X
+        coefficients"``, ``"Phasor Y coefficients"``: the magnitude
+        against z in nm, highest power first), the calibrated range
+        (``"Z range in nm"``), the box size (``"Fit box size"``) and
+        camera pixel size (``"Pixelsize"``) of the fit, the number of
+        frames, step size, z binning, magnification factor, how the beads
+        were identified (``"Identification"``, only if ``info`` records
+        it) and the format marker (``io.FORMAT_VERSION_ATTR``).
+
+    Raises
+    ------
+    ValueError
+        If ``locs`` are not phasor localizations, if fewer than 3 axial
+        bins remain, or if the ratio of the fitted curves is not monotonic
+        around z = 0.
+    """
+    missing = [c for c in _PHASOR_MAGNITUDES if c not in locs.columns]
+    if missing:
+        raise ValueError(
+            f"The localizations have no {', '.join(missing)} column: "
+            "localize the calibration movie with the phasor method "
+            "(fitting_method='phasor') first."
+        )
+    n_frames = info[0]["Frames"]
+    pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
+    box = lib.get_from_metadata(info, "Fit box size")
+    if box is None:
+        raise ValueError(
+            "The metadata of the localizations has no 'Fit box size'; the "
+            "phasor magnitudes depend on it, so the calibration needs it."
+        )
+    frames_per_step = max(1, int(frames_per_step))
+    locs, step_of_frame, step_range, z_range, _ = _z_steps(
+        locs, n_frames, d, frame_bounds, frames_per_step, frame_order
+    )
+    n_steps = len(step_range)
+    pos = np.searchsorted(step_range, step_of_frame[locs["frame"].to_numpy()])
+    mag_x = locs[_PHASOR_MAGNITUDES[0]].to_numpy(dtype=float)
+    mag_y = locs[_PHASOR_MAGNITUDES[1]].to_numpy(dtype=float)
+
+    # leave out the localizations more than one standard deviation off the
+    # mean magnitude of their step, in x or in y (the rule of calibrate_z)
+    keep = np.ones(len(locs), dtype=bool)
+    for values in (mag_x, mag_y):
+        mean, var = _step_mean_var(values, pos, n_steps)
+        keep &= (values - mean[pos]) ** 2 < var[pos]
+    locs = locs[keep]
+    pos = pos[keep]
+    mag_x = mag_x[keep]
+    mag_y = mag_y[keep]
+
+    mean_x = _interpolate_nan(_step_mean_var(mag_x, pos, n_steps)[0])
+    mean_y = _interpolate_nan(_step_mean_var(mag_y, pos, n_steps)[0])
+    z_binning = max(1, int(z_binning))
+    z_bins = lib.bin_z_steps(z_range, z_binning)
+    mean_x_bins = lib.bin_z_steps(mean_x, z_binning)
+    mean_y_bins = lib.bin_z_steps(mean_y, z_binning)
+    if len(z_bins) < 3:
+        raise ValueError(
+            f"Only {len(z_bins)} axial bins remain after z binning of "
+            f"{z_binning} (from {len(z_range)} z steps); the quadratic "
+            "calibration curves need at least 3. Reduce the z binning or "
+            "widen the frame range."
+        )
+
+    # quadratic per magnitude (paper Eq. S5, expanded), z = 0 where the two
+    # curves cross, as in calibrate_z
+    cx = np.polyfit(z_bins, mean_x_bins, 2)
+    cy = np.polyfit(z_bins, mean_y_bins, 2)
+    z = np.linspace(z_bins.min(), z_bins.max(), 10001)
+    z_zero = z[np.argmin(np.abs(np.polyval(cx, z) - np.polyval(cy, z)))]
+    z_range = z_range - z_zero
+    z_bins = z_bins - z_zero
+    cx = np.polyfit(z_bins, mean_x_bins, 2)
+    cy = np.polyfit(z_bins, mean_y_bins, 2)
+    z_lo, z_hi = _monotonic_ratio_range(cx, cy, z_bins.min(), z_bins.max())
+
+    calibration = {
+        _PHASOR_X: [float(_) for _ in cx],
+        _PHASOR_Y: [float(_) for _ in cy],
+        _PHASOR_Z_RANGE: [float(z_lo), float(z_hi)],
+        "Fit box size": int(box),
+        "Pixelsize": float(pixelsize),
+        "Number of frames": int(n_frames),
+        "Step size in nm": float(d),
+        "Magnification factor": float(magnification_factor),
+        "Path": path if path is not None else "N/A",
+        "Frame bounds": frame_bounds,
+        "Frames per step": int(frames_per_step),
+        "Frame order": frame_order,
+        "Z binning": int(z_binning),
+        io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION,
+    }
+    identification = _identification_from_info(info)
+    if identification is not None:
+        calibration["Identification"] = identification
+    if path is not None:
+        io.save_calibration(path, calibration)
+
+    # z of the calibration localizations, in stage units (no magnification)
+    z_est = _phasor_z(mag_x / mag_y, calibration)
+    found = np.isfinite(z_est)
+
+    plt.figure(figsize=(18, 10))
+    z_cal = np.linspace(z_lo, z_hi, 500)
+
+    plt.subplot(231)
+    plt.plot(z_bins, mean_x_bins, ".-", label="x")
+    plt.plot(z_bins, mean_y_bins, ".-", label="y")
+    plt.plot(z_range, np.polyval(cx, z_range), "0.3", lw=1.5, label="fit")
+    plt.plot(z_range, np.polyval(cy, z_range), "0.3", lw=1.5)
+    plt.xlabel("Stage position (nm)")
+    plt.ylabel("Mean phasor magnitude")
+    plt.xlim(z_range.min(), z_range.max())
+    plt.legend(loc="best")
+
+    plt.subplot(232)
+    plt.plot(z_range[pos], mag_x / mag_y, ".k", alpha=0.1)
+    plt.plot(
+        z_cal,
+        np.polyval(cx, z_cal) / np.polyval(cy, z_cal),
+        lw=1.5,
+        label="calibration",
+    )
+    for edge in (z_lo, z_hi):
+        plt.axvline(edge, color="0.3", lw=1, ls="--")
+    plt.xlim(z_range.min(), z_range.max())
+    plt.xlabel("Stage position (nm)")
+    plt.ylabel("Magnitude ratio x / y")
+    plt.legend(loc="best")
+
+    plt.subplot(233)
+    plt.plot(z_est[found], mag_x[found], ".", label="x", alpha=0.2)
+    plt.plot(z_est[found], mag_y[found], ".", label="y", alpha=0.2)
+    plt.plot(z_cal, np.polyval(cx, z_cal), "0.3", lw=1.5, label="calibration")
+    plt.plot(z_cal, np.polyval(cy, z_cal), "0.3", lw=1.5)
+    plt.xlim(z_range.min(), z_range.max())
+    plt.xlabel("Estimated z (nm)")
+    plt.ylabel("Phasor magnitude")
+    plt.legend(loc="best")
+
+    _plot_z_accuracy(
+        z_range, pos[found], z_est[found], step_range[pos[found]], step_range
+    )
+    _finish_calibration_figure(path)
+    return calibration
+
+
+def _step_mean_var(
+    values: np.ndarray, pos: lib.IntArray1D, n_steps: int
+) -> tuple[np.ndarray, np.ndarray]:
+    """Mean and sample variance (as pandas computes it) of ``values`` per
+    z step (``pos``: the step of each value); NaN for steps without
+    values (and the variance for steps with one)."""
+    counts = np.bincount(pos, minlength=n_steps).astype(float)
+    with np.errstate(invalid="ignore", divide="ignore"):
+        mean = np.bincount(pos, values, minlength=n_steps) / counts
+        square = np.bincount(pos, (values - mean[pos]) ** 2, minlength=n_steps)
+        var = square / (counts - 1)
+    var[counts < 2] = np.nan
+    return mean, var
+
+
+def _monotonic_ratio_range(
+    cx: np.ndarray, cy: np.ndarray, z_min: float, z_max: float
+) -> tuple[float, float]:
+    """The stretch of ``[z_min, z_max]`` around z = 0 over which the ratio
+    of the magnitude quadratics ``cx`` / ``cy`` is positive and strictly
+    monotonic, so that every ratio in it has one z."""
+    z = np.linspace(z_min, z_max, 10001)
+    mx = np.polyval(cx, z)
+    my = np.polyval(cy, z)
+    # d(mx / my)/dz has the sign of mx' my - mx my'
+    slope = np.polyval(np.polyder(cx), z) * my - mx * np.polyval(
+        np.polyder(cy), z
+    )
+    sign = np.sign(slope)
+    usable = (mx > 0) & (my > 0)
+    i0 = int(np.argmin(np.abs(z)))
+    if not usable[i0] or sign[i0] == 0:
+        raise ValueError(
+            "The phasor magnitude ratio of the calibration is not monotonic "
+            "around z = 0; check that the beads are astigmatic and that the "
+            "scan covers their focus."
+        )
+    ok = usable & (sign == sign[i0])
+    lo = i0
+    while lo > 0 and ok[lo - 1]:
+        lo -= 1
+    hi = i0
+    while hi < len(z) - 1 and ok[hi + 1]:
+        hi += 1
+    if hi == lo:
+        raise ValueError(
+            "The phasor magnitude ratio of the calibration is monotonic "
+            "over no range around z = 0."
+        )
+    return float(z[lo]), float(z[hi])
+
+
+def _phasor_z(ratio: np.ndarray, calibration: dict) -> np.ndarray:
+    """z (nm, without the magnification factor) at which the ratio of the
+    calibration's magnitude quadratics equals ``ratio`` (paper Eq. S6),
+    the root inside the calibrated range; NaN where there is none."""
+    cx = np.asarray(calibration[_PHASOR_X], dtype=float)
+    cy = np.asarray(calibration[_PHASOR_Y], dtype=float)
+    z_lo, z_hi = calibration[_PHASOR_Z_RANGE]
+    ratio = np.asarray(ratio, dtype=float)
+    # ratio * my(z) - mx(z) = a z^2 + b z + c = 0
+    a = ratio * cy[0] - cx[0]
+    b = ratio * cy[1] - cx[1]
+    c = ratio * cy[2] - cx[2]
+    with np.errstate(invalid="ignore", divide="ignore"):
+        root = np.sqrt(b * b - 4 * a * c)  # NaN: no real solution
+        # the two roots without cancellation; a == 0 (linear) gives
+        # q = -b and z2 = -c / b
+        q = -0.5 * (b + np.copysign(root, b))
+        z1 = q / a
+        z2 = c / q
+    in1 = (z1 >= z_lo) & (z1 <= z_hi)
+    in2 = (z2 >= z_lo) & (z2 <= z_hi)
+    return np.where(in1, z1, np.where(in2, z2, np.nan))
+
+
+def _phasor_lpz(
+    z: np.ndarray, sd_log_ratio: np.ndarray, calibration: dict
+) -> np.ndarray:
+    """Axial precision (nm, without the magnification factor) of phasor z:
+    the standard error of the log magnitude ratio divided by the slope of
+    the calibration's log ratio at ``z``."""
+    cx = np.asarray(calibration[_PHASOR_X], dtype=float)
+    cy = np.asarray(calibration[_PHASOR_Y], dtype=float)
+    slope = np.polyval(np.polyder(cx), z) / np.polyval(cx, z) - np.polyval(
+        np.polyder(cy), z
+    ) / np.polyval(cy, z)
+    with np.errstate(divide="ignore"):
+        return sd_log_ratio / np.abs(slope)
+
+
+def _z_steps(
+    locs: pd.DataFrame,
+    n_frames: int,
+    d: float,
+    frame_bounds: tuple | list | None,
+    frames_per_step: int,
+    frame_order: Literal["fov", "z"],
+) -> tuple[pd.DataFrame, lib.IntArray1D, lib.IntArray1D, np.ndarray, dict]:
+    """Assign the localizations of a calibration z stack to their z
+    (stage) positions, see :func:`calibrate_z` for the parameters.
+
+    Returns the localizations of the frames that belong to a step (a copy),
+    the step index of every frame (-1 for none), the steps that keep at
+    least one frame, the stage position of each of those (nm) and the
+    position of each step within them."""
+    # number of distinct z (stage) positions; any trailing frames that do
+    # not complete a step are ignored
+    n_steps = n_frames // frames_per_step
+    if n_steps < 1:
+        raise ValueError(
+            "Number of frames per step is larger than the number of "
+            "frames in the movie."
+        )
+
+    # map each frame to the index of its z (stage) position
+    all_frames = np.arange(n_frames)
+    valid = all_frames < n_steps * frames_per_step
+    if frame_order == "z":
+        # full z stack scanned sequentially, then repeated
+        step_of_frame = all_frames % n_steps
+    else:  # "fov": consecutive frames share the same z position
+        step_of_frame = all_frames // frames_per_step
+    step_of_frame = np.where(valid, step_of_frame, -1)
+
+    # z position of each step; negative so that the first frames of a
+    # bottom-to-up scan are positive z coordinates
+    z_span = (n_steps - 1) * d
+    z_of_step = -(np.arange(n_steps) * d - z_span / 2)
+
+    if frame_bounds is not None:
+        # normalize to a list of inclusive (lo, hi) segments; a frame is
+        # kept if it falls in any segment (frame bounds are inclusive,
+        # like in picasso.localize)
+        segments = lib.normalize_frame_bounds(frame_bounds, n_frames - 1)
+        in_bounds = np.zeros(n_frames, dtype=bool)
+        for frame_min, frame_max in segments:
+            in_bounds |= (all_frames >= frame_min) & (all_frames <= frame_max)
+        step_of_frame = np.where(in_bounds, step_of_frame, -1)
+
+    # steps that still have at least one frame contributing to them
+    step_range = np.unique(step_of_frame[step_of_frame >= 0])
+    z_range = z_of_step[step_range]
+    # position of each step within the (bounded) step_range
+    step_to_pos = {int(s): i for i, s in enumerate(step_range)}
+
+    # assign each localization to its z (stage) position
+    locs = locs.copy()
+    locs_step = step_of_frame[locs["frame"].to_numpy()]
+    locs = locs[np.isin(locs_step, step_range)]
+    return locs, step_of_frame, step_range, z_range, step_to_pos
+
+
+def _plot_z_accuracy(
+    z_range: np.ndarray,
+    pos: lib.IntArray1D,
+    z: np.ndarray,
+    locs_step: lib.IntArray1D,
+    step_range: lib.IntArray1D,
+) -> None:
+    """The bottom row of a z calibration's figure: estimated z against
+    the stage position (``z_range[pos]`` per localization), the deviations
+    and their RMS per step."""
     ax = plt.subplot(234)
-    plt.plot(z_range[pos], locs["z"], ".k", alpha=0.1)
+    plt.plot(z_range[pos], z, ".k", alpha=0.1)
     plt.plot(
         [z_range.min(), z_range.max()],
         [z_range.min(), z_range.max()],
@@ -337,14 +704,14 @@ def calibrate_z(
     plt.legend(loc="best")
 
     ax = plt.subplot(235)
-    deviation = locs["z"] - z_range[pos]
+    deviation = z - z_range[pos]
     bins = lib.calculate_optimal_bins(deviation, max_n_bins=1000)
     plt.hist(deviation, bins)
     plt.xlabel("Deviation to true position (nm)")
     plt.ylabel("Occurence")
 
     ax = plt.subplot(236)
-    square_deviation = deviation.to_numpy() ** 2
+    square_deviation = deviation**2
     # a step without localizations has no precision (a gap in the plot)
     mean_square_deviation_step = [
         (
@@ -361,14 +728,15 @@ def calibrate_z(
     plt.xlabel("Stage position (nm)")
     plt.ylabel("Mean z precision (nm)")
 
-    plt.tight_layout(pad=2)
 
+def _finish_calibration_figure(path: str | None) -> None:
+    """Lay out the current calibration figure, save it next to the
+    calibration file (``path``, with ``.png``) and show it."""
+    plt.tight_layout(pad=2)
     if path is not None:
         path, ext = os.path.splitext(path)
         plt.savefig(path + ".png", format="png", dpi=300)
-
     plt.show()
-    return calibration
 
 
 @numba.jit(nopython=True, nogil=True)
@@ -959,6 +1327,14 @@ def zfit(
         calibration,
         dict,
     ), "Calibration must be a dict, see ``io.load_calibration``."
+    if _is_phasor_calibration(calibration):
+        raise ValueError(
+            "This is a phasor calibration (see calibrate_z_phasor), which "
+            "takes z from the phasor magnitudes during the fit: localize "
+            "with fitting_method='phasor' and pass it as phasor_calibration "
+            "(picasso.localize.fit) or calibration_3d "
+            "(picasso.localize.localize)."
+        )
     if pixelsize is not None:
         assert isinstance(
             pixelsize, (int, float)

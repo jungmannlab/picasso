@@ -5,6 +5,7 @@ and its Gaussian and cubic-spline PSF models were ported to Python/numba in
 
     picasso/fitting/splinefit.py       CPU cubic-spline fitting
     picasso/fitting/splinefit_cuda.py  CUDA cubic-spline fitting
+    picasso/fitting/gaussfit.py        CPU Gaussian fitting
     picasso/fitting/gaussfit_cuda.py   CUDA Gaussian fitting
     picasso/fitting/lmfit_cuda.py      shared CUDA Levenberg-Marquardt
                                        machinery

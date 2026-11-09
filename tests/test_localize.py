@@ -2062,6 +2062,23 @@ class TestLocalize:
         assert "Min. Net Gradient" in info[-2]
         assert "Fit method" in info[-1]
 
+    def test_without_movie_info_records_movie_size(self, picasso_movie):
+        """Without ``movie_info``, the metadata still has every key a
+        localization file needs, so e.g. ``zfit`` and ``save_locs`` accept
+        the result."""
+        locs, info = localize.localize(
+            picasso_movie,
+            camera_info=CAMERA_INFO_WITH_PIXELSIZE,
+            identification_parameters=_params(),
+            fitting_method="gausslq",
+            parallel=False,
+        )
+        n_frames, height, width = picasso_movie.shape
+        assert lib.get_from_metadata(info, "Frames") == n_frames
+        assert lib.get_from_metadata(info, "Height") == height
+        assert lib.get_from_metadata(info, "Width") == width
+        io.validate_locs(locs, info)
+
     def test_mm_metadata_carried_over_unless_disabled(
         self, picasso_movie, movie_info, monkeypatch
     ):
@@ -5345,9 +5362,9 @@ class TestGuiConvergenceDefaults:
     and the fit runs another."""
 
     def test_every_iterating_method_has_defaults(self):
-        """Every ``fit`` code except "avg" iterates and must be listed. The
-        multi-emitter model is not a ``fit`` method: its schedule is its
-        own, and it shows no convergence boxes."""
+        """Every ``fit`` code except "avg" and "phasor" iterates and must
+        be listed. The multi-emitter model is not a ``fit`` method: its
+        schedule is its own, and it shows no convergence boxes."""
         codes = set()
         for entry in localize_gui.FIT_MODELS.values():
             if entry.get("multi_emitter"):
@@ -5359,7 +5376,8 @@ class TestGuiConvergenceDefaults:
             for code in optimizers.values():
                 codes.add(code)
                 codes.add(localize_gui._effective_fit_code(code, True))
-        assert codes - localize_gui._CONVERGENCE_CODES == {"avg"}
+        not_iterating = codes - localize_gui._CONVERGENCE_CODES
+        assert not_iterating == {"avg", "phasor"}
 
     def test_defaults_match_the_backends(self):
         """The boxes must show the schedule the fit will actually use, so the
@@ -9228,14 +9246,16 @@ class TestFitAffineTransform:
         return _affine_bead_image(ref_xy), _affine_bead_image(cyl_xy), ref_xy
 
     @pytest.mark.parametrize(
-        "model", [m for m in transforms.MODELS if m != "translation"]
+        "model",
+        [m for m in transforms.MODELS if m not in ("translation", "rigid")],
     )
     def test_every_model_recovers_the_applied_transform(
         self, bead_movies, model
     ):
         """The correction is a pure affine here, which every model except the
-        translation can represent - so each must recover it, and record which
-        one it is. The translation is covered on a pure shift below."""
+        translation and the rigid transform can represent - so each must
+        recover it, and record which one it is. The translation and the rigid
+        transform are covered on their own corrections below."""
         movie_ref, movie_cyl, ref_xy = bead_movies
         calibration, _ = localize.fit_lateral_transform(
             movie_ref,
@@ -9299,6 +9319,36 @@ class TestFitAffineTransform:
             ref_xy * PIXELSIZE,
             atol=0.3 * PIXELSIZE,
         )
+
+    def test_a_rigid_transform_recovers_a_rotation_and_shift(self):
+        """The rotation + shift model on the only correction it claims to
+        fit. The class-wide ``TRUTH`` also scales anisotropically, which a
+        rigid transform cannot represent."""
+        angle = np.radians(0.5)
+        truth = np.array(
+            [
+                [np.cos(angle), -np.sin(angle), 3.0],
+                [np.sin(angle), np.cos(angle), -2.0],
+                [0.0, 0.0, 1.0],
+            ]
+        )
+        ref_xy = _affine_bead_grid()
+        moved_xy = _apply_homogeneous(np.linalg.inv(truth), ref_xy)
+        calibration, _ = localize.fit_lateral_transform(
+            _affine_bead_image(ref_xy),
+            _affine_bead_image(moved_xy),
+            calibration={},
+            box=BOX,
+            identification_method=LATERAL_NG,
+            model="rigid",
+            pixelsize=PIXELSIZE,
+        )
+        (entry,) = lib.lateral_transforms(calibration)
+        assert entry["Transform"]["model"] == "rigid"
+        mapped = transforms.from_dict(entry["Transform"]).apply(
+            moved_xy * PIXELSIZE
+        )
+        assert np.allclose(mapped, ref_xy * PIXELSIZE, atol=0.3 * PIXELSIZE)
 
     def test_too_few_pairs_for_the_model_raises(self):
         """Enough beads for an affine, too few for a degree-3 polynomial: the

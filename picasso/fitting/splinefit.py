@@ -137,8 +137,9 @@ FIT_STATE_NEG_CURVATURE_MLE = 3
 # comparable and solutions that need a negative model are disfavored, but it
 # contributes nothing to the gradient or the Hessian: its ``1 / mu`` weight
 # would otherwise be enormous and, since Gpufit's scaling vector is a running
-# maximum, would damp every parameter to a standstill for the rest of the fit. Well-behaved fits never reach the floor,
-# so this does not change their result.
+# maximum, would damp every parameter to a standstill for the rest of the fit.
+# Well-behaved fits never reach the floor, so this does not change their
+# result.
 MU_FLOOR = 1e-3
 
 # LLVM fast-math flags for the numerical kernels: everything except ``nnan``

@@ -20,7 +20,6 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 import matplotlib.patches as patches
-import matplotlib.pyplot as plt
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 # must come after the PyQt6 import so that matplotlib's qt_compat
@@ -182,7 +181,7 @@ class Window(QtWidgets.QMainWindow):
         simulated.
     exportkinetics : QtWidgets.QCheckBox
         Save binding kinetics information to a .yaml file.
-    figure1, figure2 : plt.Figure
+    figure1, figure2 : matplotlib.figure.Figure
         Figures for displaying the simulated ROI and designed structure,
         respectively.
     framesEdit : QtWidgets.QSpinBox
@@ -1896,6 +1895,54 @@ class Window(QtWidgets.QMainWindow):
         info = documents[0] if documents else None
         if not isinstance(info, dict):
             info = {}
+        required, optional = self._settings_setters()
+        # the simulated positions, in the rows of ``self.newstruct``
+        handle_keys = [
+            "Structure.HandleX",
+            "Structure.HandleY",
+            "Structure.HandleEx",
+            "Structure.HandleStruct",
+            "Structure.Handle3d",
+        ]
+
+        missing = [key for key in [*required, *handle_keys] if key not in info]
+        if missing:
+            listed = ", ".join(missing[:5])
+            if len(missing) > 5:
+                listed += f" and {len(missing) - 5} more"
+            QtWidgets.QMessageBox.warning(
+                self,
+                title,
+                f"{path} does not contain the settings of a Picasso: "
+                f"Simulate simulation.\nMissing: {listed}.",
+            )
+            return
+        try:
+            handles = np.array(
+                [
+                    np.asarray(str(info[key]).split(","), dtype=float)
+                    for key in handle_keys
+                ]
+            )
+        except ValueError as error:
+            QtWidgets.QMessageBox.warning(
+                self,
+                title,
+                f"Could not read the docking strand positions in {path}:"
+                f"\n{error}",
+            )
+            return
+
+        self._apply_settings(info, required, optional)
+        self.newstruct = handles
+        self.plotPositions()
+        self.statusBar().showMessage("Settings loaded from: " + path)
+
+    def _settings_setters(self) -> tuple[dict, dict]:
+        """The functions that set the widgets of the settings of a
+        simulation (see ``loadSettings``), by their keys in its .yaml
+        file: those every simulation has, and those of newer versions
+        and of the noise model (``ADVANCEDMODE``)."""
 
         def check(widget):
             return lambda value: widget.setChecked(bool(value))
@@ -1946,43 +1993,14 @@ class Window(QtWidgets.QMainWindow):
                     "Noise.BackgroundStdOff": self.BgStdoffsetEdit.setValue,
                 }
             )
-        # the simulated positions, in the rows of ``self.newstruct``
-        handle_keys = [
-            "Structure.HandleX",
-            "Structure.HandleY",
-            "Structure.HandleEx",
-            "Structure.HandleStruct",
-            "Structure.Handle3d",
-        ]
+        return required, optional
 
-        missing = [key for key in [*required, *handle_keys] if key not in info]
-        if missing:
-            listed = ", ".join(missing[:5])
-            if len(missing) > 5:
-                listed += f" and {len(missing) - 5} more"
-            QtWidgets.QMessageBox.warning(
-                self,
-                title,
-                f"{path} does not contain the settings of a Picasso: "
-                f"Simulate simulation.\nMissing: {listed}.",
-            )
-            return
-        try:
-            handles = np.array(
-                [
-                    np.asarray(str(info[key]).split(","), dtype=float)
-                    for key in handle_keys
-                ]
-            )
-        except ValueError as error:
-            QtWidgets.QMessageBox.warning(
-                self,
-                title,
-                f"Could not read the docking strand positions in {path}:"
-                f"\n{error}",
-            )
-            return
-
+    def _apply_settings(
+        self, info: dict, required: dict, optional: dict
+    ) -> None:
+        """Set the widgets to the settings in ``info`` with the setters
+        of ``_settings_setters``, and the spot widths of the noise
+        model."""
         for key, apply in required.items():
             apply(info[key])
         for key, apply in optional.items():
@@ -1997,10 +2015,6 @@ class Window(QtWidgets.QMainWindow):
             self.cx = [c * pixelsize for c in info["Structure.CX"]]
             self.cy = [c * pixelsize for c in info["Structure.CY"]]
         self.structurecombo.setCurrentIndex(2)  # Custom
-
-        self.newstruct = handles
-        self.plotPositions()
-        self.statusBar().showMessage("Settings loaded from: " + path)
 
     def importDesign(self) -> None:
         """Import DNA origami design generated by Picasso: Design."""
@@ -2052,83 +2066,12 @@ class Window(QtWidgets.QMainWindow):
         if path:
             splitpath = os.path.splitext(path)
             if splitpath[-1] == ".yaml":
-
-                info = io.load_info(path)
-
-                x = self.readLine(
-                    info[0]["Structure.StructureX"],
-                    textmode=False,
-                )
-                y = self.readLine(
-                    info[0]["Structure.StructureY"],
-                    textmode=False,
-                )
-                try:
-                    ex = self.readLine(
-                        info[0]["Structure.StructureEx"],
-                        type="int",
-                        textmode=False,
-                    )
-                except Exception as e:
-                    print(e)
-                    ex = np.ones_like(x)
-
-                try:
-                    z = self.readLine(
-                        info[0]["Structure.Structure3D"],
-                        textmode=False,
-                    )
-                except Exception as e:
-                    print(e)
-                    z = np.zeros_like(x)
-
-                minlen = min(len(x), len(y), len(ex), len(z))
-
-                x = np.asarray(x[0:minlen])
-                y = np.asarray(y[0:minlen])
-                ex = ex[0:minlen]
-                z = z[0:minlen]
-
-                # The structure is stored relative to its own origin (nm,
-                # y up as in Simulate); align it in the center of window.
-                center = self.camerasizeEdit.value() / 2
-                center *= self.pixelsizeEdit.value()
-                x = x - np.mean(x) + center
-                y = y - np.mean(y) + center
-
+                handles = self._handles_from_yaml(path)
             else:
-
-                try:
-                    loaded = lib_qt.load_or_ask_pixelsize(
-                        self, io.load_locs, path
-                    )
-                except lib.FILE_LOAD_ERRORS as error:
-                    lib.show_load_error(self, path, error)
+                handles = self._handles_from_locs(path)
+                if handles is None:
                     return
-                if loaded is None:  # the pixel size prompt was canceled
-                    return
-                clusters, _ = loaded
-
-                # The cluster centers are in nm; align them in the center
-                # of the window (nm). Simulate's coordinates point y up
-                # (simulate.convert_movie flips the frame), the clusters' y
-                # points down as in Render, so y is negated to keep the
-                # structure's orientation in the simulated movie.
-                center = self.camerasizeEdit.value() / 2
-                center *= self.pixelsizeEdit.value()
-                x = clusters["x"].to_numpy(dtype=np.float64)
-                y = clusters["y"].to_numpy(dtype=np.float64)
-                x = x - np.mean(x) + center
-                y = -(y - np.mean(y)) + center
-
-                try:
-                    z = clusters["z"]
-                except Exception as e:
-                    print(e)
-                    z = np.zeros_like(x)
-
-                ex = np.ones_like(x)
-                minlen = len(x)
+            x, y, ex, z, minlen = handles
 
             self.handles["x"] = x
             self.handles["y"] = y
@@ -2145,6 +2088,89 @@ class Window(QtWidgets.QMainWindow):
             self.generatePositions()
 
             self.statusBar().showMessage(f"A total of {minlen} points loaded.")
+
+    def _handles_from_yaml(self, path: str) -> tuple:
+        """The handles of a structure saved by Picasso: Design or
+        Simulate (.yaml), centered in the window (see ``importHandles``):
+        x, y, exchange rounds, z and their number."""
+        info = io.load_info(path)
+
+        x = self.readLine(
+            info[0]["Structure.StructureX"],
+            textmode=False,
+        )
+        y = self.readLine(
+            info[0]["Structure.StructureY"],
+            textmode=False,
+        )
+        try:
+            ex = self.readLine(
+                info[0]["Structure.StructureEx"],
+                type="int",
+                textmode=False,
+            )
+        except Exception as e:
+            print(e)
+            ex = np.ones_like(x)
+
+        try:
+            z = self.readLine(
+                info[0]["Structure.Structure3D"],
+                textmode=False,
+            )
+        except Exception as e:
+            print(e)
+            z = np.zeros_like(x)
+
+        minlen = min(len(x), len(y), len(ex), len(z))
+
+        x = np.asarray(x[0:minlen])
+        y = np.asarray(y[0:minlen])
+        ex = ex[0:minlen]
+        z = z[0:minlen]
+
+        # The structure is stored relative to its own origin (nm, y up as
+        # in Simulate); align it in the center of window.
+        center = self.camerasizeEdit.value() / 2
+        center *= self.pixelsizeEdit.value()
+        x = x - np.mean(x) + center
+        y = y - np.mean(y) + center
+        return x, y, ex, z, minlen
+
+    def _handles_from_locs(self, path: str) -> tuple | None:
+        """The handles of a structure from localizations, e.g., cluster
+        centers (.hdf5), centered in the window (see ``importHandles``):
+        x, y, exchange rounds, z and their number. None if they could
+        not be loaded or the pixel size prompt was canceled."""
+        try:
+            loaded = lib_qt.load_or_ask_pixelsize(self, io.load_locs, path)
+        except lib.FILE_LOAD_ERRORS as error:
+            lib.show_load_error(self, path, error)
+            return None
+        if loaded is None:  # the pixel size prompt was canceled
+            return None
+        clusters, _ = loaded
+
+        # The cluster centers are in nm; align them in the center of the
+        # window (nm). Simulate's coordinates point y up
+        # (simulate.convert_movie flips the frame), the clusters' y points
+        # down as in Render, so y is negated to keep the structure's
+        # orientation in the simulated movie.
+        center = self.camerasizeEdit.value() / 2
+        center *= self.pixelsizeEdit.value()
+        x = clusters["x"].to_numpy(dtype=np.float64)
+        y = clusters["y"].to_numpy(dtype=np.float64)
+        x = x - np.mean(x) + center
+        y = -(y - np.mean(y)) + center
+
+        try:
+            z = clusters["z"]
+        except Exception as e:
+            print(e)
+            z = np.zeros_like(x)
+
+        ex = np.ones_like(x)
+        return x, y, ex, z, len(x)
 
     def readStructure(
         self,
