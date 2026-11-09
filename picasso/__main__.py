@@ -3112,6 +3112,14 @@ def _localize_movie(
             lateral_transforms=lateral_transforms,
             suffix=suffix,
         )
+    phasor_calibration = None
+    if fitting_method == "phasor" and z_params is not None:
+        # the phasor fit takes z from its calibration itself, so no z fit
+        # follows (and the fit applies the lateral corrections)
+        _, magnification_factor, z_calibration = z_params
+        phasor_calibration = dict(z_calibration)
+        phasor_calibration["Magnification factor"] = magnification_factor
+        z_params = None
     with _lateral_report_only():
         locs, info = localize(
             movie,
@@ -3127,6 +3135,7 @@ def _localize_movie(
             max_it=max_iterations if max_iterations > 0 else None,
             spline_calibration=spline_calibration,
             vectorfit_parameters=_vectorfit_parameters_from_args(args),
+            calibration_3d=phasor_calibration,
             camera_calibration=camera_calibration,
             # in 3D, the z fit applies them (see _localize_finish)
             affine_calibration=None if z_params else lateral_transforms,
@@ -3141,10 +3150,36 @@ def _localize_movie(
         args,
         z_params,
         lateral_transforms,
-        spline_calibration,
+        spline_calibration or phasor_calibration,
         suffix=suffix,
     )
     return [saved]
+
+
+def _check_3d_calibration_kind(
+    args: argparse.Namespace, calibration: dict | None
+) -> None:
+    """Refuse a 3D calibration of the wrong kind before any movie is
+    read: the phasor fit ('phasor-3d') needs an astigmatic phasor
+    calibration, the Gaussian z fit a Gaussian one."""
+    if calibration is None:  # written before Picasso 1.0: Gaussian
+        phasor_calibration = False
+    else:
+        from .zfit import _is_phasor_calibration
+
+        phasor_calibration = _is_phasor_calibration(calibration)
+    if args.fit_method == "phasor-3d" and not phasor_calibration:
+        raise Exception(
+            "'phasor-3d' needs an astigmatic phasor calibration (made in "
+            "Localize: Calibration > Calibrate astigmatism (phasor), or with "
+            "picasso.zfit.calibrate_z_phasor); this is a Gaussian one."
+        )
+    if args.fit_method != "phasor-3d" and phasor_calibration:
+        raise Exception(
+            "This is an astigmatic phasor calibration, which only "
+            "'--fit-method phasor-3d' can use; the Gaussian z fit needs a "
+            "Gaussian astigmatism calibration."
+        )
 
 
 def _multi_emitter_parameters_from_args(args: argparse.Namespace):
@@ -3463,8 +3498,9 @@ def _localize_finish(
         ``z_params``, the fit has applied them already, so they are
         only reported here; with it, the z fit applies them.
     spline_calibration : dict or None
-        Spline PSF calibration used for fitting, whose own lateral
-        corrections are not applied again; None if not a spline fit.
+        Spline PSF (or phasor) calibration used for fitting, whose own
+        lateral corrections are not applied again; None if not a spline
+        fit or a phasor fit in 3D.
     suffix : str, optional
         Inserted into the output name before ``_locs``, e.g. ``"_ref"`` for
         one region of a split field of view. Default "" (one file per movie).
@@ -3767,6 +3803,7 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
     # elliptical (see _check_multi_emitter_args)
     if "-3d" in args.fit_method or (args.multi_emitter and args.zc):
         z_params = _localize_load_3d_calibration(args)
+        _check_3d_calibration_kind(args, z_params[2])
         if args.fit_z_gpu:
             from . import zfit
 
@@ -3803,6 +3840,12 @@ def _localize(args: argparse.Namespace) -> list[str]:  # noqa: C901
     )
     region_fit = None
     if args.regions_separately:
+        if "phasor-3d" in fit_methods:
+            raise Exception(
+                "'phasor-3d' cannot be combined with --regions-separately "
+                "yet; fit the regions with 'phasor' (2D), or fit them "
+                "together."
+            )
         region_fit = _localize_region_fit(
             fit_methods, spline_calibrations, n_regions
         )
@@ -4896,6 +4939,8 @@ def _build_parser() -> (
             "avg",
             "vectorfit",
             "vectorfit-gpu",
+            "phasor",
+            "phasor-3d",
         ],
         action="append",
         default=None,
@@ -4909,7 +4954,11 @@ def _build_parser() -> (
             "optional VectorFit library (pip install picassosr[vectorfit]), "
             "'vectorfit-gpu' does the same on the GPU with VectorFit's GPU "
             "build (pip install vectorfit-py-cu12), which, despite its "
-            "name, needs CUDA 13 (NVIDIA driver 580 or newer). "
+            "name, needs CUDA 13 (NVIDIA driver 580 or newer). 'phasor' "
+            "localizes by phasors (Martens et al. 2018; non-iterative, CPU; "
+            "its lpx/lpy are Picasso's error-propagation estimate, not part "
+            "of the published method), 'phasor-3d' adds z from an "
+            "astigmatic phasor calibration (-zc). "
             "With --regions-separately it may be given once per --roi, to "
             "fit each region its own way"
         ),
@@ -5161,7 +5210,11 @@ def _build_parser() -> (
         dest="zc",
         type=str,
         default="",
-        help="path to 3D calibration file (3D only)",
+        help=(
+            "path to 3D calibration file (3D only): a Gaussian astigmatism "
+            "calibration for the '-3d' Gaussian methods, an astigmatic "
+            "phasor calibration for 'phasor-3d'"
+        ),
     )
     localize_parser.add_argument(
         "-zg",

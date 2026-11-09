@@ -33,7 +33,8 @@
  "picasso.fitting.precision": [
   "localization_precision",
   "sigma_uncertainty_lsq",
-  "sigma_uncertainty_mle"
+  "sigma_uncertainty_mle",
+  "phasor_precision"
  ],
  "picasso.g5m": [
   "g5m",
@@ -442,6 +443,7 @@
  ],
  "picasso.zfit": [
   "calibrate_z",
+  "calibrate_z_phasor",
   "zfit",
   "axial_localization_precision",
   "axial_localization_precision_astig"

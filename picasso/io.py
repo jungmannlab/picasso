@@ -848,6 +848,9 @@ def _legacy_calibration_to_nm(
 def load_calibration(path: str, pixelsize: float | None = None) -> dict:
     """Load 3D astigmatic calibration data from a YAML file.
 
+    Either kind: a Gaussian calibration (``picasso.zfit.calibrate_z``,
+    with "X Coefficients") or a phasor one
+    (``picasso.zfit.calibrate_z_phasor``, with "Phasor X coefficients").
     Calibrations written before Picasso 1.0 store the spot widths of
     their polynomials in camera pixels; they are converted to nm with
     ``pixelsize`` (see ``picasso.legacy``).
@@ -888,13 +891,22 @@ def load_calibration(path: str, pixelsize: float | None = None) -> dict:
                 "file. This does not look like a 3D calibration file."
             )
 
+    # "Phasor X coefficients": an astigmatic phasor calibration, see
+    # zfit.calibrate_z_phasor (new in 1.0, so always with the format
+    # marker)
+    key = (
+        "Phasor X coefficients"
+        if isinstance(calibration, dict)
+        and "Phasor X coefficients" in calibration
+        else "X Coefficients"
+    )
     if not isinstance(calibration, dict) or (
-        "X Coefficients" not in calibration
-        or not isinstance(calibration["X Coefficients"], list)
+        key not in calibration or not isinstance(calibration[key], list)
     ):
         raise ValueError(
-            "Invalid calibration file: 'X Coefficients' must be present and "
-            "be a dictionary."
+            "Invalid calibration file: 'X Coefficients' (or, for a phasor "
+            "calibration, 'Phasor X coefficients') must be present and be "
+            "a list."
         )
 
     calibration = _legacy_calibration_to_nm(
@@ -1026,8 +1038,8 @@ def _is_hdf5_calibration(path: str) -> bool:
 
 def load_any_calibration(path: str, pixelsize: float | None = None) -> dict:
     """Load a calibration of any kind: a cubic-spline PSF calibration
-    (HDF5), a Gaussian astigmatism calibration or a standalone affine
-    calibration (both YAML).
+    (HDF5), a Gaussian or phasor astigmatism calibration or a standalone
+    affine calibration (all YAML).
 
     Used wherever a calibration is only handled as a carrier of lateral
     corrections (see ``picasso.lib.lateral_transforms``), so no format is

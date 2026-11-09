@@ -5362,9 +5362,9 @@ class TestGuiConvergenceDefaults:
     and the fit runs another."""
 
     def test_every_iterating_method_has_defaults(self):
-        """Every ``fit`` code except "avg" iterates and must be listed. The
-        multi-emitter model is not a ``fit`` method: its schedule is its
-        own, and it shows no convergence boxes."""
+        """Every ``fit`` code except "avg" and "phasor" iterates and must
+        be listed. The multi-emitter model is not a ``fit`` method: its
+        schedule is its own, and it shows no convergence boxes."""
         codes = set()
         for entry in localize_gui.FIT_MODELS.values():
             if entry.get("multi_emitter"):
@@ -5376,7 +5376,8 @@ class TestGuiConvergenceDefaults:
             for code in optimizers.values():
                 codes.add(code)
                 codes.add(localize_gui._effective_fit_code(code, True))
-        assert codes - localize_gui._CONVERGENCE_CODES == {"avg"}
+        not_iterating = codes - localize_gui._CONVERGENCE_CODES
+        assert not_iterating == {"avg", "phasor"}
 
     def test_defaults_match_the_backends(self):
         """The boxes must show the schedule the fit will actually use, so the

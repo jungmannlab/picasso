@@ -1816,6 +1816,113 @@ def test_localize_multi_emitter_elliptical_gives_z(tmp_path, monkeypatch):
     assert z_entry["Z fit method"] == "gaussmle"
 
 
+def _phasor_calibration(path, box=7, pixelsize=160.0):
+    """A linear astigmatic phasor calibration (see
+    ``zfit.calibrate_z_phasor``), saved to ``path``."""
+    io.save_calibration(
+        path,
+        {
+            "Phasor X coefficients": [0.0, 2e-4, 0.5],
+            "Phasor Y coefficients": [0.0, -2e-4, 0.5],
+            "Z range in nm": [-1000.0, 1000.0],
+            "Fit box size": box,
+            "Pixelsize": pixelsize,
+            "Magnification factor": 1.0,
+            io.FORMAT_VERSION_ATTR: io.FORMAT_VERSION,
+        },
+    )
+    return path
+
+
+def test_localize_phasor(tmp_path, monkeypatch):
+    movie = _copy_testdata(tmp_path)
+    _picasso(
+        monkeypatch, "localize", movie, "-a", "phasor", "-px", 160, "-d", 0
+    )
+    locs, info = io.load_locs(_out(movie, "_locs.hdf5"))
+    assert len(locs)
+    assert {"phasor_magnitude_x", "phasor_magnitude_y"} <= set(locs.columns)
+    assert "z" not in locs.columns
+    entry = next(e for e in info if e.get("Step") == "Fit 2D")
+    assert entry["Fit method"] == "phasor"
+    assert "Localization precision" in entry
+
+
+def test_localize_phasor_3d(tmp_path, monkeypatch):
+    movie = _copy_testdata(tmp_path)
+    calibration = _phasor_calibration(str(tmp_path / "phasor_3d_calib.yaml"))
+    _picasso(
+        monkeypatch,
+        "localize",
+        movie,
+        "-a",
+        "phasor-3d",
+        "-zc",
+        calibration,
+        "-mf",
+        0.5,
+        "-px",
+        160,
+        "-d",
+        0,
+    )
+    locs, info = io.load_locs(_out(movie, "_locs.hdf5"))
+    assert len(locs)
+    assert {"z", "lpz"} <= set(locs.columns)
+    entry = next(e for e in info if e.get("Step") == "Fit 3D phasor")
+    assert entry["Magnification factor"] == 0.5
+    assert entry["Calibration path"] == calibration
+    # z comes from the fit, no Gaussian z fit runs on top
+    assert not any(e.get("Step") == "Fit 3D" for e in info)
+
+
+def test_localize_phasor_3d_refuses_a_gaussian_calibration(
+    tmp_path, monkeypatch
+):
+    from tests.conftest import CALIB_3D
+
+    movie = _copy_testdata(tmp_path)
+    calibration = str(tmp_path / "3d_calib.yaml")
+    io.save_calibration(calibration, dict(CALIB_3D))
+    with pytest.raises(Exception, match="phasor calibration"):
+        _picasso(
+            monkeypatch,
+            "localize",
+            movie,
+            "-a",
+            "phasor-3d",
+            "-zc",
+            calibration,
+            "-mf",
+            1,
+            "-px",
+            160,
+        )
+    assert not os.path.exists(_out(movie, "_locs.hdf5"))
+
+
+def test_localize_gaussian_3d_refuses_a_phasor_calibration(
+    tmp_path, monkeypatch
+):
+    movie = _copy_testdata(tmp_path)
+    calibration = _phasor_calibration(str(tmp_path / "phasor_3d_calib.yaml"))
+    with pytest.raises(Exception, match="phasor-3d"):
+        _picasso(
+            monkeypatch,
+            "localize",
+            movie,
+            "-a",
+            "lq-3d",
+            "-zc",
+            calibration,
+            "-mf",
+            1,
+            "-px",
+            160,
+        )
+    assert not os.path.exists(_out(movie, "_locs.hdf5"))
+
+
 @pytest.mark.parametrize("gpu", [False, True])
 def test_localize_multi_emitter_fits_z_on_the_gpu(tmp_path, monkeypatch, gpu):
     """--fit-z-gpu moves the z fit of --psf-model elliptical to the GPU."""

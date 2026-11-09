@@ -2,7 +2,8 @@
 picasso.fitting
 ~~~~~~~~~~~~~~~
 
-Levenberg-Marquardt PSF fitters, on the CPU and on CUDA GPUs.
+Levenberg-Marquardt PSF fitters, on the CPU and on CUDA GPUs, and the
+non-iterative phasor localization.
 
 The fitters are ports of Gpufit (https://github.com/gpufit/Gpufit) - its LM
 driver, its damping rule, its least-squares and Poisson maximum-likelihood
@@ -38,15 +39,21 @@ spots you cut out yourself, :func:`picasso.localize.fit_spots_gauss` or
     CPU multi-emitter fitting of whole frames: peaks found in the residual
     of the fit, fitted with their neighbors in place (3D-DAOSTORM, ported
     from storm-analysis; see ``LICENSES/storm-analysis-LICENSE.txt``).
+:mod:`phasor`
+    Phasor localization (pSMLM, Martens et al. 2018): positions from the
+    first Fourier coefficients of each box, aperture photometry and the
+    propagated precision, in one Numba pass; not a fit and not part of the
+    Gpufit port.
 :mod:`seeds`
     The initial parameters the fitters above start from, one closed-form
     estimator per model family. Plain NumPy, and the one module that has to
     change in step with a model's parameter layout. Not part of the Gpufit
     port, which leaves the seed to its caller.
 :mod:`precision`
-    Uncertainties of the fitted parameters: the closed-form precisions and the
-    numerically inverted Fisher matrices (Cramer-Rao bounds), on the CPU and on
-    CUDA GPUs. Not part of the Gpufit port.
+    Uncertainties of the fitted parameters: the closed-form precisions, the
+    error propagation of the phasor estimate and the numerically inverted
+    Fisher matrices (Cramer-Rao bounds), on the CPU and on CUDA GPUs. Not
+    part of the Gpufit port.
 
 References
 ----------

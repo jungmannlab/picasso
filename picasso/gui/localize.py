@@ -386,6 +386,11 @@ MULTI_EMITTER_PSF_MODELS = {
     "Experimental PSF (cubic spline)": "spline",
 }
 
+# The non-iterative phasor localization model and its ``fit`` code; it
+# takes z from an astigmatic phasor calibration of its own.
+PHASOR_MODEL = "Phasor (pSMLM)"
+PHASOR_CODE = "phasor"
+
 # Fitting models offered in the GUI, decoupled from the optimizer. Each
 # model maps its optimizer labels to the internal ``fit`` codes;
 # models without an optimizer (e.g. averaging) declare a fixed ``code``
@@ -439,6 +444,13 @@ FIT_MODELS = {
         "needs_vectorfit_parameters": True,
         "docs": "localize/vectorfit.html#localize-vectorfit",
     },
+    # last, so that the per-channel snapshots, which keep the model as an
+    # index, keep pointing at the models they did before
+    PHASOR_MODEL: {
+        "optimizers": None,
+        "code": PHASOR_CODE,
+        "docs": "localize/phasor.html#localize-phasor",
+    },
 }
 
 # The only model whose widths (sx, sy) an astigmatism z calibration can
@@ -474,6 +486,19 @@ MODEL_TOOLTIP = (
     "x/y stay at the identified pixel (no sub-pixel position)."
 )
 
+# The model tooltip's paragraph on phasor localization.
+PHASOR_MODEL_TOOLTIP = (
+    "Phasor (pSMLM):\n"
+    "No fit: x/y from the phase of the first Fourier coefficients of the\n"
+    "box, photons and background from aperture photometry (Martens et\n"
+    "al., J. Chem. Phys. 2018). Very fast (CPU), no PSF model, no widths.\n"
+    "z with an astigmatic phasor calibration (Calibration > Calibrate\n"
+    "astigmatism (phasor)). Box: 5 below and 7 above ~1,000 photons,\n"
+    "11 for astigmatic 3D (paper). The published method gives no\n"
+    "precision: lpx/lpy/lpz are Picasso's error-propagation estimate,\n"
+    "not a Cramer-Rao bound."
+)
+
 # The model tooltip's paragraph on VectorFit, shown only where the model is
 # offered (see ``offered_fit_models``).
 VECTORFIT_MODEL_TOOLTIP = (
@@ -499,10 +524,12 @@ def offered_fit_models() -> list[str]:
 
 
 def model_tooltip() -> str:
-    """The tooltip of the Model combo box: a paragraph per offered model."""
+    """The tooltip of the Model combo box: a paragraph per offered model,
+    in the order of the combo box."""
+    tooltip = MODEL_TOOLTIP
     if "Vectorial PSF (VectorFit)" in offered_fit_models():
-        return MODEL_TOOLTIP + "\n\n" + VECTORFIT_MODEL_TOOLTIP
-    return MODEL_TOOLTIP
+        tooltip += "\n\n" + VECTORFIT_MODEL_TOOLTIP
+    return tooltip + "\n\n" + PHASOR_MODEL_TOOLTIP
 
 
 GPU_TOOLTIP = (
@@ -658,12 +685,35 @@ def _compile_multi_emitter_fit() -> None:
 
 
 def _outliers_note(info: list[dict]) -> str:
-    """The status bar's note on the outliers a VectorFit fit discarded,
-    read from the fit's metadata; "" for any other fit."""
+    """The status bar's notes on a fit, read from its metadata: the
+    outliers a VectorFit fit discarded, or, for a phasor fit, where its
+    precision comes from and how many localizations fell outside the
+    calibrated z range; "" for any other fit."""
     n_outliers = vectorfit.outliers_discarded(info)
-    if n_outliers is None:
+    if n_outliers is not None:
+        return f" Discarded {n_outliers:,} outliers."
+    return _phasor_note(info)
+
+
+def _phasor_note(info: list[dict]) -> str:
+    """The status bar's note on a phasor fit (see ``_outliers_note``)."""
+    entry = next(
+        (
+            e
+            for e in reversed(info or [])
+            if isinstance(e, dict)
+            and e.get("Localization precision")
+            == localize.PHASOR_PRECISION_NOTE
+        ),
+        None,
+    )
+    if entry is None:
         return ""
-    return f" Discarded {n_outliers:,} outliers."
+    note = " lpx/lpy: Picasso's error-propagation estimate (not a CRLB)."
+    n_outside = entry.get("Outside calibrated z range")
+    if n_outside:
+        note += f" {n_outside:,} outside the calibrated z range removed."
+    return note
 
 
 def _fit_code(model: str, optimizer: str) -> str:
@@ -694,8 +744,9 @@ def _effective_fit_code(code: str, use_gpu: bool) -> str:
 
 
 # Fit codes that iterate, and the default convergence schedule of each. Every
-# method except "avg" is here: all of them run an iterative solver, so all of
-# them honor the convergence criterion and the maximum-iteration count.
+# method except "avg" and "phasor" is here: all of them run an iterative
+# solver, so all of them honor the convergence criterion and the
+# maximum-iteration count.
 #
 # The Gaussian defaults come from ``localize.gauss_schedule`` rather than
 # being repeated, so the boxes cannot show a schedule the fit does not use.
@@ -713,7 +764,7 @@ _CONVERGENCE_DEFAULTS = {
         )
     )
     for code in localize.FIT_METHODS
-    if code != "avg" and not code.startswith("vectorfit")
+    if code not in ("avg", PHASOR_CODE) and not code.startswith("vectorfit")
 }
 # the same on either device
 _VECTORFIT_CODES = ("vectorfit", "vectorfit-gpu")
@@ -7725,7 +7776,13 @@ class ParametersDialog(lib.Dialog):
                 self.z_calib_label.setToolTip("")
                 return
             self.z_calib_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-            self.z_calib_label.setText(os.path.basename(path))
+            # the two kinds are not interchangeable (see PHASOR_MODEL)
+            kind = (
+                " (phasor)"
+                if zfit._is_phasor_calibration(self.z_calibration)
+                else ""
+            )
+            self.z_calib_label.setText(os.path.basename(path) + kind)
             self.z_calib_label.setToolTip(path)
             self.fit_z_checkbox.setEnabled(True)
             self.fit_z_checkbox.setChecked(True)
@@ -9284,6 +9341,15 @@ class Window(QtWidgets.QMainWindow):
             "Calibrate astigmatism (Gaussian)"
         )
         calibrate_z_action.triggered.connect(self.calibrate_z)
+        calibrate_z_phasor_action = threed_menu.addAction(
+            "Calibrate astigmatism (phasor)"
+        )
+        calibrate_z_phasor_action.setToolTip(
+            "Calibrate astigmatic z for the phasor model from a bead z\n"
+            "stack: the ratio of the x and y phasor magnitudes against z\n"
+            "(Martens et al., J. Chem. Phys. 2018)."
+        )
+        calibrate_z_phasor_action.triggered.connect(self.calibrate_z_phasor)
 
         calibrate_affine_action = threed_menu.addAction(
             "Calibrate lateral transform (astigmatism / chromatic)..."
@@ -9418,6 +9484,11 @@ class Window(QtWidgets.QMainWindow):
         """Use the loaded movie to obtain z-calibration data for 3D
         fitting using astigmatism."""
         self.localize(calibrate_z=True)
+
+    def calibrate_z_phasor(self) -> None:
+        """Use the loaded movie to obtain an astigmatic z calibration for
+        the phasor model."""
+        self.localize(calibrate_z=True, calibration_model=PHASOR_MODEL)
 
     def calibrate_affine(self) -> None:
         """Open the affine-transform calibration dialog (astigmatism or
@@ -14867,6 +14938,15 @@ class Window(QtWidgets.QMainWindow):
             and dialog.fit_z_checkbox.isChecked()
             and dialog.z_calibration
         ):
+            if zfit._is_phasor_calibration(dialog.z_calibration):
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "Fit",
+                    "The loaded 3D calibration is a phasor calibration, "
+                    f"which only the '{PHASOR_MODEL}' model can use. Load a "
+                    "Gaussian astigmatism calibration, or untick Fit Z.",
+                )
+                return
             calibration_3d = dict(dialog.z_calibration)
             calibration_3d["Magnification factor"] = (
                 dialog.magnification_factor.value()
@@ -15030,6 +15110,37 @@ class Window(QtWidgets.QMainWindow):
             vectorfit_parameters = dialog.vectorfit_parameters()
             # VectorFit's 3D model fits z itself
             fit_z = False
+        phasor_calibration = None
+        z_calibration = dialog.z_calibration
+        phasor_calibration_loaded = zfit._is_phasor_calibration(z_calibration)
+        if method == PHASOR_CODE:
+            if fit_z and z_calibration and not calibrate_z:
+                if not phasor_calibration_loaded:
+                    QtWidgets.QMessageBox.warning(
+                        self,
+                        "Phasor fit",
+                        "The loaded 3D calibration is a Gaussian astigmatism "
+                        "calibration (fitted spot widths), which the phasor "
+                        "fit cannot use. Load a phasor calibration, made "
+                        "with Calibration > Calibrate astigmatism (phasor), "
+                        "or untick Fit Z.",
+                    )
+                    return None
+                phasor_calibration = dict(z_calibration)
+                phasor_calibration["Magnification factor"] = (
+                    dialog.magnification_factor.value()
+                )
+            # the phasor fit takes z from its calibration itself
+            fit_z = False
+        elif fit_z and phasor_calibration_loaded and not calibrate_z:
+            QtWidgets.QMessageBox.warning(
+                self,
+                "Fit",
+                "The loaded 3D calibration is a phasor calibration, which "
+                f"only the '{PHASOR_MODEL}' model can use. Select it, load a "
+                "Gaussian astigmatism calibration, or untick Fit Z.",
+            )
+            return None
         return FitWorker(
             self.movie,
             self.identifications_info if info is None else info,
@@ -15048,12 +15159,13 @@ class Window(QtWidgets.QMainWindow):
             use_gpu,
             spline_calibration=spline_calibration,
             lateral_transforms=self._extra_lateral_transforms(
-                spline_calibration
+                spline_calibration or phasor_calibration
             ),
             camera_calibration=(
                 self.parameters_dialog.camera_calibration or None
             ),
             vectorfit_parameters=vectorfit_parameters,
+            phasor_calibration=phasor_calibration,
         )
 
     def _start_fit_worker(self, worker: FitWorker) -> None:
@@ -16186,7 +16298,13 @@ class Window(QtWidgets.QMainWindow):
             )
             if ok:
                 base = self.channel_output_base()
-                out_path = base + "_3d_calib.yaml"
+                # the phasor calibration needs phasor localizations
+                phasor_fit = (
+                    lib.get_from_metadata(info, "Fit method") == PHASOR_CODE
+                )
+                out_path = base + (
+                    "_phasor_3d_calib.yaml" if phasor_fit else "_3d_calib.yaml"
+                )
                 path, exe = lib.get_save_filename_ext_dialog(
                     self, "Save 3D calibration", out_path, filter="*.yaml"
                 )
@@ -16195,11 +16313,16 @@ class Window(QtWidgets.QMainWindow):
                     magnification = (
                         self.parameters_dialog.magnification_factor.value()
                     )
+                    calibrate = (
+                        zfit.calibrate_z_phasor
+                        if phasor_fit
+                        else zfit.calibrate_z
+                    )
                     try:
                         # the metadata of the fit give the Pixelsize and the
                         # identification parameters, which the calibration
                         # records
-                        zfit.calibrate_z(
+                        calibrate(
                             locs,
                             info,
                             d=step,
@@ -16357,7 +16480,11 @@ class Window(QtWidgets.QMainWindow):
 
         # restore the GPU checkbox state for the selected model
         self.parameters_dialog.on_fit_optimizer_changed()
-        self.status_bar.showMessage(f"Saved {len(self.locs):,} localizations.")
+        # the phasor fit's note stays: its precision is not the paper's
+        self.status_bar.showMessage(
+            f"Saved {len(self.locs):,} localizations."
+            + _phasor_note(self.extra_info)
+        )
 
         # apply drift if requested
         aim_check = self.parameters_dialog.aim_undrift_checkbox.isChecked()
@@ -16668,7 +16795,11 @@ class Window(QtWidgets.QMainWindow):
             if path:
                 self.save_identifications(path)
 
-    def localize(self, calibrate_z: bool = False) -> None:
+    def localize(
+        self,
+        calibrate_z: bool = False,
+        calibration_model: str = ASTIGMATISM_FIT_MODEL,
+    ) -> None:
         """Identify and fit, see ``identify`` and ``fit``.
 
         Parameters
@@ -16676,6 +16807,10 @@ class Window(QtWidgets.QMainWindow):
         calibrate_z : bool, optional
             Whether to run z-calibration for 3D fitting afterwards
             Default is False.
+        calibration_model : str, optional
+            The fit model the z calibration needs (``ASTIGMATISM_FIT_MODEL``
+            for the Gaussian one, ``PHASOR_MODEL`` for the phasor one).
+            Default is ``ASTIGMATISM_FIT_MODEL``.
         """
         if self.movie is None:
             title = "Calibrate astigmatism" if calibrate_z else "Localize"
@@ -16685,14 +16820,15 @@ class Window(QtWidgets.QMainWindow):
             return
         # the astigmatism calibration models the x and y widths of an
         # axis-aligned elliptical Gaussian; other models do not report them
-        # (spline, averaging) or report them along other axes (rotated)
+        # (spline, averaging) or report them along other axes (rotated).
+        # The phasor calibration models the phasor magnitudes instead.
         model = self.parameters_dialog.fit_model.currentText()
-        if calibrate_z and model != ASTIGMATISM_FIT_MODEL:
+        if calibrate_z and model != calibration_model:
             QtWidgets.QMessageBox.warning(
                 self,
                 "Calibrate astigmatism",
-                "The astigmatism calibration requires the "
-                f"'{ASTIGMATISM_FIT_MODEL}' fitting model, but "
+                "This astigmatism calibration requires the "
+                f"'{calibration_model}' fitting model, but "
                 f"'{model}' is selected.\n\n"
                 "Select it under Fit Settings in the Parameters dialog and "
                 "run the calibration again.",
@@ -16884,6 +17020,7 @@ class FitWorker(QtCore.QThread):
             "avg",
             "vectorfit",
             "vectorfit-gpu",
+            "phasor",
         ],
         eps: float | None,
         max_it: int | None,
@@ -16894,6 +17031,7 @@ class FitWorker(QtCore.QThread):
         lateral_transforms: list | None = None,
         camera_calibration: dict | None = None,
         vectorfit_parameters: dict | None = None,
+        phasor_calibration: dict | None = None,
     ) -> None:
         super().__init__()
         self.movie = movie
@@ -16910,6 +17048,7 @@ class FitWorker(QtCore.QThread):
         self.lateral_transforms = lateral_transforms or []
         self.camera_calibration = camera_calibration
         self.vectorfit_parameters = vectorfit_parameters
+        self.phasor_calibration = phasor_calibration
         self.N = len(identifications)
         self.method = _effective_fit_code(method, use_gpu)
 
@@ -16949,6 +17088,7 @@ class FitWorker(QtCore.QThread):
                 max_it=self.max_it,
                 spline_calibration=self.spline_calibration,
                 vectorfit_parameters=self.vectorfit_parameters,
+                phasor_calibration=self.phasor_calibration,
                 camera_calibration=self.camera_calibration,
                 # With a z fit to follow, FitZWorker applies them after it,
                 # so that they land on the final coordinates either way.

@@ -77,6 +77,7 @@ from . import wavelet as wavelets
 from .fitting import (
     gaussfit,
     gaussfit_cuda,
+    phasor,
     precision,
     residualfit,
     seeds,
@@ -232,6 +233,7 @@ LOCALIZATION_COLUMNS = {
     "Goodness of fit": ["reduced_chi_square"],
     "Uncertainty": ["photons_unc", "bg_unc", "sx_unc", "sy_unc"],
     "Multi-emitter only": ["significance", "n_emitters"],
+    "Phasor only": ["phasor_magnitude_x", "phasor_magnitude_y"],
     "Multichannel only": (
         [f"photons_ch{c}" for c in range(precision._LINK_XYZ_MAX_CHANNELS)]
         + [f"bg_ch{c}" for c in range(precision._LINK_XYZ_MAX_CHANNELS)]
@@ -4209,11 +4211,13 @@ def fit(
         "avg",
         "vectorfit",
         "vectorfit-gpu",
+        "phasor",
     ] = "gausslq",
     eps: float | None = None,
     max_it: int | None = None,
     spline_calibration: dict | None = None,
     vectorfit_parameters: dict | None = None,
+    phasor_calibration: dict | None = None,
     camera_calibration: dict | None = None,
     lateral_transforms: dict | list | str | None = None,
     parallel: bool = True,
@@ -4250,8 +4254,8 @@ def fit(
             "gausslq-gpu", "gausslq-rotated-gpu", "gausslq-spherical-gpu", \
             "gaussmle", "gaussmle-spherical", "gaussmle-gpu", \
             "gaussmle-rotated-gpu", "gaussmle-spherical-gpu", "spline-gpu", \
-            "spline-mle-gpu", "avg", "vectorfit" or "vectorfit-gpu"}, \
-            optional
+            "spline-mle-gpu", "avg", "vectorfit", "vectorfit-gpu" or \
+            "phasor"}, optional
         Which 2D fitting algorithm to use. "gausslq" for least-squares
         fitting of a 2D Gaussian. "gausslq-gpu" for its GPU
         implementation (if available). "gaussmle" for MLE 2D Gaussian
@@ -4278,14 +4282,22 @@ def fit(
         "vectorfit-gpu" for the same on the GPU, which needs VectorFit's
         GPU build, vectorfit-py-cu12. Despite its name, that is built with
         CUDA 13, so it needs NVIDIA driver 580 or newer (see
-        ``vectorfit.gpu_unavailable_reason``).
+        ``vectorfit.gpu_unavailable_reason``). "phasor" for phasor
+        localization (Martens et al., J. Chem. Phys. 148, 123311, 2018):
+        non-iterative, from the first Fourier coefficients of each spot,
+        with photons and background from aperture photometry (see
+        ``picasso.fitting.phasor``); it gives no widths, and its
+        ``lpx``/``lpy`` are Picasso's error-propagation estimate (see
+        ``picasso.fitting.precision.phasor_precision``), not part of the
+        published method. With ``phasor_calibration`` it also gives
+        ``z``.
     eps : float or None, optional
         The convergence criterion, honored by every iterating method on
-        either device (all of them except "avg"). None (the default)
-        picks the value that suits the method: 0.001 for "gaussmle",
-        0.01 for "gausslq" and the GPU Gaussians, for either spline
-        backend 1e-4 with the axial multi-start and 1e-2 without, and
-        5e-10 for either VectorFit device.
+        either device (all of them except "avg" and "phasor"). None (the
+        default) picks the value that suits the method: 0.001 for
+        "gaussmle", 0.01 for "gausslq" and the GPU Gaussians, for either
+        spline backend 1e-4 with the axial multi-start and 1e-2 without,
+        and 5e-10 for either VectorFit device.
     max_it : int or None, optional
         The maximum number of iterations per spot, as ``eps``. None (the
         default) means 100 for "gaussmle", 200 for "gausslq" (MINPACK's
@@ -4318,7 +4330,16 @@ def fit(
         outliers the fit discarded is recorded in the metadata as
         "VectorFit outliers discarded". Ignored by the other methods.
         Default is None.
-    camera_calibration : dict or None, optional
+    phasor_calibration : dict or None, optional
+        Astigmatic phasor calibration (see ``zfit.calibrate_z_phasor`` and
+        ``io.load_calibration``), only for ``fitting_method="phasor"``:
+        the fit then also gives ``z`` and ``lpz`` (nm, scaled by the
+        calibration's "Magnification factor") from the ratio of the
+        phasor magnitudes, and drops the localizations whose ratio lies
+        outside the calibrated range (counted in the metadata as
+        "Outside calibrated z range"). The calibration must have been
+        made with the same box size and camera pixel size. Default is
+        None (2D).
         Per-pixel sCMOS camera calibration (see
         ``io.load_camera_calibration`` and ``scmos.calibrate_scmos``),
         holding the maps "offset" (ADU), "variance" (ADU^2) and,
@@ -4338,14 +4359,15 @@ def fit(
         fit, e.g., a chromatic correction: a calibration with an
         ``"Affine transforms"`` list, the list itself, or the path of a
         calibration file (see ``lib.resolve_lateral_transforms``). Those
-        that ``spline_calibration`` carries, and the fit therefore applies
-        itself, are skipped with a ``lib.DuplicateLateralTransformWarning``.
+        that ``spline_calibration`` or ``phasor_calibration`` carries, and
+        the fit therefore applies itself, are skipped with a
+        ``lib.DuplicateLateralTransformWarning``.
         They are recorded in an entry of their own. Default is None.
     parallel : bool, optional
         If True, the CPU fits run on a pool of threads ("gausslq",
-        "gaussmle", "spline" and their variants) or, for "avg", of worker
-        processes; if False, they run in the calling thread. Ignored by
-        the GPU methods. Default is True.
+        "gaussmle", "spline" and their variants, "phasor") or, for "avg",
+        of worker processes; if False, they run in the calling thread.
+        Ignored by the GPU methods. Default is True.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -4386,6 +4408,7 @@ def fit(
         max_it,
         parallel,
         camera_calibration,
+        phasor_calibration,
     )
     if fitting_method.startswith("vectorfit"):
         # before cutting the spots, which can take a while
@@ -4407,6 +4430,8 @@ def fit(
         )
         em = camera_info["Gain"] > 1
         gauss_flags = parse_gauss_code(fitting_method)
+        # counts some backends report for the metadata
+        fit_stats = {}
         if callable(abort_callback) and abort_callback():
             locs = None  # aborted while the spots were cut
         else:
@@ -4424,6 +4449,8 @@ def fit(
                 parallel=parallel,
                 progress=progress,
                 vectorfit_parameters=vectorfit_parameters,
+                phasor_calibration=phasor_calibration,
+                fit_stats=fit_stats,
                 abort_callback=abort_callback,
                 pixelsize=float(camera_info["Pixelsize"]),
                 image_shape=(
@@ -4441,7 +4468,9 @@ def fit(
         spline_calibration,
         camera_calibration,
         vectorfit_parameters,
+        phasor_calibration,
     )
+    localize_info.update(fit_stats)
     if fitting_method.startswith("vectorfit") and locs is not None:
         # the only spots the vectorfit localizations leave out are the
         # outliers it discards (none when it keeps them)
@@ -4451,13 +4480,15 @@ def fit(
     info = lib.append_metadata(info, localize_info | camera_info)
     if locs is None:  # aborted
         return None, info
-    # the spline calibration's own corrections were applied by the fit
-    return _apply_extra_affine(
-        locs,
-        info,
-        lateral_transforms,
-        spline_calibration if fitting_method.startswith("spline") else None,
-    )
+    # the spline or phasor calibration's own corrections were applied by
+    # the fit
+    if fitting_method.startswith("spline"):
+        applied = spline_calibration
+    elif fitting_method == "phasor":
+        applied = phasor_calibration
+    else:
+        applied = None
+    return _apply_extra_affine(locs, info, lateral_transforms, applied)
 
 
 def _is_positive_number(value) -> bool:
@@ -4499,13 +4530,15 @@ def _validate_fit_args(
     max_it: int | None,
     parallel: bool,
     camera_calibration: dict | None,
+    phasor_calibration: dict | None = None,
 ) -> None:
     """Validate ``fit``'s arguments.
 
     Raises
     ------
     ValueError
-        If ``camera_info`` lacks a positive ``Pixelsize`` (nm).
+        If ``camera_info`` lacks a positive ``Pixelsize`` (nm), or if
+        ``phasor_calibration`` does not suit the fit.
     """
     accepted_movie_types = (
         io.AbstractPicassoMovie,
@@ -4558,6 +4591,62 @@ def _validate_fit_args(
                 "camera_info, which is written to the metadata file as-is."
             )
     _validate_camera_calibration(camera_calibration, movie, camera_info)
+    if fitting_method == "phasor":
+        phasor._check_box(box)
+    _validate_phasor_calibration(
+        phasor_calibration, fitting_method, box, float(pixelsize)
+    )
+
+
+def _validate_phasor_calibration(
+    calibration: dict | None,
+    fitting_method: str,
+    box: int,
+    pixelsize: float,
+) -> None:
+    """Check that ``calibration`` is an astigmatic phasor calibration
+    made with the box size and camera pixel size of this fit, which its
+    magnitudes depend on; None passes."""
+    if calibration is None:
+        return
+    if fitting_method != "phasor":
+        raise ValueError(
+            "phasor_calibration is only used by fitting_method='phasor'."
+        )
+    if not zfit._is_phasor_calibration(calibration):
+        raise ValueError(
+            "phasor_calibration is not a phasor calibration: a Gaussian "
+            "astigmatism calibration (picasso.zfit.calibrate_z) holds "
+            "fitted spot widths, which the phasor fit does not give. "
+            "Calibrate with picasso.zfit.calibrate_z_phasor (Localize: "
+            "Calibration > Calibrate astigmatism (phasor))."
+        )
+    if io.FORMAT_VERSION_ATTR in calibration:
+        io.check_format_version(
+            calibration[io.FORMAT_VERSION_ATTR],
+            calibration.get("Path", ""),
+            kind="3D calibration",
+        )
+    if "Magnification factor" not in calibration:
+        raise ValueError("phasor_calibration has no 'Magnification factor'.")
+    calibration_box = calibration.get("Fit box size")
+    if calibration_box != box:
+        raise ValueError(
+            f"The phasor calibration was made with a box of "
+            f"{calibration_box} pixels, this fit uses {box}: the phasor "
+            "magnitudes depend on the box. Fit with the calibration's box "
+            "size or calibrate again with this one."
+        )
+    calibration_pixelsize = calibration.get("Pixelsize")
+    if calibration_pixelsize is None or not math.isclose(
+        float(calibration_pixelsize), pixelsize, rel_tol=1e-6
+    ):
+        raise ValueError(
+            f"The phasor calibration was made with a camera pixel size of "
+            f"{calibration_pixelsize} nm, this movie has {pixelsize:g} nm: "
+            "the phasor magnitudes depend on the PSF in camera pixels. "
+            "Calibrate with the same camera and magnification."
+        )
 
 
 def _dispatch_fit(
@@ -4576,6 +4665,8 @@ def _dispatch_fit(
     progress: lib.Progress,
     abort_callback: Callable[[], bool] | None,
     vectorfit_parameters: dict | None = None,
+    phasor_calibration: dict | None = None,
+    fit_stats: dict | None = None,
     pixelsize: float,
     image_shape: tuple[int, int] | None = None,
 ) -> pd.DataFrame | None:
@@ -4613,6 +4704,12 @@ def _dispatch_fit(
         Abort check, as in :func:`fit`.
     vectorfit_parameters : dict or None, optional
         Settings of the "vectorfit" method, see :func:`fit`.
+    phasor_calibration : dict or None, optional
+        Astigmatic phasor calibration of the "phasor" method, see
+        :func:`fit`.
+    fit_stats : dict or None, optional
+        Filled with the counts a backend reports for the metadata (the
+        phasor fit: the localizations outside the calibrated z range).
     pixelsize : float
         Camera pixel size in nm, converting the fitted positions to nm.
     image_shape : tuple of int or None, optional
@@ -4703,6 +4800,19 @@ def _dispatch_fit(
             progress=progress,
             abort_callback=abort_callback,
         )
+    elif fitting_method == "phasor":
+        locs = _fit2d_phasor(
+            spots=spots,
+            identifications=identifications,
+            em=em,
+            variance=variance,
+            calibration=phasor_calibration,
+            parallel=parallel,
+            progress=progress,
+            abort_callback=abort_callback,
+            pixelsize=pixelsize,
+            fit_stats=fit_stats,
+        )
     return locs
 
 
@@ -4715,16 +4825,24 @@ def _fit_localize_info(
     spline_calibration: dict | None,
     camera_calibration: dict | None,
     vectorfit_parameters: dict | None = None,
+    phasor_calibration: dict | None = None,
 ) -> dict:
     """Build the "Generated by"/schedule metadata dict written by ``fit``:
-    step ``"Fit 3D spline"`` for a 3D spline calibration (the fit yields
-    z), else ``"Fit 2D"``."""
+    step ``"Fit 3D spline"`` for a 3D spline calibration, ``"Fit 3D
+    phasor"`` for a phasor fit with a calibration (both fits yield z),
+    else ``"Fit 2D"``."""
     spline_3d = (
         fitting_method.startswith("spline")
         and spline_calibration.get("model") != "spline-2d"
     )
+    if spline_3d:
+        step = "Fit 3D spline"
+    elif fitting_method == "phasor" and phasor_calibration is not None:
+        step = "Fit 3D phasor"
+    else:
+        step = "Fit 2D"
     localize_info = {
-        **lib.step_info("Fit 3D spline" if spline_3d else "Fit 2D"),
+        **lib.step_info(step),
         "Fit method": fitting_method,
         # not "Box Size", which marks the identification entry
         "Fit box size": int(box),
@@ -4771,8 +4889,51 @@ def _fit_localize_info(
         localize_info["VectorFit device"] = (
             vectorfit.GPU_DEVICE if fitting_method.endswith("-gpu") else "cpu"
         )
+    if fitting_method == "phasor":
+        localize_info.update(_phasor_info(phasor_calibration))
     localize_info.update(camera_calibration_info(camera_calibration))
     return localize_info
+
+
+#: How the phasor fit's ``lpx``/``lpy`` (and ``lpz``) come about, as its
+#: metadata records it: the published method gives no precision.
+PHASOR_PRECISION_NOTE = (
+    "Error propagation of the pixel noise through the phasor estimator "
+    "(Picasso's estimate, not part of the published phasor method; not a "
+    "Cramer-Rao bound)"
+)
+
+
+def _phasor_info(calibration: dict | None) -> dict:
+    """The metadata entries of a phasor fit: how its precision and
+    photometry are obtained and, with a calibration, the calibration
+    (under keys of its own, so that its frame bounds and frame count do
+    not read as those of the localizations)."""
+    info = {
+        "Localization precision": PHASOR_PRECISION_NOTE,
+        "Photometry": (
+            "Aperture photometry: signal within box // 2 pixels of the "
+            "center pixel; background per pixel = "
+            f"{round(100 * phasor.BACKGROUND_PERCENTILE)}th percentile of the "
+            f"ring out to box // 2 + {phasor.RING_WIDTH} pixels"
+        ),
+    }
+    if calibration is None:
+        return info
+    info["Calibration path"] = calibration.get("Path", "N/A")
+    for key in (
+        zfit._PHASOR_X,
+        zfit._PHASOR_Y,
+        zfit._PHASOR_Z_RANGE,
+        "Magnification factor",
+    ):
+        info[key] = calibration[key]
+    # the lateral corrections the calibration carries, which the fit
+    # applies (see ``_locs_from_fits_phasor``)
+    own = lib.describe_lateral_transforms(calibration)
+    if own:
+        info["Lateral corrections applied"] = own
+    return info
 
 
 def _spline_schedule_info(
@@ -4878,6 +5039,7 @@ FIT_METHODS = tuple(
         "avg",
         "vectorfit",
         "vectorfit-gpu",
+        "phasor",
     ]
 )
 
@@ -4885,7 +5047,9 @@ FIT_METHODS = tuple(
 #: --fit-method`` takes them, mapped to the fitting method (one of
 #: ``FIT_METHODS``). The names ending in "-3d" ask for an astigmatic 3D
 #: fit: the 2D Gaussian fit followed by ``zfit.zfit`` with a z
-#: calibration (see ``resolve_fit_method``).
+#: calibration (see ``resolve_fit_method``); for "phasor-3d", the phasor
+#: fit with an astigmatic phasor calibration, from which the fit takes z
+#: itself (see ``zfit.calibrate_z_phasor``).
 FIT_METHOD_ALIASES = {
     "mle": "gaussmle",
     "mle-gpu": "gaussmle-gpu",
@@ -4909,6 +5073,8 @@ FIT_METHOD_ALIASES = {
     "avg": "avg",
     "vectorfit": "vectorfit",
     "vectorfit-gpu": "vectorfit-gpu",
+    "phasor": "phasor",
+    "phasor-3d": "phasor",
 }
 
 
@@ -4929,9 +5095,10 @@ def resolve_fit_method(name: str) -> tuple[str, bool]:
         ``localize`` take it.
     astigmatic_3d : bool
         Whether the name asks for an astigmatic 3D fit (the names ending
-        in "-3d"): the 2D fit is followed by ``zfit.zfit`` with a z
-        calibration. Spline fits find z themselves and are not
-        included.
+        in "-3d"): the 2D Gaussian fit is followed by ``zfit.zfit`` with
+        a z calibration, and the phasor fit ("phasor-3d") takes z from
+        an astigmatic phasor calibration itself. Spline fits find z
+        themselves and are not included.
 
     Raises
     ------
@@ -10100,6 +10267,95 @@ def _fit2d_avg(
     return locs
 
 
+def _fit2d_phasor(
+    spots: lib.FloatArray3D,
+    identifications: pd.DataFrame,
+    em: bool,
+    variance: lib.FloatArray3D | None,
+    calibration: dict | None,
+    parallel: bool,
+    progress: lib.Progress | None,
+    abort_callback: Callable[[], bool] | None,
+    *,
+    pixelsize: float,
+    fit_stats: dict | None = None,
+) -> pd.DataFrame | None:
+    """Phasor localization of the spots, see ``fit``; ``progress`` (a
+    normalized tracker, or None) gets the "Fitting spots" phase. With a
+    phasor ``calibration``, the number of localizations outside its z
+    range goes into ``fit_stats``."""
+    theta = phasor.fit_spots(
+        spots,
+        em=em,
+        variance=variance,
+        parallel=parallel,
+        progress=progress,
+        abort_callback=abort_callback,
+    )
+    if theta is None:
+        return None
+    locs, n_outside = _locs_from_fits_phasor(
+        identifications, theta, pixelsize=pixelsize, calibration=calibration
+    )
+    if calibration is not None and fit_stats is not None:
+        fit_stats["Outside calibrated z range"] = int(n_outside)
+    return locs
+
+
+def _locs_from_fits_phasor(
+    identifications: pd.DataFrame,
+    theta: lib.FloatArray2D,
+    *,
+    pixelsize: float,
+    calibration: dict | None = None,
+) -> tuple[pd.DataFrame, int]:
+    """Localizations (lengths in nm) from the phasor estimates ``theta``
+    (``picasso.fitting.phasor.COLUMNS``) of the spots cut at
+    ``identifications``, and the number left out because their magnitude
+    ratio lies outside the z range of ``calibration``. Spots without a
+    finite estimate (e.g., an empty box) are left out too, uncounted:
+    they could not be saved (``lib.ensure_sanity``)."""
+    col = phasor.COLUMNS.index
+    columns = {
+        "frame": identifications["frame"].to_numpy().astype(np.uint32),
+        # offsets from the center pixel, which the identification is at
+        "x": theta[:, col("x")] + identifications["x"].to_numpy(),
+        "y": theta[:, col("y")] + identifications["y"].to_numpy(),
+        "photons": theta[:, col("photons")].astype(np.float32),
+        "bg": theta[:, col("bg")].astype(np.float32),
+        "lpx": np.sqrt(theta[:, col("var_x")]),
+        "lpy": np.sqrt(theta[:, col("var_y")]),
+        "phasor_magnitude_x": theta[:, col("magnitude_x")].astype(np.float32),
+        "phasor_magnitude_y": theta[:, col("magnitude_y")].astype(np.float32),
+        **lib.net_gradient_column(identifications),
+    }
+    _lengths_to_nm(columns, pixelsize)
+    n_outside = 0
+    if calibration is not None:
+        with np.errstate(invalid="ignore", divide="ignore"):
+            ratio = theta[:, col("magnitude_x")] / theta[:, col("magnitude_y")]
+        z = zfit._phasor_z(ratio, calibration)
+        lpz = zfit._phasor_lpz(
+            z, np.sqrt(theta[:, col("var_log_ratio")]), calibration
+        )
+        factor = float(calibration["Magnification factor"])
+        columns["z"] = (z * factor).astype(np.float32)
+        columns["lpz"] = (lpz * factor).astype(np.float32)
+        n_outside = int(np.count_nonzero(np.isfinite(ratio) & np.isnan(z)))
+    if "n_id" in identifications.columns:
+        columns["n_id"] = identifications["n_id"].to_numpy().astype(np.uint32)
+    locs = pd.DataFrame(columns)
+    values = locs.drop(columns="frame").to_numpy(dtype=np.float64)
+    locs = locs[np.isfinite(values).all(axis=1)]
+    locs = locs.sort_values(
+        by="n_id" if "n_id" in locs.columns else "frame", kind="stable"
+    )
+    if calibration is not None:
+        # after the fit, as for a spline calibration
+        locs = lib.apply_lateral_transforms(locs, calibration)
+    return locs.reset_index(drop=True), n_outside
+
+
 def _fit2d_vectorfit(
     spots: lib.FloatArray3D,
     identifications: pd.DataFrame,
@@ -11609,6 +11865,7 @@ def localize(
         "avg",
         "vectorfit",
         "vectorfit-gpu",
+        "phasor",
     ] = "gausslq",
     eps: float | None = None,
     max_it: int | None = None,
@@ -11624,7 +11881,9 @@ def localize(
     specified parameters.
 
     Fits in 2D, or in 3D with ``calibration_3d`` (astigmatism, see
-    ``zfit``) or a 3D ``spline_calibration`` (z from the fit itself).
+    ``zfit``; for the phasor fit an astigmatic phasor calibration, z from
+    the fit itself) or a 3D ``spline_calibration`` (z from the fit
+    itself).
 
     Since v0.10.0: support for frame bounds and ROI for identification +
     all fitting methods.
@@ -11701,7 +11960,11 @@ def localize(
           the calibration sample and the estimated z position from the
           localization data.
 
-        Ignored for the "spline*" fitting methods, which fit z
+        For ``fitting_method="phasor"``, an astigmatic phasor calibration
+        instead (see ``zfit.calibrate_z_phasor``), from which the phasor
+        fit takes z itself (see the ``phasor_calibration`` of ``fit``);
+        the two kinds are not interchangeable. Ignored for the "spline*"
+        fitting methods, which fit z
         themselves from ``spline_calibration``, and for "vectorfit",
         whose 3D model fits z itself. Not supported for "avg",
         which fits no Gaussian widths, nor for the "*-spherical" methods,
@@ -11805,10 +12068,38 @@ def localize(
             "identification_parameters must be an IdentificationParameters, "
             f"got {type(identification_parameters).__name__}."
         )
-    fit_z = _validate_calibration_3d(calibration_3d, fitting_method)
+    phasor_calibration = None
+    if fitting_method == "phasor":
+        # the phasor fit takes z from its own kind of calibration itself;
+        # checked before the spots are identified, which can take a while
+        fit_z = False
+        if calibration_3d is not None:
+            phasor_calibration = (
+                io.load_calibration(
+                    calibration_3d, pixelsize=camera_info.get("Pixelsize")
+                )
+                if isinstance(calibration_3d, str)
+                else calibration_3d
+            )
+            pixelsize = camera_info.get("Pixelsize")
+            if _is_positive_number(pixelsize):  # else fit() reports it
+                _validate_phasor_calibration(
+                    phasor_calibration,
+                    fitting_method,
+                    identification_parameters.box,
+                    float(pixelsize),
+                )
+    else:
+        fit_z = _validate_calibration_3d(calibration_3d, fitting_method)
     if fit_z and isinstance(calibration_3d, str):
         calibration_3d = io.load_calibration(
             calibration_3d, pixelsize=camera_info.get("Pixelsize")
+        )
+    if fit_z and zfit._is_phasor_calibration(calibration_3d):
+        raise ValueError(
+            "calibration_3d is a phasor calibration, which only the phasor "
+            "fit (fitting_method='phasor') can use; the Gaussian z fit "
+            "needs a Gaussian astigmatism calibration (zfit.calibrate_z)."
         )
 
     # Without movie metadata, record at least the movie size, which every
@@ -11843,6 +12134,7 @@ def localize(
             max_it=max_it,
             spline_calibration=spline_calibration,
             vectorfit_parameters=vectorfit_parameters,
+            phasor_calibration=phasor_calibration,
             camera_calibration=camera_calibration,
             parallel=parallel,
             progress=progress,
@@ -11876,14 +12168,16 @@ def localize(
             return locs, info
 
     # Standalone affine corrections (e.g. a chromatic one used without a 3D
-    # calibration); those carried by the spline calibration were already
-    # applied by the fit, so they are dropped here rather than applied twice.
-    return _apply_extra_affine(
-        locs,
-        info,
-        affine_calibration,
-        spline_calibration if fitting_method.startswith("spline") else None,
-    )
+    # calibration); those carried by the spline or phasor calibration were
+    # already applied by the fit, so they are dropped here rather than
+    # applied twice.
+    if fitting_method.startswith("spline"):
+        applied = spline_calibration
+    elif fitting_method == "phasor":
+        applied = phasor_calibration
+    else:
+        applied = None
+    return _apply_extra_affine(locs, info, affine_calibration, applied)
 
 
 #: Camera keys ``fit`` reads off ``camera_info`` (see ``to_photons`` /

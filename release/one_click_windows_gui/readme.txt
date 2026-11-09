@@ -82,6 +82,7 @@ Many of the functionalities provided by Picasso were published independently, pl
 - Magnification factor of z (refractive-index mismatch, Calculate...): Loginov et al., Optica, 2024; Lyakin et al., Opt. Spectrosc., 2017; 10.1364/OPTICA.520595 (https://doi.org/10.1364/OPTICA.520595), 10.1134/S0030400X17090235 (https://doi.org/10.1134/S0030400X17090235)
 - B-spline wavelet spot identification: Izeddin et al., Opt. Express, 2012; 10.1364/OE.20.002081 (https://doi.org/10.1364/OE.20.002081)
 - Multi-emitter fitting (3D-DAOSTORM). A port of storm-analysis, see the storm-analysis license (https://github.com/jungmannlab/picasso/blob/master/LICENSES/storm-analysis-LICENSE.txt); its spline PSF is implemented from the paper: Babcock et al., Opt. Nanoscopy, 2012; Babcock & Zhuang, Sci. Rep., 2017; 10.1186/2192-2853-1-6 (https://doi.org/10.1186/2192-2853-1-6), 10.1038/s41598-017-00622-w (https://doi.org/10.1038/s41598-017-00622-w)
+- Phasor localization (pSMLM); its localization precision is Picasso's estimate: Martens et al., J. Chem. Phys., 2018; 10.1063/1.5005899 (https://doi.org/10.1063/1.5005899)
 - Vectorial PSF fitting with the VectorFit library: Droste et al., Optica, 2025; 10.1364/OPTICA.560721 (https://doi.org/10.1364/OPTICA.560721)
 - sCMOS pixel-dependent noise modeling: Huang et al., Nat. Methods, 2013; 10.1038/nmeth.2488 (https://doi.org/10.1038/nmeth.2488)
 - NeNA: Endesfelder et al., Histochem. Cell Biol., 2014; 10.1007/s00418-014-1192-3 (https://doi.org/10.1007/s00418-014-1192-3)

@@ -20,6 +20,17 @@ function                        estimator
 :func:`sigma_uncertainty_mle`   Poisson maximum likelihood (width)
 ==============================  ====================================
 
+*Error propagation.* For an estimator that is a closed-form function of the
+pixels, the variance of every pixel can be propagated through it to first
+order; this is the precision of that estimator itself, not a bound, and
+needs no PSF model:
+
+==============================  ====================================
+function                        estimator
+==============================  ====================================
+:func:`phasor_precision`        phasor localization (position, z)
+==============================  ====================================
+
 *Numerically inverted Fisher matrices.* The expensive counterpart: they
 evaluate the model and its derivatives at every pixel of every fitting box and
 invert the resulting information matrix, so they need the PSF model itself.
@@ -55,6 +66,12 @@ Rieger, B. & Stallinga, S. "The lateral and axial localization uncertainty in
 super-resolution light microscopy." ChemPhysChem 15, 664-670 (2014).
 https://doi.org/10.1002/cphc.201300711
 
+Martens, K. J. A., Bader, A. N., Baas, S., Rieger, B. & Hohlbein, J.
+"Phasor based single-molecule localization microscopy in 3D (pSMLM-3D): An
+algorithm for MHz localization rates using standard CPUs." J. Chem. Phys.
+148, 123311 (2018). https://doi.org/10.1063/1.5005899 (the phasor
+estimator; its precision here is Picasso's)
+
 Kowalewski, R., Reinhardt, S. C. M. et al. Nature Communications (2026).
 https://doi.org/10.1038/s41467-026-70198-5
 
@@ -81,6 +98,7 @@ __all__ = [
     "localization_precision",
     "sigma_uncertainty_lsq",
     "sigma_uncertainty_mle",
+    "phasor_precision",
 ]
 
 # Check for CUDA availability for the spline CRLB kernels. Otherwise, CPU is
@@ -252,6 +270,69 @@ def sigma_uncertainty_mle(
         1 + 8 * tau + np.sqrt((8 * tau) / (1 + 2 * tau))
     )
     return np.sqrt(delta_sigma_sq)
+
+
+# ---------------------------------------------------------------------------
+# Error propagation
+# ---------------------------------------------------------------------------
+
+
+def phasor_precision(
+    spots: lib.FloatArray3D,
+    *,
+    em: bool,
+    variance: lib.FloatArray3D | None = None,
+    parallel: bool = True,
+) -> tuple[lib.FloatArray1D, lib.FloatArray1D, lib.FloatArray1D]:
+    """Precision of the phasor localization of spots, by error propagation.
+
+    The phasor estimate of Martens et al. (2018) is a closed-form function
+    of the pixels (see :mod:`picasso.fitting.phasor`), so the variance of
+    each pixel - its photon count, doubled on an EMCCD, plus its sCMOS
+    readout variance - can be propagated through it to first order. This
+    is what Picasso reports as ``lpx``/``lpy`` (and, through the slope of
+    the z calibration, ``lpz``) for phasor localizations. The published
+    method itself gives no precision; this estimate is Picasso's.
+
+    It is the precision of the phasor estimator, not a Cramer-Rao bound,
+    and it assumes no PSF model. The photon count of each pixel stands in
+    for its expected value. It covers the noise only: the error a box
+    introduces by cutting off the tails of the spot, which depends on where
+    the emitter sits in its pixel, is not included.
+
+    Parameters
+    ----------
+    spots : lib.FloatArray3D
+        ``(n_spots, box, box)`` photon counts, indexed ``[spot, y, x]``;
+        ``box`` odd and at least 3.
+    em : bool
+        Whether the camera multiplies the signal (EMCCD), which doubles
+        the photon variance.
+    variance : lib.FloatArray3D or None, optional
+        Per-pixel sCMOS readout variance in photoelectrons squared, laid
+        out like ``spots``. Default is None (no readout noise).
+    parallel : bool, optional
+        Whether to use all CPU cores. Default is True.
+
+    Returns
+    -------
+    lpx, lpy : lib.FloatArray1D
+        Standard errors of the phasor x and y positions in camera pixels.
+    sd_log_ratio : lib.FloatArray1D
+        Standard error of the log of the ratio of the x and y phasor
+        magnitudes, the quantity an astigmatic phasor calibration turns
+        into z.
+    """
+    from picasso.fitting import phasor
+
+    theta = phasor.fit_spots(
+        spots, em=em, variance=variance, parallel=parallel
+    )
+    return (
+        np.sqrt(theta[:, phasor.COLUMNS.index("var_x")]),
+        np.sqrt(theta[:, phasor.COLUMNS.index("var_y")]),
+        np.sqrt(theta[:, phasor.COLUMNS.index("var_log_ratio")]),
+    )
 
 
 # ---------------------------------------------------------------------------

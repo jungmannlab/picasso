@@ -307,11 +307,13 @@ on its own. See :ref:`localize-analyzing-each-channel`.
 3D fitting
 ~~~~~~~~~~
 If you select one of the astigmatism-based 3D algorithms (``lq-3d``,
-``lq-gpu-3d`` or ``mle-3d``) you must supply both the magnification factor
-(``-mf``) and the path to the 3D calibration file (``-zc``). If either is
-omitted, the program will prompt you for it interactively. The spline fit
-methods instead need a cubic-spline PSF calibration passed with
-``--spline-calibration``.
+``lq-gpu-3d``, ``mle-3d`` or ``phasor-3d``) you must supply both the
+magnification factor (``-mf``) and the path to the 3D calibration file
+(``-zc``). If either is omitted, the program will prompt you for it
+interactively. ``phasor-3d`` needs an astigmatic phasor calibration, the
+Gaussian ones a Gaussian calibration; the two are not interchangeable (see
+:ref:`localize-phasor-3d`). The spline fit methods instead need a
+cubic-spline PSF calibration passed with ``--spline-calibration``.
 
 Example
 ~~~~~~~
