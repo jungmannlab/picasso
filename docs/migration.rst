@@ -437,7 +437,7 @@ With the same settings, these results differ from Picasso 0.11:
 - **Apply expression** in Render enlarges ``Width`` and ``Height`` of the
   metadata when it moves localizations beyond the field of view; 0.11 lost
   them on saving.
-- **Astigmatism (3D) calibrations made with Picasso 0.11.3 or 0.11.4**
+- **Astigmatism (3D) calibrations made with Picasso 0.11.3**
   without z binning placed z = 0 away from the focus, by the distance between
   the focus and the middle of the calibration stack, so every z fitted with
   them is shifted by that distance. Calibrate again with 1.0.

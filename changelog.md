@@ -91,6 +91,7 @@ Picasso 1.0 is the largest update since Picasso was first published. The highlig
 - The Info dialog groups the localization precision, NeNA, FRC and decorrelation in one *Precision and resolution* section with one channel selector: no channel is asked for, and each channel keeps its results.
 - *Align channels* can remove the localizations that lie outside the overlap of the aligned channels. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-postprocess.html#render-align-non-overlapping).
 - *Align channels* can align from the displacements between the localizations, without rendering images and with the uncertainty of each shift. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-postprocess.html#render-align-channels).
+- Plot profile (rectangular) allows for lower bin size.
 - Optional confirmation before `File > Remove all localizations`, turned on with the user setting `Confirm removing all localizations` (off by default). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-file.html#render-remove-all-localizations).
 - Fixed: closing a channel in Render did not remove its drift data, so the drift of the channels after it was misaligned.
 - Fixed: the pick statistics of the Info dialog showed meaningless huge numbers when a pick held no localizations (also in `picasso.postprocess.evaluate_picks`, which now gives NaN for such picks).
@@ -286,9 +287,6 @@ The [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html)
 - `picasso.render.build_animation` gained a `cancel` callback and returns whether the build completed.
 - New `picasso.spatial_index` functions: `query_rect`, `query_circle` (circular picks through the pyramid), `save_render_index`, `read_render_index`, `validate_render_index`, `load_render_index`. `picasso.postprocess.picked_locs` and the functions taking `index_blocks` (`pick_similar`, `combine_locs_in_picks`, `remove_locs_in_picks`, `align_from_picked`, `undrift_from_fiducials`) accept a `spatial_index.RenderIndexPyramid` in that argument.
 - `picasso.io.save_locs` gained `render_index`; `picasso.lib.standardize_dtypes` is new.
-
-## 0.11.4
-- Plot profile (rectangular) allows for lower bin size.
 
 ## 0.11.3
 - **Breaking change:** dark times are now the number of frames without signal between binding events, i.e., one frame shorter than before (two binding events in consecutive frames have a dark time of 0). Together with the bright time, each now counts the frames spent in its state. This affects Render's pick info, qPAINT (`picasso.postprocess.evaluate_picks`, `pick_kinetics` and `pick_properties`) and `picasso dark`; influx rates calibrated with earlier versions should be recalibrated. See the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#hdf5-pick-property-files) for the convention.
