@@ -468,7 +468,28 @@ MODEL_TOOLTIP = (
     "the optics (NA, wavelength, refractive indices), no calibration\n"
     "needed; its 3D model yields z directly. Runs on the CPU and\n"
     "requires the optional VectorFit library\n"
-    "(pip install picassosr[vectorfit])."
+    "(pip install picassosr[vectorfit]); tick Use GPU to run it on\n"
+    "the GPU with VectorFit's GPU build (pip install vectorfit-py-cu12),\n"
+    "which, despite its name, needs CUDA 13 (NVIDIA driver 580 or newer)."
+)
+
+GPU_TOOLTIP = (
+    "Perform fitting on a CUDA-capable GPU.\n\n"
+    "The algorithm is a port of Gpufit; the kernels are compiled "
+    "at run time by Numba.\n\n"
+    "Przybylski, A., Thiel, B., Keller-Findeisen, J. et al. "
+    "Gpufit: An open-source toolkit for GPU-accelerated curve "
+    "fitting. Sci Rep 7, 15722 (2017). "
+)
+
+# The "Use GPU" tooltip while VectorFit is selected: VectorFit has its own
+# GPU implementation.
+VECTORFIT_GPU_TOOLTIP = (
+    "Fit the vectorial PSF on a CUDA-capable GPU, with VectorFit's GPU\n"
+    "build (vectorfit-py-cu12, installed in place of vectorfit-py).\n\n"
+    "Despite its name, it needs CUDA 13, i.e. an NVIDIA driver of\n"
+    "version 580 or newer, and an Ampere or newer GPU; a driver that\n"
+    "supports CUDA 12 only is not enough."
 )
 
 CAMERA_CALIB_TOOLTIP = (
@@ -660,18 +681,21 @@ _CONVERGENCE_DEFAULTS = {
         )
     )
     for code in localize.FIT_METHODS
-    if code not in ("avg", "vectorfit")
+    if code != "avg" and not code.startswith("vectorfit")
 }
-_CONVERGENCE_DEFAULTS["vectorfit"] = (
-    vectorfit.TOLERANCE,
-    vectorfit.MAX_ITERATIONS,
+# the same on either device
+_VECTORFIT_CODES = ("vectorfit", "vectorfit-gpu")
+_CONVERGENCE_DEFAULTS.update(
+    dict.fromkeys(
+        _VECTORFIT_CODES, (vectorfit.TOLERANCE, vectorfit.MAX_ITERATIONS)
+    )
 )
 _CONVERGENCE_CODES = frozenset(_CONVERGENCE_DEFAULTS)
 # Smallest convergence criterion offered: below ~1e-6 the test on the
 # chi-square answers its noise rather than convergence. VectorFit has its
 # own test, whose default (vectorfit.TOLERANCE) lies far below.
 _CONVERGENCE_MINIMUM = 1e-6
-_CONVERGENCE_MINIMUMS = {"vectorfit": 1e-12}
+_CONVERGENCE_MINIMUMS = dict.fromkeys(_VECTORFIT_CODES, 1e-12)
 
 
 # Steps allotted to each file in the load progress dialog, so the bar can
@@ -5783,14 +5807,7 @@ class ParametersDialog(lib.Dialog):
         # GPU, so the checkbox applies to both optimizers and sits below
         # the optimizer parameter stack.
         self.gpu_checkbox = QtWidgets.QCheckBox("Use GPU")
-        self.gpu_checkbox.setToolTip(
-            "Perform fitting on a CUDA-capable GPU.\n\n"
-            "The algorithm is a port of Gpufit; the kernels are compiled "
-            "at run time by Numba.\n\n"
-            "Przybylski, A., Thiel, B., Keller-Findeisen, J. et al. "
-            "Gpufit: An open-source toolkit for GPU-accelerated curve "
-            "fitting. Sci Rep 7, 15722 (2017). "
-        )
+        self.gpu_checkbox.setToolTip(GPU_TOOLTIP)
         self.gpu_checkbox.setTristate(False)
         self.gpu_checkbox.setDisabled(True)
         self.gpu_checkbox.stateChanged.connect(self.on_gpu_fitting_changed)
@@ -6130,8 +6147,10 @@ class ParametersDialog(lib.Dialog):
         )
         vectorfit_groupbox.setToolTip(
             "Optics of the vectorial PSF model fitted by VectorFit.\n"
-            "Runs on the CPU; requires the optional VectorFit library\n"
-            "(pip install picassosr[vectorfit]). Supported box sizes are\n"
+            "Runs on the CPU, or on the GPU with Use GPU; requires the\n"
+            "optional VectorFit library (pip install picassosr[vectorfit],\n"
+            "or vectorfit-py-cu12 for the GPU, which needs CUDA 13 despite\n"
+            "its name). Supported box sizes are\n"
             f"{', '.join(str(_) for _ in vectorfit.N_PUPIL)}."
         )
         vbox.addWidget(vectorfit_groupbox)
@@ -6590,6 +6609,7 @@ class ParametersDialog(lib.Dialog):
         if optimizers is None:
             self.optimizer_label.hide()
             self.fit_optimizer.hide()
+            self._update_gpu_checkbox()
             self._apply_convergence_defaults()
         else:
             self.optimizer_label.show()
@@ -6811,17 +6831,39 @@ class ParametersDialog(lib.Dialog):
             self.convergence_criterion.setValue(defaults[0])
             self.max_it.setValue(defaults[1])
 
+    def _update_gpu_checkbox(self) -> None:
+        """Enable the GPU fitting checkbox if the selected model and
+        optimizer have a GPU implementation that can run here; otherwise
+        untick and disable it. VectorFit's needs its GPU build and a recent
+        enough driver, so its tooltip says why it cannot run."""
+        if getattr(self, "gpu_checkbox", None) is None:
+            return  # still building the dialog
+        model = self.fit_model.currentText()
+        if FIT_MODELS[model]["optimizers"] is None:
+            code = FIT_MODELS[model]["code"]
+        else:
+            optimizer = self.fit_optimizer.currentText()
+            code = _fit_code(model, optimizer) if optimizer else ""
+        tooltip = GPU_TOOLTIP
+        if code not in _GPU_CAPABLE_CODES:
+            available = False
+        elif code in _VECTORFIT_CODES:
+            reason = vectorfit.gpu_unavailable_reason()
+            available = reason is None
+            tooltip = VECTORFIT_GPU_TOOLTIP + (
+                "" if available else f"\n\nNot available: {reason}"
+            )
+        else:
+            available = CUDA_AVAILABLE
+        if not available:
+            self.gpu_checkbox.setChecked(False)
+        self.gpu_checkbox.setDisabled(not available)
+        self.gpu_checkbox.setToolTip(tooltip)
+
     def on_fit_optimizer_changed(self) -> None:
         """Enable/disable the GPU fitting checkbox based on the selected
         model and optimizer, then show that method's convergence schedule."""
-        model = self.fit_model.currentText()
-        optimizer = self.fit_optimizer.currentText()
-        code = _fit_code(model, optimizer) if optimizer else ""
-        if code in _GPU_CAPABLE_CODES:
-            self.gpu_checkbox.setDisabled(not CUDA_AVAILABLE)
-        else:
-            self.gpu_checkbox.setChecked(False)
-            self.gpu_checkbox.setDisabled(True)
+        self._update_gpu_checkbox()
         self.on_gpu_fitting_changed()
 
     def on_frames_edit_changed(self) -> None:
@@ -14803,6 +14845,17 @@ class Window(QtWidgets.QMainWindow):
                     "pip install picassosr[vectorfit]",
                 )
                 return None
+            # the checkbox is disabled then, but restoring saved settings
+            # can tick it
+            if use_gpu and not vectorfit.gpu_available():
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "VectorFit",
+                    "VectorFit cannot fit on the GPU. "
+                    f"{vectorfit.gpu_unavailable_reason()}\n\n"
+                    "Untick Use GPU to fit on the CPU.",
+                )
+                return None
             box = self.parameters["Box Size"]
             if box not in vectorfit.N_PUPIL:
                 QtWidgets.QMessageBox.warning(
@@ -16669,6 +16722,7 @@ class FitWorker(QtCore.QThread):
             "spline-mle-gpu",
             "avg",
             "vectorfit",
+            "vectorfit-gpu",
         ],
         eps: float | None,
         max_it: int | None,

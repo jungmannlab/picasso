@@ -4208,6 +4208,7 @@ def fit(
         "spline-mle-gpu",
         "avg",
         "vectorfit",
+        "vectorfit-gpu",
     ] = "gausslq",
     eps: float | None = None,
     max_it: int | None = None,
@@ -4249,7 +4250,8 @@ def fit(
             "gausslq-gpu", "gausslq-rotated-gpu", "gausslq-spherical-gpu", \
             "gaussmle", "gaussmle-spherical", "gaussmle-gpu", \
             "gaussmle-rotated-gpu", "gaussmle-spherical-gpu", "spline-gpu", \
-            "spline-mle-gpu", "avg" or "vectorfit"}, optional
+            "spline-mle-gpu", "avg", "vectorfit" or "vectorfit-gpu"}, \
+            optional
         Which 2D fitting algorithm to use. "gausslq" for least-squares
         fitting of a 2D Gaussian. "gausslq-gpu" for its GPU
         implementation (if available). "gaussmle" for MLE 2D Gaussian
@@ -4273,19 +4275,23 @@ def fit(
         spot. "vectorfit" for maximum-likelihood fitting of a vectorial
         PSF model with the optional VectorFit library (CPU), configured by
         ``vectorfit_parameters``; its 3D model yields ``z`` directly.
+        "vectorfit-gpu" for the same on the GPU, which needs VectorFit's
+        GPU build, vectorfit-py-cu12. Despite its name, that is built with
+        CUDA 13, so it needs NVIDIA driver 580 or newer (see
+        ``vectorfit.gpu_unavailable_reason``).
     eps : float or None, optional
         The convergence criterion, honored by every iterating method on
         either device (all of them except "avg"). None (the default)
         picks the value that suits the method: 0.001 for "gaussmle",
         0.01 for "gausslq" and the GPU Gaussians, for either spline
         backend 1e-4 with the axial multi-start and 1e-2 without, and
-        5e-10 for "vectorfit".
+        5e-10 for either VectorFit device.
     max_it : int or None, optional
         The maximum number of iterations per spot, as ``eps``. None (the
         default) means 100 for "gaussmle", 200 for "gausslq" (MINPACK's
         own default), 20 for the GPU Gaussians, for either spline
         backend 100 with the axial multi-start and 20 without, and 20 for
-        "vectorfit".
+        either VectorFit device.
     spline_calibration : dict or None, optional
         Cubic-spline PSF calibration (see ``io.load_spline_calibration``),
         required for any "spline*" ``fitting_method`` and ignored
@@ -4293,8 +4299,8 @@ def fit(
         contain the fitted ``z`` directly (no separate z-fitting step is
         needed). Default is None.
     vectorfit_parameters : dict or None, optional
-        Optical and model settings of the "vectorfit" method; missing
-        ones take their defaults:
+        Optical and model settings of the "vectorfit" and "vectorfit-gpu"
+        methods; missing ones take their defaults:
 
         - "Fit model": "2D" or "3D" (also fits ``z``), default "2D";
         - "Wavelength": emission wavelength in nm, default 680;
@@ -4381,12 +4387,14 @@ def fit(
         parallel,
         camera_calibration,
     )
-    if fitting_method == "vectorfit":
+    if fitting_method.startswith("vectorfit"):
         # before cutting the spots, which can take a while
         vectorfit_parameters = vectorfit.parameters_with_defaults(
             vectorfit_parameters
         )
         vectorfit.check_box(box)
+        if fitting_method == "vectorfit-gpu":
+            vectorfit.check_gpu()
     with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
         spots, variance = get_spots(
             movie,
@@ -4420,7 +4428,7 @@ def fit(
                 pixelsize=float(camera_info["Pixelsize"]),
                 image_shape=(
                     tuple(movie.shape[1:3])
-                    if fitting_method == "vectorfit"
+                    if fitting_method.startswith("vectorfit")
                     else None
                 ),
             )
@@ -4434,7 +4442,7 @@ def fit(
         camera_calibration,
         vectorfit_parameters,
     )
-    if fitting_method == "vectorfit" and locs is not None:
+    if fitting_method.startswith("vectorfit") and locs is not None:
         # the only spots the vectorfit localizations leave out are the
         # outliers it discards (none when it keeps them)
         localize_info[vectorfit.OUTLIERS_KEY] = len(identifications) - len(
@@ -4680,7 +4688,7 @@ def _dispatch_fit(
             variance=variance,
             pixelsize=pixelsize,
         )
-    elif fitting_method == "vectorfit":
+    elif fitting_method.startswith("vectorfit"):
         locs = _fit2d_vectorfit(
             spots=spots,
             identifications=identifications,
@@ -4691,6 +4699,7 @@ def _dispatch_fit(
             tolerance=eps,
             max_iterations=max_it,
             parallel=parallel,
+            use_gpu=fitting_method.endswith("-gpu"),
             progress=progress,
             abort_callback=abort_callback,
         )
@@ -4748,7 +4757,7 @@ def _fit_localize_info(
         localize_info.update(
             _spline_schedule_info(spline_calibration, None, eps, max_it)
         )
-    if fitting_method == "vectorfit":
+    if fitting_method.startswith("vectorfit"):
         localize_info["Convergence criterion"] = (
             vectorfit.TOLERANCE if eps is None else eps
         )
@@ -4759,6 +4768,9 @@ def _fit_localize_info(
             vectorfit_parameters
         ).items():
             localize_info[f"VectorFit {key}"] = value
+        localize_info["VectorFit device"] = (
+            vectorfit.GPU_DEVICE if fitting_method.endswith("-gpu") else "cpu"
+        )
     localize_info.update(camera_calibration_info(camera_calibration))
     return localize_info
 
@@ -4865,6 +4877,7 @@ FIT_METHODS = tuple(
         "spline-mle-gpu",
         "avg",
         "vectorfit",
+        "vectorfit-gpu",
     ]
 )
 
@@ -4895,6 +4908,7 @@ FIT_METHOD_ALIASES = {
     "spline-mle-gpu": "spline-mle-gpu",
     "avg": "avg",
     "vectorfit": "vectorfit",
+    "vectorfit-gpu": "vectorfit-gpu",
 }
 
 
@@ -10089,14 +10103,15 @@ def _fit2d_vectorfit(
     tolerance: float | None = None,
     max_iterations: int | None = None,
     parallel: bool = True,
+    use_gpu: bool = False,
     progress: lib.Progress | None = None,
     abort_callback: Callable[[], bool] | None = None,
 ) -> pd.DataFrame | None:
-    """Fit a vectorial PSF model with VectorFit, see ``fit`` for more
-    details. VectorFit runs its own threads, so ``parallel`` only chooses
-    between all of them and one. ``progress`` (a normalized tracker, or
-    None) gets the "Fitting spots" phase. Returns None if
-    ``abort_callback`` asked to stop."""
+    """Fit a vectorial PSF model with VectorFit, on the GPU if
+    ``use_gpu``, see ``fit`` for more details. On the CPU VectorFit runs
+    its own threads, so ``parallel`` only chooses between all of them and
+    one. ``progress`` (a normalized tracker, or None) gets the "Fitting
+    spots" phase. Returns None if ``abort_callback`` asked to stop."""
     result = vectorfit.fit_spots(
         spots,
         identifications,
@@ -10106,6 +10121,7 @@ def _fit2d_vectorfit(
         tolerance=tolerance,
         max_iterations=max_iterations,
         n_threads=lib.n_workers() if parallel else 1,
+        use_gpu=use_gpu,
         progress=progress,
         abort_callback=abort_callback,
     )
@@ -11445,6 +11461,7 @@ def localize(
         "spline-mle-gpu",
         "avg",
         "vectorfit",
+        "vectorfit-gpu",
     ] = "gausslq",
     eps: float | None = None,
     max_it: int | None = None,
@@ -11502,8 +11519,8 @@ def localize(
     fitting_method : {"gausslq", "gausslq-spherical", "gausslq-rotated", \
             "gausslq-gpu", "gausslq-rotated-gpu", "gausslq-spherical-gpu", \
             "gaussmle", "gaussmle-spherical", "gaussmle-gpu", \
-            "gaussmle-rotated-gpu", "gaussmle-spherical-gpu", "avg" or \
-            "vectorfit"}, optional
+            "gaussmle-rotated-gpu", "gaussmle-spherical-gpu", "avg", \
+            "vectorfit" or "vectorfit-gpu"}, optional
         Which 2D fitting algorithm to use, see ``fit``. Default is
         "gausslq".
     eps : float or None, optional
@@ -11938,7 +11955,7 @@ def _validate_calibration_3d(
             stacklevel=3,
         )
         return False
-    if fitting_method == "vectorfit":
+    if fitting_method.startswith("vectorfit"):
         # The 3D vectorial PSF model fits z itself.
         warnings.warn(
             "Ignoring calibration_3d: VectorFit fits z itself with its 3D "

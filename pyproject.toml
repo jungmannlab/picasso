@@ -104,6 +104,12 @@ formats = [
 vectorfit = [
     "vectorfit-py>=0.3.2",
 ]
+# The same on the GPU ('vectorfit-gpu' fit method), with VectorFit's CUDA
+# build. Both builds install the same module, so install one or the other.
+# NOTE: DESPITE THE NAME, CUDA13 IS REQUIRED
+vectorfit-gpu = [
+    "vectorfit-py-cu12>=0.3.2",
+]
 # Not for general use: the installer / installer_cuda extras exist only to
 # build the one-click installers, where every version is pinned exactly so
 # the frozen bundles stay reproducible and stable. Regular users should
