@@ -1,21 +1,27 @@
-call DEL /F/Q/S build_cuda > NUL
-call DEL /F/Q/S dist_cuda > NUL
-call RMDIR /Q/S build_cuda
-call RMDIR /Q/S dist_cuda
+REM CUDA 12 edition: the CPU installer plus the CUDA 12 runtime for GPU
+REM (numba.cuda) fitting. Runs on any CUDA-capable NVIDIA GPU with a driver
+REM for CUDA 12 (R525+). create_installer_windows_cuda13.bat builds the CUDA 13
+REM edition; keep the two scripts in step. The edition's name (-CUDA12) is how
+REM the in-app updater (picasso/updater.py, find_installer) tells the two
+REM apart in a release, so keep "CUDA12" in the file names.
+call DEL /F/Q/S build_cuda12 > NUL
+call DEL /F/Q/S dist_cuda12 > NUL
+call RMDIR /Q/S build_cuda12
+call RMDIR /Q/S dist_cuda12
 
 call cd %~dp0\..\..
 
-call conda create -n picasso_installer_cuda python=3.14.4 -y
-call conda activate picasso_installer_cuda
+call conda create -n picasso_installer_cuda12 python=3.14.4 -y
+call conda activate picasso_installer_cuda12
 
 for /f %%i in ('python -c "exec(open('picasso/version.py').read()); print(__version__)"') do set PICASSO_VERSION=%%i
 REM Picasso is built from a temporary copy of the repository
 REM (..\install_picasso.py): a build in the repository itself writes build\,
 REM dist\ and picassosr.egg-info there, which create_installer_windows.bat, if
 REM it runs at the same time, would overwrite.
-REM installer_cuda adds numba-cuda[cu12], which pulls the nvidia-*-cu12 CUDA
+REM installer_cuda12 adds numba-cuda[cu12], which pulls the nvidia-*-cu12 CUDA
 REM runtime wheels needed to run numba.cuda (GPU-accelerated) code.
-call python release\install_picasso.py installer_cuda
+call python release\install_picasso.py installer_cuda12
 if errorlevel 1 exit /b 1
 call cd release/one_click_windows_gui
 
@@ -50,14 +56,14 @@ REM would keep Numba's built-in CUDA stub and GPU-accelerated (numba.cuda) code
 REM would fall back to CPU or vanish. picasso/_numba_cuda_compat.py reinstalls
 REM that redirect at import time (shipped via --collect-all picasso), so no extra
 REM PyInstaller flag is needed here.
-REM CUDA artifacts go to _gpu-suffixed folders (--distpath/--workpath/--specpath)
+REM CUDA artifacts go to _cuda12-suffixed folders (--distpath/--workpath/--specpath)
 REM so they never clash with the CPU build's build/dist/*.spec. The exe names
 REM (--name) stay "picasso"/"picassow" so picasso_innoinstaller.iss is unchanged.
 call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --onedir ^
-    --distpath dist_cuda ^
-    --workpath build_cuda ^
-    --specpath build_cuda ^
+    --distpath dist_cuda12 ^
+    --workpath build_cuda12 ^
+    --specpath build_cuda12 ^
     --collect-all picasso ^
     --collect-all PyImarisWriter ^
     --collect-all streamlit ^
@@ -80,9 +86,9 @@ call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
 call pyinstaller "../pyinstaller/picasso_pyinstaller.py" ^
     --onedir ^
     --windowed ^
-    --distpath dist_cuda ^
-    --workpath build_cuda ^
-    --specpath build_cuda ^
+    --distpath dist_cuda12 ^
+    --workpath build_cuda12 ^
+    --specpath build_cuda12 ^
     --collect-all picasso ^
     --collect-all PyImarisWriter ^
     --collect-all streamlit ^
@@ -107,7 +113,7 @@ REM The installer redistributes Python, PyQt6/Qt, the CUDA runtime and every
 REM other bundled library, whose licenses require shipping their notices with
 REM it. Collect them while the build environment is still active so the list
 REM matches the frozen packages; the file lands in the installation folder.
-call python ..\collect_third_party_licenses.py dist_cuda\picasso\THIRD-PARTY-LICENSES.txt
+call python ..\collect_third_party_licenses.py dist_cuda12\picasso\THIRD-PARTY-LICENSES.txt
 if errorlevel 1 exit /b 1
 
 REM Test the frozen app before packaging it (..\smoke_test.py): a short
@@ -115,25 +121,25 @@ REM analysis on the command line and every GUI opened offscreen, also from
 REM the windowed build. A failure stops here, so a broken build never becomes
 REM an installer. Set PICASSO_SKIP_SMOKE_TEST=1 to skip the test.
 if not defined PICASSO_SKIP_SMOKE_TEST (
-    call python ..\smoke_test.py --frozen dist_cuda\picasso\picasso.exe
+    call python ..\smoke_test.py --frozen dist_cuda12\picasso\picasso.exe
     if errorlevel 1 exit /b 1
-    call python ..\smoke_test.py --frozen dist_cuda\picassow\picassow.exe --gui-only
+    call python ..\smoke_test.py --frozen dist_cuda12\picassow\picassow.exe --gui-only
     if errorlevel 1 exit /b 1
 )
 
-REM Spec files were written to build_cuda (via --specpath); they are removed with
-REM the build_cuda tree below, so no separate *.spec deletion is needed here.
+REM Spec files were written to build_cuda12 (via --specpath); they are removed with
+REM the build_cuda12 tree below, so no separate *.spec deletion is needed here.
 
 call conda deactivate
-call conda env remove -n picasso_installer_cuda -y
+call conda env remove -n picasso_installer_cuda12 -y
 
-copy dist_cuda\picassow\picassow.exe dist_cuda\picasso\picassow.exe
-call "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAPP_VERSION=%PICASSO_VERSION% /DVARIANT=-CUDA /DDISTDIR=dist_cuda picasso_innoinstaller.iss
+copy dist_cuda12\picassow\picassow.exe dist_cuda12\picasso\picassow.exe
+call "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" /DAPP_VERSION=%PICASSO_VERSION% /DVARIANT=-CUDA12 /DDISTDIR=dist_cuda12 picasso_innoinstaller.iss
 if errorlevel 1 exit /b 1
 
 REM Zip the installer (Inno Setup writes it to Output\) with readme.txt, for
 REM the GitHub release
-set INSTALLER=Output\Picasso-Windows-64bit-CUDA-%PICASSO_VERSION%
+set INSTALLER=Output\Picasso-Windows-64bit-CUDA12-%PICASSO_VERSION%
 powershell -NoProfile -Command "$ErrorActionPreference = 'Stop'; Compress-Archive -Path '%INSTALLER%.exe', 'readme.txt' -DestinationPath '%INSTALLER%.zip' -Force"
 if errorlevel 1 exit /b 1
 echo Created %INSTALLER%.zip

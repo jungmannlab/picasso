@@ -215,7 +215,8 @@ ASSETS_0_11 = [
 #: the assets as the release scripts of 1.0 name them
 ASSETS_1_0 = [
     {"name": "Picasso-Windows-64bit-1.0.1.zip"},
-    {"name": "Picasso-Windows-64bit-CUDA-1.0.1.zip"},
+    {"name": "Picasso-Windows-64bit-CUDA12-1.0.1.zip"},
+    {"name": "Picasso-Windows-64bit-CUDA13-1.0.1.zip"},
     {"name": "Picasso-Apple-Silicon-1.0.1.zip"},
 ]
 
@@ -227,7 +228,7 @@ macos_only = pytest.mark.skipif(
 )
 
 
-def _names(assets, platform, cuda=False):
+def _names(assets, platform, cuda=0):
     asset = updater.find_installer(
         {"assets": assets}, platform=platform, cuda=cuda
     )
@@ -235,27 +236,68 @@ def _names(assets, platform, cuda=False):
 
 
 @pytest.mark.parametrize(
-    "assets, windows, cuda, macos",
+    "assets, windows, cuda12, cuda13, macos",
     [
         (
             ASSETS_0_11,
             "Picasso-Windows-64bit-0.11.3.zip",
             "Picasso-Windows-64bit-GPU-0.11.3.zip",
+            None,
             "Picasso_v0.11.3_installer_macOS_apple_silicon.zip",
         ),
         (
             ASSETS_1_0,
             "Picasso-Windows-64bit-1.0.1.zip",
-            "Picasso-Windows-64bit-CUDA-1.0.1.zip",
+            "Picasso-Windows-64bit-CUDA12-1.0.1.zip",
+            "Picasso-Windows-64bit-CUDA13-1.0.1.zip",
             "Picasso-Apple-Silicon-1.0.1.zip",
         ),
     ],
 )
-def test_each_edition_finds_its_installer(assets, windows, cuda, macos):
+def test_each_edition_finds_its_installer(
+    assets, windows, cuda12, cuda13, macos
+):
     assert _names(assets, "win32") == windows
-    assert _names(assets, "win32", cuda=True) == cuda
+    assert _names(assets, "win32", cuda=12) == cuda12
+    assert _names(assets, "win32", cuda=13) == cuda13
     assert _names(assets, "darwin") == macos
     assert _names(assets, "linux") is None
+
+
+def test_the_cuda_editions_are_told_apart_in_any_order():
+    """Neither CUDA edition is offered the other's installer, whichever
+    comes first in the release, and a version without a number after
+    "CUDA" is not read as CUDA 1."""
+    assets = [
+        {"name": "Picasso-Windows-64bit-CUDA13-1.0.1.exe"},
+        {"name": "Picasso-Windows-64bit-CUDA12-1.0.1.exe"},
+    ]
+    assert _names(assets, "win32", cuda=12).startswith(
+        "Picasso-Windows-64bit-CUDA12"
+    )
+    assert _names(assets[:1], "win32", cuda=12) is None
+    assert _names(assets[1:], "win32", cuda=13) is None
+    assert _names(assets, "win32") is None
+    unnumbered = [{"name": "Picasso-Windows-64bit-CUDA-1.0.1.exe"}]
+    assert _names(unnumbered, "win32", cuda=12) is not None
+
+
+@pytest.mark.parametrize(
+    "bindings, edition", [(None, 0), ("12.9.9", 12), ("13.5.0", 13)]
+)
+def test_the_running_cuda_edition(monkeypatch, bindings, edition):
+    """The running edition is read from the cuda-bindings it bundles;
+    without numba-cuda it is the standard edition."""
+    import importlib.metadata
+    import importlib.util
+
+    monkeypatch.setattr(
+        importlib.util,
+        "find_spec",
+        lambda name: None if bindings is None else object(),
+    )
+    monkeypatch.setattr(importlib.metadata, "version", lambda name: bindings)
+    assert updater._cuda_edition() == edition
 
 
 def test_the_installer_is_preferred_to_a_zip_of_it():

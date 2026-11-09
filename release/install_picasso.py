@@ -1,9 +1,9 @@
 """Install Picasso from this repository into the build environment of a
-one-click installer, e.g., in ``create_installer_windows_cuda.bat``::
+one-click installer, e.g., in ``create_installer_windows_cuda12.bat``::
 
-    python release/install_picasso.py installer_cuda
+    python release/install_picasso.py installer_cuda12
 
-installs ``picassosr[installer_cuda]`` with the Python that runs it.
+installs ``picassosr[installer_cuda12]`` with the Python that runs it.
 
 Picasso is built from a temporary copy of the repository, not from the
 repository itself: a build writes ``build``, ``dist`` and
@@ -51,7 +51,7 @@ def copy_sources(target: str) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
-        "extra", help="the optional dependencies, e.g., installer_cuda"
+        "extra", help="the optional dependencies, e.g., installer_cuda12"
     )
     args = parser.parse_args()
     folder = tempfile.mkdtemp(prefix="picasso_install_")

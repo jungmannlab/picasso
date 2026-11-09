@@ -11,7 +11,7 @@ call conda activate picasso_installer
 for /f %%i in ('python -c "exec(open('picasso/version.py').read()); print(__version__)"') do set PICASSO_VERSION=%%i
 REM Picasso is built from a temporary copy of the repository
 REM (..\install_picasso.py): a build in the repository itself writes build\,
-REM dist\ and picassosr.egg-info there, which create_installer_windows_cuda.bat,
+REM dist\ and picassosr.egg-info there, which create_installer_windows_cuda12.bat,
 REM if it runs at the same time, would overwrite.
 call python release\install_picasso.py installer
 if errorlevel 1 exit /b 1
