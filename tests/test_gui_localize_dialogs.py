@@ -3632,13 +3632,17 @@ class TestSeparateVectorFit:
 
     REGIONS = [[[0, 0], [32, 16]], [[0, 16], [32, 32]]]
 
+    @pytest.fixture(autouse=True)
+    def _installed(self, monkeypatch):
+        # before the window is built: it offers VectorFit only if installed
+        monkeypatch.setattr(
+            gui_localize.vectorfit, "VECTORFIT_AVAILABLE", True
+        )
+
     @pytest.fixture
     def fake_fit_worker(self, monkeypatch):
         _FakeFitWorker.built = []
         monkeypatch.setattr(gui_localize, "FitWorker", _FakeFitWorker)
-        monkeypatch.setattr(
-            gui_localize.vectorfit, "VECTORFIT_AVAILABLE", True
-        )
         return _FakeFitWorker.built
 
     @staticmethod

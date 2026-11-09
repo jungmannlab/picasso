@@ -78,7 +78,7 @@ Besides the driver, the GPU build needs a GPU of compute capability 8.0 (Ampere,
 
 1. Identify the spots as usual (see :ref:`localize-identification`). The **box size** must be one VectorFit supports: 5, 7, 9, 11, 13, 15, 17, 19, 21 or 27.
 2. Make sure the **pixel size** of the camera is right: the model is computed in nm.
-3. Open ``Analyze`` > ``Parameters`` and set **Model** to ``Vectorial PSF (VectorFit)``. There is no optimizer to choose. Tick **Use GPU** to fit on the GPU (see above).
+3. Open ``Analyze`` > ``Parameters`` and set **Model** to ``Vectorial PSF (VectorFit)``; it is listed only where VectorFit is installed. There is no optimizer to choose. Tick **Use GPU** to fit on the GPU (see above).
 4. In the **Vectorial PSF (VectorFit)** box, set the **Fit model** (``2D`` or ``3D``), the emission wavelength, the NA and the three refractive indices of your setup.
 5. Set the aberrations you know. For 3D imaging with a cylindrical lens, enter its astigmatism. The ``3D`` fit model can only be selected once the vertical or oblique astigmatism or the spherical aberration is set: an aberration-free PSF is symmetric about focus, so ``z`` above and below focus cannot be told apart. Coma alone does not help, as it only mirrors the spot sideways. The command line and the Python API stop with an error if ``3D`` is asked for without one of these aberrations.
 6. Run ``Analyze`` > ``Localize (Identify & Fit)`` (or ``Fit`` for already-identified spots).

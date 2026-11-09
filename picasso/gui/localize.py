@@ -462,7 +462,12 @@ MODEL_TOOLTIP = (
     "(much faster).\n\n"
     "Average of ROI:\n"
     "No fit: reports the summed intensity of the box (photons).\n"
-    "x/y stay at the identified pixel (no sub-pixel position).\n\n"
+    "x/y stay at the identified pixel (no sub-pixel position)."
+)
+
+# The model tooltip's paragraph on VectorFit, shown only where the model is
+# offered (see ``offered_fit_models``).
+VECTORFIT_MODEL_TOOLTIP = (
     "Vectorial PSF (VectorFit):\n"
     "Maximum-likelihood fit of a vectorial PSF model computed from\n"
     "the optics (NA, wavelength, refractive indices), no calibration\n"
@@ -472,6 +477,26 @@ MODEL_TOOLTIP = (
     "the GPU with VectorFit's GPU build (pip install vectorfit-py-cu12),\n"
     "which, despite its name, needs CUDA 13 (NVIDIA driver 580 or newer)."
 )
+
+
+def offered_fit_models() -> list[str]:
+    """The fit models the Parameters dialog offers, in the order of
+    ``FIT_MODELS``: all of them, but VectorFit's only where the VectorFit
+    library is installed (never on macOS, which it does not support)."""
+    return [
+        model
+        for model, entry in FIT_MODELS.items()
+        if vectorfit.VECTORFIT_AVAILABLE
+        or not entry.get("needs_vectorfit_parameters", False)
+    ]
+
+
+def model_tooltip() -> str:
+    """The tooltip of the Model combo box: a paragraph per offered model."""
+    if "Vectorial PSF (VectorFit)" in offered_fit_models():
+        return MODEL_TOOLTIP + "\n\n" + VECTORFIT_MODEL_TOOLTIP
+    return MODEL_TOOLTIP
+
 
 GPU_TOOLTIP = (
     "Perform fitting on a CUDA-capable GPU.\n\n"
@@ -768,7 +793,7 @@ class Channel:
 def _region_fit_summary(params: dict) -> list[tuple[str, str]]:
     """One split-FOV region's fit settings as ``(text, tooltip)`` pairs for
     the ROI table: the model (with its optimizer) and its PSF calibration."""
-    models = list(FIT_MODELS)
+    models = offered_fit_models()
     model = models[min(params.get("fit_model", 0), len(models) - 1)]
     optimizers = FIT_MODELS[model]["optimizers"]
     optimizer = ""
@@ -5751,12 +5776,12 @@ class ParametersDialog(lib.Dialog):
         fit_grid = QtWidgets.QGridLayout(fit_groupbox.content)
 
         model_label = QtWidgets.QLabel("Model:")
-        model_label.setToolTip(MODEL_TOOLTIP)
+        model_label.setToolTip(model_tooltip())
         fit_grid.addWidget(model_label, 1, 0)
         self.fit_model = QtWidgets.QComboBox()
-        self.fit_model.addItems(list(FIT_MODELS.keys()))
+        self.fit_model.addItems(offered_fit_models())
         self.fit_model.setCurrentIndex(0)
-        self.fit_model.setToolTip(MODEL_TOOLTIP)
+        self.fit_model.setToolTip(model_tooltip())
         fit_grid.addWidget(self.fit_model, 1, 1)
 
         self.optimizer_label = QtWidgets.QLabel("Optimizer:")

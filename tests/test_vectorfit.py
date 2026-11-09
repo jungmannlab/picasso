@@ -821,6 +821,11 @@ class TestCommandLine:
 
 @pytest.mark.gui
 class TestGui:
+    @pytest.fixture(autouse=True)
+    def _installed(self, monkeypatch):
+        """The dialog offers VectorFit only where it is installed."""
+        monkeypatch.setattr(vectorfit, "VECTORFIT_AVAILABLE", True)
+
     def _dialog(self):
         from PyQt6 import QtWidgets
         from picasso.gui import localize as localize_gui
@@ -848,7 +853,26 @@ class TestGui:
         """Each model gets its own paragraph in the tooltip."""
         from picasso.gui import localize as localize_gui
 
-        assert "\n\nVectorial PSF (VectorFit):\n" in localize_gui.MODEL_TOOLTIP
+        assert "\n\nVectorial PSF (VectorFit):\n" in (
+            localize_gui.model_tooltip()
+        )
+
+    def test_not_offered_without_the_library(self, monkeypatch, qt_offscreen):
+        """Where VectorFit is not installed (always on macOS), the dialog
+        does not offer it."""
+        from picasso.gui import localize as localize_gui
+
+        monkeypatch.setattr(vectorfit, "VECTORFIT_AVAILABLE", False)
+        assert "Vectorial PSF (VectorFit)" not in (
+            localize_gui.offered_fit_models()
+        )
+        assert "VectorFit" not in localize_gui.model_tooltip()
+        dialog = self._dialog()
+        try:
+            assert dialog.fit_model.findText("Vectorial PSF (VectorFit)") < 0
+            assert "VectorFit" not in dialog.fit_model.toolTip()
+        finally:
+            dialog.deleteLater()
 
     def test_selecting_it_shows_its_settings(self, qt_offscreen):
         from picasso.gui import localize as localize_gui
