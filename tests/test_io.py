@@ -439,6 +439,47 @@ class TestStandardDtypes:
         assert lib.standardize_dtypes(standard) is standard
 
 
+class TestSaveUserSettingsWhileLocked:
+    """On Windows, renaming over a file another process has open fails
+    with PermissionError (WinError 5); simulated here by patching
+    ``os.replace``."""
+
+    @pytest.fixture(autouse=True)
+    def _settings_file(self, tmp_path, monkeypatch):
+        path = tmp_path / "settings.yaml"
+        monkeypatch.setattr(io, "_user_settings_filename", lambda: str(path))
+        monkeypatch.setattr(io.time, "sleep", lambda seconds: None)
+        return path
+
+    def test_retries_a_briefly_locked_file(self, _settings_file, monkeypatch):
+        io.save_user_settings({"a": 1})
+        real_replace = os.replace
+        failures = iter([True, True, False])
+
+        def replace(source, destination):
+            if next(failures):
+                raise PermissionError(5, "Access is denied")
+            real_replace(source, destination)
+
+        monkeypatch.setattr(io.os, "replace", replace)
+        io.save_user_settings({"a": 2})
+        assert yaml.safe_load(_settings_file.read_text()) == {"a": 2}
+        assert not os.path.exists(str(_settings_file) + ".tmp")
+
+    def test_overwrites_in_place_if_the_file_stays_locked(
+        self, _settings_file, monkeypatch
+    ):
+        io.save_user_settings({"a": 1})
+
+        def replace(source, destination):
+            raise PermissionError(5, "Access is denied")
+
+        monkeypatch.setattr(io.os, "replace", replace)
+        io.save_user_settings({"a": 2})
+        assert yaml.safe_load(_settings_file.read_text()) == {"a": 2}
+        assert not os.path.exists(str(_settings_file) + ".tmp")
+
+
 class TestSavePicksInMetadataSetting:
     @pytest.fixture(autouse=True)
     def _settings_file(self, tmp_path, monkeypatch):

@@ -394,7 +394,10 @@ def setup_gui_update_check(parent=None):  # noqa: C901
 
     def _on_checked(available, latest_version):
         # in the main thread, like all access to the user settings
-        mark_checked()
+        try:
+            mark_checked()
+        except OSError:  # e.g., a read-only home folder
+            pass
         if available and not is_skipped(latest_version):
             _show_dialog(latest_version)
 
