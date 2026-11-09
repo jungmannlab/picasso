@@ -3573,6 +3573,119 @@ class TestRememberedSettings:
         )
         window.close()
 
+    def test_the_vectorfit_settings_come_back(self, qt_offscreen):
+        first = gui_localize.Window()
+        first.parameters_dialog.set_vectorfit_parameters(
+            {
+                "Fit model": "3D",
+                "Wavelength": 600.0,
+                "Spherical aberration": -20.0,
+                "Discard outliers": False,
+            }
+        )
+        expected = first.parameters_dialog.vectorfit_parameters()
+        first.close()
+        assert io.load_user_settings()["Localize"]["vectorfit"] == expected
+
+        second = gui_localize.Window()
+        assert second.parameters_dialog.vectorfit_parameters() == expected
+        second.close()
+
+    @pytest.mark.parametrize(
+        "stored",
+        [
+            {"Wavelength": "red"},
+            {"Fit model": "4D"},
+            {"NA": -1.0},
+            "not a dict",
+        ],
+    )
+    def test_invalid_vectorfit_settings_keep_the_defaults(
+        self, qt_offscreen, stored
+    ):
+        settings = io.load_user_settings()
+        settings["Localize"]["vectorfit"] = stored
+        io.save_user_settings(settings)
+        window = gui_localize.Window()
+        assert window.parameters_dialog.vectorfit_parameters() == (
+            gui_localize.vectorfit.DEFAULT_PARAMETERS
+        )
+        window.close()
+
+    def test_unknown_vectorfit_settings_are_ignored(self, qt_offscreen):
+        settings = io.load_user_settings()
+        settings["Localize"]["vectorfit"] = {
+            "Wavelength": 600.0,
+            "Removed setting": 1,
+        }
+        io.save_user_settings(settings)
+        window = gui_localize.Window()
+        parameters = window.parameters_dialog.vectorfit_parameters()
+        assert parameters["Wavelength"] == 600.0
+        assert "Removed setting" not in parameters
+        window.close()
+
+
+class TestSeparateVectorFit:
+    """Fitted separately, each channel / split-FOV region is fitted with
+    its own VectorFit settings."""
+
+    REGIONS = [[[0, 0], [32, 16]], [[0, 16], [32, 32]]]
+
+    @pytest.fixture
+    def fake_fit_worker(self, monkeypatch):
+        _FakeFitWorker.built = []
+        monkeypatch.setattr(gui_localize, "FitWorker", _FakeFitWorker)
+        monkeypatch.setattr(
+            gui_localize.vectorfit, "VECTORFIT_AVAILABLE", True
+        )
+        return _FakeFitWorker.built
+
+    @staticmethod
+    def _select_vectorfit(dialog):
+        dialog.fit_model.setCurrentText("Vectorial PSF (VectorFit)")
+        dialog.gpu_checkbox.setChecked(False)
+        dialog.fit_mode_combo.setCurrentText(gui_localize.FIT_MODE_SEPARATE)
+
+    def test_each_channel_has_its_own_settings(
+        self, window, tmp_path, fake_fit_worker
+    ):
+        _identified(window, tmp_path)
+        dialog = window.parameters_dialog
+        for channel, wavelength in enumerate((600.0, 700.0)):
+            window.set_current_channel(channel)
+            self._select_vectorfit(dialog)
+            dialog.set_vectorfit_parameters({"Wavelength": wavelength})
+        window.set_current_channel(0)
+        window.fit()
+        window._fit_run_next()
+        # the fake workers never finish, so the batch would never end
+        window._multi_fit = None
+        assert [
+            w.kwargs["vectorfit_parameters"]["Wavelength"]
+            for w in fake_fit_worker
+        ] == [600.0, 700.0]
+
+    def test_each_region_has_its_own_settings(self, loaded, fake_fit_worker):
+        dialog = loaded.parameters_dialog
+        dialog.split_fov_checkbox.setChecked(True)
+        loaded.view.rois = [list(map(list, r)) for r in self.REGIONS]
+        self._select_vectorfit(dialog)
+        loaded.identifications = _ids([(8, 10), (24, 10)])
+        loaded.ready_for_fit = True
+        for region, wavelength in enumerate((600.0, 700.0)):
+            loaded.view.selected_roi = region
+            loaded.sync_region_fit_params()
+            dialog.set_vectorfit_parameters({"Wavelength": wavelength})
+        loaded.fit()
+        loaded._fit_run_next()
+        # the fake workers never finish, so the batch would never end
+        loaded._multi_fit = None
+        assert [
+            w.kwargs["vectorfit_parameters"]["Wavelength"]
+            for w in fake_fit_worker
+        ] == [600.0, 700.0]
+
 
 def _drag_event(kind, path):
     """A drag-enter or drop event carrying ``path`` (or text)."""

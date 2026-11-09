@@ -8781,6 +8781,26 @@ class Window(QtWidgets.QMainWindow):
         self._load_multi_emitter_settings(
             settings["Localize"].get("multi_emitter")
         )
+        self._load_vectorfit_settings(settings["Localize"].get("vectorfit"))
+
+    def _load_vectorfit_settings(self, saved: dict | None) -> None:
+        """Put the saved VectorFit settings on the dialog. Unknown keys are
+        ignored and missing ones take their defaults; if a value is invalid,
+        the dialog keeps what it had."""
+        if not isinstance(saved, dict):
+            return
+        known = {
+            key: value
+            for key, value in saved.items()
+            if key in vectorfit.DEFAULT_PARAMETERS
+        }
+        dialog = self.parameters_dialog
+        previous = dialog.vectorfit_parameters()
+        try:
+            dialog.set_vectorfit_parameters(known)
+        except (TypeError, ValueError):
+            # a hand-edited file: a value of the wrong type or out of range
+            dialog.set_vectorfit_parameters(previous)
 
     def _load_multi_emitter_settings(self, saved: dict | None) -> None:
         """Put the saved multi-emitter settings on the dialog; values that
@@ -8885,6 +8905,7 @@ class Window(QtWidgets.QMainWindow):
             # 2 is "Auto"
             "fit_region_size": dialog.fit_region_spinbox.value(),
         }
+        settings["Localize"]["vectorfit"] = dialog.vectorfit_parameters()
         settings["Localize"]["Columns to save"] = {
             column: checkbox.isChecked()
             for column, checkbox in (
