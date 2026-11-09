@@ -472,10 +472,8 @@ VECTORFIT_MODEL_TOOLTIP = (
     "Maximum-likelihood fit of a vectorial PSF model computed from\n"
     "the optics (NA, wavelength, refractive indices), no calibration\n"
     "needed; its 3D model yields z directly. Runs on the CPU and\n"
-    "requires the optional VectorFit library\n"
-    "(pip install picassosr[vectorfit]); tick Use GPU to run it on\n"
-    "the GPU with VectorFit's GPU build (pip install vectorfit-py-cu12),\n"
-    "which, despite its name, needs CUDA 13 (NVIDIA driver 580 or newer)."
+    "requires the optional VectorFit library;\n"
+    "tick Use GPU to run it on the GPU with VectorFit's GPU build."
 )
 
 
