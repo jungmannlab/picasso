@@ -6,9 +6,9 @@ build-backend = "setuptools.build_meta"
 name = "picassosr"
 dynamic = ["version"]
 authors = [
+    {name = "Rafal Kowalewski", email = "rafalkowalewski998@gmail.com"},
     {name = "Joerg Schnitzbauer", email = "joschnitzbauer@gmail.com"},
     {name = "Maximilian T. Strauss", email = "straussmaximilian@gmail.com"},
-    {name = "Rafal Kowalewski", email = "rafalkowalewski998@gmail.com"},
 ]
 maintainers = [{name = "Rafal Kowalewski", email = "rafalkowalewski998@gmail.com"}]
 keywords = ["super-resolution", "DNA-PAINT", "microscopy"]
