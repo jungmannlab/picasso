@@ -194,13 +194,16 @@ Before each release:
 6. Build the one-click installers with the scripts in ``release`` on Windows
    and macOS. Each script tests the frozen app (``release/smoke_test.py``)
    before packaging it and stops if the test fails, and zips the installer
-   with its ``readme.txt``. The standard and the CUDA Windows installers can
-   be built at the same time.
+   with its ``readme.txt``. The three Windows installers (standard, CUDA 12
+   and CUDA 13) can be built at the same time. The smoke test does not use
+   the GPU: check GPU fitting with each CUDA edition by hand, the CUDA 13
+   one (including ``vectorfit-gpu``) on a PC with an NVIDIA driver 580 or
+   newer.
 7. Publish the release on GitHub, with a tag ``v`` plus the version in
-   ``picasso/version.py`` (e.g., ``v1.1.0``) and the three zips attached.
+   ``picasso/version.py`` (e.g., ``v1.1.0``) and the four zips attached.
    Keep their names as the scripts write them: *Install Now* in the update
    notification finds the installer of each edition by name ("Windows",
-   "CUDA" for the CUDA edition, and "Apple" or "macOS"), see
+   "CUDA12" or "CUDA13" for the CUDA editions, and "Apple" or "macOS"), see
    ``picasso.updater.find_installer``.
    ``python release/make_release_notes.py`` writes its description, from the
    changelog section of this version, to ``release/release_notes.txt``, to

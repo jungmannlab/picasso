@@ -32,11 +32,16 @@ Which installer should I use?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 - **Windows:** the one-click installer from the `release page
-  <https://github.com/jungmannlab/picasso/releases>`__. Its *CUDA* edition
-  adds GPU fitting in Localize and supports plugins that rely on CUDA
-  and needs an NVIDIA graphics card; GPU
-  rendering in Render works with both editions. The editions install to
-  ``C:\Picasso`` and ``C:\Picasso-CUDA`` and can be installed side by side.
+  <https://github.com/jungmannlab/picasso/releases>`__. Its *CUDA12* and
+  *CUDA13* editions add GPU fitting in Localize and support plugins that
+  rely on CUDA, and need an NVIDIA graphics card. *CUDA13* needs a Turing
+  or newer GPU and a driver of version 580 or newer, and also fits vectorial
+  PSFs on the GPU (``vectorfit-gpu``, Ampere or newer); otherwise, use
+  *CUDA12*. :ref:`installation-check-cuda` shows how to check your GPU and
+  driver. GPU
+  rendering in Render works with all editions. The editions install to
+  ``C:\Picasso``, ``C:\Picasso-CUDA12`` and ``C:\Picasso-CUDA13`` and can be
+  installed side by side.
 - **macOS:** the one-click installer runs on Apple Silicon (M1 and later)
   only. On an Intel Mac, install Picasso with pip.
 - **Linux, scripts and notebooks:** ``pip install picassosr`` in an
@@ -133,8 +138,9 @@ the log is in ``~/.picasso/logs/update.log``.
 You can also download and install the new version from the
 `release page <https://github.com/jungmannlab/picasso/releases>`__ yourself;
 on Windows, there is no need to uninstall the old version first, except for
-the *GPU* edition of versions before 1.0: its successor, the *CUDA* edition,
-installs beside it, so uninstall *Picasso-GPU* (Windows *Settings* > *Apps*).
+the *GPU* edition of versions before 1.0: its successors, the *CUDA12* and
+*CUDA13* editions, install beside it, so uninstall *Picasso-GPU* (Windows
+*Settings* > *Apps*).
 With pip, ``pip install --upgrade picassosr``.
 
 Updating from a version before 1.0? See :doc:`migration`.
@@ -316,7 +322,7 @@ fit, ``reduced_chi_square`` (about 1 for a good fit). Conditions such as
 ``Use GPU`` is missing or grayed out
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-GPU fitting needs an NVIDIA graphics card and either the CUDA edition of the
+GPU fitting needs an NVIDIA graphics card and either a CUDA edition of the
 Windows installer or ``pip install "picassosr[gpu]"``; without them, the option
 is hidden. It is grayed out for fitting methods that have no GPU version.
 There is no GPU fitting on a Mac. See :ref:`localize-gpu`. GPU rendering in

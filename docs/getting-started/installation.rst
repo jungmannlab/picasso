@@ -19,18 +19,87 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
 
       .. rubric:: Windows: default or CUDA build?
 
-      There are two Windows installers:
+      There are three Windows installers:
 
       - The **default** build.
-      - The **CUDA** build, which also bundles the CUDA runtime (CUDA 12)
-        so that CUDA-accelerated (``numba.cuda``) code runs, for example
+      - The **CUDA12** build, which also bundles the CUDA 12 runtime so
+        that CUDA-accelerated (``numba.cuda``) code runs, for example
         localization fitting on the GPU. It is larger and needs an NVIDIA
         (CUDA-capable) GPU.
+      - The **CUDA13** build, the same with the CUDA 13 runtime. It needs
+        an NVIDIA GPU of the Turing generation or newer (compute capability
+        7.5, e.g., RTX 20xx, Quadro RTX, T4 or newer) and an NVIDIA driver
+        of version 580 or newer. On an Ampere or newer GPU (compute
+        capability 8.0, e.g., RTX 30xx or A-series), it also fits vectorial
+        PSFs on the GPU (VectorFit, ``vectorfit-gpu``).
 
-      Both builds render on the graphics card in Render (via ``wgpu``, any
-      vendor). Choose the CUDA build only if you have a compatible NVIDIA GPU
-      and want the accelerated tools. On machines without one, CUDA-only
-      options are hidden.
+      All builds render on the graphics card in Render (via ``wgpu``, any
+      vendor). Choose a CUDA build only if you have a compatible NVIDIA GPU
+      and want the accelerated tools: CUDA13 if your GPU and driver support
+      it, CUDA12 otherwise, see :ref:`installation-check-cuda`. On machines
+      without one, CUDA-only options are hidden.
+
+      .. _installation-check-cuda:
+
+      .. rubric:: Which CUDA build does my PC support?
+
+      Open a Command Prompt (or PowerShell) and run:
+
+      .. code-block:: bat
+
+         nvidia-smi
+
+      The first lines of the output show the version of the NVIDIA driver
+      and the highest CUDA version it supports, for example:
+
+      .. code-block:: text
+
+         +---------------------------------------------------------------------------------------+
+         | NVIDIA-SMI 536.67                 Driver Version: 536.67       CUDA Version: 12.2     |
+         |-----------------------------------------+----------------------+----------------------+
+
+      Then find the compute capability of the GPU, which tells its
+      generation:
+
+      .. code-block:: bat
+
+         nvidia-smi --query-gpu=name,compute_cap --format=csv
+
+      prints, for example, ``NVIDIA RTX A5500, 8.6``. If your driver is too
+      old to report it (``"compute_cap" is not a valid field``), look up
+      your GPU in NVIDIA's `list of CUDA GPUs
+      <https://developer.nvidia.com/cuda-gpus>`__.
+
+      .. list-table::
+         :header-rows: 1
+         :widths: 50 50
+
+         * - What you see
+           - Which build
+         * - *CUDA Version* 13.0 or higher and compute capability 7.5 or
+             higher
+           - **CUDA13** (VectorFit on the GPU needs compute capability 8.0
+             or higher)
+         * - *CUDA Version* 12.x, or compute capability below 7.5
+           - **CUDA12**
+         * - *CUDA Version* below 12.0
+           - Update the NVIDIA driver (see below), or use the **default**
+             build
+         * - ``nvidia-smi`` is not found
+           - No NVIDIA GPU, or its driver is not installed: the **default**
+             build
+
+      The *CUDA Version* shown is the highest one the **driver** supports,
+      not a CUDA toolkit installed on the PC: the CUDA builds bring their own
+      CUDA runtime, so there is no need to install the CUDA toolkit. To move
+      from CUDA 12 to CUDA 13 on a Turing or newer GPU, update the NVIDIA
+      driver to version 580 or newer from `NVIDIA's driver page
+      <https://www.nvidia.com/drivers>`__.
+      A newer driver keeps running the CUDA12 build, too.
+
+      Without a terminal, the NVIDIA Control Panel shows the same: *Help* >
+      *System Information* > *Components*, where the row ``NVCUDA64.DLL``
+      names the CUDA version the driver supports.
 
       .. _installation-command-line:
 
@@ -231,9 +300,10 @@ Python functions now take nm. Scripts that pass camera pixels need updating;
 :doc:`/migration` lists what changes and the replacement of each setting,
 command and function.
 
-On Windows, the one-click installer's *GPU* edition is now called *CUDA* and
-installs beside the old one: uninstall *Picasso-GPU* (Windows *Settings* >
-*Apps*), or ``picasso`` in a terminal keeps running the old version.
+On Windows, the one-click installer's *GPU* edition is now called *CUDA12*
+(a new *CUDA13* edition joins it) and installs beside the old one: uninstall
+*Picasso-GPU* (Windows *Settings* > *Apps*), or ``picasso`` in a terminal
+keeps running the old version.
 
 .. _error-log:
 
