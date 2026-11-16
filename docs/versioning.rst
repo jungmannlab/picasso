@@ -196,8 +196,8 @@ Before each release:
    before packaging it and stops if the test fails, and zips the installer
    with its ``readme.txt``. The three Windows installers (standard, CUDA 12
    and CUDA 13) can be built at the same time. The smoke test does not use
-   the GPU: check GPU fitting with each CUDA edition by hand, the CUDA 13
-   one (including ``vectorfit-gpu``) on a PC with an NVIDIA driver 580 or
+   the GPU: check GPU fitting (including ``vectorfit-gpu``) with each CUDA
+   edition by hand, the CUDA 13 one on a PC with an NVIDIA driver 580 or
    newer.
 7. Publish the release on GitHub, with a tag ``v`` plus the version in
    ``picasso/version.py`` (e.g., ``v1.1.0``) and the four zips attached.

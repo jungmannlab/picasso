@@ -110,13 +110,14 @@ formats = [
 # Vectorial PSF fitting ('vectorfit' fit method) with the VectorFit
 # library, CPU build.
 vectorfit = [
-    "vectorfit-py>=0.3.2",
+    "vectorfit-py>=0.3.4",
 ]
 # The same on the GPU ('vectorfit-gpu' fit method), with VectorFit's CUDA
 # build. Both builds install the same module, so install one or the other.
-# NOTE: DESPITE THE NAME, CUDA13 IS REQUIRED
+# Built with CUDA 12; 0.3.4 adds machine code for Pascal and Volta GPUs
+# (compute capability 6.0 and 7.0).
 vectorfit-gpu = [
-    "vectorfit-py-cu12>=0.3.2",
+    "vectorfit-py-cu12>=0.3.4",
 ]
 # Not for general use: the installer* extras exist only to build the
 # one-click installers, where every version is pinned exactly so the frozen
@@ -160,29 +161,30 @@ installer_base = [
 # CPU build (also used for the macOS installer)
 installer = [
     "picassosr[installer_base]",
-    # VectorFit's CPU build, also in installer_cuda12. No macOS wheels.
-    "vectorfit-py==0.3.2; sys_platform=='win32' or sys_platform=='linux'",
+    # VectorFit's CPU build. No macOS wheels.
+    "vectorfit-py==0.3.4; sys_platform=='win32' or sys_platform=='linux'",
 ]
-# CUDA 12 build (create_installer_windows_cuda12.bat): identical to the CPU
-# installer plus the CUDA 12 runtime (GPU rendering via wgpu is in all
-# builds; this one adds CUDA fitting).
-# Reuse picassosr[installer] so the pinned versions never drift apart.
-# VectorFit stays the CPU build: its GPU build needs CUDA 13.
+# CUDA 12 build (create_installer_windows_cuda12.bat): the CPU installer
+# plus the CUDA 12 runtime (GPU rendering via wgpu is in all builds; this
+# one adds CUDA fitting), with VectorFit's GPU build (vectorfit-py-cu12,
+# built with CUDA 12 and bundling its own CUDA 12 runtime) in place of its
+# CPU build. Windows only.
 installer_cuda12 = [
-    "picassosr[installer]",
+    "picassosr[installer_base]",
     "numba-cuda[cu12]==0.30.2",
     # numba-cuda's NVIDIA dependencies are pinned too: their wheel layout
     # (vendored DLLs, compiled subpackages) is what release/pyinstaller/hooks
     # bundles, so an unpinned rebuild can silently break the frozen app.
     "cuda-bindings==12.9.9",
     "cuda-core==1.2.1",
-    "cuda-pathfinder==1.8.2"
+    "cuda-pathfinder==1.8.2",
+    "vectorfit-py-cu12==0.3.4; sys_platform=='win32'",
 ]
-# CUDA 13 build: CUDA fitting with the CUDA 13 runtime plus VectorFit's GPU
-# build (vectorfit-py-cu12, which despite its name is compiled with
-# CUDA 13). Needs an NVIDIA driver R580+ and a Turing or newer GPU (compute
-# capability >= 7.5); installer_cuda12 covers older drivers and GPUs.
-# Windows only (create_installer_windows_cuda13.bat).
+# CUDA 13 build: CUDA fitting with the CUDA 13 runtime, plus VectorFit's
+# GPU build as in installer_cuda12 (its own CUDA 12 runtime runs on CUDA 13
+# drivers too). Needs an NVIDIA driver R580+ and a Turing or newer GPU
+# (compute capability >= 7.5); installer_cuda12 covers older drivers and
+# GPUs. Windows only (create_installer_windows_cuda13.bat).
 installer_cuda13 = [
     "picassosr[installer_base]",
     "numba-cuda[cu13]==0.30.2",
@@ -193,7 +195,7 @@ installer_cuda13 = [
     "cuda-pathfinder==1.8.6",
     "cuda-toolkit==13.5.0",
     "nvidia-nvjitlink==13.5.37",
-    "vectorfit-py-cu12==0.3.2; sys_platform=='win32'",
+    "vectorfit-py-cu12==0.3.4; sys_platform=='win32'",
 ]
 
 [project.urls]

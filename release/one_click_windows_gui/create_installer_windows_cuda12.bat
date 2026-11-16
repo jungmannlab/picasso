@@ -1,9 +1,13 @@
 REM CUDA 12 edition: the CPU installer plus the CUDA 12 runtime for GPU
-REM (numba.cuda) fitting. Runs on any CUDA-capable NVIDIA GPU with a driver
-REM for CUDA 12 (R525+). create_installer_windows_cuda13.bat builds the CUDA 13
-REM edition; keep the two scripts in step. The edition's name (-CUDA12) is how
-REM the in-app updater (picasso/updater.py, find_installer) tells the two
-REM apart in a release, so keep "CUDA12" in the file names.
+REM (numba.cuda) fitting, with VectorFit's GPU build ('vectorfit-gpu' fit
+REM method, compute capability >= 6.0) in place of its CPU build. Runs on any
+REM CUDA-capable NVIDIA GPU with a driver for CUDA 12 (R525+).
+REM create_installer_windows_cuda13.bat builds the CUDA 13 edition; keep the
+REM two scripts in step. The edition's name (-CUDA12) is how the in-app
+REM updater (picasso/updater.py, find_installer) tells the two apart in a
+REM release, so keep "CUDA12" in the file names. The smoke test does not use
+REM the GPU: check the GPU (numba.cuda and VectorFit GPU) fitting on a PC
+REM with an NVIDIA GPU before releasing.
 call DEL /F/Q/S build_cuda12 > NUL
 call DEL /F/Q/S dist_cuda12 > NUL
 call RMDIR /Q/S build_cuda12
@@ -20,7 +24,8 @@ REM (..\install_picasso.py): a build in the repository itself writes build\,
 REM dist\ and picassosr.egg-info there, which create_installer_windows.bat, if
 REM it runs at the same time, would overwrite.
 REM installer_cuda12 adds numba-cuda[cu12], which pulls the nvidia-*-cu12 CUDA
-REM runtime wheels needed to run numba.cuda (GPU-accelerated) code.
+REM runtime wheels needed to run numba.cuda (GPU-accelerated) code, and
+REM vectorfit-py-cu12, VectorFit's GPU build (with its own CUDA 12 runtime).
 call python release\install_picasso.py installer_cuda12
 if errorlevel 1 exit /b 1
 call cd release/one_click_windows_gui
@@ -46,10 +51,10 @@ REM                              bundle the cuda_bindings.libs / cuda_core.libs
 REM                              DLLs (delvewheel-vendored msvcp140); without them
 REM                              the app fails with "DLL load failed while
 REM                              importing runtime".
-REM   --hidden-import vectorfit_py : VectorFit (CPU build, as in the CPU
+REM   --hidden-import vectorfit_py : VectorFit (GPU build, as in the CUDA 13
 REM                              installer) is imported dynamically;
 REM                              hook-vectorfit_py.py adds its extension,
-REM                              metadata and vectorfit_py.libs DLLs.
+REM                              metadata and vectorfit_py_cu12.libs DLLs.
 REM Note: numba-cuda redirects "numba.cuda" to its own target via a
 REM site-packages .pth file that PyInstaller does not run, so the frozen app
 REM would keep Numba's built-in CUDA stub and GPU-accelerated (numba.cuda) code

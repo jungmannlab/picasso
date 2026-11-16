@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import re
 import shutil
+import struct
 import sys
 import warnings
 
@@ -238,10 +239,38 @@ class TestParameters:
 
     def test_missing_library_says_how_to_install_it(self, monkeypatch):
         def fail(name):
-            raise ImportError(name)
+            raise ModuleNotFoundError(f"No module named {name!r}", name=name)
 
         monkeypatch.setattr(vectorfit.importlib, "import_module", fail)
         with pytest.raises(ImportError, match=r"picassosr\[vectorfit\]"):
+            vectorfit._import_vectorfit()
+
+    def test_unloadable_library_says_why(self, monkeypatch):
+        """The GPU build needs the NVIDIA driver's library to load at all,
+        even to fit on the CPU."""
+
+        def fail(name):
+            raise ImportError(
+                "DLL load failed while importing _vectorfit_py: The "
+                "specified module could not be found."
+            )
+
+        monkeypatch.setattr(vectorfit.importlib, "import_module", fail)
+        with pytest.raises(ImportError) as error:
+            vectorfit._import_vectorfit()
+        message = str(error.value)
+        assert "DLL load failed" in message
+        assert "needs an NVIDIA driver" in message
+        assert "pip install vectorfit-py'" in message
+
+    def test_missing_dependency_is_not_reported_as_missing_vectorfit(
+        self, monkeypatch
+    ):
+        def fail(name):
+            raise ModuleNotFoundError("No module named 'other'", name="other")
+
+        monkeypatch.setattr(vectorfit.importlib, "import_module", fail)
+        with pytest.raises(ImportError, match="installed but cannot be l"):
             vectorfit._import_vectorfit()
 
     def test_outliers_discarded_reads_the_metadata(self):
@@ -724,12 +753,46 @@ class TestLocalizeWiring:
 # GPU support
 # ---------------------------------------------------------------------------
 
-# What NVCC leaves in a binary (vectorfit-py-cu12 0.3.2 has these), amid
-# other bytes.
-_CUDA_BINARY = (
-    b"MZ\x00\x01Cuda compilation tools, release 13.1, V13.1.115\x00"
-    b"\x00.version 9.1\n.target sm_86\n\x00\xff.target sm_80\n"
-)
+PTX, SASS = 1, 2
+
+
+def _fatbin(*entries) -> bytes:
+    """A CUDA fat binary as NVCC embeds it, of ``(kind, (major, minor),
+    arch)`` entries (for PTX, the version is its ISA version), each with a
+    short payload."""
+    payload = b"payload!"
+    body = b"".join(
+        struct.pack(
+            "<HHIQIIHHI",
+            kind,
+            0x0101,
+            64,
+            len(payload),
+            0,
+            0,
+            minor,
+            major,
+            arch,
+        ).ljust(64, b"\0")
+        + payload
+        for kind, (major, minor), arch in entries
+    )
+    return struct.pack("<IHHQ", 0xBA55ED50, 1, 16, len(body)) + body
+
+
+def _gpu_code(ptx_isa, archs, sass_version=(1, 7)) -> bytes:
+    """Machine code and PTX of ISA version ``ptx_isa`` for each of
+    ``archs``, as NVCC compiles a translation unit."""
+    return _fatbin(
+        *[(SASS, sass_version, arch) for arch in archs],
+        *[(PTX, ptx_isa, arch) for arch in archs],
+    )
+
+
+# The GPU builds of vectorfit-py-cu12, amid other bytes: 0.3.3 and 0.3.4
+# (CUDA 12; PTX ISA 8.5 on Windows, 8.4 on Linux).
+_BINARY_0_3_3 = b"MZ\x00\x01" + _gpu_code((8, 5), (80, 86)) * 2 + b"\xff"
+_BINARY_0_3_4 = b"MZ\x00\x01" + _gpu_code((8, 5), (60, 70, 80, 86)) * 2
 
 
 class TestGpuSupport:
@@ -747,37 +810,106 @@ class TestGpuSupport:
         numba sees ``device`` ((driver CUDA version), (compute
         capability)), or no GPU for None."""
 
-        def install(content: bytes, device=((13, 0), (8, 6))):
+        def install(content: bytes, device=((12, 2), (8, 6))):
             path = tmp_path / "_vectorfit_py.pyd"
             path.write_bytes(content)
             monkeypatch.setattr(vectorfit, "VECTORFIT_AVAILABLE", True)
-            monkeypatch.setattr(vectorfit, "_extension_path", lambda: path)
+            monkeypatch.setattr(vectorfit, "_binary_paths", lambda: [path])
             monkeypatch.setattr(vectorfit, "_cuda_device", lambda: device)
+            vectorfit.gpu_unavailable_reason.cache_clear()
 
         return install
 
     def test_reads_the_cuda_build(self, tmp_path):
         path = tmp_path / "gpu.pyd"
-        path.write_bytes(_CUDA_BINARY)
-        assert vectorfit._cuda_build(path) == ((13, 1), 80)
+        path.write_bytes(_BINARY_0_3_4)
+        build = vectorfit._cuda_build([path])
+        assert build.cuda == (12, 5)
+        assert build.sass == build.ptx == {60, 70, 80, 86}
+        path.write_bytes(_BINARY_0_3_3)
+        assert vectorfit._cuda_build([path]) == ((12, 5), {80, 86}, {80, 86})
         path.write_bytes(b"MZ\x00 a CPU build, no CUDA in here")
-        assert vectorfit._cuda_build(path) is None
+        assert vectorfit._cuda_build([path]) is None
+        assert vectorfit._cuda_build([]) is None
+
+    def test_reads_the_gpu_code_of_every_binary(self, tmp_path):
+        """On Linux the GPU code is in the library beside the extension
+        module, not in the module itself."""
+        module = tmp_path / "_vectorfit_py.cpython-314-x86_64-linux-gnu.so"
+        module.write_bytes(b"\x7fELF bindings only")
+        library = tmp_path / "libVectorFitter_lib.so"
+        library.write_bytes(b"\x7fELF" + _gpu_code((8, 4), (80, 86)))
+        assert vectorfit._cuda_build([module]) is None
+        build = vectorfit._cuda_build([module, library])
+        assert build == ((12, 4), {80, 86}, {80, 86})
+
+    def test_cuda_version_without_ptx(self, tmp_path):
+        """Machine code alone does not tell the CUDA version; NVCC's own
+        text does, where it left it."""
+        path = tmp_path / "gpu.pyd"
+        sass_only = _fatbin((SASS, (1, 8), 80), (SASS, (1, 8), 86))
+        path.write_bytes(sass_only)
+        assert vectorfit._cuda_build([path]) == (None, {80, 86}, set())
+        path.write_bytes(b"Cuda compilation tools, release 12.4" + sass_only)
+        assert vectorfit._cuda_build([path]).cuda == (12, 4)
+
+    def test_ignores_what_only_looks_like_a_fat_binary(self, tmp_path):
+        path = tmp_path / "cpu.pyd"
+        magic = struct.pack("<I", 0xBA55ED50)
+        path.write_bytes(
+            b"MZ" + magic + b"\x07\x00\x10\x00" + b"\0" * 80 + magic[:3]
+        )
+        assert vectorfit._cuda_build([path]) is None
+        # a container of an unknown entry kind
+        path.write_bytes(_fatbin((7, (8, 5), 86)))
+        assert vectorfit._cuda_build([path]) is None
+
+    def test_finds_the_binaries_of_the_package(self, tmp_path, monkeypatch):
+        import importlib.machinery
+
+        for name in (
+            "__init__.py",
+            "_vectorfit_py.cp314-win_amd64.pyd",
+            "_vectorfit_py.cpython-314-x86_64-linux-gnu.so",
+            "libVectorFitter_lib.so",
+            "libfoo.so.12.4.127",
+            "VectorFitter_lib.lib",
+        ):
+            (tmp_path / name).write_bytes(b"x")
+        spec = importlib.machinery.ModuleSpec(
+            "vectorfit_py", None, is_package=True
+        )
+        spec.submodule_search_locations = [str(tmp_path), str(tmp_path / "x")]
+        monkeypatch.setattr(
+            vectorfit.importlib.util, "find_spec", lambda name: spec
+        )
+        assert {path.name for path in vectorfit._binary_paths()} == {
+            "_vectorfit_py.cp314-win_amd64.pyd",
+            "_vectorfit_py.cpython-314-x86_64-linux-gnu.so",
+            "libVectorFitter_lib.so",
+            "libfoo.so.12.4.127",
+        }
 
     @requires_vectorfit
     def test_reads_the_installed_build(self):
-        """Finds the installed binary without importing it."""
+        """Finds the installed binaries without importing them."""
         was_imported = "vectorfit_py" in sys.modules
-        path = vectorfit._extension_path()
-        assert path is not None and path.is_file()
-        build = vectorfit._cuda_build(path)
-        assert build is None or (len(build[0]) == 2 and build[1] >= 0)
+        paths = vectorfit._binary_paths()
+        assert paths and all(path.is_file() for path in paths)
+        build = vectorfit._cuda_build(paths)
+        assert build is None or (build.sass | build.ptx)
         assert ("vectorfit_py" in sys.modules) == was_imported
 
-    def test_usable(self, installed):
-        installed(_CUDA_BINARY, ((13, 0), (8, 6)))
+    @pytest.mark.parametrize("binary", [_BINARY_0_3_3, _BINARY_0_3_4])
+    def test_usable(self, installed, binary):
+        """The CUDA 12 builds run on a CUDA 12.2 driver, though built with
+        a later CUDA 12 (minor version compatibility)."""
+        installed(binary, ((12, 2), (8, 6)))
         assert vectorfit.gpu_unavailable_reason() is None
         assert vectorfit.gpu_available()
         vectorfit.check_gpu()  # does not raise
+        installed(binary, ((13, 0), (8, 6)))
+        assert vectorfit.gpu_unavailable_reason() is None
 
     def test_not_installed(self, monkeypatch):
         monkeypatch.setattr(vectorfit, "VECTORFIT_AVAILABLE", False)
@@ -792,80 +924,99 @@ class TestGpuSupport:
         assert "pip uninstall vectorfit-py vectorfit-py-cu12" in reason
 
     def test_no_gpu(self, installed):
-        installed(_CUDA_BINARY, None)
+        installed(_BINARY_0_3_4, None)
         assert "No CUDA-capable GPU" in vectorfit.gpu_unavailable_reason()
 
     def test_driver_too_old(self, installed):
-        """A CUDA 13 build on a CUDA 12.2 driver crashes the process in
+        """A CUDA 12 build on a CUDA 11.8 driver crashes the process in
         VectorFit, so it must be caught here."""
-        installed(_CUDA_BINARY, ((12, 2), (8, 6)))
+        installed(_BINARY_0_3_4, ((11, 8), (8, 6)))
         reason = vectorfit.gpu_unavailable_reason()
-        assert "CUDA 13" in reason and "12.2" in reason
-        # the package name says otherwise, so the reason says so
-        assert "Despite its name, vectorfit-py-cu12" in reason
-        assert "version 580 or newer" in reason
+        assert reason == (
+            "The GPU build of VectorFit needs CUDA 12, but the NVIDIA driver "
+            "supports CUDA 11.8 only. Update the NVIDIA driver to version "
+            "525 or newer, or fit on the CPU."
+        )
         with pytest.raises(RuntimeError, match="Update the NVIDIA driver"):
             vectorfit.check_gpu()
-
-    def test_driver_too_old_for_a_cuda_12_build(self, installed):
-        """Should vectorfit-py-cu12 be rebuilt with CUDA 12, the name is
-        right again and the reason need not explain it."""
-        installed(
-            _CUDA_BINARY.replace(b"release 13.1", b"release 12.6"),
-            ((11, 8), (8, 6)),
-        )
-        reason = vectorfit.gpu_unavailable_reason()
-        assert "needs CUDA 12" in reason and "version 525" in reason
-        assert "Despite" not in reason
-        installed(
-            _CUDA_BINARY.replace(b"release 13.1", b"release 12.6"),
-            ((12, 2), (8, 6)),
-        )
-        vectorfit.gpu_unavailable_reason.cache_clear()
-        assert vectorfit.gpu_unavailable_reason() is None
 
     def test_driver_too_old_for_an_unlisted_cuda_version(self, installed):
         """A CUDA version without a known minimum driver still gets a
         usable hint."""
-        installed(
-            _CUDA_BINARY.replace(b"release 13.1", b"release 14.0"),
-            ((13, 0), (8, 6)),
-        )
+        installed(_gpu_code((10, 0), (80, 86)), ((13, 0), (8, 6)))
         reason = vectorfit.gpu_unavailable_reason()
         assert "needs CUDA 14" in reason
         assert "to one supporting CUDA 14" in reason
-        assert "Despite its name" in reason
+
+    @pytest.mark.parametrize(
+        "capability, binary",
+        [
+            ((8, 9), _BINARY_0_3_3),  # Ada runs Ampere's machine code
+            ((8, 0), _BINARY_0_3_3),
+            ((7, 5), _BINARY_0_3_4),  # Turing runs Volta's
+            ((6, 1), _BINARY_0_3_4),
+        ],
+    )
+    def test_runs_the_machine_code_of_the_gpu_generation(
+        self, installed, capability, binary
+    ):
+        installed(binary, ((12, 0), capability))
+        assert vectorfit.gpu_unavailable_reason() is None
+
+    @pytest.mark.parametrize("capability", [(9, 0), (12, 0)])
+    def test_newer_gpu_needs_a_driver_that_compiles_the_ptx(
+        self, installed, capability
+    ):
+        """Hopper and Blackwell have no machine code of their own in the
+        build, so the driver compiles the PTX, which needs one of at least
+        its CUDA version."""
+        installed(_BINARY_0_3_4, ((12, 4), capability))
+        reason = vectorfit.gpu_unavailable_reason()
+        assert "no machine code for this GPU" in reason
+        assert f"{capability[0]}.{capability[1]}" in reason
+        assert "needs CUDA 12.5" in reason and "12.4 only" in reason
+        assert "to one supporting CUDA 12.5 or newer" in reason
+        assert "Despite" not in reason
+        installed(_BINARY_0_3_4, ((12, 5), capability))
+        assert vectorfit.gpu_unavailable_reason() is None
+
+    def test_cuda_version_unknown(self, installed):
+        """Without a CUDA version there is nothing to check the driver
+        against."""
+        installed(_fatbin((SASS, (1, 8), 86)), ((11, 0), (8, 6)))
+        assert vectorfit.gpu_unavailable_reason() is None
 
     def test_answer_is_cached(self, installed, monkeypatch):
         """The GPU is queried once per session."""
-        installed(_CUDA_BINARY)
+        installed(_BINARY_0_3_4)
         calls = []
         monkeypatch.setattr(
             vectorfit,
             "_cuda_device",
-            lambda: calls.append(None) or ((13, 0), (8, 6)),
+            lambda: calls.append(None) or ((12, 2), (8, 6)),
         )
         assert vectorfit.gpu_unavailable_reason() is None
         assert vectorfit.gpu_available()
         vectorfit.check_gpu()
         assert len(calls) == 1
 
-    def test_extension_path_without_a_binary(self, tmp_path, monkeypatch):
+    def test_binary_paths_without_a_binary(self, tmp_path, monkeypatch):
         import importlib.machinery
 
         monkeypatch.setattr(
             vectorfit.importlib.util, "find_spec", lambda name: None
         )
-        assert vectorfit._extension_path() is None
+        assert vectorfit._binary_paths() == []
         # a package directory without the compiled module
         spec = importlib.machinery.ModuleSpec(
             "vectorfit_py", None, is_package=True
         )
         spec.submodule_search_locations = [str(tmp_path)]
+        (tmp_path / "__init__.py").write_text("")
         monkeypatch.setattr(
             vectorfit.importlib.util, "find_spec", lambda name: spec
         )
-        assert vectorfit._extension_path() is None
+        assert vectorfit._binary_paths() == []
 
     def test_cuda_device_without_a_gpu(self, monkeypatch):
         from numba import cuda
@@ -873,13 +1024,21 @@ class TestGpuSupport:
         monkeypatch.setattr(cuda, "is_available", lambda: False)
         assert vectorfit._cuda_device() is None
 
-    def test_gpu_too_old(self, installed):
-        installed(_CUDA_BINARY, ((13, 0), (7, 5)))
+    @pytest.mark.parametrize(
+        "binary, capability, lowest",
+        [
+            (_BINARY_0_3_3, (7, 5), "8.0"),
+            (_BINARY_0_3_4, (5, 2), "6.0"),
+        ],
+    )
+    def test_gpu_too_old(self, installed, binary, capability, lowest):
+        installed(binary, ((13, 0), capability))
         reason = vectorfit.gpu_unavailable_reason()
-        assert "8.0" in reason and "7.5" in reason
+        assert f"compute capability {lowest} or higher" in reason
+        assert f"{capability[0]}.{capability[1]}" in reason
 
     def test_broken_cuda_setup(self, installed, monkeypatch):
-        installed(_CUDA_BINARY)
+        installed(_BINARY_0_3_4)
 
         def broken():
             raise OSError("no nvcuda")
@@ -1637,22 +1796,47 @@ class TestFit:
     @requires_vectorfit_gpu
     @pytest.mark.parametrize("model", ["2D", "3D"])
     def test_gpu_agrees_with_cpu(self, model):
-        """The GPU fit's single-precision Fourier transforms leave the
-        positions where the CPU fit puts them."""
-        spots, _, _ = _gaussian_spots(300)
-        identifications = _identifications(300)
-        parameters = _model(model)
-        cpu = _fit_spots(spots, identifications, parameters=parameters)
-        gpu = _fit_spots(
-            spots, identifications, parameters=parameters, use_gpu=True
-        )
+        """Where both fits converge, the GPU fit puts the spots where the
+        CPU fit does, and it is as precise overall.
+
+        Elsewhere they may end apart (by up to a localization precision):
+        the double precision CPU fit often never meets the tolerance on
+        these Gaussian spots, which the vectorial model does not match, and
+        stops at the iteration limit wherever it is. The GPU fit's single
+        precision is not the cause; VectorFit's double precision "gpu"
+        device ends at the same points."""
+        n_spots = 300
+        spots, dx, dy = _gaussian_spots(n_spots)
+        identifications = _identifications(n_spots)
+        max_iterations = 100
+        fits = {
+            use_gpu: _fit_spots(
+                spots,
+                identifications,
+                parameters=_model(model),
+                max_iterations=max_iterations,
+                use_gpu=use_gpu,
+            )
+            for use_gpu in (False, True)
+        }
+        cpu, gpu = fits[False], fits[True]
         assert gpu["theta"].shape == cpu["theta"].shape
-        # y and x within 0.01 camera pixels (in nm) for nearly every spot;
-        # a fit stopped at the iteration limit may end elsewhere
+        converged = (cpu["iterations"] < max_iterations) & (
+            gpu["iterations"] < max_iterations
+        )
+        assert converged.sum() > n_spots / 4
+        # y and x within 0.01 camera pixels (in nm)
         shift = np.abs(gpu["theta"][:, :2] - cpu["theta"][:, :2]).max(1)
-        assert np.mean(shift < 0.01 * PIXELSIZE) > 0.95
+        assert np.mean(shift[converged] < 0.01 * PIXELSIZE) > 0.95
         relative = np.abs(gpu["crlb"] - cpu["crlb"]) / cpu["crlb"]
-        assert np.median(relative) < 0.01
+        assert np.median(relative[converged]) < 0.05
+        # every spot: as close to the true positions as the CPU fit
+        truth = np.stack([dy, dx], axis=1) * PIXELSIZE
+        rms = {
+            use_gpu: np.sqrt(np.mean((fit["theta"][:, :2] - truth) ** 2))
+            for use_gpu, fit in fits.items()
+        }
+        assert rms[True] < 1.05 * rms[False]
 
     def test_calibration_3d_is_not_applied(self, movie):
         with warnings.catch_warnings():

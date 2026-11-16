@@ -33,11 +33,11 @@ Which installer should I use?
 
 - **Windows:** the one-click installer from the `release page
   <https://github.com/jungmannlab/picasso/releases>`__. Its *CUDA12* and
-  *CUDA13* editions add GPU fitting in Localize and support plugins that
-  rely on CUDA, and need an NVIDIA graphics card. *CUDA13* needs a Turing
-  or newer GPU and a driver of version 580 or newer, and also fits vectorial
-  PSFs on the GPU (``vectorfit-gpu``, Ampere or newer); otherwise, use
-  *CUDA12*. :ref:`installation-check-cuda` shows how to check your GPU and
+  *CUDA13* editions add GPU fitting in Localize (also of vectorial PSFs,
+  ``vectorfit-gpu``) and support plugins that rely on CUDA, and need an
+  NVIDIA graphics card. *CUDA13* needs a Turing or newer GPU and a driver
+  of version 580 or newer; otherwise, use *CUDA12*.
+  :ref:`installation-check-cuda` shows how to check your GPU and
   driver. GPU
   rendering in Render works with all editions. The editions install to
   ``C:\Picasso``, ``C:\Picasso-CUDA12`` and ``C:\Picasso-CUDA13`` and can be
