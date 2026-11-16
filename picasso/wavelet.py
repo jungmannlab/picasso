@@ -145,6 +145,12 @@ class WaveletParameters:
     ValueError
         If ``threshold`` is negative or not finite, ``noise`` is unknown
         or ``min_area`` is smaller than 1.
+
+    References
+    ----------
+    Izeddin, I. et al. Wavelet analysis for single molecule localization
+    microscopy. Opt Express 20, 2081-2095 (2012).
+    https://doi.org/10.1364/OE.20.002081
     """
 
     threshold: float = 0.5
@@ -540,6 +546,12 @@ def detect_regions(
         in pixels.
     area : lib.IntArray1D
         Number of pixels of each region.
+
+    References
+    ----------
+    Izeddin, I. et al. Wavelet analysis for single molecule localization
+    microscopy. Opt Express 20, 2081-2095 (2012).
+    https://doi.org/10.1364/OE.20.002081
     """
     if parameters is None:
         parameters = WaveletParameters()

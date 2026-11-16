@@ -13,6 +13,13 @@ The matrices keep grays unchanged. Milder, anomalous forms
 (protanomaly, deuteranomaly) lose less of the color differences than
 the simulation shows.
 
+References
+----------
+Machado, G. M., Oliveira, M. M. & Fernandes, L. A physiologically-based
+model for simulation of color vision deficiency. IEEE Trans Vis Comput
+Graph 15, 1291-1298 (2009).
+https://doi.org/10.1109/TVCG.2009.113
+
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
 """

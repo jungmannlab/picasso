@@ -6,12 +6,19 @@ Clusterer for single molecules optimized for DNA-PAINT.
 Additionally, contains implementations of DBSCAN and HDBSCAN and other
 clustering-related functions.
 
-SMLM clusterer is based on:
+SMLM clusterer is based on Schlichthaerle et al. (2021) and Reinhardt
+et al. (2023).
 
-* Schlichthaerle, et al. Nature Comm, 2021
-  (DOI: 10.1038/s41467-021-22606-1)
-* Reinhardt, Masullo, Baudrexel, Steen, et al. Nature, 2023
-  (DOI: 10.1038/s41586-023-05925-9)
+References
+----------
+Schlichthaerle, T., Lindner, C. & Jungmann, R. Super-resolved
+visualization of single DNA-based tension sensors in cell adhesion. Nat
+Commun 12, 2510 (2021).
+https://doi.org/10.1038/s41467-021-22606-1
+
+Reinhardt, S. C. M. et al. Ångström-resolution fluorescence microscopy.
+Nature 617, 711-716 (2023).
+https://doi.org/10.1038/s41586-023-05925-9
 
 :authors: Rafal Kowalewski, Susanne Reinhardt,
     Thomas Schlichthaerle
@@ -235,10 +242,8 @@ def _cluster(
     arrays (see ``_build_neighbor_graph``) so peak memory stays bounded
     even for tens of millions of localizations.
 
-    Based on the algorithm published by Schichthaerle et al.
-    Nature Comm, 2021 (10.1038/s41467-021-22606-1) and first implemented
-    in Reinhardt, Masullo, Baudrexel, Steen, et al. Nature, 2023
-    (10.1038/s41586-023-05925-9).
+    Based on the algorithm published by Schlichthaerle et al. (2021) and
+    first implemented in Reinhardt et al. (2023).
 
     Parameters
     ----------
@@ -261,6 +266,17 @@ def _cluster(
     labels : lib.IntArray1D
         Cluster labels for each localization (-1 means no cluster
         assigned).
+
+    References
+    ----------
+    Schlichthaerle, T., Lindner, C. & Jungmann, R. Super-resolved
+    visualization of single DNA-based tension sensors in cell adhesion.
+    Nat Commun 12, 2510 (2021).
+    https://doi.org/10.1038/s41467-021-22606-1
+
+    Reinhardt, S. C. M. et al. Ångström-resolution fluorescence
+    microscopy. Nature 617, 711-716 (2023).
+    https://doi.org/10.1038/s41586-023-05925-9
     """
     n_points = X.shape[0]
 
@@ -437,10 +453,8 @@ def cluster(
     4. Assign cluster labels to all points. If two local maxima are
        within the radius from each other, combine such clusters.
 
-    Based on the algorithm published by Schichthaerle et al.
-    Nature Comm, 2021 (10.1038/s41467-021-22606-1) and first implemented
-    in Reinhardt, Masullo, Baudrexel, Steen, et al. Nature, 2023
-    (10.1038/s41586-023-05925-9).
+    Based on the algorithm published by Schlichthaerle et al. (2021) and
+    first implemented in Reinhardt et al. (2023).
 
     The recommended parameters are ``radius`` of 2*NeNA and ``min_locs``
     of 10. Keep in mind that the parameters may vary between
@@ -478,6 +492,17 @@ def cluster(
     info : list of dicts
         Metadata of the clustered localizations: ``info`` with an entry
         recording the clustering appended, see ``lib.append_metadata``.
+
+    References
+    ----------
+    Schlichthaerle, T., Lindner, C. & Jungmann, R. Super-resolved
+    visualization of single DNA-based tension sensors in cell adhesion.
+    Nat Commun 12, 2510 (2021).
+    https://doi.org/10.1038/s41467-021-22606-1
+
+    Reinhardt, S. C. M. et al. Ångström-resolution fluorescence
+    microscopy. Nature 617, 711-716 (2023).
+    https://doi.org/10.1038/s41586-023-05925-9
     """
     locs = locs.copy()
     n_raw = len(locs)
@@ -529,7 +554,7 @@ def _dbscan(
 ) -> lib.IntArray1D:
     """Find DBSCAN cluster labels, given data points and parameters.
 
-    See Ester, et al. Inkdd, 1996. (Vol. 96, No. 34, pp. 226-231).
+    See Ester et al. (1996).
 
     Parameters
     ----------
@@ -550,6 +575,13 @@ def _dbscan(
     labels : lib.IntArray1D
         Cluster labels for each point. Shape: (N,). -1 means no cluster
         assigned.
+
+    References
+    ----------
+    Ester, M., Kriegel, H.-P., Sander, J. & Xu, X. A density-based
+    algorithm for discovering clusters in large spatial databases with
+    noise. In Proc. 2nd Int. Conf. Knowledge Discovery and Data Mining
+    (KDD-96) 226-231 (AAAI Press, 1996).
     """
     db = DBSCAN(eps=radius, min_samples=min_density).fit(X)
     labels = db.labels_.astype(np.int32)
@@ -570,7 +602,7 @@ def dbscan(
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Perform DBSCAN on localizations.
 
-    See Ester, et al. Inkdd, 1996. (Vol. 96, No. 34, pp. 226-231).
+    See Ester et al. (1996).
 
     For 3D data with ``radius_z`` set, anisotropic clustering is used:
     z coordinates are scaled by ``radius / radius_z`` so that the
@@ -609,6 +641,13 @@ def dbscan(
     info : list of dicts
         Metadata of the clustered localizations: ``info`` with an entry
         recording the clustering appended, see ``lib.append_metadata``.
+
+    References
+    ----------
+    Ester, M., Kriegel, H.-P., Sander, J. & Xu, X. A density-based
+    algorithm for discovering clusters in large spatial databases with
+    noise. In Proc. 2nd Int. Conf. Knowledge Discovery and Data Mining
+    (KDD-96) 226-231 (AAAI Press, 1996).
     """
     locs = locs.copy()
     n_raw = len(locs)
@@ -644,7 +683,7 @@ def _hdbscan(
 ) -> lib.IntArray1D:
     """Find HDBSCAN cluster labels, given data points and parameters.
 
-    See Campello, et al. PAKDD, 2013 (DOI: 10.1007/978-3-642-37456-2_14).
+    See Campello et al. (2013).
 
     Parameters
     ----------
@@ -670,6 +709,14 @@ def _hdbscan(
     RuntimeError
         If ``cluster_eps`` > 0 runs into scikit-learn's HDBSCAN bug with
         NumPy 2.4 and later (scikit-learn issue 33219).
+
+    References
+    ----------
+    Campello, R. J. G. B., Moulavi, D. & Sander, J. Density-based
+    clustering based on hierarchical density estimates. In Advances in
+    Knowledge Discovery and Data Mining (PAKDD 2013) 160-172 (Springer,
+    2013).
+    https://doi.org/10.1007/978-3-642-37456-2_14
     """
     try:
         hdb = HDBSCAN(
@@ -701,7 +748,7 @@ def hdbscan(
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Perform HDBSCAN on localizations.
 
-    See Campello, et al. PAKDD, 2013 (DOI: 10.1007/978-3-642-37456-2_14).
+    See Campello et al. (2013).
 
     Parameters
     ----------
@@ -734,6 +781,14 @@ def hdbscan(
     RuntimeError
         If ``cluster_eps`` > 0 runs into scikit-learn's HDBSCAN bug with
         NumPy 2.4 and later (scikit-learn issue 33219).
+
+    References
+    ----------
+    Campello, R. J. G. B., Moulavi, D. & Sander, J. Density-based
+    clustering based on hierarchical density estimates. In Advances in
+    Knowledge Discovery and Data Mining (PAKDD 2013) 160-172 (Springer,
+    2013).
+    https://doi.org/10.1007/978-3-642-37456-2_14
     """
     locs = locs.copy()
     n_raw = len(locs)
@@ -1187,8 +1242,7 @@ def test_subclustering(
     do not (sparse). If subclustering occurs, the clustered molecules
     should have a lower number of events on average.
 
-    Introduced in Kowalewski, Reinhardt, et al. Nature Comms, 2026.
-    DOI: https://doi.org/10.1038/s41467-026-70198-5
+    Introduced in Kowalewski et al. (2026).
 
     Parameters
     ----------
@@ -1210,6 +1264,12 @@ def test_subclustering(
         Number of events for clustered molecules.
     sparse_nevents : lib.IntArray1D
         Number of events for sparse molecules.
+
+    References
+    ----------
+    Kowalewski, R. et al. Molecular mapping in DNA-PAINT via modified
+    Gaussian Mixture Modeling. Nat Commun 17, 2315 (2026).
+    https://doi.org/10.1038/s41467-026-70198-5
     """
     assert (
         "n_events" in mols.columns

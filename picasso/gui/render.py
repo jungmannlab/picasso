@@ -9353,8 +9353,7 @@ class ToolsSettingsDialog(lib.Dialog):
 
 class CBCDialog(lib.Dialog):
     """Choose the channels and parameters for coordinate-based
-    colocalization (CBC, Malkusch, et al. Histochem Cell Biol, 2012.
-    DOI: 10.1007/s00418-011-0880-5).
+    colocalization (CBC, Malkusch et al., 2012).
 
     The CBC is not symmetric, so the channel whose localizations are
     scored and the partner channel are chosen separately, or all pairs
@@ -9387,6 +9386,13 @@ class CBCDialog(lib.Dialog):
     use_z : QCheckBox
         If checked, the CBC is computed in 3D. Only enabled if all
         channels involved contain z.
+
+    References
+    ----------
+    Malkusch, S., Endesfelder, U., Mondry, J. et al. Coordinate-based
+    colocalization analysis of single-molecule localization microscopy
+    data. Histochem Cell Biol 137, 1-10 (2012).
+    https://doi.org/10.1007/s00418-011-0880-5
     """
 
     DOCS_URL = docs_url("render/analysis.html#render-cbc")
@@ -11423,7 +11429,15 @@ class DisplaySettingsDialog(lib.Dialog):
     def _update_quadtree_snr(self, *args) -> None:
         """Show the signal-to-noise ratio the leaf capacity implies:
         bins hold about half the capacity on average and their counts
-        are Poisson distributed (Baddeley et al. 2010, sqrt(N / 2))."""
+        are Poisson distributed (Baddeley et al. 2010, sqrt(N / 2)).
+
+        References
+        ----------
+        Baddeley, D., Cannell, M. B. & Soeller, C. Visualization of
+        localization microscopy data. Microsc Microanal 16, 64-72
+        (2010).
+        https://doi.org/10.1017/S143192760999122X
+        """
         snr = np.sqrt(self.quadtree_capacity.value() / 2.0)
         self.quadtree_snr.setText(f"Mean SNR per bin \u2248 {snr:.1f}")
 
@@ -20312,7 +20326,15 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     def undrift_aim(self) -> None:
         """Undrift with Adaptive Intersection Maximization (AIM).
 
-        See Ma H., et al. Science Advances. 2024."""
+        See Ma H., et al. Science Advances. 2024.
+
+        References
+        ----------
+        Ma, H., Chen, M., Nguyen, P. & Liu, Y. Toward drift-free
+        high-throughput nanoscopy through adaptive intersection
+        maximization. Sci Adv 10, eadm7765 (2024).
+        https://doi.org/10.1126/sciadv.adm7765
+        """
         channel = self.get_channel_all_seq("Undrift by AIM")
         if channel is None:
             return
@@ -20360,7 +20382,15 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     def undrift_rcc(self) -> None:
         """Undrift with RCC.
 
-        See Wang Y., et al. Optics Express. 2014."""
+        See Wang Y., et al. Optics Express. 2014.
+
+        References
+        ----------
+        Wang, Y. et al. Localization events-based sample drift
+        correction for localization microscopy with redundant
+        cross-correlation algorithm. Opt Express 22, 15982 (2014).
+        https://doi.org/10.1364/OE.22.015982
+        """
         channel = self.get_channel_all_seq("Undrift by RCC")
         if channel is None:
             return

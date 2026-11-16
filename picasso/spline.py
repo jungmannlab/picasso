@@ -542,6 +542,12 @@ def _subpixel_shift(
     interpolation and reads the x, y, z shift off the position of the maximum.
     Returns ``(shift, peak_value)`` with ``shift`` the ``(row, col, z)``
     displacement from the center voxel.
+
+    References
+    ----------
+    Li, Y. et al. Real-time 3D single-molecule localization using
+    experimental point spread functions. Nat Methods 15, 367-369 (2018).
+    https://doi.org/10.1038/nmeth.4661
     """
     shape = np.array(cc.shape)
     center = shape // 2
@@ -734,7 +740,14 @@ def _register_and_average(
     the two dissimilarity measures ``ncc`` / ``mse``, the thresholds applied
     (see ``_keep_inliers``) and ``registered_all``, the registered volumes of
     all beads including the rejected ones, so the rejection can be inspected
-    visually."""
+    visually.
+
+    References
+    ----------
+    Li, Y. et al. Real-time 3D single-molecule localization using
+    experimental point spread functions. Nat Methods 15, 367-369 (2018).
+    https://doi.org/10.1038/nmeth.4661
+    """
     n_beads, box, _, n_steps = volumes.shape
     vols = volumes.astype(np.float64)
     z_center = int(z_center)
@@ -881,6 +894,12 @@ def _smooth_z(volume: np.ndarray) -> np.ndarray:
     without washing out the real axial variation that encodes z. Returns the
     smoothed volume (same shape/dtype); the volume is returned unchanged if
     there are too few z-steps to fit a cubic smoothing spline.
+
+    References
+    ----------
+    Li, Y. et al. Real-time 3D single-molecule localization using
+    experimental point spread functions. Nat Methods 15, 367-369 (2018).
+    https://doi.org/10.1038/nmeth.4661
     """
     box, _, n_steps = volume.shape
     if n_steps < 5:  # a cubic smoothing spline needs a few points to be stable
@@ -911,7 +930,14 @@ def _normalize_template(
     is the integral of the in-focus normalized slice (used to convert a fitted
     amplitude into integrated photons). Unit-peak scaling is kept (rather than
     the paper's central-slice-sum) so the Gpufit spline fit's amplitude
-    initialization (``spot_max - spot_min``) stays valid without change."""
+    initialization (``spot_max - spot_min``) stays valid without change.
+
+    References
+    ----------
+    Li, Y. et al. Real-time 3D single-molecule localization using
+    experimental point spread functions. Nat Methods 15, 367-369 (2018).
+    https://doi.org/10.1038/nmeth.4661
+    """
     background = float(np.min(volume))
     focus = volume[:, :, z_center] - background
     amplitude = float(np.max(focus))
@@ -2338,6 +2364,12 @@ def calibrate_spline_multichannel(
         match the channel count, do not share a size, or ``reference`` is out
         of range, or if the bead correspondences are too few or the fitted
         registration is geometrically implausible.
+
+    References
+    ----------
+    Li, Y. et al. Global fitting for high-accuracy multi-channel
+    single-molecule localization. Nat Commun 13, 3133 (2022).
+    https://doi.org/10.1038/s41467-022-30719-4
     """
     n_channels = len(movies)
     if n_channels < 2:
@@ -3074,6 +3106,12 @@ def calibrate_spline_split_fov(
     ValueError
         If fewer than two regions are given, plus everything
         :func:`calibrate_spline_multichannel` raises.
+
+    References
+    ----------
+    Li, Y. et al. Global fitting for high-accuracy multi-channel
+    single-molecule localization. Nat Commun 13, 3133 (2022).
+    https://doi.org/10.1038/s41467-022-30719-4
     """
     n_channels = len(regions)
     if n_channels < 2:

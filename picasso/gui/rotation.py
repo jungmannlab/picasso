@@ -438,7 +438,15 @@ class DisplaySettingsRotationDialog(lib.Dialog):
 
     def _update_quadtree_snr(self, *args) -> None:
         """Show the signal-to-noise ratio the leaf capacity implies
-        (Baddeley et al. 2010, sqrt(N / 2))."""
+        (Baddeley et al. 2010, sqrt(N / 2)).
+
+        References
+        ----------
+        Baddeley, D., Cannell, M. B. & Soeller, C. Visualization of
+        localization microscopy data. Microsc Microanal 16, 64-72
+        (2010).
+        https://doi.org/10.1017/S143192760999122X
+        """
         snr = np.sqrt(self.quadtree_capacity.value() / 2.0)
         self.quadtree_snr.setText(f"Mean SNR per bin \u2248 {snr:.1f}")
 

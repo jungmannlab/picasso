@@ -192,6 +192,13 @@ def rcc(
         minimization of the pairwise shifts (see
         ``lib.minimize_shifts``). The first segment is the reference,
         i.e., ``shift_y[0] == shift_x[0] == 0``.
+
+    References
+    ----------
+    Wang, Y. et al. Localization events-based sample drift correction
+    for localization microscopy with redundant cross-correlation
+    algorithm. Opt Express 22, 15982 (2014).
+    https://doi.org/10.1364/OE.22.015982
     """
     n_segments = len(segments)
     shifts_x = np.zeros((n_segments, n_segments))

@@ -460,6 +460,12 @@ class IdentificationParameters:
     is switched on or off. The wavelet threshold is in units of the noise
     and needs no re-tuning.
 
+    References
+    ----------
+    Izeddin, I. et al. Wavelet analysis for single molecule localization
+    microscopy. Opt Express 20, 2081-2095 (2012).
+    https://doi.org/10.1364/OE.20.002081
+
     Examples
     --------
     Local maxima above a minimum net gradient of 5000, in 7x7 pixel boxes:
@@ -600,6 +606,12 @@ class IdentificationParameters:
         ValueError
             If a required key is missing or the identification method is
             unknown.
+
+        References
+        ----------
+        Izeddin, I. et al. Wavelet analysis for single molecule
+        localization microscopy. Opt Express 20, 2081-2095 (2012).
+        https://doi.org/10.1364/OE.20.002081
         """
         settings = wavelet_from_parameters(info)
         if settings is not None:
@@ -2663,6 +2675,12 @@ def identify(
     None is returned instead if the identification was aborted via
     ``abort_callback``.
 
+    References
+    ----------
+    Izeddin, I. et al. Wavelet analysis for single molecule localization
+    microscopy. Opt Express 20, 2081-2095 (2012).
+    https://doi.org/10.1364/OE.20.002081
+
     Examples
     --------
     Local maxima above a minimum net gradient of 5000, in 7x7 pixel boxes:
@@ -3728,7 +3746,15 @@ def _sensitivity(
 
     Picasso's ``Sensitivity`` is electrons per A/D count, i.e. the reciprocal
     of the amplification gain ``g`` a camera calibration measures in ADU per
-    photoelectron (Huang et al. 2013, Supplementary Note Section 2.3)."""
+    photoelectron (Huang et al. 2013, Supplementary Note Section 2.3).
+
+    References
+    ----------
+    Huang, F. et al. Video-rate nanoscopy using sCMOS camera-specific
+    single-molecule localization algorithms. Nat Methods 10, 653-658
+    (2013).
+    https://doi.org/10.1038/nmeth.2488
+    """
     if gain_patch is None:
         return camera_info["Sensitivity"]
     return 1.0 / gain_patch
@@ -3785,6 +3811,13 @@ def _variance_to_photons(
     :func:`to_photons` scales counts by ``Sensitivity / Gain``, so a variance
     scales by its square. This is Huang et al.'s ``var / g^2``, the quantity
     the noise model adds to both the data and the model mean.
+
+    References
+    ----------
+    Huang, F. et al. Video-rate nanoscopy using sCMOS camera-specific
+    single-molecule localization algorithms. Nat Methods 10, 653-658
+    (2013).
+    https://doi.org/10.1038/nmeth.2488
     """
     sensitivity = _sensitivity(camera_info, gain_patch)
     gain = camera_info["Gain"]
@@ -3920,6 +3953,13 @@ def reduced_chi_square(
     ------
     ValueError
         If not exactly one of ``log_likelihood`` and ``chi_square`` is given.
+
+    References
+    ----------
+    Huang, F. et al. Video-rate nanoscopy using sCMOS camera-specific
+    single-molecule localization algorithms. Nat Methods 10, 653-658
+    (2013).
+    https://doi.org/10.1038/nmeth.2488
     """
     if (log_likelihood is None) == (chi_square is None):
         raise ValueError(
@@ -4396,6 +4436,19 @@ def fit(
         the fit and ``camera_info`` appended (see
         ``lib.append_metadata``), and one recording ``lateral_transforms``
         if any were applied.
+
+    References
+    ----------
+    Martens, K. J. A., Bader, A. N., Baas, S., Rieger, B. & Hohlbein, J.
+    Phasor based single-molecule localization microscopy in 3D
+    (pSMLM-3D): an algorithm for MHz localization rates using standard
+    CPUs. J Chem Phys 148, 123311 (2018).
+    https://doi.org/10.1063/1.5005899
+
+    Huang, F. et al. Video-rate nanoscopy using sCMOS camera-specific
+    single-molecule localization algorithms. Nat Methods 10, 653-658
+    (2013).
+    https://doi.org/10.1038/nmeth.2488
     """
     _validate_fit_args(
         movie,
@@ -5295,6 +5348,13 @@ def fit_spots_gauss(
         None for maximum likelihood.
     None
         If ``abort_callback`` asked to stop.
+
+    References
+    ----------
+    Huang, F. et al. Video-rate nanoscopy using sCMOS camera-specific
+    single-molecule localization algorithms. Nat Methods 10, 653-658
+    (2013).
+    https://doi.org/10.1038/nmeth.2488
     """
     if rotated and spherical:
         raise ValueError("'rotated' and 'spherical' are mutually exclusive.")
@@ -5570,6 +5630,13 @@ def locs_from_fits_gauss(
     locs : pd.DataFrame
         Data frame containing the localized spots, with every length in
         nm.
+
+    References
+    ----------
+    Mortensen, K. I., Churchman, L. S., Spudich, J. A. & Flyvbjerg, H.
+    Optimized localization analysis for single-molecule tracking and
+    super-resolution microscopy. Nat Methods 7, 377-381 (2010).
+    https://doi.org/10.1038/nmeth.1447
     """
     box_offset = int(box / 2)
     rotated = theta.shape[1] == 7
@@ -6292,6 +6359,12 @@ def fit_gauss_multichannel(
         If the registration carries no ``channel_transforms``, if the number of
         movies does not match it, or if the photon-decoupled model is asked for
         outside the 2 to 6 channel range it supports.
+
+    References
+    ----------
+    Li, Y. et al. Global fitting for high-accuracy multi-channel
+    single-molecule localization. Nat Commun 13, 3133 (2022).
+    https://doi.org/10.1038/s41467-022-30719-4
     """
     transforms = channel_registration.get("channel_transforms")
     if not transforms:
@@ -8674,6 +8747,12 @@ def fit_spline_multichannel(
     ValueError
         If the calibration is not ``"spline-3d-multichannel"``, or if the
         number of movies disagrees with its channel transforms.
+
+    References
+    ----------
+    Li, Y. et al. Global fitting for high-accuracy multi-channel
+    single-molecule localization. Nat Commun 13, 3133 (2022).
+    https://doi.org/10.1038/s41467-022-30719-4
     """
     if calibration.get("model") != "spline-3d-multichannel":
         raise ValueError(
@@ -8928,6 +9007,12 @@ def fit_spline_multichannel_ratiometric(
         If the calibration is not ``"spline-3d-multichannel"``, if no
         ``photon_ratios`` are given or stored, or if the movie count or the
         ratio width disagrees with the calibration's channel count.
+
+    References
+    ----------
+    Li, Y. et al. Global fitting for high-accuracy multi-channel
+    single-molecule localization. Nat Commun 13, 3133 (2022).
+    https://doi.org/10.1038/s41467-022-30719-4
     """
     photon_ratios, transforms, n_channels = _validate_ratiometric_inputs(
         calibration, photon_ratios, movies
@@ -9615,6 +9700,12 @@ def fit_spline_split_fov(
         Metadata of the localizations: ``info`` with an entry recording
         the fit, including the regions, appended (see
         ``lib.append_metadata``).
+
+    References
+    ----------
+    Li, Y. et al. Global fitting for high-accuracy multi-channel
+    single-molecule localization. Nat Commun 13, 3133 (2022).
+    https://doi.org/10.1038/s41467-022-30719-4
     """
     fit_regions, reference, transforms = split_fov_fit_geometry(
         calibration, regions
@@ -10588,6 +10679,17 @@ class MultiEmitterParameters:
         ``peak_search_z`` not one or more finite numbers, or
         ``fit_region_size`` neither None nor an integer of at least 3 or
         given for a Gaussian model.
+
+    References
+    ----------
+    Babcock, H., Sigal, Y. M. & Zhuang, X. A high-density 3D
+    localization algorithm for stochastic optical reconstruction
+    microscopy. Opt Nanoscopy 1, 6 (2012).
+    https://doi.org/10.1186/2192-2853-1-6
+
+    Babcock, H. P. & Zhuang, X. Analyzing single molecule localization
+    microscopy data using cubic splines. Sci Rep 7, 552 (2017).
+    https://doi.org/10.1038/s41598-017-00622-w
 
     Examples
     --------

@@ -3,7 +3,14 @@ picasso.gui.spinna
 ~~~~~~~~~~~~~~~~~~
 
 Graphical user interface for simulating single proteins in
-DNA-PAINT using SPINNA. DOI: 10.1038/s41467-025-59500-z
+DNA-PAINT using SPINNA (Masullo et al., 2025).
+
+References
+----------
+Masullo, L. A. et al. Spatial and stoichiometric in situ analysis of
+biomolecular oligomerization at single-protein resolution. Nat Commun
+16, 4202 (2025).
+https://doi.org/10.1038/s41467-025-59500-z
 
 :authors: Rafal Kowalewski, Luciano A Masullo
 :copyright: Copyright (c) 2022-2026 Jungmann Lab, MPI of Biochemistry

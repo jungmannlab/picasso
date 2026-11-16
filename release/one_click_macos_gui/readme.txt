@@ -111,7 +111,7 @@ Many of the functionalities provided by Picasso were published independently, pl
 - Edge-corrected (Kaplan-Meier) nearest neighbor distance distributions: Baddeley and Gill, Ann. Stat., 1997; 10.1214/aos/1034276629 (https://doi.org/10.1214/aos/1034276629)
 - Signal-to-background ratio, localization drop and destroyed docking sites (dye performance): Steen et al., Nat. Methods, 2024; 10.1038/s41592-024-02374-8 (https://doi.org/10.1038/s41592-024-02374-8)
 - Stitching tiles (global tile positions, inspired by): Preibisch et al., Bioinformatics, 2009; 10.1093/bioinformatics/btp184 (https://doi.org/10.1093/bioinformatics/btp184)
-- Single-particle tracking (nearest-neighbor tracking, jump distance and MSD analysis): Martens et al., Front. Bioinform., 2021; 10.3389/fbinf.2021.817254 (https://doi.org/10.3389/fbinf.2021.817254)
+- Single-particle tracking (nearest-neighbor tracking, jump distance and MSD analysis): Martens et al., Front. Bioinform., 2022; 10.3389/fbinf.2021.817254 (https://doi.org/10.3389/fbinf.2021.817254)
 
 .. SYNC-END: citing
 

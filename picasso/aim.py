@@ -9,6 +9,13 @@ Adapted from: Ma, H., et al. Science Advances. 2024. Translated from
 the authors' MATLAB code to Python and numba, and modified. License
 (Apache-2.0): ``LICENSES/AIM-LICENSE.txt``.
 
+References
+----------
+Ma, H., Chen, M., Nguyen, P. & Liu, Y. Toward drift-free high-throughput
+nanoscopy through adaptive intersection maximization. Sci Adv 10,
+eadm7765 (2024).
+https://doi.org/10.1126/sciadv.adm7765
+
 :authors: Hongqiang Ma, Maomao Chen, Phuong Nguyen, Yang Liu,
     Rafal Kowalewski
 :copyright: Copyright (c) 2016-2026 Jungmann Lab, MPI of Biochemistry

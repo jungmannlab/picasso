@@ -174,6 +174,12 @@ def _get_structures_permutation(t_counts: lib.FloatArray2D) -> lib.IntArray1D:
     -------
     perm : lib.IntArray1D
         The permutation array, shape (S,).
+
+    References
+    ----------
+    Polyanin, A. D. & Manzhirov, A. V. Handbook of Mathematics for
+    Engineers and Scientists (Chapman & Hall/CRC, 2007).
+    https://doi.org/10.1201/9781420010510
     """
     n_t, n_s = t_counts.shape
     perm = np.arange(n_s)  # initiate the permutation array
@@ -6593,6 +6599,12 @@ def batch_analysis(
     summary : pd.DataFrame
         Results of all rows, one row each, as saved in
         "summary_results.csv".
+
+    References
+    ----------
+    Hellmeier, J. et al. Quantification of absolute labeling efficiency
+    at the single-protein level. Nat Methods 21, 1702-1707 (2024).
+    https://doi.org/10.1038/s41592-024-02242-5
     """
     parameters, result_dir = _spinna_validate_parameters(parameters_filename)
     os.makedirs(result_dir, exist_ok=True)

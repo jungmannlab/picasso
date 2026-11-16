@@ -1245,7 +1245,15 @@ def _dye_performance_cli(
     drop and the destroyed docking sites and saves the summary
     (``<file>_dye_performance.csv``), the values of each site
     (``..._sites.csv``) and a plot (``.png``) next to each file. See
-    ``postprocess.dye_performance`` for details."""
+    ``postprocess.dye_performance`` for details.
+
+    References
+    ----------
+    Steen, P. R. et al. The DNA-PAINT palette: a comprehensive
+    performance analysis of fluorescent dyes. Nat Methods 21, 1755-1762
+    (2024).
+    https://doi.org/10.1038/s41592-024-02374-8
+    """
     import pandas as pd
     from . import io, postprocess
 

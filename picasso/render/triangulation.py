@@ -15,6 +15,12 @@ The rasterizer is ``picasso.render.kernels._fill_triangles``; this
 module holds the geometry (scipy's Qhull) and the passes. It never
 imports the GUI.
 
+References
+----------
+Baddeley, D., Cannell, M. B. & Soeller, C. Visualization of localization
+microscopy data. Microsc Microanal 16, 64-72 (2010).
+https://doi.org/10.1017/S143192760999122X
+
 :author: Rafal Kowalewski, 2026
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
 """

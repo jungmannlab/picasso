@@ -867,6 +867,13 @@ def structure_classes(
     ValueError
         If there are fewer than 2 candidates.
 
+    References
+    ----------
+    Ankerst, M., Breunig, M. M., Kriegel, H.-P. & Sander, J. OPTICS:
+    ordering points to identify the clustering structure. ACM SIGMOD Rec
+    28, 49-60 (1999).
+    https://doi.org/10.1145/304181.304187
+
     Examples
     --------
     >>> candidates = postprocess.pick_similar_candidates(
@@ -2897,8 +2904,7 @@ def nena(
 ) -> tuple[dict, float]:
     """Calculate NeNA - experimental estimate of localization
     precision. Please refer to the original paper for details:
-    Endesfelder, et al. Histochemistry and Cell Biology, 2014.
-    DOI: 10.1007/s00418-014-1192-3.
+    Endesfelder et al. (2014).
 
     Parameters
     ----------
@@ -2920,6 +2926,14 @@ def nena(
         fit and fitted parameters.
     s : float
         Estimated localization precision in nm.
+
+    References
+    ----------
+    Endesfelder, U., Malkusch, S., Fricke, F. & Heilemann, M. A simple
+    method to estimate the average localization precision of a
+    single-molecule localization microscopy experiment. Histochem Cell
+    Biol 141, 629-638 (2014).
+    https://doi.org/10.1007/s00418-014-1192-3
     """
     with lib.tracked_progress(
         progress, "Calculating NeNA", unit="loc"
@@ -3257,6 +3271,12 @@ def frc(
     ValueError
         If the rendered images would be larger than
         ``max_image_size`` pixels on a side.
+
+    References
+    ----------
+    Nieuwenhuizen, R. P. J. et al. Measuring image resolution in optical
+    nanoscopy. Nat Methods 10, 557-562 (2013).
+    https://doi.org/10.1038/nmeth.2448
     """
     if lp is None:
         lp = nena(locs, info)[1]
@@ -3474,6 +3494,12 @@ def _frc(
         resolution could not be determined.
     images : tuple of 2 lib.FloatArray2D
         2 grayscale images used for calculating FRC. Already masked.
+
+    References
+    ----------
+    Nieuwenhuizen, R. P. J. et al. Measuring image resolution in optical
+    nanoscopy. Nat Methods 10, 557-562 (2013).
+    https://doi.org/10.1038/nmeth.2448
     """
     # render images
     disp_px_size = lp / 2  # nm
@@ -3588,7 +3614,15 @@ def _render_bilinear(
     """Bilinear histogram of the points ``(x, y)`` (nm) on an image of
     ``shape`` (rows, columns) whose corner is at ``(x_min, y_min)``:
     each point is spread on its four nearest pixels (Descloux et al.,
-    2021), which avoids the rounding of a plain histogram."""
+    2021), which avoids the rounding of a plain histogram.
+
+    References
+    ----------
+    Descloux, A., Grussmayer, K. S., Radenovic, A. Parameter-free
+    rendering of single-molecule localization microscopy data for
+    parameter-free resolution estimation. Commun Biol 4, 550 (2021).
+    https://doi.org/10.1038/s42003-021-02086-1
+    """
     n_rows, n_columns = shape
     image = np.zeros(n_rows * n_columns)
     for column, row, weight in _bilinear_weights(
@@ -3608,7 +3642,15 @@ def _render_bilinear(
 def _sample_area(x: lib.FloatArray1D, y: lib.FloatArray1D) -> float:
     """Area (nm^2) covered by the points ``(x, y)`` (nm): the pixels of
     their bilinear histogram with 5 nm pixels that exceed 0.5 (Descloux
-    et al., 2021). Only the occupied pixels are stored."""
+    et al., 2021). Only the occupied pixels are stored.
+
+    References
+    ----------
+    Descloux, A., Grussmayer, K. S., Radenovic, A. Parameter-free
+    rendering of single-molecule localization microscopy data for
+    parameter-free resolution estimation. Commun Biol 4, 550 (2021).
+    https://doi.org/10.1038/s42003-021-02086-1
+    """
     if not len(x):
         return 0.0
     pixel_size = _SAMPLE_AREA_PIXEL_SIZE
@@ -4744,6 +4786,13 @@ def select_binding_event_cores(
     info : list of dicts
         Metadata of ``out_locs``: ``info`` with an entry recording the
         selection appended, see ``lib.append_metadata``.
+
+    References
+    ----------
+    Steen, P. R. et al. The DNA-PAINT palette: a comprehensive
+    performance analysis of fluorescent dyes. Nat Methods 21, 1755-1762
+    (2024).
+    https://doi.org/10.1038/s41592-024-02374-8
     """
     entry = lib.step_info(
         "Binding event cores",
@@ -5166,7 +5215,15 @@ def _exponential_cdf_mean(times: lib.FloatArray1D) -> float:
     ``times`` best (least squares at the fractions 0, 1 / (n - 1), ...,
     1 of the n sorted times; Steen et al., 2024). Negative times
     (missing dark times, see ``dark_times``) are ignored; NaN for fewer
-    than two times or a failed fit."""
+    than two times or a failed fit.
+
+    References
+    ----------
+    Steen, P. R. et al. The DNA-PAINT palette: a comprehensive
+    performance analysis of fluorescent dyes. Nat Methods 21, 1755-1762
+    (2024).
+    https://doi.org/10.1038/s41592-024-02374-8
+    """
     times = np.sort(times[times >= 0])
     n = len(times)
     if n < 2:
@@ -6012,6 +6069,13 @@ def undrift(
     ValueError
         If the segmentation is not positive or divides the movie into
         fewer than 4 segments, the fewest the drift interpolation needs.
+
+    References
+    ----------
+    Wang, Y. et al. Localization events-based sample drift correction
+    for localization microscopy with redundant cross-correlation
+    algorithm. Opt Express 22, 15982 (2014).
+    https://doi.org/10.1364/OE.22.015982
     """
     n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
     if not segmentation > 0:
@@ -8906,7 +8970,15 @@ def _pair_statistic_region(
     the region then extends over ``z_range`` (nm), which contains all
     ``z``. With ``partner`` points ``(x, y, z)``, the cross function
     between both sets of points, combining both directions (Lotwick
-    and Silverman, 1982); otherwise at least two points are needed."""
+    and Silverman, 1982); otherwise at least two points are needed.
+
+    References
+    ----------
+    Lotwick, H. W. & Silverman, B. W. Methods for analysing spatial
+    processes of several types of points. J R Stat Soc Series B 44,
+    406-413 (1982).
+    https://doi.org/10.1111/j.2517-6161.1982.tb01221.x
+    """
     use_z = z is not None
     z_range = tuple(z_range) if use_z else None
     first = _grid_points(x, y, z, region, z_range, r_max)
@@ -10996,7 +11068,15 @@ def _knn_kaplan_meier(
     """Kaplan-Meier estimate of the distribution of the distances of a
     sample, given that they are at least ``r_min``: the exact distances
     in ascending order and the probability that a distance is longer
-    than each (Baddeley and Gill, 1997)."""
+    than each (Baddeley and Gill, 1997).
+
+    References
+    ----------
+    Baddeley, A. & Gill, R. D. Kaplan-Meier estimators of distance
+    distributions for spatial point processes. Ann Stat 25, 263-292
+    (1997).
+    https://doi.org/10.1214/aos/1034276629
+    """
     times = np.concatenate([sample.exact, sample.censored])
     is_exact = np.arange(len(times)) < len(sample.exact)
     order = np.lexsort((~is_exact, times))  # exact first at ties

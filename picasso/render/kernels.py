@@ -1216,6 +1216,12 @@ def _quadtree_fill(
     leaf's density is its count over the part of its cell within the
     field, so that the counts of the leaves along the field's right
     and bottom edges are not spread into the empty margin.
+
+    References
+    ----------
+    Baddeley, D., Cannell, M. B. & Soeller, C. Visualization of
+    localization microscopy data. Microsc Microanal 16, 64-72 (2010).
+    https://doi.org/10.1017/S143192760999122X
     """
     n = perm.shape[0]
     n_py, n_px = image.shape
@@ -1354,6 +1360,12 @@ def _fill_triangles(
     pixel puts its whole mass into the pixel holding its centroid, so
     at an overview the image tends to the histogram and no mass is
     lost.
+
+    References
+    ----------
+    Baddeley, D., Cannell, M. B. & Soeller, C. Visualization of
+    localization microscopy data. Microsc Microanal 16, 64-72 (2010).
+    https://doi.org/10.1017/S143192760999122X
     """
     n_py, n_px = image.shape
     for t in range(simplices.shape[0]):

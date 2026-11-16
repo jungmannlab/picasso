@@ -166,6 +166,13 @@ def localization_precision(
     prefer a maximum-likelihood method, whose Cramer-Rao bound is evaluated
     pixel by pixel and is exact under the noise model
     (:func:`_gauss_crlb`).
+
+    References
+    ----------
+    Mortensen, K. I., Churchman, L. S., Spudich, J. A. & Flyvbjerg, H.
+    Optimized localization analysis for single-molecule tracking and
+    super-resolution microscopy. Nat Methods 7, 377-381 (2010).
+    https://doi.org/10.1038/nmeth.1447
     """
     bg = bg + readout_variance
     s2 = s**2
@@ -212,6 +219,12 @@ def sigma_uncertainty_lsq(
     -------
     se_sigma : lib.FloatArray1D
         Standard error of fitted sigma values in camera pixels.
+
+    References
+    ----------
+    Kowalewski, R. et al. Molecular mapping in DNA-PAINT via modified
+    Gaussian Mixture Modeling. Nat Commun 17, 2315 (2026).
+    https://doi.org/10.1038/s41467-026-70198-5
     """
     bg = bg + readout_variance
     sa2 = sigma**2 + 1 / 12
@@ -262,6 +275,13 @@ def sigma_uncertainty_mle(
     -------
     se_sigma : lib.FloatArray1D
         Standard error of fitted sigma values in camera pixels.
+
+    References
+    ----------
+    Rieger, B. & Stallinga, S. The lateral and axial localization
+    uncertainty in super-resolution light microscopy. ChemPhysChem 15,
+    664-670 (2014).
+    https://doi.org/10.1002/cphc.201300711
     """
     bg = bg + readout_variance
     sa2 = sigma**2 + 1 / 12
@@ -322,6 +342,14 @@ def phasor_precision(
         Standard error of the log of the ratio of the x and y phasor
         magnitudes, the quantity an astigmatic phasor calibration turns
         into z.
+
+    References
+    ----------
+    Martens, K. J. A., Bader, A. N., Baas, S., Rieger, B. & Hohlbein, J.
+    Phasor based single-molecule localization microscopy in 3D
+    (pSMLM-3D): an algorithm for MHz localization rates using standard
+    CPUs. J Chem Phys 148, 123311 (2018).
+    https://doi.org/10.1063/1.5005899
     """
     from picasso.fitting import phasor
 
@@ -613,6 +641,13 @@ def _gauss_crlb(
         ``(n_locs, n_params)`` parameter variances (float64) in the same column
         order as ``theta`` (angle variance in rad²). Non-converged and
         numerically singular fits are NaN.
+
+    References
+    ----------
+    Huang, F. et al. Video-rate nanoscopy using sCMOS camera-specific
+    single-molecule localization algorithms. Nat Methods 10, 653-658
+    (2013).
+    https://doi.org/10.1038/nmeth.2488
     """
     theta = np.asarray(theta, dtype=np.float64)
     n_locs = len(theta)
@@ -743,6 +778,13 @@ def _crlb_pixel_weights(mu, var, m, ch, j, i, use_var, mu_floor, mle):
     -------
     wa, wb : float
         Fisher and sandwich weights of the pixel.
+
+    References
+    ----------
+    Huang, F. et al. Video-rate nanoscopy using sCMOS camera-specific
+    single-molecule localization algorithms. Nat Methods 10, 653-658
+    (2013).
+    https://doi.org/10.1038/nmeth.2488
     """
     if use_var:
         mu = mu + var[m, ch, j, i]
