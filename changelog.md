@@ -135,6 +135,7 @@ Picasso 1.0 is the largest update since Picasso was first published. The highlig
 - Customizable scale bar, see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html).
 - Fixed: ratiometric multichannel spline fitting ignored the per-pixel sCMOS variance of the camera calibration.
 - Fixed: with an sCMOS camera calibration and a CUDA GPU, spline fits of movies with more than about 1.5-2 million localizations reported wrong localization precisions (`lpx`, `lpy`, `lpz`, ...) beyond the first ~2 million, which were computed with the readout variance of other localizations.
+- Cross markers of localizations in the GUI are thinner as you zoom in.
 - Fixed: `Height` and `Width` were swapped in the metadata of non-square `.ims` movies.
 - Fixed drift estimation when adding to database + database building.
 - Fixed: canceling the channel selection when opening a multi-channel IMARIS .ims movie raised an error instead of loading the first channel, as for .czi and .lif.

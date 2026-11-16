@@ -1653,6 +1653,36 @@ def format_hover_tooltip(row: pd.Series) -> str:
 OVERLAPPING_MARKER_COLOR = QtGui.QColor(86, 180, 233)
 
 
+class _MarkerLine(QtWidgets.QGraphicsLineItem):
+    """Line of a :class:`FitMarker` whose width follows the zoom.
+
+    Its pen is one camera pixel wide, which makes a blob of the marker
+    when zoomed in, where the marker is drawn large. On screen, the line
+    is as wide as the pen up to 2 px and then grows with a sixteenth of
+    the zoom, so the marker gets relatively thinner as it gets bigger.
+    The width comes from the painter's transform, so the exported view
+    (drawn at the scale of the view) looks like the screen.
+    """
+
+    def paint(
+        self,
+        painter: QtGui.QPainter,
+        option: QtWidgets.QStyleOptionGraphicsItem,
+        widget: QtWidgets.QWidget | None = None,
+    ) -> None:
+        # screen pixels per camera pixel
+        zoom = option.levelOfDetailFromTransform(painter.worldTransform())
+        pen = QtGui.QPen(self.pen())
+        if zoom > 0:
+            width_px = min(zoom, max(2.0, zoom / 16))
+            pen.setWidthF(width_px / zoom)
+        painter.save()
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        painter.setPen(pen)
+        painter.drawLine(self.line())
+        painter.restore()
+
+
 class FitMarker(QtWidgets.QGraphicsItemGroup):
     """Marker showing fitted position: a green x, or, for an emitter of a
     multi-emitter fit with neighbors (``overlapping``), a sky blue +, so
@@ -1670,12 +1700,12 @@ class FitMarker(QtWidgets.QGraphicsItemGroup):
         L = size / 2
         if overlapping:
             color = OVERLAPPING_MARKER_COLOR
-            line1 = QtWidgets.QGraphicsLineItem(x - L, y, x + L, y)
-            line2 = QtWidgets.QGraphicsLineItem(x, y - L, x, y + L)
+            line1 = _MarkerLine(x - L, y, x + L, y)
+            line2 = _MarkerLine(x, y - L, x, y + L)
         else:
             color = QtGui.QColor(0, 255, 0)
-            line1 = QtWidgets.QGraphicsLineItem(x - L, y - L, x + L, y + L)
-            line2 = QtWidgets.QGraphicsLineItem(x - L, y + L, x + L, y - L)
+            line1 = _MarkerLine(x - L, y - L, x + L, y + L)
+            line2 = _MarkerLine(x - L, y + L, x + L, y - L)
         line1.setPen(QtGui.QPen(color))
         self.addToGroup(line1)
         line2.setPen(QtGui.QPen(color))
