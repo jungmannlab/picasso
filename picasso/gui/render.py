@@ -19194,17 +19194,21 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             )
             locs, info = self.locs[channel], self.infos[channel]
             pick_args = self._pick_args()
-            new_picks = lib.run_with_status(
-                lambda: postprocess.pick_similar(
-                    locs=locs,
-                    info=info,
-                    **pick_args,
-                    std_range=std_range,
-                    index_blocks=index_blocks,
-                ),
-                "Picking similar...",
-                self.window,
-            )
+            try:
+                new_picks = lib.run_with_status(
+                    lambda: postprocess.pick_similar(
+                        locs=locs,
+                        info=info,
+                        **pick_args,
+                        std_range=std_range,
+                        index_blocks=index_blocks,
+                    ),
+                    "Picking similar...",
+                    self.window,
+                )
+            except ValueError as e:
+                QtWidgets.QMessageBox.warning(self, "Pick Error", str(e))
+                return
             # the current picks come first and keep their sizes, the new
             # ones take the median size
             n_picks = len(self._picks)

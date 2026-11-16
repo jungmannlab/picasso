@@ -558,6 +558,39 @@ class TestPickSimilar:
                 == []
             )
 
+    @pytest.mark.parametrize("shape", ["Circle", "Square"])
+    def test_pick_without_locs_is_ignored(self, locs, info, shape):
+        # a seed pick on empty background used to divide by zero
+        empty = [10.5 * PX, 10.5 * PX]
+        (in_empty,) = postprocess.picked_locs(
+            locs, info, picks=[empty], pick_shape=shape, pick_size=PICK_SIZE
+        )
+        assert len(in_empty) < 2
+        kwargs = dict(pick_shape=shape, pick_size=PICK_SIZE, std_range=123.0)
+        expected = postprocess.pick_similar(
+            locs, info, picks=ORIGAMI_PICKS[:2], **kwargs
+        )
+        with pytest.warns(UserWarning, match="fewer than 2"):
+            new_picks = postprocess.pick_similar(
+                locs, info, picks=ORIGAMI_PICKS[:2] + [empty], **kwargs
+            )
+        # the empty pick is kept but does not change the criteria
+        assert new_picks[:2] == expected[:2]
+        assert list(new_picks[2]) == empty
+        assert new_picks[3:] == expected[2:]
+
+    @pytest.mark.parametrize("shape", ["Circle", "Square"])
+    def test_only_picks_without_locs_raise(self, locs, info, shape):
+        with pytest.warns(UserWarning, match="fewer than 2"):
+            with pytest.raises(ValueError, match="enough localizations"):
+                postprocess.pick_similar(
+                    locs,
+                    info,
+                    picks=[[10.5 * PX, 10.5 * PX]],
+                    pick_shape=shape,
+                    pick_size=PICK_SIZE,
+                )
+
     def test_polygon_is_rejected(self, locs, info):
         with pytest.raises(AssertionError):
             postprocess.pick_similar(

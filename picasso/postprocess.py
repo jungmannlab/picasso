@@ -1136,18 +1136,25 @@ def _pick_similar_circular(
                 index_blocks[7],
             )
             pick_locs_xy = lib.locs_in_circle(x, y, block_locs_xy, r)
-        n_locs.append(pick_locs_xy.shape[1])
+        n = pick_locs_xy.shape[1]
+        if n < 2:
+            warnings.warn(
+                f"Pick at ({x:.2f}, {y:.2f}) contains fewer than 2 "
+                "localizations and is ignored when calculating the "
+                "similarity criteria."
+            )
+            continue
+        n_locs.append(n)
         rmsd.append(lib.rmsd_at_com(pick_locs_xy))
+    if not n_locs:
+        raise ValueError(
+            "None of the picks contains enough localizations to define "
+            "the similarity criteria."
+        )
 
     # calculate min and max n_locs and rmsd for picking similar
-    mean_n_locs = np.mean(n_locs)
-    mean_rmsd = np.mean(rmsd)
-    std_n_locs = np.std(n_locs)
-    std_rmsd = np.std(rmsd)
-    min_n_locs = max(2, mean_n_locs - std_range * std_n_locs)
-    max_n_locs = mean_n_locs + std_range * std_n_locs
-    min_rmsd = mean_rmsd - std_range * std_rmsd
-    max_rmsd = mean_rmsd + std_range * std_rmsd
+    min_n_locs, max_n_locs = _similarity_window(n_locs, std_range, minimum=2)
+    min_rmsd, max_rmsd = _similarity_window(rmsd, std_range)
 
     # x, y coordinates of found regions:
     x_similar = np.array([_[0] for _ in picks], dtype=np.float64)
