@@ -23285,46 +23285,57 @@ class Window(QtWidgets.QMainWindow):
             held & QtCore.Qt.KeyboardModifier.ControlModifier
         )
         self._undo_by_key = False
-        label = self.view.history.undo_label
-        if self.view.undo() and by_key:
-            self.explain_ctrl_z(label)
+        if by_key and not self.explain_ctrl_z(self.view.history.undo_label):
+            return
+        self.view.undo()
 
-    def explain_ctrl_z(self, label: str | None) -> None:
+    def explain_ctrl_z(self, label: str | None) -> bool:
         """Tell, when Ctrl+Z is pressed, that it undoes the last step
         rather than selecting the Zoom tool, as before Picasso 1.0, which
-        is now Z. Not shown if ``Show Ctrl+Z notice`` is False in the
-        user settings; ticking "Don't show again" sets it to False.
+        is now Z, and ask whether to undo the step or select the Zoom
+        tool. Not shown if ``Show Ctrl+Z notice`` is False in the user
+        settings; ticking "Don't show again" sets it to False.
 
         Parameters
         ----------
         label : str or None
-            Name of the step undone, None if there was nothing to undo.
+            Name of the step to undo, None if there is nothing to undo.
+
+        Returns
+        -------
+        undo : bool
+            Whether to undo the step: True if the notice is not shown
+            or "Undo" was chosen.
         """
         if not ctrl_z_notice_setting():
-            return
+            return True
         native = QtGui.QKeySequence.SequenceFormat.NativeText
         undo_key = self.undo_action.shortcut().toString(native)
-        redo_key = self.redo_action.shortcut().toString(native)
-        if label is None:
-            done = "There was nothing to undo."
-        else:
-            done = (
-                f'It undid "{label}"; {redo_key} (File > Redo) puts it'
-                " back."
-            )
         box = QtWidgets.QMessageBox(self)
         box.setIcon(QtWidgets.QMessageBox.Icon.Information)
         box.setWindowTitle("Undo")
+        if label is None:
+            question = "There is nothing to undo."
+        else:
+            question = f'Undo "{label}"?'
         box.setText(
             f"{undo_key} undoes the last step that changed the"
             f" localizations, the picks or the measurements (File > Undo)."
-            f" {done}\n\nThe Zoom tool, which {undo_key} selected before"
-            " Picasso 1.0, is now selected with Z."
+            f" {question}\n\nThe Zoom tool, which {undo_key} selected"
+            " before Picasso 1.0, is now selected with Z."
         )
-        box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
+        undo_button = None
+        if label is None:
+            box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
+        else:
+            undo_button = box.addButton(
+                "Undo", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+            )
         zoom_button = box.addButton(
             "Select Zoom tool", QtWidgets.QMessageBox.ButtonRole.ActionRole
         )
+        if undo_button is not None:
+            box.setDefaultButton(undo_button)
         dont_show = QtWidgets.QCheckBox("Don't show again")
         box.setCheckBox(dont_show)
         box.exec()
@@ -23336,6 +23347,7 @@ class Window(QtWidgets.QMainWindow):
         if box.clickedButton() is zoom_button:
             tools = self.tools_actiongroup.actions()
             next(a for a in tools if a.text() == "Zoom").trigger()
+        return undo_button is not None and box.clickedButton() is undo_button
 
     def link_channels_changed(self, changes: list[tuple]) -> None:
         """Pass changed channels on to the linked windows sharing them;
