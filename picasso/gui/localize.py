@@ -546,9 +546,8 @@ GPU_TOOLTIP = (
 VECTORFIT_GPU_TOOLTIP = (
     "Fit the vectorial PSF on a CUDA-capable GPU, with VectorFit's GPU\n"
     "build (vectorfit-py-cu12, installed in place of vectorfit-py).\n\n"
-    "Despite its name, it needs CUDA 13, i.e. an NVIDIA driver of\n"
-    "version 580 or newer, and an Ampere or newer GPU; a driver that\n"
-    "supports CUDA 12 only is not enough."
+    "It needs CUDA 12, i.e. an NVIDIA driver of version 525 or newer,\n"
+    "and a GPU of compute capability 6.0 (Pascal) or higher."
 )
 
 CAMERA_CALIB_TOOLTIP = (
@@ -6241,8 +6240,8 @@ class ParametersDialog(lib.Dialog):
             "Optics of the vectorial PSF model fitted by VectorFit.\n"
             "Runs on the CPU, or on the GPU with Use GPU; requires the\n"
             "optional VectorFit library (pip install picassosr[vectorfit],\n"
-            "or vectorfit-py-cu12 for the GPU, which needs CUDA 13 despite\n"
-            "its name). Supported box sizes are\n"
+            "or picassosr[vectorfit-gpu] for the GPU, which needs CUDA 12).\n"
+            "Supported box sizes are\n"
             f"{vectorfit.supported_boxes_text()}."
         )
         vbox.addWidget(vectorfit_groupbox)

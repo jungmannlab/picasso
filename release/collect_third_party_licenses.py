@@ -90,9 +90,21 @@ _FFTW_NOTICE = (
     "available at https://www.fftw.org/download.html."
 )
 _FFTW = ("bundled FFTW", "\n".join(textwrap.wrap(_FFTW_NOTICE, 70)))
+_CUDART_NOTICE = (
+    "The .libs folder this package installs next to vectorfit_py also "
+    "contains the NVIDIA CUDA Runtime (cudart), Copyright (c) NVIDIA "
+    "Corporation, a redistributable part of the NVIDIA CUDA Toolkit, "
+    "distributed under the NVIDIA CUDA Toolkit End User License Agreement "
+    "(https://docs.nvidia.com/cuda/eula/)."
+)
+_CUDART = (
+    "bundled CUDA Runtime",
+    "\n".join(textwrap.wrap(_CUDART_NOTICE, 70)),
+)
 BUNDLED_NOTICES = {
     "vectorfit-py": [_FFTW],
-    "vectorfit-py-cu12": [_FFTW],
+    # the GPU build bundles the CUDA runtime
+    "vectorfit-py-cu12": [_FFTW, _CUDART],
 }
 
 RULE = "=" * 78

@@ -24,14 +24,13 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
       - The **default** build.
       - The **CUDA12** build, which also bundles the CUDA 12 runtime so
         that CUDA-accelerated (``numba.cuda``) code runs, for example
-        localization fitting on the GPU. It is larger and needs an NVIDIA
-        (CUDA-capable) GPU.
+        localization fitting on the GPU, including vectorial PSFs
+        (VectorFit, ``vectorfit-gpu``, on GPUs of compute capability 6.0 or
+        higher). It is larger and needs an NVIDIA (CUDA-capable) GPU.
       - The **CUDA13** build, the same with the CUDA 13 runtime. It needs
         an NVIDIA GPU of the Turing generation or newer (compute capability
         7.5, e.g., RTX 20xx, Quadro RTX, T4 or newer) and an NVIDIA driver
-        of version 580 or newer. On an Ampere or newer GPU (compute
-        capability 8.0, e.g., RTX 30xx or A-series), it also fits vectorial
-        PSFs on the GPU (VectorFit, ``vectorfit-gpu``).
+        of version 580 or newer.
 
       All builds render on the graphics card in Render (via ``wgpu``, any
       vendor). Choose a CUDA build only if you have a compatible NVIDIA GPU
@@ -78,8 +77,7 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
            - Which build
          * - *CUDA Version* 13.0 or higher and compute capability 7.5 or
              higher
-           - **CUDA13** (VectorFit on the GPU needs compute capability 8.0
-             or higher)
+           - **CUDA13**
          * - *CUDA Version* 12.x, or compute capability below 7.5
            - **CUDA12**
          * - *CUDA Version* below 12.0
@@ -203,9 +201,9 @@ Picasso runs on Windows, macOS and Linux. Several installation modes are availab
              Linux only.
          * - ``pip install picassosr[vectorfit-gpu]``
            - The same on an NVIDIA GPU, with VectorFit's GPU build. Install
-             it instead of ``[vectorfit]``, not alongside it. **Needs CUDA
-             13 (NVIDIA driver 580 or newer), not CUDA 12**, and an Ampere
-             or newer GPU, see
+             it instead of ``[vectorfit]``, not alongside it. Needs CUDA 12
+             or newer (NVIDIA driver 525 or newer) and a GPU of compute
+             capability 6.0 or higher, see
              :ref:`VectorFit on the GPU <localize-vectorfit-gpu>`. Windows
              and Linux only.
          * - ``pip install picassosr[gpu]``

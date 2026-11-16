@@ -4280,8 +4280,8 @@ def fit(
         PSF model with the optional VectorFit library (CPU), configured by
         ``vectorfit_parameters``; its 3D model yields ``z`` directly.
         "vectorfit-gpu" for the same on the GPU, which needs VectorFit's
-        GPU build, vectorfit-py-cu12. Despite its name, that is built with
-        CUDA 13, so it needs NVIDIA driver 580 or newer (see
+        GPU build, vectorfit-py-cu12 (built with CUDA 12, so it needs
+        NVIDIA driver 525 or newer; see
         ``vectorfit.gpu_unavailable_reason``). "phasor" for phasor
         localization (Martens et al., J. Chem. Phys. 148, 123311, 2018):
         non-iterative, from the first Fourier coefficients of each spot,

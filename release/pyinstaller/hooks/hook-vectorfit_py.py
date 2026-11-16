@@ -10,10 +10,12 @@ hook adds what the package needs at run time:
   version with ``importlib.metadata.version`` and fails to import without
   it;
 - the DLLs delvewheel (Windows) or auditwheel (Linux) vendored next to the
-  package, in ``vectorfit_py.libs`` (FFTW and the MSVC runtime). The
-  package adds that folder to the DLL search path relative to its own
-  location (``<package>/../vectorfit_py.libs``), so the DLLs go to the same
-  relative place in the bundle.
+  package, in ``vectorfit_py.libs`` (FFTW and the MSVC runtime), or in
+  ``vectorfit_py_cu12.libs`` for the GPU build (which also bundles the
+  CUDA 12 runtime, cudart). The package adds that folder to
+  the DLL search path relative to its own location
+  (``<package>/../vectorfit_py.libs``), so the DLLs go to the same relative
+  place in the bundle.
 
 The CPU (``vectorfit-py``) and the GPU (``vectorfit-py-cu12``) builds install
 the same module, so either is handled.

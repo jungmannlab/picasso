@@ -1,6 +1,7 @@
 REM CUDA 13 edition: the CUDA 12 edition (create_installer_windows_cuda12.bat)
-REM with the CUDA 13 runtime instead of CUDA 12, plus VectorFit's GPU build
-REM ('vectorfit-gpu' fit method). Runs on NVIDIA drivers R580+ and GPUs of
+REM with the CUDA 13 runtime instead of CUDA 12 for numba.cuda, and the same
+REM VectorFit GPU build ('vectorfit-gpu' fit method, built with CUDA 12, whose
+REM runtime it brings along). Runs on NVIDIA drivers R580+ and GPUs of
 REM compute capability >= 7.5 (Turing or newer) only; older ones need the
 REM CUDA 12 edition. Keep the two scripts in step: they differ only in the
 REM CUDA-13-specific parts below. The edition's name (-CUDA13) is how the
@@ -27,8 +28,7 @@ REM dist\ and picassosr.egg-info there, which create_installer_windows.bat, if
 REM it runs at the same time, would overwrite.
 REM installer_cuda13 adds numba-cuda[cu13], which pulls the nvidia-* CUDA 13
 REM runtime wheels needed to run numba.cuda (GPU-accelerated) code, and
-REM vectorfit-py-cu12, VectorFit's GPU build (built with CUDA 13 despite its
-REM name).
+REM vectorfit-py-cu12, VectorFit's GPU build (with its own CUDA 12 runtime).
 call python release\install_picasso.py installer_cuda13
 if errorlevel 1 exit /b 1
 call cd release/one_click_windows_gui
@@ -57,8 +57,8 @@ REM                              bundle the cuda_bindings.libs / cuda_core.libs
 REM                              DLLs (delvewheel-vendored msvcp140); without them
 REM                              the app fails with "DLL load failed while
 REM                              importing runtime".
-REM   --hidden-import vectorfit_py : VectorFit (GPU build, unlike the other
-REM                              installers) is imported dynamically;
+REM   --hidden-import vectorfit_py : VectorFit (GPU build, as in the CUDA 12
+REM                              installer) is imported dynamically;
 REM                              hook-vectorfit_py.py adds its extension,
 REM                              metadata and vectorfit_py_cu12.libs DLLs.
 REM Note: numba-cuda redirects "numba.cuda" to its own target via a
