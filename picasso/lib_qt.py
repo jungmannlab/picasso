@@ -2186,6 +2186,195 @@ class LogDoubleSpinBox(QtWidgets.QDoubleSpinBox):
             self.setValue(self.value() / (self._factor ** abs(steps)))
 
 
+class TailElidedComboBox(QtWidgets.QComboBox):
+    """Combo box that shows only the end of a long current item, so that
+    long file names and paths do not widen their window. The popup list
+    shows the items in full.
+
+    The closed box shows as much of the end of the current item as fits
+    its width, which may be larger than its preferred width when a
+    layout stretches it.
+
+    Parameters
+    ----------
+    max_chars : int, optional
+        Preferred width of the box, in average characters, for items
+        longer than that; shorter items set the width themselves.
+        Default is 60.
+    parent : QWidget, optional
+        Parent widget.
+    """
+
+    # the box can shrink to this many average characters in a layout
+    MIN_CHARS = 8
+
+    def __init__(
+        self,
+        max_chars: int = 60,
+        parent: QtWidgets.QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.max_chars = max_chars
+        # the widths are set by sizeHint; this keeps Qt from measuring
+        # the items for its own hint
+        policy = QtWidgets.QComboBox.SizeAdjustPolicy
+        self.setSizeAdjustPolicy(policy.AdjustToMinimumContentsLengthWithIcon)
+
+    def _style_option(self) -> QtWidgets.QStyleOptionComboBox:
+        option = QtWidgets.QStyleOptionComboBox()
+        self.initStyleOption(option)
+        return option
+
+    def _text_width(self) -> int:
+        """Width available for the text in the closed box."""
+        rect = self.style().subControlRect(
+            QtWidgets.QStyle.ComplexControl.CC_ComboBox,
+            self._style_option(),
+            QtWidgets.QStyle.SubControl.SC_ComboBoxEditField,
+            self,
+        )
+        return rect.width()
+
+    def displayed_text(self) -> str:
+        """Text shown in the closed box: the current item, or as much of
+        its end as fits the box after an ellipsis."""
+        return self.fontMetrics().elidedText(
+            self.currentText(),
+            QtCore.Qt.TextElideMode.ElideLeft,
+            self._text_width(),
+        )
+
+    def _hint_for_text_width(self, width: int) -> QtCore.QSize:
+        """Size of the box with ``width`` pixels for the text."""
+        height = super().sizeHint().height()
+        return self.style().sizeFromContents(
+            QtWidgets.QStyle.ContentsType.CT_ComboBox,
+            self._style_option(),
+            QtCore.QSize(width, height),
+            self,
+        )
+
+    def sizeHint(self) -> QtCore.QSize:
+        """Size for the widest item, at most ``max_chars`` average
+        characters wide."""
+        metrics = self.fontMetrics()
+        widest = max(
+            (
+                metrics.horizontalAdvance(self.itemText(i))
+                for i in range(self.count())
+            ),
+            default=0,
+        )
+        limit = self.max_chars * metrics.averageCharWidth()
+        return self._hint_for_text_width(min(widest, limit))
+
+    def minimumSizeHint(self) -> QtCore.QSize:
+        """A layout may shrink the box to ``MIN_CHARS`` characters."""
+        metrics = self.fontMetrics()
+        hint = self._hint_for_text_width(
+            self.MIN_CHARS * metrics.averageCharWidth()
+        )
+        return hint.boundedTo(self.sizeHint())
+
+    def paintEvent(self, event: QtGui.QPaintEvent) -> None:
+        """Paint the box with the end of the current item."""
+        painter = QtWidgets.QStylePainter(self)
+        option = self._style_option()
+        option.currentText = self.displayed_text()
+        painter.drawComplexControl(
+            QtWidgets.QStyle.ComplexControl.CC_ComboBox, option
+        )
+        painter.drawControl(
+            QtWidgets.QStyle.ControlElement.CE_ComboBoxLabel, option
+        )
+
+    def showPopup(self) -> None:
+        """Open the popup list wide enough for the full items."""
+        view = self.view()
+        metrics = view.fontMetrics()
+        widest = max(
+            (
+                metrics.horizontalAdvance(self.itemText(i))
+                for i in range(self.count())
+            ),
+            default=0,
+        )
+        view.setMinimumWidth(widest + 4 * metrics.averageCharWidth())
+        super().showPopup()
+
+
+class PathItemDialog(Dialog):
+    """Input dialog choosing one of several items, typically file paths,
+    in a ``TailElidedComboBox``. See ``get_path_item``."""
+
+    def __init__(
+        self,
+        parent: QtWidgets.QWidget | None,
+        title: str,
+        label: str,
+        items: list[str],
+        current: int = 0,
+        max_chars: int = 60,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        layout = QtWidgets.QVBoxLayout(self)
+        layout.addWidget(QtWidgets.QLabel(label))
+        self.combo = TailElidedComboBox(max_chars)
+        self.combo.addItems(items)
+        self.combo.setCurrentIndex(current)
+        layout.addWidget(self.combo)
+        buttons = QtWidgets.QDialogButtonBox(
+            QtWidgets.QDialogButtonBox.StandardButton.Ok
+            | QtWidgets.QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+
+def get_path_item(
+    parent: QtWidgets.QWidget | None,
+    title: str,
+    label: str,
+    items: list[str],
+    current: int = 0,
+    max_chars: int = 60,
+) -> tuple[str, bool]:
+    """Ask for one of ``items`` like ``QInputDialog.getItem``, showing
+    only the end of a long chosen item, so that long file paths do not
+    widen the dialog. The popup list shows the items in full.
+
+    Parameters
+    ----------
+    parent : QWidget or None
+        Parent widget of the dialog.
+    title : str
+        Window title.
+    label : str
+        Text shown above the items.
+    items : list of str
+        Items to choose from.
+    current : int, optional
+        Index of the item chosen initially. Default is 0.
+    max_chars : int, optional
+        Width of the box, in average characters, for items longer than
+        that. Default is 60.
+
+    Returns
+    -------
+    item : str
+        The chosen item, empty if canceled.
+    ok : bool
+        False if the dialog was canceled.
+    """
+    dialog = PathItemDialog(parent, title, label, items, current, max_chars)
+    ok = dialog.exec() == QtWidgets.QDialog.DialogCode.Accepted
+    item = dialog.combo.currentText() if ok else ""
+    dialog.deleteLater()
+    return item, ok
+
+
 class WrappingLabel(QtWidgets.QLabel):
     """Word-wrapped QLabel for file names, which tend to be long and to
     use ``_``, ``-`` and ``.`` instead of spaces.

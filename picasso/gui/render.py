@@ -6511,7 +6511,9 @@ class InfoDialog(lib.Dialog):
         self.precision_channel_label = QtWidgets.QLabel("Channel:")
         grid.addWidget(self.precision_channel_label, 0, 0)
         # the channel selector is shown only with several channels
-        self.precision_channel = QtWidgets.QComboBox()
+        # long file names must not widen the dialog: the box shows their
+        # end, the popup list the full names
+        self.precision_channel = lib_qt.TailElidedComboBox(max_chars=20)
         self.precision_channel.setToolTip(
             "Channel whose precision and resolution are shown and"
             " calculated."
@@ -16067,6 +16069,20 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                     qimage_scale = self.draw_scalebar(qimage, force=True)
                     qimage_scale.save(spath)
 
+    def _ask_channel(self, title: str, extra_items: list[str]) -> int | None:
+        """Ask for a channel in an input dialog listing the paths of the
+        loaded channels followed by ``extra_items``. Return the index of
+        the chosen item, or None if canceled.
+
+        The closed box shows only the end of a long path so that the
+        dialog does not grow with it; the popup list shows full paths.
+        """
+        items = list(self.locs_paths) + extra_items
+        item, ok = lib_qt.get_path_item(self, title, "Channel:", items)
+        if ok and item in items:
+            return items.index(item)
+        return None
+
     def get_channel(self, title: str = "Choose a channel") -> int | None:
         """Open an input dialog to ask for a channel. Return the channel
         index or None if no locs loaded.
@@ -16081,15 +16097,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return None
         elif n_channels == 1:
             return 0
-        elif len(self.locs_paths) > 1:
-            pathlist = list(self.locs_paths)
-            index, ok = QtWidgets.QInputDialog.getItem(
-                self, title, "Channel:", pathlist, editable=False
-            )
-            if ok:
-                return pathlist.index(index)
-            else:
-                return None
+        return self._ask_channel(title, [])
 
     def get_channel_save_locs(
         self,
@@ -16109,21 +16117,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return None
         elif n_channels == 1:
             return 0
-        elif n_channels > 1:
-            pathlist = list(self.locs_paths)
-            pathlist.append("Apply to all sequentially")
-            pathlist.append("Combine all channels")
-            index, ok = QtWidgets.QInputDialog.getItem(
-                self,
-                title,
-                "Channel:",
-                pathlist,
-                editable=False,
-            )
-            if ok:
-                return pathlist.index(index)
-            else:
-                return None
+        return self._ask_channel(
+            title, ["Apply to all sequentially", "Combine all channels"]
+        )
 
     def get_channel_all_seq(
         self,
@@ -16143,20 +16139,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return None
         elif n_channels == 1:
             return 0
-        elif len(self.locs_paths) > 1:
-            pathlist = list(self.locs_paths)
-            pathlist.append("Apply to all sequentially")
-            index, ok = QtWidgets.QInputDialog.getItem(
-                self,
-                title,
-                "Channel:",
-                pathlist,
-                editable=False,
-            )
-            if ok:
-                return pathlist.index(index)
-            else:
-                return None
+        return self._ask_channel(title, ["Apply to all sequentially"])
 
     def get_channel3d(self, title: str = "Select channel") -> int | None:
         """Similar to ``self.get_channel``, used in selecting 3D picks.
@@ -16166,16 +16149,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return None
         elif n_channels == 1:
             return 0
-        elif len(self.locs_paths) > 1:
-            pathlist = list(self.locs_paths)
-            pathlist.append("Show all channels")
-            index, ok = QtWidgets.QInputDialog.getItem(
-                self, title, "Channel:", pathlist, editable=False
-            )
-            if ok:
-                return pathlist.index(index)
-            else:
-                return None
+        return self._ask_channel(title, ["Show all channels"])
 
     def get_render_kwargs(
         self,
