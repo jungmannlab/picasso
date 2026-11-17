@@ -2,12 +2,21 @@
 picasso.clusterer
 ~~~~~~~~~~~~~~~~~
 
-Clusterer for single molecules optimized for DNA-PAINT.
-Additionally, contains implementations of DBSCAN and HDBSCAN and other
-clustering-related functions.
+Clustering of localizations and analysis of the resulting clusters.
 
-SMLM clusterer is based on Schlichthaerle et al. (2021) and Reinhardt
-et al. (2023).
+- ``cluster``: the SMLM clusterer, optimized for resolving single
+  molecules in DNA-PAINT data. Based on Schlichthaerle et al. (2021)
+  and Reinhardt et al. (2023).
+- ``dbscan``, ``hdbscan``: wrappers around scikit-learn's DBSCAN and
+  HDBSCAN.
+- ``find_cluster_centers``: one localization-like row per cluster
+  (position, spread, size, number of binding events).
+- ``cluster_areas``: cluster areas/volumes from thresholded images.
+- ``test_subclustering``: checks a molecular map for molecules that
+  were wrongly split into several.
+
+All clustering functions add a ``group`` column with the cluster id
+and remove unclustered localizations.
 
 References
 ----------
@@ -59,20 +68,20 @@ __all__ = [
 
 
 def _frame_analysis(frame: pd.SeriesGroupBy, n_frames: int) -> int:
-    """Verify which clusters pass basic frame analysis. Reject clusters
-    whose mean frame is outside of the [20, 80] % (max frame) range or
-    any 1/20th of measurement's time contains more than 80 % of
-    localizations.
+    """Check whether one cluster passes basic frame analysis.
 
-    Assumes frame to be a ``pandas.SeriesGroupBy`` object, grouped by
-    cluster ids.
+    A cluster fails if its mean frame lies outside 20-80 % of
+    ``n_frames``, or if more than 80 % of its localizations fall into
+    one twentieth of ``n_frames``. Both indicate sticking events or
+    other non-repetitive signal rather than repeated DNA-PAINT binding.
 
     Parameters
     ----------
-    frame : pandas.SeriesGroupBy
-        Frame number for a given cluster; grouped by cluster ids.
+    frame : pandas.Series
+        Frame numbers of the localizations of one cluster (one group of
+        a ``SeriesGroupBy``, as passed by ``groupby().apply``).
     n_frames : int
-        Acquisition time given in frames.
+        Number of frames the time range spans.
 
     Returns
     -------
@@ -103,25 +112,27 @@ def _frame_analysis(frame: pd.SeriesGroupBy, n_frames: int) -> int:
 def frame_analysis(
     labels: lib.IntArray1D, frame: lib.IntArray1D
 ) -> lib.IntArray1D:
-    """Perform basic frame analysis on clustered localizations. Reject
-    clusters whose mean frame is outside of the [20, 80] % (max frame)
-    range or any 1/20th of measurement's time contains more than 80 % of
-    localizations.
+    """Reject clusters that fail basic frame analysis.
 
-    Uses ``pandas`` for fast calculations using groupby().
+    Repeated DNA-PAINT binding spreads a cluster's localizations over
+    the whole acquisition, while sticking events are concentrated in
+    time. A cluster is rejected if its mean frame lies outside 20-80 %
+    of the time range, or if more than 80 % of its localizations fall
+    into one twentieth of it. The time range is taken as frame 0 to the
+    last frame in ``frame``.
 
     Parameters
     ----------
     labels : lib.IntArray1D
-        Cluster labels (-1 means no cluster assigned).
+        Cluster label of each localization (-1 means no cluster
+        assigned). Modified in place.
     frame : lib.IntArray1D
-        Frame number for each localization.
+        Frame number of each localization.
 
     Returns
     -------
     labels : lib.IntArray1D
-        Cluster labels for each localization (-1 means no cluster
-        assigned).
+        ``labels`` with the rejected clusters set to -1.
     """
     # group frames by cluster ids
     frame_pd = pd.Series(frame, index=labels)
@@ -226,17 +237,21 @@ def _cluster(
     frame: pd.Series | None,
     progress: lib.Progress,
 ) -> lib.IntArray1D:
-    """Cluster points given by X with a given clustering radius and
-    minimum number of localizations within that radius using KDTree.
+    """Cluster points with the SMLM clusterer.
 
     The general workflow is as follows:
 
     1. Build a KDTree from the points in X.
-    2. For each point, find its neighbors within the given radius.
-    3. Identify local maxima, i.e., points with the most neighbors
-       within their neighborhood.
-    4. Assign cluster labels to all points. If two local maxima are
-       within the radius from each other, combine such clusters.
+    2. For each point, find its neighbors within ``radius`` (the point
+       itself included).
+    3. Identify local maxima: points that have more than ``min_locs``
+       neighbors and no neighbor with more neighbors than themselves.
+    4. Assign each local maximum and its neighbors to a cluster. A
+       local maximum that already belongs to another one's cluster
+       adds its unassigned neighbors to that cluster instead of
+       starting a new one.
+    5. Remove clusters with fewer than ``min_locs`` points and, if
+       ``frame`` is given, clusters failing ``frame_analysis``.
 
     The neighbor graph is built in batches and stored as compact NumPy
     arrays (see ``_build_neighbor_graph``) so peak memory stays bounded
@@ -250,9 +265,10 @@ def _cluster(
     X : lib.FloatArray2D
         Array of points of shape (n_points, n_dim) to be clustered.
     radius : float
-        Clustering radius.
+        Clustering radius, in the units of ``X``.
     min_locs : int
-        Minimum number of localizations in a cluster.
+        Minimum number of localizations in a cluster, also used as the
+        neighbor threshold for local maxima (step 3).
     frame : pd.Series or None
         Frame number of each localization. If None, no frame analysis
         is performed.
@@ -339,18 +355,24 @@ def cluster_2D(
     fa: bool,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> lib.IntArray1D:
-    """Prepare 2D input to be used by ``_cluster``.
+    """Cluster 2D localizations with the SMLM clusterer and return the
+    labels.
+
+    Low-level helper of ``cluster``, which also adds the labels to the
+    localizations and records metadata.
 
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations to be clustered.
+        Localizations to be clustered. Must contain "x" and "y", and
+        "frame" if ``fa`` is True.
     radius : float
-        Clustering radius.
+        Clustering radius (nm).
     min_locs : int
-        Minimum number of localizations in a cluster.
+        Minimum number of localizations in a cluster, see ``cluster``.
     fa : bool
-        True, if basic frame analysis is to be performed.
+        If True, clusters failing basic frame analysis are rejected,
+        see ``frame_analysis``.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -384,7 +406,11 @@ def cluster_3D(
     fa: bool,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> lib.IntArray1D:
-    """Prepare 3D input to be used by ``_cluster``.
+    """Cluster 3D localizations with the SMLM clusterer and return the
+    labels.
+
+    Low-level helper of ``cluster``, which also adds the labels to the
+    localizations and records metadata.
 
     Scales z coordinates by ``radius_xy / radius_z`` so that a Euclidean
     neighborhood search with radius ``radius_xy`` in the scaled space
@@ -394,15 +420,17 @@ def cluster_3D(
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations to be clustered.
+        Localizations to be clustered. Must contain "x", "y" and "z",
+        and "frame" if ``fa`` is True.
     radius_xy : float
         Clustering radius in x and y directions (nm).
     radius_z : float
         Clustering radius in z direction (nm).
     min_locs : int
-        Minimum number of localizations in a cluster.
+        Minimum number of localizations in a cluster, see ``cluster``.
     fa : bool
-        True, if basic frame analysis is to be performed.
+        If True, clusters failing basic frame analysis are rejected,
+        see ``frame_analysis``.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
@@ -442,38 +470,52 @@ def cluster(
     radius_z: float | None = None,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
-    """Cluster localizations from single molecules (SMLM clusterer).
+    """Cluster localizations of single molecules (SMLM clusterer).
 
-    The general workflow is as follows:
+    Designed to group the repeated localizations of one DNA-PAINT
+    target into one cluster. The general workflow is as follows:
 
-    1. Build a KDTree from the points in X.
-    2. For each point, find its neighbors within the given radius.
-    3. Identify local maxima, i.e., points with the most neighbors
-       within their neighborhood.
-    4. Assign cluster labels to all points. If two local maxima are
-       within the radius from each other, combine such clusters.
+    1. For each localization, find its neighbors within ``radius_xy``
+       (the localization itself included). In 3D, the neighborhood is
+       an ellipsoid with semi-axes ``(radius_xy, radius_xy,
+       radius_z)``.
+    2. Identify local maxima: localizations that have more than
+       ``min_locs`` neighbors and no neighbor with more neighbors than
+       themselves.
+    3. Assign each local maximum and its neighbors to a cluster. A
+       local maximum that already belongs to another one's cluster
+       adds its unassigned neighbors to that cluster instead of
+       starting a new one.
+    4. Remove clusters with fewer than ``min_locs`` localizations and,
+       if ``frame_analysis`` is True, clusters whose localizations are
+       concentrated in time (see below).
 
     Based on the algorithm published by Schlichthaerle et al. (2021) and
     first implemented in Reinhardt et al. (2023).
 
-    The recommended parameters are ``radius`` of 2*NeNA and ``min_locs``
-    of 10. Keep in mind that the parameters may vary between
-    applications, so we encourage you to experiment with them when
-    needed. Especially ``min_locs`` may vary between datasets.
+    The recommended (starting) parameters are ``radius_xy`` of 2*NeNA and
+    ``min_locs`` of 10. Keep in mind that the parameters may vary
+    between applications, so we encourage you to experiment with them
+    when needed. Especially ``min_locs`` may vary between datasets.
 
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations to be clustered.
+        Localizations to be clustered. 3D clustering is used if "z" is
+        present.
     info : list of dicts or None, optional
         Metadata of ``locs``, carried over into the returned metadata.
         Default is None.
     radius_xy : float
         Clustering radius in xy plane (nm).
     min_locs : int
-        Minimum number of localizations in a cluster.
+        Minimum number of localizations in a cluster, also used as the
+        neighbor threshold for local maxima (step 2).
     frame_analysis : bool
-        If True, performs basic frame analysis.
+        If True, rejects clusters whose mean frame lies outside 20-80 %
+        of the acquisition, or with more than 80 % of their
+        localizations in one twentieth of it. Such clusters usually
+        come from sticking events rather than repeated binding.
     radius_z : float, optional
         Clustering radius in z (nm). Required for 3D clustering.
     progress : lib.Progress, "console" or None, optional
@@ -486,12 +528,22 @@ def cluster(
     Returns
     -------
     locs : pd.DataFrame
-        Clusterered localizations, with column 'group' added, which
-        specifies cluster label for each localization. Noise (label -1)
-        is removed.
+        Clustered localizations, with the cluster id of each
+        localization in the ``group`` column. Ids are not consecutive.
+        Unclustered localizations are removed. An existing ``group``
+        column is moved to ``group_input``.
     info : list of dicts
         Metadata of the clustered localizations: ``info`` with an entry
         recording the clustering appended, see ``lib.append_metadata``.
+
+    Raises
+    ------
+    ValueError
+        If ``locs`` is 3D and ``radius_z`` is None.
+
+    See Also
+    --------
+    find_cluster_centers : Summarizes each cluster as one localization.
 
     References
     ----------
@@ -564,8 +616,8 @@ def _dbscan(
     radius : float
         DBSCAN search radius, often referred to as "epsilon".
     min_density : int
-        Number of points within radius to consider a given point a core
-        sample.
+        Number of points within radius (the point itself included) for
+        a point to be a core point.
     min_locs : int, optional
         Minimum number of localizations in a cluster. Clusters with
         fewer localizations will be removed. Default is 0.
@@ -602,7 +654,11 @@ def dbscan(
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Perform DBSCAN on localizations.
 
-    See Ester et al. (1996).
+    See Ester et al. (1996). Localizations with at least
+    ``min_samples`` localizations within ``radius`` are core points;
+    core points within ``radius`` of each other form one cluster, which
+    also takes in the non-core localizations within ``radius`` of its
+    core points. Uses scikit-learn's ``DBSCAN``.
 
     For 3D data with ``radius_z`` set, anisotropic clustering is used:
     z coordinates are scaled by ``radius / radius_z`` so that the
@@ -614,7 +670,8 @@ def dbscan(
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations to be clustered.
+        Localizations to be clustered. 3D clustering is used if "z" is
+        present.
     info : list of dicts or None, optional
         Metadata of ``locs``, carried over into the returned metadata.
         Default is None.
@@ -622,8 +679,8 @@ def dbscan(
         DBSCAN search radius in the xy plane (nm), usually referred to
         as "epsilon".
     min_samples : int
-        Number of localizations within radius to consider a given point
-        a core sample.
+        Number of localizations within ``radius`` (the localization
+        itself included) for a localization to be a core point.
     min_locs : int, optional
         Minimum number of localizations in a cluster. Clusters with
         fewer localizations will be removed. Default is 10.
@@ -635,12 +692,17 @@ def dbscan(
     Returns
     -------
     locs : pd.DataFrame
-        Clusterered localizations, with column 'group' added, which
-        specifies cluster label for each localization. Noise (label -1)
-        is removed.
+        Clustered localizations, with the cluster id of each
+        localization in the ``group`` column. Unclustered localizations
+        are removed. An existing ``group`` column is moved to
+        ``group_input``.
     info : list of dicts
         Metadata of the clustered localizations: ``info`` with an entry
         recording the clustering appended, see ``lib.append_metadata``.
+
+    See Also
+    --------
+    find_cluster_centers : Summarizes each cluster as one localization.
 
     References
     ----------
@@ -691,12 +753,13 @@ def _hdbscan(
         Array of shape (N, D), with N being the number of data points
         and D the number of dimensions.
     min_cluster_size : int
-        Minimum number of points in cluster.
+        Minimum number of points in a cluster.
     min_samples : int
-        Number of points within radius to consider a given point a core
-        sample.
+        Number of nearest neighbors (the point itself included) whose
+        farthest distance defines a point's core distance.
     cluster_eps : float, optional
-        Distance threshold. Clusters below this value will be merged.
+        Clusters that would split at distances below this threshold
+        are kept merged. Default is 0 (no merging).
 
     Returns
     -------
@@ -748,30 +811,39 @@ def hdbscan(
 ) -> tuple[pd.DataFrame, list[dict]]:
     """Perform HDBSCAN on localizations.
 
-    See Campello et al. (2013).
+    See Campello et al. (2013). Unlike DBSCAN, HDBSCAN needs no search
+    radius: it builds a hierarchy of clusters over all density levels
+    and keeps the most stable ones, so clusters of different densities
+    are found in one run. Uses scikit-learn's ``HDBSCAN``. In 3D, x, y
+    and z are weighted equally.
 
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations to be clustered.
+        Localizations to be clustered. 3D clustering is used if "z" is
+        present.
     info : list of dicts or None, optional
         Metadata of ``locs``, carried over into the returned metadata.
         Default is None.
     min_cluster_size : int
-        Minimum number of localizations in cluster.
+        Minimum number of localizations in a cluster.
     min_samples : int
-        Number of localizations within radius to consider a given point
-        a core sample.
+        Number of nearest neighbors (the localization itself included)
+        whose farthest distance defines a localization's core distance.
+        Larger values make the clustering more conservative: more
+        localizations are labeled as noise.
     cluster_eps : float, optional
-        Distance threshold (nm). Clusters below this value will be
-        merged. Default is 0.
+        Distance threshold (nm). Clusters that would split at distances
+        below it are kept merged, so dense structures are not broken
+        into many small clusters. Default is 0 (no merging).
 
     Returns
     -------
     locs : pd.DataFrame
-        Clusterered localizations, with column 'group' added, which
-        specifies cluster label for each localization. Noise (label -1)
-        is removed.
+        Clustered localizations, with the cluster id of each
+        localization in the ``group`` column. Unclustered localizations
+        are removed. An existing ``group`` column is moved to
+        ``group_input``.
     info : list of dicts
         Metadata of the clustered localizations: ``info`` with an entry
         recording the clustering appended, see ``lib.append_metadata``.
@@ -781,6 +853,10 @@ def hdbscan(
     RuntimeError
         If ``cluster_eps`` > 0 runs into scikit-learn's HDBSCAN bug with
         NumPy 2.4 and later (scikit-learn issue 33219).
+
+    See Also
+    --------
+    find_cluster_centers : Summarizes each cluster as one localization.
 
     References
     ----------
@@ -816,13 +892,14 @@ def extract_valid_labels(
     locs: pd.DataFrame,
     labels: lib.IntArray1D,
 ) -> pd.DataFrame:
-    """Extract localizations based on clustering results. Localizations
-    that were not clustered are excluded.
+    """Add cluster labels to localizations as the ``group`` column and
+    remove the unclustered ones (label -1).
 
     Parameters
     ----------
     locs : pd.DataFrame
-        Localizations to be filtered.
+        Localizations to be filtered. Modified in place (the ``group``
+        column is assigned); pass a copy to keep the original.
     labels : lib.IntArray1D
         Array of cluster labels for each localization. -1 means no
         cluster assignment.
@@ -869,16 +946,19 @@ RESERVED_CENTER_COLUMNS = frozenset(
 def _aggregate_cluster_stats(
     locs: pd.DataFrame, has_z: bool
 ) -> tuple[pd.core.groupby.DataFrameGroupBy, dict]:
-    """One vectorized pass for per-group means, stds and sizes.
+    """Per-cluster means, standard deviations and sizes in one
+    vectorized pass.
 
     Every numeric column present in ``locs`` is averaged, except the
     ones ``find_cluster_centers`` derives itself
-    (``RESERVED_CENTER_COLUMNS``).
+    (``RESERVED_CENTER_COLUMNS``). Standard deviations are computed for
+    the frame and the coordinates only.
 
-    Returns the underlying ``groupby`` object (for downstream use such
-    as ``group_input.first()``) and a dict of plain NumPy arrays, one
-    per statistic, indexed positionally by sorted group id. The names of
-    the averaged non-coordinate columns are returned as ``extra_cols``.
+    Returns the ``groupby`` object (for downstream use such as
+    ``gb["group_input"].first()``) and a dict of plain NumPy arrays
+    indexed positionally by sorted group id: ``"<col>_mean"``,
+    ``"<col>_std"``, ``"n_locs"`` and ``"unique_groups"``, plus the
+    names of the averaged non-coordinate columns as ``"extra_cols"``.
     """
     coord_cols = ["frame", "x", "y", "z"] if has_z else ["frame", "x", "y"]
     extra_cols = [
@@ -953,10 +1033,10 @@ def _cluster_convex_hulls(
     """Convex-hull area (2D, nm^2) or volume (3D, nm^3) per cluster.
 
     The only per-cluster Python loop in ``find_cluster_centers``; runs
-    on raw NumPy slices of a group-sorted coordinate array. For datasets
-    with many clusters this is the run-time bottleneck, so the
-    normalized tracker ``progress`` reports "Calculating cluster
-    centers" over the clusters.
+    on raw NumPy slices of a group-sorted coordinate array. Clusters
+    whose points do not span a hull (too few or collinear/coplanar
+    points) get 0. ``progress`` reports "Calculating cluster centers"
+    over the clusters.
     """
     coord_cols = ["x", "y", "z"] if has_z else ["x", "y"]
     coords_sorted = (
@@ -984,7 +1064,8 @@ def _cluster_convex_hulls(
 def _weighted_z_means(
     locs: pd.DataFrame, group_arr: lib.IntArray1D
 ) -> lib.FloatArray1D:
-    """Per-cluster z mean weighted by 1/(lpx + lpy)^2 (per-row weights).
+    """Per-cluster mean of z, weighted by ``1 / (lpx + lpy)^2`` of each
+    localization.
 
     Falls back to the unweighted mean if ``lpx``/``lpy`` are missing.
     """
@@ -1009,19 +1090,28 @@ def find_cluster_centers(
     *,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> tuple[pd.DataFrame, list[dict]]:
-    """Calculate cluster centers.
+    """Summarize each cluster of localizations as one localization.
 
-    Aggregations are computed in vectorized pandas/NumPy passes; the
-    only per-cluster Python loop is the convex hull, which operates on
-    raw NumPy slices.
+    Every value of the ``group`` column is treated as one cluster and
+    turned into one row of ``centers``. That row has the cluster's
+    mean position, its spread and size, and the per-cluster means of
+    the other localization columns. The result is a localization
+    table, so it can be saved with ``io.save_locs``, opened in Render
+    and Filter, and passed on to analyses that work on localizations
+    (e.g. nearest-neighbor or Ripley's analysis of the centers).
+
+    Typical input is the output of a clustering function in this
+    module (``dbscan``, ``hdbscan``, ``cluster``) or picked
+    localizations, where every pick is one group.
 
     Parameters
     ----------
     locs : pd.DataFrame
-        Clustered localizations (contain group info). Must contain
-        "frame", "x", "y" and "group" (and "z" for 3D). Any other
-        numeric column present is averaged per cluster. Other numeric
-        columns are carried over as means.
+        Clustered localizations. Must contain "frame", "x", "y" and
+        "group", and "z" for 3D data (3D is detected from the presence
+        of "z"). Every row counts towards its group, so remove
+        unclustered localizations (``group == -1``) first. The
+        clustering functions in this module already do so.
     info : list of dicts or None, optional
         Metadata of ``locs``, carried over into the returned metadata.
         Default is None.
@@ -1036,14 +1126,55 @@ def find_cluster_centers(
     Returns
     -------
     centers : pd.DataFrame
-        Cluster centers saved in the format of localizations: positions,
-        their standard deviations (``std_x``, ``std_y``, ``std_z``) and
-        precisions (``lpx``, ``lpy``, ``lpz``) in nm, ``area`` and 2D
-        ``convexhull`` in nm^2, ``volume`` and 3D ``convexhull`` in
-        nm^3.
+        One row per cluster, sorted by group id, with the columns:
+
+        - ``frame``, ``std_frame``: mean and standard deviation of the
+          frames of the cluster's localizations.
+        - ``x``, ``y``: mean position (nm).
+        - ``z`` (3D only): mean axial position (nm), weighted by
+          ``1 / (lpx + lpy)^2`` of each localization. Unweighted if
+          ``locs`` has no ``lpx``/``lpy``.
+        - ``std_x``, ``std_y``, ``std_z`` (3D only): standard
+          deviations of the localization positions (nm), i.e. the
+          cluster's spatial extent.
+        - ``lpx``, ``lpy``, ``lpz`` (3D only): precision of the center
+          position as the standard error of the mean,
+          ``std / sqrt(n_locs)`` (nm). These are not the mean
+          localization precisions of the input.
+        - Any other numeric column of ``locs`` (e.g. ``photons``,
+          ``bg``, ``sx``, ``sy``): its per-cluster mean.
+        - ``ellipticity``: ``sx / sy`` of the cluster means, only if
+          ``locs`` has ``sx`` and ``sy``.
+        - ``n_locs``: number of localizations in the cluster.
+        - ``n_events``: number of binding events. A new event starts
+          whenever two consecutive localizations of the cluster are
+          more than 3 frames apart. Consecutive means in the row order
+          of ``locs``, so ``locs`` should be sorted by frame (as
+          Picasso saves localizations).
+        - ``area`` (2D, nm^2) or ``volume`` (3D, nm^3): size of a disk
+          or sphere whose radius is twice the mean standard deviation,
+          i.e. ``pi * (std_x + std_y)^2`` in 2D and
+          ``4/3 * pi * (2 * (std_x + std_y + std_z) / 3)^3`` in 3D.
+        - ``convexhull``: area (2D, nm^2) or volume (3D, nm^3) of the
+          convex hull of the cluster's localizations. 0 for clusters
+          too small or too flat to span a hull (e.g. fewer than 3
+          localizations in 2D).
+        - ``group``: the cluster's group id.
+        - ``group_input``: copied from ``locs`` if present (the
+          grouping before clustering, e.g. pick ids), taken from the
+          cluster's first localization.
+
+        Input columns named like any of the derived columns above are
+        not averaged; the derived values replace them.
     info : list of dicts
         Metadata of the cluster centers: ``info`` with an entry
-        recording the step appended, see ``lib.append_metadata``.
+        recording the step and the number of clusters appended, see
+        ``lib.append_metadata``.
+
+    See Also
+    --------
+    dbscan, hdbscan, cluster : Clustering functions whose output is
+        the usual input here.
     """
     has_z = "z" in locs.columns
 
@@ -1119,21 +1250,27 @@ def find_cluster_centers(
 
 
 def _cluster_area(X: lib.FloatArray2D, lp: float) -> float:
-    """Calculate cluster area (2D) or volume (3D). Uses Otsu
-    thresholding of the images of the clusters to find areas/volumes.
+    """Calculate the area (2D) or volume (3D) of one cluster from a
+    thresholded image.
+
+    The points are binned with a pixel size of ``lp / 2`` (``1.25 *
+    lp`` in z), blurred with a Gaussian of sigma ``lp`` (2 pixels in
+    every dimension) and thresholded with Otsu's method. The pixels at
+    or above the threshold make up the area/volume.
 
     Parameters
     ----------
     X : lib.FloatArray2D
-        Array of points of shape (n_points, n_dim).
+        Array of points of shape (n_points, n_dim), n_dim 2 or 3.
     lp : float
-        Median localization precision in x and y of the dataset. Used to
-        define the pixel size for image rendering
+        Median localization precision in x and y of the dataset (nm).
+        Sets the pixel size for rendering and the unit of the result.
 
     Returns
     -------
     area : float
-        Cluster area (2D) or volume (3D) in units of LP.
+        Cluster area in units of ``lp^2`` (2D) or volume in units of
+        ``lp^3`` (3D).
     """
     # get image
     bin_size = lp / 2  # pixel size for rendering
@@ -1168,15 +1305,22 @@ def cluster_areas(
     *,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> pd.DataFrame:
-    """Calculate cluster areas (2D) or volumes (3D).
+    """Calculate cluster areas (2D) or volumes (3D) from thresholded
+    images.
 
-    Uses Otsu thresholding of the images of the clusters to find areas/
-    volumes.
+    Each cluster is rendered with a pixel size of half the localization
+    precision ``LP`` (``1.25 * LP`` in z), blurred with a Gaussian of
+    sigma ``LP`` and thresholded with Otsu's method; the pixels above
+    the threshold make up the area/volume. ``LP`` is the median of
+    ``(lpx + lpy) / 2`` over all localizations. Unlike the hull-based
+    and std-based sizes of ``find_cluster_centers``, this follows the
+    shape of the localization density.
 
     Parameters
     ----------
     locs : pd.DataFrame
-        Clustered localizations (contain group info).
+        Clustered localizations. Must contain "x", "y", "lpx", "lpy"
+        and "group" (and "z" for 3D).
     info : list of dicts or None, optional
         Metadata of ``locs``. Not used; accepted so that the call
         matches the other functions on localizations. Default is None.
@@ -1189,7 +1333,15 @@ def cluster_areas(
     Returns
     -------
     areas : pd.DataFrame
-        Cluster areas/volumes for each cluster.
+        One row per cluster, sorted by group id, with the columns
+        ``group`` and ``Area (LP^2)`` (2D) or ``Volume (LP^3)`` (3D).
+        The sizes are in units of ``LP``, not nm; multiply by ``LP^2``
+        or ``LP^3`` to convert.
+
+    Raises
+    ------
+    AssertionError
+        If ``locs`` has no ``group`` column.
     """
     assert (
         "group" in locs.columns
@@ -1231,39 +1383,50 @@ def test_subclustering(
     clustering_dist: float = 25,
     sparse_dist: float = 80,
 ) -> tuple[lib.IntArray1D, lib.IntArray1D]:
-    """Extract number of events from molecular maps based on their
-    numbers of binding events assigned.
+    """Split a molecular map by nearest-neighbor distance to test for
+    subclustering.
 
-    The reasoning is that 'subclustered' molecules will tend to have
-    fewer binding events assigned to them since multiple molecules
-    are assigned to a real single molecule. Thus, we can compare the
-    distribution of the number of events for the populations of
-    molecules that have close neighbors (clustered) and those that
-    do not (sparse). If subclustering occurs, the clustered molecules
-    should have a lower number of events on average.
+    Subclustering means that the localizations of one real molecule
+    were split into several molecules. Each of these then gets only
+    part of the molecule's binding events, and they lie close to each
+    other. So, if subclustering occurs, molecules with a close nearest
+    neighbor ("clustered") have fewer binding events on average than
+    isolated ("sparse") ones. This function returns the numbers of
+    binding events of both populations so that their distributions can
+    be compared, e.g. with histograms or their means. Molecules with a
+    nearest-neighbor distance between ``clustering_dist`` and
+    ``sparse_dist`` are in neither population.
 
     Introduced in Kowalewski et al. (2026).
 
     Parameters
     ----------
     mols : pd.DataFrame
-        List of molecules, must contain n_events.
+        Molecules, e.g. the output of ``find_cluster_centers`` or
+        G5M. Must contain "x", "y" and "n_events" (and "z" for 3D,
+        which makes the distances 3D).
     info : list of dicts or None, optional
         Metadata of ``mols``. Not used; accepted so that the call
         matches the other functions on localizations. Default is None.
     clustering_dist : float, optional
-        Maximum distance between molecules (nm) to consider them as
+        Molecules whose nearest neighbor is closer than this (nm) are
         clustered. Default is 25.
     sparse_dist : float, optional
-        Minimum distance between molecules (nm) to consider them as sparse.
-        Default is 80.
+        Molecules whose nearest neighbor is at least this far (nm) are
+        sparse. Must be larger than ``clustering_dist``. Default is 80.
 
     Returns
     -------
     clustered_nevents : lib.IntArray1D
-        Number of events for clustered molecules.
+        ``n_events`` of the clustered molecules.
     sparse_nevents : lib.IntArray1D
-        Number of events for sparse molecules.
+        ``n_events`` of the sparse molecules.
+
+    Raises
+    ------
+    AssertionError
+        If ``mols`` has no ``n_events`` column, or if ``sparse_dist``
+        is not larger than ``clustering_dist``.
 
     References
     ----------
