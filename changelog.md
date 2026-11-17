@@ -163,6 +163,7 @@ Picasso 1.0 is the largest update since Picasso was first published. The highlig
 - The metadata of a filtered file lists its filter steps in the order they were applied.
 - Filters from metadata can also be applied by dragging the .yaml file into the Filter window.
 - Filter shows 1D histograms of both variablies in the 2D histogram filtering.
+- If a column is selected, it is automatically chosen for filtering by a numeric range.
 
 ### **Backward incompatible changes:**
 The [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html) lists what changes for you, with the replacement of each setting, command and function.

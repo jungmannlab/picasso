@@ -685,6 +685,15 @@ class FilterNum(lib.Dialog):
         for name in names:
             self.attributes.addItem(name)
 
+    def select_column(self, name: str | None) -> None:
+        """Show column ``name`` in the combo box; None keeps the current
+        one."""
+        if name is None:
+            return
+        index = self.attributes.findText(name)
+        if index >= 0:
+            self.attributes.setCurrentIndex(index)
+
 
 EXPRESSION_TOOLTIP = (
     "Condition that the kept localizations satisfy, e.g.,\n"
@@ -1019,6 +1028,10 @@ class Window(QtWidgets.QMainWindow):
         self.table_model = TableModel(self)
         self.table_view.setModel(self.table_model)
         self.filter_num = FilterNum(self)
+        # the numeric filter follows the column selected in the table
+        self.table_view.selectionModel().selectionChanged.connect(
+            self._on_table_selection_changed
+        )
         self.filter_expression = FilterExpression(self)
         self.metadata_dialog = lib.MetadataDialog(self)
         self.user_settings_dialog = lib.UserSettingsDialog(self)
@@ -1071,7 +1084,7 @@ class Window(QtWidgets.QMainWindow):
         filter_menu.addSeparator()
         filter_action = filter_menu.addAction("Filter numerically...")
         filter_action.setShortcut("Ctrl+F")
-        filter_action.triggered.connect(self.filter_num.show)
+        filter_action.triggered.connect(self.show_filter_num)
         filter_expression_action = filter_menu.addAction(
             "Filter by expression..."
         )
@@ -1635,6 +1648,34 @@ class Window(QtWidgets.QMainWindow):
             return False
         QtWidgets.QMessageBox.information(self, title, "No file loaded.")
         return True
+
+    def selected_column(self) -> str | None:
+        """Name of the column selected in the table, or None.
+
+        With several columns selected, the one clicked last (the
+        current column) wins if it is among them, otherwise the
+        leftmost.
+        """
+        if not self.has_locs:
+            return None
+        selection_model = self.table_view.selectionModel()
+        columns = sorted(i.column() for i in selection_model.selectedColumns())
+        if not columns:
+            return None
+        current = selection_model.currentIndex().column()
+        column = current if current in columns else columns[0]
+        if column >= len(self.locs_full.columns):
+            return None
+        return self.locs_full.columns[column]
+
+    def show_filter_num(self) -> None:
+        """Open the numeric filter with the selected column chosen."""
+        self.filter_num.select_column(self.selected_column())
+        self.filter_num.show()
+
+    def _on_table_selection_changed(self, *args) -> None:
+        if self.filter_num.isVisible():
+            self.filter_num.select_column(self.selected_column())
 
     def plot_histogram(self) -> None:
         if self.no_locs_warning("Histogram"):
