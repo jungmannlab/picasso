@@ -683,18 +683,28 @@ def _sidecar_path() -> str:
 def load_state() -> dict:
     """Load the installed-state sidecar, tolerant of a missing/corrupt file.
 
-    The state holds three things: ``plugins`` (per-id records of what was
-    installed from the registry), ``enabled`` (per-file-name flags deciding
-    what may be loaded) and ``trust_acknowledged`` (the one-time warning).
+    The state holds ``plugins`` (per-id records of what was installed
+    from the registry), ``enabled`` (per-file-name flags deciding what
+    may be loaded), ``trust_acknowledged`` (the one-time warning),
+    ``notify`` (per-id flags, False for the installed plugins whose
+    updates are not notified, see :func:`available_updates`) and
+    ``skipped_updates`` (per-id versions not to notify about again).
 
     Returns
     -------
     state : dict
         The installed state; the defaults (no plugins, nothing enabled,
-        trust not acknowledged) if the file is missing or corrupt.
+        trust not acknowledged, every update notified) if the file is
+        missing or corrupt.
     """
     path = _sidecar_path()
-    state = {"plugins": {}, "enabled": {}, "trust_acknowledged": False}
+    state = {
+        "plugins": {},
+        "enabled": {},
+        "trust_acknowledged": False,
+        "notify": {},
+        "skipped_updates": {},
+    }
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
@@ -708,6 +718,18 @@ def load_state() -> dict:
                     if isinstance(k, str)
                 }
             state["trust_acknowledged"] = bool(data.get("trust_acknowledged"))
+            notify = data.get("notify", {}) or {}
+            if isinstance(notify, dict):
+                state["notify"] = {
+                    k: bool(v) for k, v in notify.items() if isinstance(k, str)
+                }
+            skipped = data.get("skipped_updates", {}) or {}
+            if isinstance(skipped, dict):
+                state["skipped_updates"] = {
+                    k: str(v)
+                    for k, v in skipped.items()
+                    if isinstance(k, str) and v is not None
+                }
     except (OSError, ValueError):
         pass
     return state
@@ -749,6 +771,32 @@ def is_enabled(state: dict, filename: str) -> bool:
 def set_enabled(state: dict, filename: str, value: bool) -> None:
     """Record whether ``filename`` may be loaded, and save the sidecar."""
     state.setdefault("enabled", {})[filename] = bool(value)
+    save_state(state)
+
+
+def is_notified(state: dict, plugin_id: str) -> bool:
+    """Whether updates of the installed plugin ``plugin_id`` are notified
+    (see :func:`available_updates`); True unless switched off.
+
+    Parameters
+    ----------
+    state : dict
+        Installed state, as returned by :func:`load_state`.
+    plugin_id : str
+        Registry id of the plugin.
+
+    Returns
+    -------
+    notified : bool
+        False if the user switched off the notifications of the plugin.
+    """
+    return bool(state.get("notify", {}).get(plugin_id, True))
+
+
+def set_notified(state: dict, plugin_id: str, value: bool) -> None:
+    """Record whether updates of ``plugin_id`` are notified, and save the
+    sidecar."""
+    state.setdefault("notify", {})[plugin_id] = bool(value)
     save_state(state)
 
 
@@ -894,6 +942,8 @@ def uninstall(plugin_id: str, state: dict) -> None:
             pass
         state.get("enabled", {}).pop(filename, None)
     state["plugins"].pop(plugin_id, None)
+    state.get("notify", {}).pop(plugin_id, None)
+    state.get("skipped_updates", {}).pop(plugin_id, None)
     save_state(state)
 
 
@@ -968,6 +1018,74 @@ def status_for(entry: dict, state: dict) -> str:
     if compare_versions(entry.get("version"), installed.get("version")) > 0:
         return UPDATE_AVAILABLE
     return UP_TO_DATE
+
+
+def available_updates(manifest: list[dict], state: dict) -> list[dict]:
+    """Updates of the installed plugins to notify about.
+
+    Only plugins installed from the registry count, never plugins that
+    are not installed. Plugins whose notifications are switched off
+    (:func:`is_notified`) and versions skipped by
+    :func:`skip_updates` are left out. Updates that need a newer Picasso
+    are included, marked as not installable.
+
+    Parameters
+    ----------
+    manifest : list of dict
+        Entries as returned by :func:`fetch_manifest`.
+    state : dict
+        Installed state, as returned by :func:`load_state`.
+
+    Returns
+    -------
+    updates : list of dict
+        One dict per update, sorted by name, with the keys "id", "name"
+        (display name), "installed" and "version" (installed and new
+        version), "compatible" (whether the running Picasso can install
+        it) and "min_picasso_version".
+    """
+    updates = []
+    skipped = state.get("skipped_updates", {})
+    for entry in manifest:
+        plugin_id = entry["id"]
+        installed = state["plugins"].get(plugin_id)
+        if installed is None or not is_notified(state, plugin_id):
+            continue
+        version = entry.get("version")
+        if compare_versions(version, installed.get("version")) <= 0:
+            continue
+        if not is_valid_digest(entry.get("sha256")):
+            continue  # cannot be installed, whatever the version
+        if skipped.get(plugin_id) == version:
+            continue
+        updates.append(
+            {
+                "id": plugin_id,
+                "name": str(entry.get("display_name", plugin_id)),
+                "installed": installed.get("version"),
+                "version": version,
+                "compatible": is_compatible(entry),
+                "min_picasso_version": entry.get("min_picasso_version"),
+            }
+        )
+    return sorted(updates, key=lambda u: u["name"].lower())
+
+
+def skip_updates(state: dict, updates: list[dict]) -> None:
+    """Do not notify about ``updates`` again, only about later versions,
+    and save the sidecar.
+
+    Parameters
+    ----------
+    state : dict
+        Installed state, as returned by :func:`load_state`.
+    updates : list of dict
+        Updates as returned by :func:`available_updates`.
+    """
+    skipped = state.setdefault("skipped_updates", {})
+    for update in updates:
+        skipped[update["id"]] = update["version"]
+    save_state(state)
 
 
 def entry_filename(entry: dict) -> str | None:

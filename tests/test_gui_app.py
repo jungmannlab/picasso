@@ -31,7 +31,9 @@ def isolated(tmp_path, monkeypatch, qapp, restore_theme):
 
     from picasso import updater
 
-    monkeypatch.setattr(updater, "setup_gui_update_check", lambda window: None)
+    monkeypatch.setattr(
+        updater, "setup_gui_update_check", lambda window, **kwargs: None
+    )
 
     hooks = (sys.excepthook, threading.excepthook, sys.unraisablehook)
     try:

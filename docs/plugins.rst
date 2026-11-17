@@ -52,6 +52,21 @@ A plugin you install this way is enabled automatically - clicking *Install*
 and confirming the warning *is* the consent step. Picasso shows that warning
 once, before your first install.
 
+Picasso tells you when an **installed plugin has an update**: with its own
+check for a new version, at most once a day when an app starts, it lists the
+installed plugins whose registry version is newer. It never mentions plugins
+you have not installed. *Review Updates* opens the plugin browser, where
+**View changes** shows what an update changes before you install it, and
+*Skip These Versions* stops the notifications until the next version of these
+plugins. Untick **Notify** in a plugin's row to stop the notifications about
+it altogether; the update check of Picasso itself is switched off together
+with these notifications (``Disabled`` under ``Updates`` in the
+:ref:`user settings <user-settings-file>`).
+
+An update that needs a newer version of Picasso is listed in the
+notification with the version of Picasso it requires; the installed version
+keeps working. Update Picasso first, then the plugin.
+
 If a plugin is listed as **No integrity hash**, the registry does not publish
 a SHA-256 for it and Picasso will refuse to install it. That is a problem with
 the registry entry, not with your setup; please report it in the

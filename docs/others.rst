@@ -444,7 +444,7 @@ Top level
 
 ``Updates``
 ^^^^^^^^^^^
-Written and read only by the update-notification feature, not by any module's own GUI. Picasso checks for a new version at most once a day, also when a check fails, e.g., without an internet connection.
+Written and read only by the update-notification feature, not by any module's own GUI. Picasso checks for a new version at most once a day, also when a check fails, e.g., without an internet connection. The same check tells about updates of installed plugins (see :ref:`plugins-registry`); which plugins are notified and the plugin versions skipped are stored with the installed plugins, not here.
 
 .. list-table::
    :widths: 22 10 68
