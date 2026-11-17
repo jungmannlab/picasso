@@ -176,6 +176,11 @@ KEEP_NON_OVERLAPPING_KEY = "Keep non-overlapping after alignment"
 # Remove all localizations asks for confirmation first
 CONFIRM_REMOVE_LOCS_KEY = "Confirm removing all localizations"
 CTRL_Z_NOTICE_KEY = "Show Ctrl+Z notice"
+# key (in the Render section of the user settings) of the percentage of
+# a file's localizations that must be dropped while loading it for
+# Render to warn about it, and its default
+DROPPED_LOCS_WARNING_KEY = "Dropped localizations warning (%)"
+DROPPED_LOCS_WARNING_DEFAULT = 5.0
 POLYGON_POINTER_SIZE = 16  # must be even
 # shortest drag (display pixels, in x and y) that still yields a box
 # pick, so that a stray click does not create one of zero area
@@ -279,6 +284,43 @@ def _render_bool_setting(key: str, default: bool) -> bool:
         render_settings[key] = default
         io.save_user_settings(settings)
     return default
+
+
+def dropped_locs_warning_setting() -> float:
+    """The percentage of a file's localizations that must be dropped
+    while loading it (missing or infinite values, outside the field of
+    view, negative values) for Render to warn about it.
+
+    Reads ``Dropped localizations warning (%)`` from the ``Render``
+    section of the user settings; a missing key is written with the
+    default (5), so that it is visible in the file, unless the file on
+    disk could not be read. A value that is not a non-negative number
+    is left in the file and the default is used. 0 warns whenever a
+    localization is dropped.
+
+    Returns
+    -------
+    percent : float
+        Render warns if more than this percentage is dropped.
+    """
+    settings = io.load_user_settings()
+    render_settings = settings["Render"]
+    if not isinstance(render_settings, dict):
+        return DROPPED_LOCS_WARNING_DEFAULT
+    value = render_settings.get(DROPPED_LOCS_WARNING_KEY)
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and np.isfinite(value)
+        and value >= 0
+    ):
+        return float(value)
+    if value is None and not io.settings_file_is_broken():
+        render_settings[DROPPED_LOCS_WARNING_KEY] = (
+            DROPPED_LOCS_WARNING_DEFAULT
+        )
+        io.save_user_settings(settings)
+    return DROPPED_LOCS_WARNING_DEFAULT
 
 
 def keep_non_overlapping_setting() -> bool:
@@ -12517,15 +12559,26 @@ class _ThreadLogRecords(logging.Handler):
 
     Records of other threads are passed on to ``logging.lastResort``
     when no other handler would take them, as without this handler.
+
+    Parameters
+    ----------
+    dropped_percent : float, optional
+        The warning about dropped localizations is collected only if
+        more than this percentage of the file's localizations was
+        dropped. Default is 0, i.e., always.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, dropped_percent: float = 0.0) -> None:
         super().__init__(logging.WARNING)
         self.thread = threading.get_ident()
+        self.dropped_percent = dropped_percent
         self.messages = []
 
     def emit(self, record: logging.LogRecord) -> None:
         if record.thread == self.thread:
+            fraction = getattr(record, io._DROPPED_FRACTION_ATTR, None)
+            if fraction is not None and 100 * fraction <= self.dropped_percent:
+                return
             self.messages.append(record.getMessage())
         elif not logging.getLogger().handlers and logging.lastResort:
             logging.lastResort.handle(record)
@@ -12545,8 +12598,9 @@ class LocsLoadWorker(QtCore.QObject):
     the GUI thread *before* the worker starts (see
     ``View._prompt_pixelsize``), errors are reported via ``failed`` and
     the warnings logged while a file is read (e.g., about localizations
-    that were dropped) via ``warned``, such that the GUI thread displays
-    the message box.
+    that were dropped, if more than ``Dropped localizations warning
+    (%)`` of the user settings were) via ``warned``, such that the GUI
+    thread displays the message box.
 
     Parameters
     ----------
@@ -12583,6 +12637,8 @@ class LocsLoadWorker(QtCore.QObject):
         self.jobs = jobs
         self.average_traces = average_traces
         self._canceled = False
+        # read here, on the GUI thread, as it may write the settings
+        self.dropped_percent = dropped_locs_warning_setting()
 
     def cancel(self) -> None:
         """Request cancellation; takes effect at the next block of
@@ -12604,7 +12660,7 @@ class LocsLoadWorker(QtCore.QObject):
         _LoadCanceledError
             Propagated so the caller can stop the whole run.
         """
-        records = _ThreadLogRecords()
+        records = _ThreadLogRecords(self.dropped_percent)
         io_log = logging.getLogger(io.__name__)
         io_log.addHandler(records)
         try:

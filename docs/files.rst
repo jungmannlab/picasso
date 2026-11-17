@@ -164,7 +164,9 @@ for the pixel size instead of failing. Without metadata at all, a
 Localizations with NaN or infinite values in any column, negative ``x``, ``y``
 or precisions, or ``x`` ≥ ``Width × Pixelsize`` or ``y`` ≥
 ``Height × Pixelsize`` are discarded on loading. Picasso reports how many were
-discarded (Render shows a message): if most of them lie beyond the field of
+discarded (Render shows a message if more than 5% were discarded, see
+``Dropped localizations warning (%)`` in the :ref:`user settings
+<user-settings-file>`): if most of them lie beyond the field of
 view, ``Width``, ``Height`` or ``Pixelsize`` are too small, or the file holds
 camera pixels although it carries the format marker.
 

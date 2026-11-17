@@ -7252,6 +7252,11 @@ def validate_locs(
         )
 
 
+# attribute of the ``logging.LogRecord`` of the warning about the
+# localizations dropped while a file is loaded: the fraction dropped
+_DROPPED_FRACTION_ATTR = "dropped_fraction"
+
+
 def _report_dropped_locs(
     locs: pd.DataFrame,
     kept: pd.DataFrame,
@@ -7287,7 +7292,11 @@ def _report_dropped_locs(
             f"{docs_url('files.html#files-legacy')}). Else Width, Height "
             "or Pixelsize in the metadata are too small."
         )
-    _log.warning(message)
+    # the fraction lets a GUI skip the warning for a few dropped
+    # localizations (see Render's ``Dropped localizations warning (%)``)
+    _log.warning(
+        message, extra={_DROPPED_FRACTION_ATTR: n_dropped / len(locs)}
+    )
 
 
 def _render_index_to_save(locs: pd.DataFrame, info: list[dict], render_index):

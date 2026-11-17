@@ -282,6 +282,9 @@ Top level
    * - ``Confirm removing all localizations``
      - ``False``
      - ``True`` asks for confirmation before ``File > Remove all localizations``. Ticking *Don't ask again* in the question sets it to ``False``. See :ref:`render-remove-all-localizations`.
+   * - ``Dropped localizations warning (%)``
+     - ``5``
+     - Render warns when it drops localizations while loading a file (missing or infinite values, outside the field of view or negative values) only if more than this percentage of the file's localizations was dropped. ``0`` warns whenever a localization is dropped.
    * - ``Show Ctrl+Z notice``
      - ``True``
      - Pressing :kbd:`Ctrl+Z` in Render shows a notice that tells that it undoes the last step rather than selecting the Zoom tool (now :kbd:`Z`), as before Picasso 1.0, and asks whether to undo the step or select the Zoom tool. Ticking *Don't show again* in the notice sets it to ``False``.
