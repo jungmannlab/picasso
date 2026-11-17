@@ -9314,15 +9314,15 @@ class Window(QtWidgets.QMainWindow):
         # in the menu only, not on the toolbar
         constract_action.setIcon(theme.icon("contrast"))
         view_menu.addAction(constract_action)
-        # photon-counting movies only (enabled in update_lifetime_controls)
+        # photon-counting movies only (shown in update_lifetime_controls)
         self.lifetime_action = view_menu.addAction("Show lifetime")
         self.lifetime_action.setCheckable(True)
-        self.lifetime_action.setEnabled(False)
+        self.lifetime_action.setVisible(False)
         self.lifetime_action.toggled.connect(self.set_lifetime_shown)
         self.lifetime_settings_action = view_menu.addAction(
             "Lifetime display..."
         )
-        self.lifetime_settings_action.setEnabled(False)
+        self.lifetime_settings_action.setVisible(False)
         self.lifetime_settings_action.triggered.connect(
             self.lifetime_dialog.show
         )
@@ -13072,8 +13072,8 @@ class Window(QtWidgets.QMainWindow):
     def update_lifetime_controls(self) -> None:
         """Offer the lifetime display for photon-counting movies only."""
         available = self.lifetime_available()
-        self.lifetime_action.setEnabled(available)
-        self.lifetime_settings_action.setEnabled(available)
+        self.lifetime_action.setVisible(available)
+        self.lifetime_settings_action.setVisible(available)
         self.lifetime_button.setVisible(available)
         self.lifetime_dialog.update_decay()
 

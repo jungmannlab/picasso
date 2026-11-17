@@ -333,8 +333,8 @@ class TestLifetimeDisplay:
     def test_offered_for_photon_counting_movies_only(
         self, window, scan, tmp_path
     ):
-        assert window.lifetime_action.isEnabled()
-        assert window.lifetime_settings_action.isEnabled()
+        assert window.lifetime_action.isVisible()
+        assert window.lifetime_settings_action.isVisible()
         assert not window.lifetime_button.isHidden()
         window.lifetime_button.setChecked(True)
         assert window.lifetime_action.isChecked()
@@ -346,8 +346,8 @@ class TestLifetimeDisplay:
         window._set_channels(
             [camera], [[info]], [str(tmp_path / "movie.raw")], ["Channel 1"]
         )
-        assert not window.lifetime_action.isEnabled()
-        assert not window.lifetime_settings_action.isEnabled()
+        assert not window.lifetime_action.isVisible()
+        assert not window.lifetime_settings_action.isVisible()
         assert window.lifetime_button.isHidden()
         assert not window.lifetime_shown()
 
