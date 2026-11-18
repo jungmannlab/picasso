@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib
 
+import numpy as np
 import pytest
 from PyQt6 import QtGui, QtWidgets
 
@@ -266,3 +267,17 @@ def test_render_undo_and_redo_without_history(render_window, messages):
     assert len(messages) == n_messages
     assert not render_window.undo_action.isEnabled()
     assert not render_window.redo_action.isEnabled()
+
+
+def test_render_empty_grouped_file(messages, qt_offscreen):
+    # a file with a group column but no localizations (e.g., filtered
+    # down to nothing) used to raise KeyError: False on every redraw
+    window = _window("render")
+    locs, info = io.load_locs(LOCS_PATH)
+    locs = locs.iloc[:0].assign(group=np.zeros(0, dtype=np.int32))
+    window.view.add(LOCS_PATH, locs, info, render_=False)
+    window.view.fit_in_view(autoscale=True)
+    window.view.update_scene(viewport=((0.0, 0.0), (1000.0, 1000.0)))
+    qt_offscreen.processEvents()
+    assert isinstance(window.view.group_color, np.ndarray)
+    window.close()

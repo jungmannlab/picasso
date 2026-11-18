@@ -12934,7 +12934,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.locs = []
         self.infos = []
         self.locs_paths = []
-        self.group_color = []
+        self.group_color = np.zeros(0, dtype=np.int64)
         self._mode = "Zoom"
         self._pan = False
         self._pan_button = None  # the button whose release ends a pan
@@ -13264,8 +13264,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 [np.median(locs["lpx"]), np.median(locs["lpy"])]
             )
             if "group" in locs.columns:
-                if len(self.group_color) == 0 and len(locs):
-                    self.group_color = render.get_group_color(self.locs[0])
+                # also for a file without localizations, whose group
+                # colors must be an (empty) array as well
+                self.group_color = render.get_group_color(self.locs[0])
             disp_sett_dlg.parameter.clear()
             disp_sett_dlg.parameter.addItems(locs.columns.to_list())
             disp_sett_dlg.render_groupbox.content.setEnabled(True)

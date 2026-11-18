@@ -168,7 +168,8 @@ def get_group_color(
     """
     groups = locs["group"].to_numpy().astype(int)
     if shuffle:
-        lookup = np.arange(groups.max() + 1)
+        # initial=-1: an empty file has no maximum
+        lookup = np.arange(groups.max(initial=-1) + 1)
         np.random.shuffle(lookup)
         lookup %= N_GROUP_COLORS
         return lookup[groups]
@@ -578,8 +579,9 @@ def _contrast_limits(
             max_ = image.max()
         else:
             # lowest max value from all channels, given it's not
-            # an empty image
-            max_ = min([_.max() for _ in image if _.max() > 0])
+            # an empty image; 0 if all channels are empty
+            maxima = [_.max() for _ in image if _.max() > 0]
+            max_ = min(maxima) if maxima else 0.0
         vmax = 0.5 * max_
         vmin = 0.0
     vmin = vmin if vmin is not None else image.min()
@@ -1115,6 +1117,8 @@ def split_locs_by_group(
         grouping to apply.
     """
     if group_color is not None:
+        # a list would compare to a single bool below
+        group_color = np.asarray(group_color)
         assert len(group_color) == len(
             locs
         ), "Length of group_color must match number of localizations."
