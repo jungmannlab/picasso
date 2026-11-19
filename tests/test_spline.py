@@ -226,6 +226,29 @@ class TestTemplateHelpers:
         assert z_center == 2
         assert eff_sigma == pytest.approx(1.0, abs=0.4)
 
+    def test_focus_step_ignores_degenerate_and_faint_slices(self):
+        """Neither a slice the Gaussian cannot describe (a line, whose fit
+        collapses one width) nor a faint narrow lobe far out of focus is
+        taken for the focus."""
+        box, nz = 11, 7
+        yy, xx = np.mgrid[0:box, 0:box]
+        c = box // 2
+
+        def gauss(s, peak=1.0):
+            return peak * np.exp(-((xx - c) ** 2 + (yy - c) ** 2) / (2 * s**2))
+
+        vol = np.zeros((box, box, nz), dtype=np.float32)
+        vol[:, :, 0] = 0.3 * (np.abs(yy - c) <= 0)  # a 1-px line
+        vol[:, :, 1] = gauss(2.4, 0.3)
+        vol[:, :, 2] = gauss(1.8, 0.6)
+        vol[:, :, 3] = gauss(1.2)  # the focus
+        vol[:, :, 4] = gauss(1.8, 0.6)
+        vol[:, :, 5] = gauss(2.4, 0.3)
+        vol[:, :, 6] = gauss(0.8, 0.05)  # faint narrow lobe
+        z_center, eff_sigma = spline._focus_step(vol)
+        assert z_center == 3
+        assert eff_sigma == pytest.approx(1.2, abs=0.1)
+
     def test_register_and_average_centers_beads(self):
         box, nz = BOX, 3
         yy, xx = np.mgrid[0:box, 0:box]

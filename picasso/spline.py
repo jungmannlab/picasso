@@ -497,14 +497,49 @@ def _fit_gauss_spots(spots: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return thetas, states
 
 
+#: A slice is a focus candidate only if its fitted Gaussian peak is at least
+#: this fraction of the highest slice's peak (see :func:`_focus_step`).
+_FOCUS_MIN_PEAK_FRACTION = 0.5
+
+
 def _focus_step(volume: np.ndarray) -> tuple[int, float]:
     """Return ``(z_center, effective_sigma)``: the sharpest z-slice of a
     ``(box, box, n_steps)`` PSF volume (smallest fitted Gaussian sigma) and
-    the mean sigma there, using the least-squares Gaussian fitter."""
-    thetas, _ = _fit_gauss_spots(volume.transpose(2, 0, 1))
+    the mean sigma there, using the least-squares Gaussian fitter.
+
+    Only fits that describe a spot count, by the same test as
+    :func:`_focus_center_offset`: far out of focus (e.g. the broad end of an
+    astigmatic stack) the fit can "converge" to a degenerate Gaussian with
+    a negative peak and one width near zero, which would otherwise be taken
+    for the sharpest slice. Of those, only the slices whose fitted peak is at
+    least :data:`_FOCUS_MIN_PEAK_FRACTION` of the highest one are
+    candidates: a strongly defocused slice can fit a narrow Gaussian to a
+    faint central lobe (e.g. the end of a 2D stack). If no slice passes,
+    all finite fits are used."""
+    thetas, states = _fit_gauss_spots(volume.transpose(2, 0, 1))
+    box = volume.shape[0]
+    peak = thetas[:, 0]  # the fitted amplitude (peak height above bg)
     sx, sy = np.abs(thetas[:, 3]), np.abs(thetas[:, 4])
+    finite = np.isfinite(sx) & np.isfinite(sy) & np.isfinite(peak)
+    usable = (
+        finite
+        & ~np.isin(
+            states,
+            (
+                splinefit.FIT_STATE_SINGULAR_HESSIAN,
+                splinefit.FIT_STATE_NEG_CURVATURE_MLE,
+            ),
+        )
+        & (peak > 0.0)
+        & (sx > 0.0)
+        & (sx <= box)
+        & (sy > 0.0)
+        & (sy <= box)
+    )
+    if usable.any():
+        usable &= peak >= _FOCUS_MIN_PEAK_FRACTION * peak[usable].max()
+    ok = usable if usable.any() else finite
     sigmas = np.full(volume.shape[2], np.inf, dtype=np.float32)
-    ok = np.isfinite(sx) & np.isfinite(sy)
     sigmas[ok] = np.sqrt(sx[ok] * sy[ok])
     z_center = int(np.argmin(sigmas))
     return z_center, float(sigmas[z_center])
