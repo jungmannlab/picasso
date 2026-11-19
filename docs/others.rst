@@ -371,6 +371,9 @@ Top level
    * - ``gaussian_filter_sigma``
      - *(last used)*
      - Remembered last value: the Gaussian pre-filter sigma.
+   * - ``edge_spots``
+     - *(last used)*
+     - Remembered last value: whether ``Identify spots at the frame edge`` was ticked. See :ref:`localize-edge-spots`.
    * - ``identification_method``
      - *(last used)*
      - Remembered last value: the identification ``Method`` (net gradient or B-spline wavelet).

@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 18-NOV-2026 CET
+Last change: 19-NOV-2026 CET
 
 ## 1.0.0
 
@@ -127,6 +127,7 @@ Picasso 1.0 is the largest update since Picasso was first published. The highlig
 - New PSF model *Vectorial PSF* ([VectorFit](https://doi.org/10.1364/OPTICA.560721)): maximum-likelihood fitting of a vectorial PSF computed from the optics, in 2D or 3D, with the optional VectorFit library (Windows and Linux only). See the [documentation](https://picassosr.readthedocs.io/en/latest/localize/vectorfit.html).
 - New fitting method *Phasor (pSMLM)* (Martens et al., *J. Chem. Phys.* 2018). See the [documentation](https://picassosr.readthedocs.io/en/latest/localize/phasor.html).
 - New spot identification method: B-spline wavelet segmentation (Izeddin et al., *Opt. Express* 2012), see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html#localize-wavelet).
+- Spots at the edge of the frame are identified and fitted, see the [documentation](https://picassosr.readthedocs.io/en/latest/localize/identification.html#localize-edge-spots).
 - New column `reduced_chi_square` for MLE and least-squares fits: the goodness of fit normalized for the box size and the photon counts, about 1 for a good fit (`picasso.localize.reduced_chi_square`).
 - The quantum efficiency is no longer shown in the Parameters dialog. A `Quantum Efficiency` entry in the camera config, `--qe` in `picasso localize` and a `Qe` key in `camera_info` are still accepted and ignored. `camera_parameters` of the movie classes in `picasso.io` no longer returns `qe`. The `Emission Wavelength` dropdown now lists the wavelengths of `Channel Device` > `Emission Wavelengths` and of the wavelength-keyed calibrations in the config (it appeared only when the config had a `Quantum Efficiency` mapping before, so wavelength-keyed calibrations were not selected with the template config).
 - Imaris `.ims` movies can now be opened on macOS and Linux, not only Windows. Exporting `.ims` files (Render's `Export ROI for Imaris`) remains Windows only. `hdf5plugin` is now installed on all platforms.
@@ -148,6 +149,7 @@ Picasso 1.0 is the largest update since Picasso was first published. The highlig
 - Fixed: astigmatism (3D) calibrations made with Picasso 0.11.3 without z binning placed z = 0 away from the focus, by the distance between the focus and the middle of the calibration stack, shifting every z fitted with them. Calibrations made with these versions should be redone.
 - `picasso localize` on a folder localizes the movies of every format Picasso opens (also `.tiff`, `.btf`, `.lsm`, `.ims`, ...), also with upper-case extensions.
 - Fixed: a 3D (astigmatism) calibration with more frames per step than the movie has, or a z binning that leaves fewer than 7 axial bins, raised an error instead of a warning saying what to change.
+- Fixed: the net gradient of a spot whose box touched the top or left edge of the frame included gradients from the opposite edge.
 - Fixed: identifications loaded from picks, localizations or saved identifications lost the spots right of x = number of frames (the check against the field of view took the frame count for the width); opening a file that is not HDF5 as identifications raised an error instead of saying so.
 - Fixed: entering a frame range for a `.raw` movie raised an error; the message that no spots were found on the channel sum disappeared at once.
 - Localize tells why a fit failed (the error, in a message box) instead of only "Aborted.", and an identification that finds no spots says so, instead of leaving its progress in the status bar, and drops the spots of an earlier identification.

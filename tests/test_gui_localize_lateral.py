@@ -446,6 +446,12 @@ class TestTheFitLeavesARecord:
             "get_spots",
             lambda *a, **k: (None, None),
         )
+        # no movie, so no frame to place the boxes of edge spots in
+        monkeypatch.setattr(
+            gui_localize.localize,
+            "_place_boxes",
+            lambda identifications, *a: (identifications, None, 0),
+        )
         monkeypatch.setattr(
             gui_localize.localize,
             "_dispatch_fit",

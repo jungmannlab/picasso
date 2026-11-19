@@ -49,23 +49,49 @@ def _initial_widths_gauss(
     spots: lib.FloatArray3D,
     size: int,
     background: lib.FloatArray1D,
+    offsets: np.ndarray | None = None,
 ) -> tuple[lib.FloatArray1D, lib.FloatArray1D]:
-    """Seed the Gaussian widths from the second moment of the spot's central
-    row and column."""
+    """Seed the Gaussian widths from the second moment of the row and
+    column through the spot: the central ones, or those ``offsets``
+    (``(n_spots, 2)`` whole pixels, x and y) away from the center."""
     half = int(size / 2)
-    # float64 throughout: the moment sums photons weighted by a squared
-    # distance, which overflows a float32 accumulator on a bright spot.
-    d2 = (np.arange(size, dtype=np.float64) - half) ** 2
-    # spots is (n, y, x): the central column varies along y, the row along x.
-    profile_y = spots[:, :, half].astype(np.float64) - background[:, None]
-    profile_x = spots[:, half, :].astype(np.float64) - background[:, None]
-    np.clip(profile_y, 0.0, None, out=profile_y)
-    np.clip(profile_x, 0.0, None, out=profile_x)
-    # A non-finite profile (an inf from a gain map, say) falls through to the
-    # fallback below rather than warning here.
-    with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
-        width_y = np.sqrt(profile_y @ d2 / profile_y.sum(axis=1))
-        width_x = np.sqrt(profile_x @ d2 / profile_x.sum(axis=1))
+    if offsets is None:
+        # float64 throughout: the moment sums photons weighted by a squared
+        # distance, which overflows a float32 accumulator on a bright spot.
+        d2 = (np.arange(size, dtype=np.float64) - half) ** 2
+        # spots is (n, y, x): the central column varies along y, the row
+        # along x.
+        profile_y = spots[:, :, half].astype(np.float64) - background[:, None]
+        profile_x = spots[:, half, :].astype(np.float64) - background[:, None]
+        np.clip(profile_y, 0.0, None, out=profile_y)
+        np.clip(profile_x, 0.0, None, out=profile_x)
+        # A non-finite profile (an inf from a gain map, say) falls through to
+        # the fallback below rather than warning here.
+        with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+            width_y = np.sqrt(profile_y @ d2 / profile_y.sum(axis=1))
+            width_x = np.sqrt(profile_x @ d2 / profile_x.sum(axis=1))
+    else:
+        pixels = np.arange(size, dtype=np.float64)
+        col = half + np.asarray(offsets[:, 0], dtype=np.int64)
+        row = half + np.asarray(offsets[:, 1], dtype=np.int64)
+        index = np.arange(len(spots))
+        profile_y = (
+            spots[index, :, col].astype(np.float64) - background[:, None]
+        )
+        profile_x = (
+            spots[index, row, :].astype(np.float64) - background[:, None]
+        )
+        np.clip(profile_y, 0.0, None, out=profile_y)
+        np.clip(profile_x, 0.0, None, out=profile_x)
+        d2_y = (pixels[None, :] - row[:, None]) ** 2
+        d2_x = (pixels[None, :] - col[:, None]) ** 2
+        with np.errstate(invalid="ignore", divide="ignore", over="ignore"):
+            width_y = np.sqrt(
+                (profile_y * d2_y).sum(axis=1) / profile_y.sum(axis=1)
+            )
+            width_x = np.sqrt(
+                (profile_x * d2_x).sum(axis=1) / profile_x.sum(axis=1)
+            )
     # An empty or single-pixel profile yields 0/0 or a zero width.
     fallback = max(size / 5.0, 1.0)
     width_y[~np.isfinite(width_y)] = fallback
@@ -150,6 +176,7 @@ def initial_parameters_gauss(
     size: int,
     rotated: bool = False,
     spherical: bool = False,
+    offsets: np.ndarray | None = None,
 ) -> lib.FloatArray2D:
     """Initialize the parameters for a 2D Gaussian fit.
 
@@ -169,27 +196,39 @@ def initial_parameters_gauss(
     spherical : bool, optional
         Seed the isotropic Gaussian with a single width. Takes precedence
         over ``rotated``. Default False.
+    offsets : np.ndarray, optional
+        ``(n_spots, 2)`` whole-pixel offsets (x, y) of the spots from the
+        box center, for spots whose box was shifted to stay inside the
+        frame (see ``picasso.localize.IdentificationParameters.edge_spots``).
+        The position is seeded there and the widths are taken through it.
+        Default None, i.e., every spot is centered in its box.
 
     Returns
     -------
     initial_parameters : lib.FloatArray2D
         ``(n_spots, n_params)`` float32 seeds, with ``n_params`` 5
         (spherical), 6 (elliptical) or 7 (rotated). The position is seeded at
-        the box center.
+        the box center, shifted by ``offsets`` if given.
     """
     center = (size / 2.0) - 0.5
+    if offsets is None:
+        x_seed = y_seed = center
+    else:
+        offsets = np.asarray(offsets)
+        x_seed = center + offsets[:, 0]
+        y_seed = center + offsets[:, 1]
 
     spot_max = np.amax(spots, axis=(1, 2))
     spot_min = np.amin(spots, axis=(1, 2))
 
-    width_x, width_y = _initial_widths_gauss(spots, size, spot_min)
+    width_x, width_y = _initial_widths_gauss(spots, size, spot_min, offsets)
 
     if spherical:
         # GAUSS_2D: photons, x, y, s (single width), bg.
         initial_parameters = np.empty((len(spots), 5), dtype=np.float32)
         initial_parameters[:, 0] = spot_max - spot_min
-        initial_parameters[:, 1] = center
-        initial_parameters[:, 2] = center
+        initial_parameters[:, 1] = x_seed
+        initial_parameters[:, 2] = y_seed
         initial_parameters[:, 3] = 0.5 * (width_x + width_y)
         initial_parameters[:, 4] = spot_min
         return initial_parameters
@@ -198,8 +237,8 @@ def initial_parameters_gauss(
     initial_parameters = np.empty((len(spots), n_parameters), dtype=np.float32)
 
     initial_parameters[:, 0] = spot_max - spot_min
-    initial_parameters[:, 1] = center
-    initial_parameters[:, 2] = center
+    initial_parameters[:, 1] = x_seed
+    initial_parameters[:, 2] = y_seed
     initial_parameters[:, 3] = width_x
     initial_parameters[:, 4] = width_y
     initial_parameters[:, 5] = spot_min

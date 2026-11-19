@@ -35,6 +35,7 @@ Identification and fitting of single-molecule spots
    - By checking ``Preview``, the spots identified with the current settings will be marked in the displayed frame. Adjust ``Min. net gradient`` to a value at which only spots are detected (no background).
    - ``Estimate``, next to ``Min. net gradient``, sets a starting value from the background of the movie; see :ref:`localize-estimate-min-net-gradient`.
    - Alternatively, select ``B-spline wavelet`` as the ``Method`` to identify spots by wavelet segmentation, with a threshold in units of the noise instead of the net gradient; see :ref:`localize-wavelet`.
+   - Spots closer to the edge of the frame than half a box are identified and fitted, too, unless ``Identify spots at the frame edge`` is unticked; see :ref:`localize-edge-spots`.
 
 5. (Optional) Tick ``Temporal median filter`` in the ``Identification`` group to subtract a rolling per-pixel background before spots are identified; see :ref:`localize-temporal-median-filter`.
 
@@ -163,6 +164,7 @@ The following values entered in the ``Parameters`` dialog are all remembered acr
 
 - ``Box side length``, the identification ``Method``, ``Min. net gradient`` and the wavelet settings,
 - the temporal median and Gaussian filters (and whether each is ticked),
+- whether spots at the frame edge are identified (``Identify spots at the frame edge``),
 - the fit **Model**, **Optimizer** and **Fit mode**.
 
 The same section also stores the last directory used in the file dialogs (``PWD``) and which columns are ticked in the ``File`` > ``Select columns to save...`` dialog when saving fit results.
@@ -246,6 +248,39 @@ Unlike the temporal median filter, the Gaussian filter *is applied when calibrat
 
       parameters = localize.IdentificationParameters(
           method=localize.NetGradient(5000), box=7, gaussian_filter_sigma=1.0
+      )
+      identifications, id_info = localize.identify(movie, parameters=parameters)
+
+
+.. _localize-edge-spots:
+
+Spots at the frame edge
+-----------------------
+
+A spot closer to the edge of the frame than half a box has a box that reaches past the edge. With ``Identify spots at the frame edge`` ticked (the default) in the ``Identification`` group, such spots are identified, too: the local maximum and the net gradient are taken over the part of the box inside the frame, and the wavelet identification keeps the regions there. Unticked, only spots whose whole box lies inside the frame are identified, which leaves a band of half a box along every edge empty.
+
+The box of a spot at the edge keeps its size and is shifted inward until it lies in the frame, so the spot sits off its center. The identification boxes are drawn where they are fitted. The fit uses the pixels the camera recorded; the closer a spot is to the edge, the more of it lies outside the frame and the less precisely it is localized. The maximum-likelihood fits account for that in the localization precision. The least-squares precision is a closed-form expression for a whole spot and is optimistic for a spot cut by the edge.
+
+Whether a spot in a shifted box can be fitted depends on the fit method:
+
+- **Gaussian fits** (least squares and maximum likelihood, every model) fit all of them.
+- **Spline fits** fit them as far as the calibrated PSF reaches beyond the fit box: the box can be shifted by up to half the difference between the box of the spline calibration and the fit box. A calibration made with a larger box than the one you fit with therefore covers the spots at the edge (see :ref:`localize-spline`); with equal boxes, no box is shifted.
+- **Phasor**, **Vectorfit** and **Average** take the spot to be at the center of its box and leave the spots at the edge out.
+
+Spots that are left out are counted under ``Edge spots not fitted`` in the metadata of the localizations. The fits of several channels together (:ref:`localize-multichannel`) and the identification on a sum of channels never use spots at the edge, since the box must lie inside every channel. The calibrations never use beads at the edge, either. Identifications loaded from a file made before this setting existed count as made with it unticked.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``edge_spots`` of the ``IdentificationParameters`` is ``Identify spots
+   at the frame edge``; ``localize.fit`` shifts the boxes of the spots at
+   the edge by itself.
+
+   .. code-block:: python
+
+      parameters = localize.IdentificationParameters(
+          method=localize.NetGradient(5000), box=7, edge_spots=False
       )
       identifications, id_info = localize.identify(movie, parameters=parameters)
 

@@ -157,6 +157,8 @@ A calibration is built from a **bead z-stack**: image a sample of sparse, bright
 
    **The fit box size must not be larger than the box size the calibration was built with.** If it is larger, Picasso Localize shows a dialog and offers to set the box size to the calibration's value (you then re-run identification before fitting).
 
+A calibration box larger than the fit box also lets the spline fit the spots at the frame edge: their box is shifted into the frame, and the spot can sit up to half the difference between the two boxes off its center. See :ref:`localize-edge-spots`.
+
 .. _localize-spline-plot:
 
 Reading the calibration plot

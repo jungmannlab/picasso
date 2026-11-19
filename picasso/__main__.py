@@ -2726,6 +2726,7 @@ def _identification_parameters_from_args(
         box=box,
         temporal_median_window=args.temporal_median or 0,
         gaussian_filter_sigma=args.gaussian_filter or 0.0,
+        edge_spots=not getattr(args, "no_edge_spots", False),
     )
 
 
@@ -5072,6 +5073,18 @@ def _build_parser() -> (
             " spot is easier to identify. 0 (the default) disables it. "
             "Fitting always uses the raw movie, so the minimum net gradient "
             "needs re-tuning when this is changed"
+        ),
+    )
+    localize_parser.add_argument(
+        "--no-edge-spots",
+        action="store_true",
+        help=(
+            "identify only spots whose whole box lies inside the frame. By"
+            " default, spots closer to the frame edge than half a box are"
+            " identified, too, and fitted in a box shifted into the frame:"
+            " by the Gaussian fits, and by the spline fits as far as the"
+            " calibration reaches beyond the box; the phasor and Vectorfit"
+            " fits leave them out"
         ),
     )
     _add_identification_method_args(localize_parser)

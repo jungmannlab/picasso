@@ -115,6 +115,7 @@ DEFAULT_PARAMETERS = {
     "Wavelet Min. Area": wavelet.WaveletParameters().min_area,
     "Gaussian Filter Sigma": 0.0,
     "Temporal Median Window": 51,
+    "Edge Spots": True,
 }
 #: Identification method combo box entries -> ``localize.IDENTIFY_METHODS``.
 IDENTIFICATION_METHODS = {
@@ -5108,6 +5109,9 @@ class ParametersDialog(lib.Dialog):
     GAUSSIAN_FILTER_URL = docs_url(
         "localize/identification.html#localize-gaussian-filter"
     )
+    EDGE_SPOTS_URL = docs_url(
+        "localize/identification.html#localize-edge-spots"
+    )
     IDENT_URL = docs_url(
         "localize/identification.html#localize-identification"
     )
@@ -5478,6 +5482,31 @@ class ParametersDialog(lib.Dialog):
         gauss_row.addWidget(self.gaussian_filter_spinbox)
         gauss_row.addStretch(1)
         settings_grid.addLayout(gauss_row, 5, 0, 1, 2)
+
+        # spots whose box reaches past the frame edge
+        edge_row = QtWidgets.QHBoxLayout()
+        edge_row.addWidget(lib.HelpButton(self.EDGE_SPOTS_URL))
+        self.edge_spots_checkbox = QtWidgets.QCheckBox(
+            "Identify spots at the frame edge"
+        )
+        self.edge_spots_checkbox.setToolTip(
+            "Also identify spots closer to the edge of the frame than half\n"
+            "a box. Their box is shifted inward until it lies in the frame,\n"
+            "so the spot is fitted off-center, with the pixels it has.\n\n"
+            "The Gaussian fits fit all of them. The spline fits fit those\n"
+            "as far as the calibration reaches beyond the box (calibrate\n"
+            "with a larger box than you fit with). Phasor and Vectorfit\n"
+            "need the spot centered and leave them out.\n\n"
+            "Uncheck to identify only spots whose whole box lies inside\n"
+            "the frame."
+        )
+        self.edge_spots_checkbox.setChecked(DEFAULT_PARAMETERS["Edge Spots"])
+        self.edge_spots_checkbox.stateChanged.connect(
+            self.on_edge_spots_changed
+        )
+        edge_row.addWidget(self.edge_spots_checkbox)
+        edge_row.addStretch(1)
+        settings_grid.addLayout(edge_row, 6, 0, 1, 2)
 
         # preview identifications + cross-channel link color overlay
         preview_row = QtWidgets.QHBoxLayout()
@@ -7876,6 +7905,10 @@ class ParametersDialog(lib.Dialog):
         sigma is non-zero."""
         self._reset_contrast_and_refresh()
 
+    def on_edge_spots_changed(self, _state: int = 0) -> None:
+        """Refresh the preview: spots at the frame edge appear or go."""
+        self.window.on_parameters_changed()
+
     def _reset_contrast_and_refresh(self) -> None:
         """Re-derive the contrast and redraw after an identification
         filter changed, since the filtered frames live on a different
@@ -8929,6 +8962,9 @@ class Window(QtWidgets.QMainWindow):
             self.parameters_dialog.gaussian_filter_spinbox.setValue(
                 float(gaussian_sigma)
             )
+        edge_spots = settings["Localize"].get("edge_spots", None)
+        if isinstance(edge_spots, bool):
+            self.parameters_dialog.edge_spots_checkbox.setChecked(edge_spots)
         self._load_identification_method_settings(settings)
 
     def _load_identification_method_settings(self, settings: dict) -> None:
@@ -9076,6 +9112,9 @@ class Window(QtWidgets.QMainWindow):
         settings["Localize"][
             "gaussian_filter_sigma"
         ] = self.parameters_dialog.gaussian_filter_spinbox.value()
+        settings["Localize"][
+            "edge_spots"
+        ] = self.parameters_dialog.edge_spots_checkbox.isChecked()
         settings["Localize"][
             "identification_method"
         ] = self.parameters_dialog.identification_method()
@@ -11539,6 +11578,11 @@ class Window(QtWidgets.QMainWindow):
         self.parameters_dialog.gaussian_filter_spinbox.setValue(
             float(gaussian_sigma or 0.0)
         )
+        # files written before the setting existed were identified away
+        # from the edge (as ``IdentificationParameters.from_info`` reads them)
+        self.parameters_dialog.edge_spots_checkbox.setChecked(
+            bool(lib.get_from_metadata(info, "Edge Spots") or False)
+        )
         self._restore_identification_method(info, min_ng)
         self._clean_up_external_ids(info)
 
@@ -11897,6 +11941,11 @@ class Window(QtWidgets.QMainWindow):
                     self.curr_frame_number,
                     roi=self.identification_rois(),
                     frame_bounds=self.frame_range,
+                    # as ``localize.identify``: never at the edge of a sum
+                    edges=(
+                        parameters.edge_spots
+                        and self.identify_mode() not in IDENTIFY_SUM_MODES
+                    ),
                 )
                 self.draw_preview_identifications(
                     identifications_frame,
@@ -12062,6 +12111,17 @@ class Window(QtWidgets.QMainWindow):
         )
         return True
 
+    def _frame_shape(self) -> tuple[int, int] | None:
+        """``(height, width)`` of the displayed movie's frames, or None
+        without a movie."""
+        movie = getattr(self, "movie", None)
+        if movie is None:
+            return None
+        try:
+            return localize._frame_shape(movie)
+        except Exception:
+            return None
+
     def draw_identifications(
         self,
         identifications: pd.DataFrame,
@@ -12074,12 +12134,18 @@ class Window(QtWidgets.QMainWindow):
         box_half = int(box / 2)
         locs_frame = self._current_frame_locs()
         pixelsize = self.parameters_dialog.pixelsize.value()
+        frame_shape = self._frame_shape()
         for _, identification in identifications.iterrows():
             x = identification["x"]
             y = identification["y"]
-            item = self.scene.addRect(
-                x - box_half, y - box_half, box, box, color
-            )
+            # the box that is fitted: shifted into the frame for a spot at
+            # its edge (see localize.fit)
+            left, top = x - box_half, y - box_half
+            if frame_shape is not None:
+                height, width = frame_shape
+                left = max(0, min(left, width - box))
+                top = max(0, min(top, height - box))
+            item = self.scene.addRect(left, top, box, box, color)
             loc = self._loc_near(locs_frame, x, y, box_half, pixelsize)
             item.setToolTip(
                 format_hover_tooltip(identification if loc is None else loc)
@@ -12257,6 +12323,7 @@ class Window(QtWidgets.QMainWindow):
             parameters["Wavelet Min. Area"],
             parameters["Temporal Median Window"],
             parameters["Gaussian Filter Sigma"],
+            parameters["Edge Spots"],
             tuple(np.asarray(rois).ravel().tolist()) if rois else None,
             None if self.frame_range is None else str(self.frame_range),
         )
@@ -12274,6 +12341,7 @@ class Window(QtWidgets.QMainWindow):
                 frame_number,
                 roi=rois,
                 frame_bounds=self.frame_range,
+                edges=identification.edge_spots,
             )
         except Exception:
             # another channel's movie must never break the display; without
@@ -13631,6 +13699,7 @@ class Window(QtWidgets.QMainWindow):
                 else 0
             ),
             "Gaussian Filter Sigma": dialog.gaussian_filter_spinbox.value(),
+            "Edge Spots": dialog.edge_spots_checkbox.isChecked(),
         }
 
     def temporal_median_applicable(self) -> bool:

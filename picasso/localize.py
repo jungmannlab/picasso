@@ -441,6 +441,16 @@ class IdentificationParameters:
         a spot that is not Gaussian-shaped into one. Applied after the
         temporal median filter, if both are used. Default is 0 (no
         filtering).
+    edge_spots : bool, optional
+        Also identify spots closer to the edge of the frame than half a
+        box, whose box would reach past it. Their maximum and net gradient
+        are taken over the part of the box inside the frame, and
+        :func:`fit` shifts their box inward until it lies in the frame, so
+        the spot is fitted off-center. Default is True. False restricts
+        the identification to spots whose whole box lies inside the frame,
+        as in Picasso 0.x. Ignored when identifying a sum of channels
+        (:class:`SummedChannelsMovie`), whose joint fits need the box
+        inside every channel.
 
     Raises
     ------
@@ -508,6 +518,7 @@ class IdentificationParameters:
     temporal_median_window: int = 0
     temporal_median_stride: int | None = None
     gaussian_filter_sigma: float = 0.0
+    edge_spots: bool = True
 
     def __post_init__(self) -> None:
         # frozen: normalize the values through object.__setattr__
@@ -539,6 +550,7 @@ class IdentificationParameters:
                 f"got {self.gaussian_filter_sigma}."
             )
         object.__setattr__(self, "gaussian_filter_sigma", sigma)
+        object.__setattr__(self, "edge_spots", bool(self.edge_spots))
 
     def to_info(self) -> dict:
         """The parameters under the keys of the identification metadata.
@@ -552,7 +564,8 @@ class IdentificationParameters:
             ``"Identification Method"`` (see ``IDENTIFY_METHODS``), the
             settings of the method (``"Min. Net Gradient"`` or those of
             ``wavelet.WaveletParameters.to_info``), ``"Box Size"``,
-            ``"Temporal Median Window"`` and ``"Gaussian Filter Sigma"``.
+            ``"Temporal Median Window"``, ``"Gaussian Filter Sigma"`` and
+            ``"Edge Spots"``.
         """
         if _is_wavelet(self.method):
             method_info = {
@@ -576,6 +589,7 @@ class IdentificationParameters:
         if self.temporal_median_stride is not None:
             info["Temporal Median Stride"] = self.temporal_median_stride
         info["Gaussian Filter Sigma"] = self.gaussian_filter_sigma
+        info["Edge Spots"] = self.edge_spots
         return info
 
     @classmethod
@@ -586,8 +600,10 @@ class IdentificationParameters:
         A missing ``"Identification Method"`` means the net gradient, as in
         files written before the wavelet identification existed; missing
         filter settings mean no filtering and missing wavelet settings take
-        the defaults of Izeddin et al. (2012). A list under a setting holds
-        one value per ROI.
+        the defaults of Izeddin et al. (2012). A missing ``"Edge Spots"``
+        means False, as files written before it existed were identified
+        away from the frame edge. A list under a setting holds one value
+        per ROI.
 
         Parameters
         ----------
@@ -639,12 +655,13 @@ class IdentificationParameters:
             temporal_median_window=info.get("Temporal Median Window") or 0,
             temporal_median_stride=info.get("Temporal Median Stride"),
             gaussian_filter_sigma=info.get("Gaussian Filter Sigma") or 0.0,
+            edge_spots=bool(info.get("Edge Spots", False)),
         )
 
 
 @numba.jit(nopython=True, nogil=True, cache=False)
 def _local_maxima(
-    frame: lib.IntArray2D, box: int
+    frame: lib.IntArray2D, box: int, edges: bool = False
 ) -> tuple[lib.IntArray1D, lib.IntArray1D]:
     """Find pixels with maximum value within a region of interest.
 
@@ -655,6 +672,11 @@ def _local_maxima(
     box : int
         Size of the box to search for local maxima. Should be an odd
         integer.
+    edges : bool, optional
+        Also search the pixels whose box reaches past the frame edge,
+        comparing them with the part of their box inside the frame.
+        Default is False, i.e., only pixels whose whole box lies inside
+        the frame (and one pixel less on the bottom and right).
 
     Returns
     -------
@@ -667,17 +689,42 @@ def _local_maxima(
     maxima_map = np.zeros(frame.shape, np.uint8)
     box_half = int(box / 2)
     box_half_1 = box_half + 1
-    for i in range(box_half, Y - box_half_1):
-        for j in range(box_half, X - box_half_1):
-            local_frame = frame[
-                i - box_half : i + box_half + 1,
-                j - box_half : j + box_half + 1,
-            ]
-            flat_max = np.argmax(local_frame)
-            i_local_max = int(flat_max / box)
-            j_local_max = int(flat_max % box)
-            if (i_local_max == box_half) and (j_local_max == box_half):
-                maxima_map[i, j] = 1
+    if edges:
+        for i in range(Y):
+            i0 = max(i - box_half, 0)
+            i1 = min(i + box_half + 1, Y)
+            for j in range(X):
+                j0 = max(j - box_half, 0)
+                j1 = min(j + box_half + 1, X)
+                local_frame = frame[i0:i1, j0:j1]
+                flat_max = np.argmax(local_frame)
+                width = j1 - j0
+                if (i0 + flat_max // width == i) and (
+                    j0 + flat_max % width == j
+                ):
+                    if i == i0 and j == j0:
+                        # the top-left pixel of the frame comes first in its
+                        # own window, so argmax picks it on a tie, too (a
+                        # flat corner); it has to be the only maximum
+                        n_max = 0
+                        for value in local_frame.ravel():
+                            if value >= local_frame[0, 0]:
+                                n_max += 1
+                        if n_max > 1:
+                            continue
+                    maxima_map[i, j] = 1
+    else:
+        for i in range(box_half, Y - box_half_1):
+            for j in range(box_half, X - box_half_1):
+                local_frame = frame[
+                    i - box_half : i + box_half + 1,
+                    j - box_half : j + box_half + 1,
+                ]
+                flat_max = np.argmax(local_frame)
+                i_local_max = int(flat_max / box)
+                j_local_max = int(flat_max % box)
+                if (i_local_max == box_half) and (j_local_max == box_half):
+                    maxima_map[i, j] = 1
     y, x = np.where(maxima_map)
     return y, x
 
@@ -744,12 +791,20 @@ def _net_gradient(
         (len(y),).
     """
     box_half = int(box / 2)
+    Y, X = frame.shape
     ng = np.zeros(len(x), dtype=np.float32)
     for i, (yi, xi) in enumerate(zip(y, x)):
         for k_index, k in enumerate(range(yi - box_half, yi + box_half + 1)):
+            # near the frame edge (spots identified with ``edges``), only
+            # the pixels whose central-difference gradient lies inside the
+            # frame count; elsewhere every pixel of the box does
+            if k < 1 or k > Y - 2:
+                continue
             for l_index, m in enumerate(
                 range(xi - box_half, xi + box_half + 1)
             ):
+                if m < 1 or m > X - 2:
+                    continue
                 if not (k == yi and m == xi):
                     gy, gx = _gradient_at(frame, k, m, i)
                     ng[i] += (
@@ -763,6 +818,7 @@ def identify_in_image(
     image: lib.IntArray2D,
     minimum_ng: float,
     box: int,
+    edges: bool = False,
 ) -> tuple[lib.IntArray1D, lib.IntArray1D, lib.FloatArray1D]:
     """Identify local maxima in the image and calculate the net gradient
     at those maxima.
@@ -776,6 +832,11 @@ def identify_in_image(
     box : int
         Size of the box used for calculating the gradient. Should be
         an odd integer.
+    edges : bool, optional
+        Also identify spots whose box reaches past the image edge; their
+        maximum and net gradient are taken over the part of the box
+        inside the image. Default is False, i.e., only spots whose whole
+        box lies inside the image.
 
     Returns
     -------
@@ -787,7 +848,7 @@ def identify_in_image(
         Net gradient values at the identified maxima. The shape is
         (len(y),).
     """
-    y, x = _local_maxima(image, box)
+    y, x = _local_maxima(image, box, edges)
     box_half = int(box / 2)
     # Now comes basically a meshgrid
     ux = np.zeros((box, box), dtype=np.float32)
@@ -2073,12 +2134,14 @@ def _identify_in_crop(
     image: lib.FloatArray2D,
     box: int,
     method: IdentificationMethod,
+    edges: bool = False,
 ) -> tuple[lib.IntArray1D, lib.IntArray1D, lib.FloatArray1D | None]:
     """Identify spots in a float32 image with one identification method;
-    the net gradient is None for the wavelet identification."""
+    the net gradient is None for the wavelet identification. ``edges``
+    also identifies spots whose box reaches past the image edge."""
     if isinstance(method, NetGradient):
-        return identify_in_image(image, method.minimum, box)
-    y, x = wavelets.identify_in_image(image, box, method)
+        return identify_in_image(image, method.minimum, box, edges)
+    y, x = wavelets.identify_in_image(image, box, method, edges=edges)
     return y, x, None
 
 
@@ -2131,6 +2194,8 @@ def identify_in_frame(
     method: IdentificationMethod | list | tuple,
     box: int,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
+    *,
+    edges: bool = False,
 ) -> tuple[lib.IntArray1D, lib.IntArray1D, lib.FloatArray1D | None]:
     """Identify spots in a single frame within optionally specified
     subregion(s) (ROI).
@@ -2162,6 +2227,12 @@ def identify_in_frame(
         several (disjoint) regions. If None, the entire frame is used.
         Note that the origin of the image is in the top-left corner.
         Default is None.
+    edges : bool, optional
+        Also identify spots whose box reaches past the frame edge (see
+        ``IdentificationParameters.edge_spots``). The edge of a ROI that
+        lies inside the frame is not an edge: spots there are compared
+        with the pixels around them, as without ``edges``. Default is
+        False.
 
     Returns
     -------
@@ -2176,7 +2247,9 @@ def identify_in_frame(
     rois = _as_roi_list(roi)
     if rois is None:
         image = np.float32(frame)  # otherwise numba goes crazy
-        return _identify_in_crop(image, box, _as_method_list(method, 1)[0])
+        return _identify_in_crop(
+            image, box, _as_method_list(method, 1)[0], edges
+        )
     methods = _as_method_list(method, len(rois))
     wavelet = _is_wavelet(methods[0])
     height, width = frame.shape
@@ -2187,7 +2260,13 @@ def identify_in_frame(
         py0, px0 = max(y0 - pad, 0), max(x0 - pad, 0)
         py1, px1 = min(y1 + pad, height), min(x1 + pad, width)
         image = np.float32(frame[py0:py1, px0:px1])  # numba needs float32!
-        y, x, net_gradient = _identify_in_crop(image, box, methods[roi_index])
+        # the crop is padded by more than half a box, so with ``edges`` a
+        # spot inside the ROI reaches a crop border only where the frame
+        # ends; maxima at the other crop borders lie outside the ROI and
+        # are dropped below
+        y, x, net_gradient = _identify_in_crop(
+            image, box, methods[roi_index], edges
+        )
         y += py0  # offset back to global frame coordinates
         x += px0
         # keep only spots centered inside the actual ROI
@@ -2232,6 +2311,7 @@ def identify_by_frame_number(
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
     frame_bounds: tuple[int, int] | list | None = None,
     lock: threading.Lock | None = None,
+    edges: bool = False,
 ) -> pd.DataFrame:
     """Identify spots in a specific frame of a movie, see
     :func:`identify_in_frame`. Optionally, a lock can be used to ensure
@@ -2271,6 +2351,11 @@ def identify_by_frame_number(
         If provided, this lock will be used to ensure thread safety when
         accessing the movie data. This is useful in a multithreaded
         environment. Default is None.
+    edges : bool, optional
+        Also identify spots whose box reaches past the frame edge, see
+        :func:`identify_in_frame`. Ignored for a movie with a
+        ``filled_window`` (a sum of channels), whose window border is not
+        the edge of a camera frame. Default is False.
 
     Returns
     -------
@@ -2310,8 +2395,13 @@ def identify_by_frame_number(
         (y0, x0), (y1, x1) = window
         frame = np.asarray(frame)[y0:y1, x0:x1]
         roi = _roi_in_window(roi, window)
+        # the summed channels are fitted channel by channel, where a box
+        # must fit inside every channel; the window border is no frame edge
+        edges = False
     # identify
-    y, x, net_gradient = identify_in_frame(frame, method, box, roi)
+    y, x, net_gradient = identify_in_frame(
+        frame, method, box, roi, edges=edges
+    )
     if window is not None:
         y = y + y0  # back to canvas coordinates
         x = x + x0
@@ -2327,6 +2417,7 @@ def _identify_worker(
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None,
     frame_bounds: tuple[int, int] | list | None,
     lock: threading.Lock | None,
+    edges: bool = False,
 ) -> list[pd.DataFrame]:
     """Worker function for identifying spots in a movie. This function is
     designed to be run in a separate thread and processes each frame
@@ -2351,6 +2442,7 @@ def _identify_worker(
                 roi=roi,
                 frame_bounds=frame_bounds,
                 lock=lock,
+                edges=edges,
             )
         )
         with lock:
@@ -2393,6 +2485,7 @@ def identify_async(
     *,
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
     frame_bounds: tuple[int, int] | list | None = None,
+    edges: bool = False,
 ) -> tuple[list[int], list[Future]]:
     """Start identifying spots in a movie on a pool of threads and return
     without waiting for them. The threads claim the frames one by one;
@@ -2424,6 +2517,9 @@ def identify_async(
         specified, the other is to be set to None, for example,
         ``(5, None)`` sets minimum frame to 5 without maximum frame.
         Default is None.
+    edges : bool, optional
+        Also identify spots whose box reaches past the frame edge, see
+        :func:`identify_in_frame`. Default is False.
 
     Returns
     -------
@@ -2471,6 +2567,7 @@ def identify_async(
             roi,
             frame_bounds,
             lock,
+            edges,
         )
         for _ in range(n_workers)
     ]
@@ -2486,6 +2583,7 @@ def _identify_threaded(
     frame_bounds,
     progress: lib.Progress,
     abort_callback,
+    edges: bool = False,
 ):
     """Run identify_async and report the finished frames to ``progress``
     (an already started phase) from the calling thread.
@@ -2499,6 +2597,7 @@ def _identify_threaded(
         box,
         roi=roi,
         frame_bounds=frame_bounds,
+        edges=edges,
     )
     try:
         while True:
@@ -2527,6 +2626,7 @@ def _identify_serial(
     frame_bounds,
     progress: lib.Progress,
     abort_callback=None,
+    edges: bool = False,
 ):
     """Identify spots frame-by-frame in the current thread, reporting the
     finished frames to ``progress`` (an already started phase).
@@ -2547,6 +2647,7 @@ def _identify_serial(
                 i,
                 roi=roi,
                 frame_bounds=frame_bounds,
+                edges=edges,
             )
         )
         progress.set_value(i + 1)
@@ -2733,6 +2834,9 @@ def identify(
     if window is not None:
         movie = CroppedMovie(movie, window)
         search_roi = _roi_in_window(roi, window)
+    # A channel sum is fitted channel by channel (the joint fits), where a
+    # box must lie inside every channel, so it is never searched at the edge.
+    edges = parameters.edge_spots and summed is None
     # note that identify_async() is not wrapped: callers driving the
     # thread pool themselves build the filtered views explicitly
     movie = _identification_filtered_movie(movie, parameters, search_roi)
@@ -2751,6 +2855,7 @@ def identify(
                 frame_bounds,
                 progress,
                 abort_callback,
+                edges,
             )
             if ids is None:
                 return
@@ -2763,6 +2868,7 @@ def identify(
                 frame_bounds,
                 progress,
                 abort_callback,
+                edges,
             )
             if ids is None:
                 return
@@ -3059,8 +3165,8 @@ def _calibration_identification_info(
     The keys are those of :meth:`IdentificationParameters.to_info`, so
     ``IdentificationParameters.from_info`` reads the entry back. No
     filters are applied to calibration movies, so the filter settings are
-    always off. Per-channel methods that are all the same are recorded as
-    one.
+    always off, and calibrations never identify at the frame edge. Per-channel
+    methods that are all the same are recorded as one.
 
     Parameters
     ----------
@@ -3079,7 +3185,9 @@ def _calibration_identification_info(
         m == method[0] for m in method
     ):
         method = method[0]
-    return IdentificationParameters(method=method, box=box).to_info()
+    return IdentificationParameters(
+        method=method, box=box, edge_spots=False
+    ).to_info()
 
 
 def identify_multichannel_sum(
@@ -4142,7 +4250,10 @@ def get_spots(
         Data frame containing the identified spots. Contains fields
         `frame`, `x`, `y`, and `net_gradient` (which is missing for spots
         identified by wavelet segmentation and then also from the
-        localizations).
+        localizations). The box of a spot closer to the frame edge than
+        half a box (see ``IdentificationParameters.edge_spots``) is
+        shifted inward until it lies in the frame, so the spot is off its
+        center.
     box : int
         Size of the box to cut out around each spot. Should be an odd
         integer.
@@ -4201,6 +4312,11 @@ def _get_spots(
     """The work of :func:`get_spots`, reporting ``progress_offset`` plus the
     spots cut so far to the running phase of ``progress`` (a normalized
     tracker), which the caller starts and ends."""
+    # spots at the frame edge are cut from boxes shifted into the frame
+    # (a no-op for the spots ``fit`` placed already)
+    identifications, _, _ = _place_boxes(
+        identifications, box, movie, int(box) // 2
+    )
     spots = _cut_spots(
         movie, identifications, box, progress, offset=progress_offset
     )
@@ -4286,7 +4402,14 @@ def fit(
         Data frame containing the identified spots. Contains fields
         `frame`, `x`, `y`, and `net_gradient` (which is missing for spots
         identified by wavelet segmentation and then also from the
-        localizations).
+        localizations). A spot closer to the frame edge than half a box
+        (see ``IdentificationParameters.edge_spots``) is fitted in a box
+        shifted inward until it lies in the frame, off-center, by the
+        Gaussian fits and by the spline fits as far as the calibration
+        reaches beyond the box (see :func:`_edge_spot_margin`). The other
+        methods, and the spline fits beyond that, need the spot centered:
+        such spots are not fitted, and their number is recorded under
+        ``"Edge spots not fitted"`` in the metadata.
     box : int
         Size of the box to cut out around each spot. Should be an odd
         integer.
@@ -4471,6 +4594,12 @@ def fit(
         vectorfit.check_box(box)
         if fitting_method == "vectorfit-gpu":
             vectorfit.check_gpu()
+    identifications, box_offsets, n_edge_dropped = _place_boxes(
+        identifications,
+        box,
+        movie,
+        _edge_shift_limit(fitting_method, box, spline_calibration),
+    )
     with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
         spots, variance = get_spots(
             movie,
@@ -4488,7 +4617,8 @@ def fit(
         if callable(abort_callback) and abort_callback():
             locs = None  # aborted while the spots were cut
         else:
-            locs = _dispatch_fit(
+            locs = _dispatch_fit_placed(
+                box_offsets,
                 fitting_method=fitting_method,
                 gauss_flags=gauss_flags,
                 spots=spots,
@@ -4524,6 +4654,8 @@ def fit(
         phasor_calibration,
     )
     localize_info.update(fit_stats)
+    if n_edge_dropped:
+        localize_info["Edge spots not fitted"] = n_edge_dropped
     if fitting_method.startswith("vectorfit") and locs is not None:
         # the only spots the vectorfit localizations leave out are the
         # outliers it discards (none when it keeps them)
@@ -4702,6 +4834,130 @@ def _validate_phasor_calibration(
         )
 
 
+def _edge_shift_limit(
+    fitting_method: str, box: int, spline_calibration: dict | None
+) -> int:
+    """How far (camera pixels) :func:`fit` may shift the box of a spot at
+    the frame edge inward for ``fitting_method``.
+
+    The Gaussian fits start at the spot wherever it is in its box, so up to
+    half a box (any spot in the frame). The spline fits as far as the
+    calibration covers the box around the spot (see
+    :func:`_edge_spot_margin`). Phasor, Vectorfit and the averaging method
+    take the spot to be at the box center, so 0."""
+    if parse_gauss_code(fitting_method) is not None:
+        return int(box) // 2
+    if fitting_method.startswith("spline") and spline_calibration:
+        return _edge_spot_margin(spline_calibration, box)
+    return 0
+
+
+def _frame_shape(movie: MovieLike) -> tuple[int, int]:
+    """``(height, width)`` of the frames of ``movie``: from its ``shape``
+    or ``frame_shape``, else from its first frame."""
+    shape = getattr(movie, "shape", None)
+    if shape is not None and len(shape) == 3:
+        return int(shape[1]), int(shape[2])
+    frame_shape = getattr(movie, "frame_shape", None)
+    if frame_shape is not None:
+        return int(frame_shape[0]), int(frame_shape[1])
+    frame = np.asarray(movie[0])
+    return int(frame.shape[0]), int(frame.shape[1])
+
+
+def _place_boxes(
+    identifications: pd.DataFrame,
+    box: int,
+    movie: MovieLike,
+    max_shift: int,
+) -> tuple[pd.DataFrame, np.ndarray | None, int]:
+    """Shift the boxes of spots at the frame edge inward until they lie in
+    the frame.
+
+    A spot closer to the edge than half a box (identified with
+    ``IdentificationParameters.edge_spots``) keeps its box size; its box is
+    moved inward, so the spot sits off its center. Spots that would need a
+    shift of more than ``max_shift`` pixels (see :func:`_edge_shift_limit`)
+    are dropped.
+
+    Parameters
+    ----------
+    identifications : pd.DataFrame
+        The identified spots, with integer ``x`` and ``y``.
+    box : int
+        Box side length in camera pixels.
+    movie : MovieLike
+        The movie the spots are cut from (see :func:`_frame_shape`).
+    max_shift : int
+        Largest shift allowed along x and along y.
+
+    Returns
+    -------
+    identifications : pd.DataFrame
+        The spots that are kept, with ``x`` and ``y`` the centers of their
+        boxes. The input itself (not a copy) when no box is shifted.
+    box_offsets : np.ndarray or None
+        ``(n_spots, 2)`` integer offsets (x, y) of each spot from its box
+        center, or None when every kept spot is centered.
+    n_dropped : int
+        Number of spots dropped.
+    """
+    half = int(box) // 2
+    height, width = _frame_shape(movie)
+    x = np.asarray(identifications["x"]).astype(np.int64)
+    y = np.asarray(identifications["y"]).astype(np.int64)
+    box_x = np.clip(x, half, width - 1 - half)
+    box_y = np.clip(y, half, height - 1 - half)
+    dx = x - box_x
+    dy = y - box_y
+    if not (dx.any() or dy.any()):
+        return identifications, None, 0
+    keep = np.flatnonzero(
+        (np.abs(dx) <= max_shift) & (np.abs(dy) <= max_shift)
+    )
+    placed = identifications.iloc[keep].reset_index(drop=True)
+    placed["x"] = box_x[keep].astype(identifications["x"].dtype)
+    placed["y"] = box_y[keep].astype(identifications["y"].dtype)
+    offsets = np.column_stack([dx[keep], dy[keep]])
+    return placed, (offsets if offsets.any() else None), len(x) - len(keep)
+
+
+def _dispatch_fit_placed(
+    box_offsets: np.ndarray | None, **kwargs
+) -> pd.DataFrame | None:
+    """:func:`_dispatch_fit` for spots placed by :func:`_place_boxes`.
+
+    The centered spots are fitted exactly as without edge spots, those in
+    shifted boxes separately, with their ``box_offsets``; the localizations
+    are put together sorted by frame. ``kwargs`` are those of
+    :func:`_dispatch_fit`, with ``spots``, ``identifications`` and
+    ``variance`` for every spot."""
+    if box_offsets is None:
+        return _dispatch_fit(**kwargs)
+    shifted = box_offsets.any(axis=1)
+    if shifted.all():
+        return _dispatch_fit(**kwargs, box_offsets=box_offsets)
+    parts = []
+    for mask, offsets in ((~shifted, None), (shifted, box_offsets[shifted])):
+        index = np.flatnonzero(mask)
+        part = dict(kwargs)
+        part["spots"] = kwargs["spots"][index]
+        part["identifications"] = (
+            kwargs["identifications"].iloc[index].reset_index(drop=True)
+        )
+        if kwargs.get("variance") is not None:
+            part["variance"] = kwargs["variance"][index]
+        locs = _dispatch_fit(**part, box_offsets=offsets)
+        if locs is None:  # aborted
+            return None
+        parts.append(locs)
+    locs = pd.concat(parts, ignore_index=True)
+    locs.sort_values(
+        by="frame", kind="stable", inplace=True, ignore_index=True
+    )
+    return locs
+
+
 def _dispatch_fit(
     *,
     fitting_method: str,
@@ -4722,6 +4978,7 @@ def _dispatch_fit(
     fit_stats: dict | None = None,
     pixelsize: float,
     image_shape: tuple[int, int] | None = None,
+    box_offsets: np.ndarray | None = None,
 ) -> pd.DataFrame | None:
     """Run the fitting backend selected by ``fitting_method``.
 
@@ -4767,6 +5024,12 @@ def _dispatch_fit(
         Camera pixel size in nm, converting the fitted positions to nm.
     image_shape : tuple of int or None, optional
         ``(height, width)`` of the movie frames, needed by "vectorfit".
+    box_offsets : np.ndarray or None, optional
+        ``(n_spots, 2)`` whole-pixel offsets (x, y) of the spots from the
+        centers of their boxes, which ``identifications`` hold, for boxes
+        shifted to stay inside the frame (see :func:`_place_boxes`). Only
+        the Gaussian and spline fits take them. Default None, i.e., every
+        spot is centered in its box.
 
     Returns
     -------
@@ -4787,6 +5050,7 @@ def _dispatch_fit(
             parallel=parallel,
             abort_callback=abort_callback,
             pixelsize=pixelsize,
+            box_offsets=box_offsets,
             **gauss_flags,
         )
     elif fitting_method in ("spline-gpu", "spline-mle-gpu"):
@@ -4806,6 +5070,7 @@ def _dispatch_fit(
             variance=variance,
             abort_callback=abort_callback,
             pixelsize=pixelsize,
+            box_offsets=box_offsets,
         )
     elif fitting_method in ("spline", "spline-mle"):
         # The CPU cubic-spline fit (picasso.fitting.splinefit), reported per
@@ -4825,6 +5090,7 @@ def _dispatch_fit(
             abort_callback=abort_callback,
             variance=variance,
             pixelsize=pixelsize,
+            box_offsets=box_offsets,
         )
     elif fitting_method == "avg":
         locs = _fit2d_avg(
@@ -5356,6 +5622,42 @@ def fit_spots_gauss(
     (2013).
     https://doi.org/10.1038/nmeth.2488
     """
+    return _fit_spots_gauss(
+        spots,
+        rotated=rotated,
+        mle=mle,
+        spherical=spherical,
+        use_gpu=use_gpu,
+        return_stats=return_stats,
+        tolerance=tolerance,
+        max_iterations=max_iterations,
+        progress=progress,
+        variance=variance,
+        parallel=parallel,
+        abort_callback=abort_callback,
+    )
+
+
+def _fit_spots_gauss(
+    spots: lib.FloatArray3D,
+    *,
+    rotated: bool = False,
+    mle: bool = False,
+    spherical: bool = False,
+    use_gpu: bool = False,
+    return_stats: bool = False,
+    tolerance: float | None = None,
+    max_iterations: int | None = None,
+    progress: lib.Progress | Literal["console"] | None = None,
+    variance: lib.FloatArray3D | None = None,
+    parallel: bool = True,
+    abort_callback: Callable[[], bool] | None = None,
+    seed_offsets: np.ndarray | None = None,
+):
+    """:func:`fit_spots_gauss`, seeding each spot ``seed_offsets``
+    (``(n_spots, 2)`` whole pixels, x and y) away from the box center if
+    given: the spots of boxes that :func:`fit` shifted inward to keep them
+    inside the frame (see ``IdentificationParameters.edge_spots``)."""
     if rotated and spherical:
         raise ValueError("'rotated' and 'spherical' are mutually exclusive.")
     if use_gpu and not CUDA_AVAILABLE:
@@ -5374,6 +5676,7 @@ def fit_spots_gauss(
         size,
         rotated=rotated,
         spherical=spherical,
+        offsets=seed_offsets,
     ).astype(np.float64)
 
     kwargs = dict(
@@ -5747,6 +6050,7 @@ def _fit2d_gauss(
     abort_callback: Callable[[], bool] | None = None,
     *,
     pixelsize: float,
+    box_offsets: np.ndarray | None = None,
 ) -> pd.DataFrame | None:
     """Fit 2D Gaussians with least squares or, if ``mle``, maximum
     likelihood, on the CPU or the GPU. If ``rotated``, a rotated elliptical
@@ -5755,10 +6059,14 @@ def _fit2d_gauss(
     isotropic Gaussian with a single width is fitted and the resulting ``sx``
     and ``sy`` columns are identical. ``pixelsize`` (nm) converts the result
     to nm. ``progress`` (a normalized tracker, or None) gets the "Fitting
-    spots" phase. See ``fit`` for more details.
+    spots" phase. See ``fit`` for more details. ``box_offsets``
+    (``(n_spots, 2)`` whole pixels, x and y) are the offsets of the spots
+    from the centers of boxes that ``fit`` shifted to keep them inside the
+    frame: the fit starts there, and ``identifications`` hold the box
+    centers, so the positions need no further correction.
 
     Returns None if ``abort_callback`` asked to stop."""
-    result = fit_spots_gauss(
+    result = _fit_spots_gauss(
         spots,
         rotated=rotated,
         mle=mle,
@@ -5771,6 +6079,7 @@ def _fit2d_gauss(
         variance=variance,
         parallel=parallel,
         abort_callback=abort_callback,
+        seed_offsets=box_offsets,
     )
     if result is None:
         return None
@@ -6789,6 +7098,8 @@ def _run_splinefit(
     abort_callback: Callable[[], bool] | None = None,
     use_gpu: bool = False,
     variance: lib.FloatArray3D | None = None,
+    seed_shifts: np.ndarray | None = None,
+    grid_margin: int = 0,
 ) -> tuple | None:
     """Low-level spline fit: unpack the calibration and run the kernels.
 
@@ -6817,12 +7128,24 @@ def _run_splinefit(
     subprocess. False runs the fit serially in the calling thread, which is
     what the tests use for reproducibility. It is ignored on the GPU, where
     one launch fits every spot.
+
+    ``grid_margin`` widens the calibration crop by that many pixels on each
+    side of the box, and ``seed_shifts`` (``(n_spots, 2)``, x and y) are
+    added to the lateral seeds. A spot ``d`` pixels off the box center is
+    seeded at ``d - grid_margin``: the model only depends on the shift
+    relative to the grid, so the fit is that of the centered case, with the
+    spline evaluated over the whole box around the spot. The fitted shifts
+    are relative to the wider grid's center (see
+    :func:`_locs_from_fits_spline`).
     """
     box = spots.shape[1]
     # Fit a smaller-than-calibration box against a centered crop, exactly as
     # locs_from_fits_spline crops identically itself, so its CRLB matches
-    # the fit geometry.
-    calibration = crop_spline_calibration(calibration, box)
+    # the fit geometry. Spots off-center in boxes that ``fit`` shifted to
+    # stay inside the frame are fitted against a crop ``grid_margin`` pixels
+    # wider on each side (see ``_edge_spot_margin``), so the model covers the
+    # whole box around them; ``seed_shifts`` start them where they are.
+    calibration = crop_spline_calibration(calibration, box + 2 * grid_margin)
     args, kwargs, n_spots = _prepare_splinefit_args(
         spots,
         calibration,
@@ -6833,6 +7156,7 @@ def _run_splinefit(
         tolerance,
         max_iterations,
         variance,
+        seed_shifts=seed_shifts,
     )
     progress = lib.normalize_progress(progress)
     aborted = callable(abort_callback) and abort_callback()
@@ -6860,6 +7184,7 @@ def _prepare_splinefit_args(
     tolerance: float | None,
     max_iterations: int | None,
     variance: lib.FloatArray3D | None,
+    seed_shifts: np.ndarray | None = None,
 ) -> tuple[tuple, dict, int]:
     """Build the positional/keyword arguments shared by both fit kernels.
 
@@ -6893,6 +7218,10 @@ def _prepare_splinefit_args(
     variance : lib.FloatArray3D or None
         Per-pixel sCMOS readout variance in photoelectrons squared, laid
         out like ``spots``.
+    seed_shifts : np.ndarray or None, optional
+        ``(n_spots, 2)`` lateral seeds (x, y shift) added to those of
+        ``seeds.initial_parameters_spline``, for spots that are not at the
+        center of the template (see :func:`_run_splinefit`). Default None.
 
     Returns
     -------
@@ -6924,6 +7253,13 @@ def _prepare_splinefit_args(
         ),
         dtype=np.float64,
     )
+    if seed_shifts is not None:
+        # the lateral shifts are the first two parameters of the
+        # photon-decoupled model and follow the amplitude otherwise
+        x_col = 0 if model == precision._LINK_XYZ_MODEL else 1
+        initial[:, x_col : x_col + 2] += np.asarray(
+            seed_shifts, dtype=np.float64
+        )
     coefficients = precision._spline_coeff_reshaped(calibration)
     channel_jacobians = precision._spline_channel_jacobians(
         jacobians, len(spots), n_channels, calibration
@@ -7163,6 +7499,45 @@ def fit_spots_splinefit(
         Only if ``return_stats``. The residual sum of squares at the optimum;
         None for maximum likelihood.
     """
+    return _fit_spots_splinefit(
+        spots,
+        calibration,
+        mle=mle,
+        n_z_starts=n_z_starts,
+        return_stats=return_stats,
+        residuals=residuals,
+        jacobians=jacobians,
+        tolerance=tolerance,
+        max_iterations=max_iterations,
+        parallel=parallel,
+        progress=progress,
+        abort_callback=abort_callback,
+        use_gpu=use_gpu,
+        variance=variance,
+    )
+
+
+def _fit_spots_splinefit(
+    spots: lib.FloatArray3D,
+    calibration: dict,
+    *,
+    mle: bool = False,
+    n_z_starts: int | None = None,
+    return_stats: bool = False,
+    residuals: np.ndarray | None = None,
+    jacobians: np.ndarray | None = None,
+    tolerance: float | None = None,
+    max_iterations: int | None = None,
+    parallel: bool = True,
+    progress: lib.Progress | Literal["console"] | None = None,
+    abort_callback: Callable[[], bool] | None = None,
+    use_gpu: bool = False,
+    variance: lib.FloatArray3D | None = None,
+    seed_shifts: np.ndarray | None = None,
+    grid_margin: int = 0,
+) -> np.ndarray | tuple | None:
+    """:func:`fit_spots_splinefit` with the edge-spot geometry of
+    :func:`_run_splinefit` (``seed_shifts`` and ``grid_margin``)."""
     with lib.tracked_progress(progress, "Fitting spots", "spot") as progress:
         result = _run_splinefit(
             spots,
@@ -7178,6 +7553,8 @@ def fit_spots_splinefit(
             abort_callback=abort_callback,
             use_gpu=use_gpu,
             variance=variance,
+            seed_shifts=seed_shifts,
+            grid_margin=grid_margin,
         )
     if result is None:
         return None
@@ -7662,9 +8039,15 @@ def _locs_from_fits_spline(
     spots: np.ndarray | None,
     *,
     pixelsize: float,
+    grid_margin: int = 0,
 ) -> pd.DataFrame:
-    """:func:`locs_from_fits_spline` with a normalized tracker."""
-    calibration = crop_spline_calibration(calibration, box)
+    """:func:`locs_from_fits_spline` with a normalized tracker.
+
+    ``grid_margin`` is that of the fit (see :func:`_run_splinefit`): the
+    calibration is cropped as wide as it was for the fit, so the CRLB is
+    evaluated in the fit's geometry, and the shifts are relative to the
+    center of that wider grid."""
+    calibration = crop_spline_calibration(calibration, box + 2 * grid_margin)
     model = calibration["model"]
     if model == precision._LINK_XYZ_MODEL:
         # Photon-decoupled model: 3 + 2*n_channels parameters
@@ -7695,7 +8078,9 @@ def _locs_from_fits_spline(
     x_shift = np.asarray(theta[:, 1])
     y_shift = np.asarray(theta[:, 2])
     offset = np.asarray(theta[:, -1])
-    center = (box - 1) / 2.0
+    # the template center in box coordinates (``grid_margin`` pixels further
+    # for a fit against a wider grid, see ``_run_splinefit``)
+    center = (box - 1) / 2.0 + grid_margin
     x = x_shift / oversampling + center + identifications["x"] - box_offset
     y = y_shift / oversampling + center + identifications["y"] - box_offset
 
@@ -7778,6 +8163,7 @@ def _fit2d_spline_gpu(
     abort_callback: Callable[[], bool] | None = None,
     *,
     pixelsize: float,
+    box_offsets: np.ndarray | None = None,
 ) -> pd.DataFrame | None:
     """Fit an experimentally measured cubic-spline PSF on the GPU. For a 3D
     calibration the localizations contain the fitted ``z`` directly. See
@@ -7789,8 +8175,15 @@ def _fit2d_spline_gpu(
     :func:`fit_spots_splinefit`); ``None`` picks it from the calibration.
     Pass 1 for the single in-focus start.
 
+    ``box_offsets`` are the offsets of the spots from the centers of boxes
+    that ``fit`` shifted to keep them inside the frame, see
+    :func:`_spline_edge_geometry`.
+
     Returns None if ``abort_callback`` asked to stop."""
-    result = fit_spots_splinefit(
+    seed_shifts, grid_margin = _spline_edge_geometry(
+        calibration, box, box_offsets
+    )
+    result = _fit_spots_splinefit(
         spots,
         calibration,
         mle=mle,
@@ -7802,11 +8195,13 @@ def _fit2d_spline_gpu(
         use_gpu=True,
         variance=variance,
         abort_callback=abort_callback,
+        seed_shifts=seed_shifts,
+        grid_margin=grid_margin,
     )
     if result is None:
         return None
     theta, log_likelihood, iterations, chi_square = result
-    locs = locs_from_fits_spline(
+    return _spline_locs(
         identifications,
         theta,
         box=box,
@@ -7820,8 +8215,8 @@ def _fit2d_spline_gpu(
         variance=variance,
         spots=spots,
         pixelsize=pixelsize,
+        grid_margin=grid_margin,
     )
-    return locs
 
 
 def _fit2d_spline_cpu(
@@ -7840,15 +8235,20 @@ def _fit2d_spline_cpu(
     variance: lib.FloatArray3D | None = None,
     *,
     pixelsize: float,
+    box_offsets: np.ndarray | None = None,
 ) -> pd.DataFrame | None:
     """Fit an experimentally measured cubic-spline PSF on the CPU. For a 3D
     calibration the localizations contain the fitted ``z`` directly. See
     ``fit`` for more details. ``progress`` (a normalized tracker) gets two
     phases: "Fitting spots" (per spot) and the CRLB of
-    ``locs_from_fits_spline``.
+    ``locs_from_fits_spline``. ``box_offsets`` as in
+    :func:`_fit2d_spline_gpu`.
 
     Returns None if ``abort_callback`` asked to stop."""
-    result = fit_spots_splinefit(
+    seed_shifts, grid_margin = _spline_edge_geometry(
+        calibration, box, box_offsets
+    )
+    result = _fit_spots_splinefit(
         spots,
         calibration,
         mle=mle,
@@ -7860,11 +8260,13 @@ def _fit2d_spline_cpu(
         progress=progress,
         abort_callback=abort_callback,
         variance=variance,
+        seed_shifts=seed_shifts,
+        grid_margin=grid_margin,
     )
     if result is None:
         return None
     theta, log_likelihood, iterations, chi_square = result
-    return locs_from_fits_spline(
+    return _spline_locs(
         identifications,
         theta,
         box=box,
@@ -7878,7 +8280,93 @@ def _fit2d_spline_cpu(
         variance=variance,
         spots=spots,
         pixelsize=pixelsize,
+        grid_margin=grid_margin,
     )
+
+
+def _edge_spot_margin(calibration: dict, box: int) -> int:
+    """How far (in camera pixels) ``fit`` may shift the box of a spot at
+    the frame edge for a spline fit with ``calibration``.
+
+    The box of an edge spot is shifted to stay inside the frame, so the spot
+    sits off-center in it and the model has to cover the box *around the
+    spot*: up to the shift beyond the centered crop on the far side. The
+    calibration measured the PSF in its own box, which is usually larger than
+    the fit box, so the spot may move as far as that extra width reaches
+    (``(calibration box - box) // 2``), and at most half a box. Models other
+    than the single-channel ``spline-2d`` and ``spline-3d``, and laterally
+    oversampled calibrations, give 0: their spots must be centered."""
+    if calibration.get("model") not in ("spline-2d", "spline-3d"):
+        return 0
+    if float(calibration.get("oversampling", 1.0)) != 1.0:
+        return 0
+    box = int(box)
+    margin = (int(calibration["n_data"][0]) - box) // 2
+    return max(0, min(box // 2, margin))
+
+
+def _spline_edge_geometry(
+    calibration: dict, box: int, box_offsets: np.ndarray | None
+) -> tuple[np.ndarray | None, int]:
+    """The ``(seed_shifts, grid_margin)`` of :func:`_run_splinefit` for
+    spots ``box_offsets`` (``(n_spots, 2)`` whole pixels, x and y) from the
+    centers of their boxes; ``(None, 0)`` without offsets, i.e. every spot
+    centered. Each spot is seeded at its offset relative to the center of a
+    calibration crop :func:`_edge_spot_margin` pixels wider on each side."""
+    if box_offsets is None:
+        return None, 0
+    margin = _edge_spot_margin(calibration, box)
+    offsets = np.asarray(box_offsets, dtype=np.float64)
+    if np.abs(offsets).max(initial=0) > margin:
+        raise ValueError(
+            f"A spot is {np.abs(offsets).max():.0f} pixels off its box center "
+            f"but the spline calibration covers only {margin} (see "
+            "_edge_spot_margin)."
+        )
+    return offsets - margin, margin
+
+
+def _spline_locs(
+    identifications: pd.DataFrame,
+    theta: lib.FloatArray2D,
+    *,
+    box: int,
+    em: bool,
+    calibration: dict,
+    mle: bool,
+    log_likelihood: lib.FloatArray1D | None,
+    iterations: lib.FloatArray1D | None,
+    progress: lib.Progress | None,
+    chi_square: lib.FloatArray1D | None,
+    variance: lib.FloatArray3D | None,
+    spots: np.ndarray | None,
+    pixelsize: float,
+    grid_margin: int,
+) -> pd.DataFrame:
+    """:func:`locs_from_fits_spline` for a fit against a calibration crop
+    ``grid_margin`` pixels wider on each side (see :func:`_run_splinefit`);
+    the same as it for ``grid_margin=0``."""
+    with lib.tracked_progress(
+        progress, precision._SPLINE_CRLB_LABEL, "loc"
+    ) as progress:
+        return _locs_from_fits_spline(
+            identifications,
+            theta,
+            box,
+            em,
+            calibration,
+            mle=mle,
+            log_likelihood=log_likelihood,
+            iterations=iterations,
+            progress=progress,
+            residuals=None,
+            jacobians=None,
+            chi_square=chi_square,
+            variance=variance,
+            spots=spots,
+            pixelsize=pixelsize,
+            grid_margin=grid_margin,
+        )
 
 
 # ----------------------------------------------------------------------

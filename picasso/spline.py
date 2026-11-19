@@ -291,8 +291,10 @@ def _detect_bead_positions(
     # No temporal median filter here: beads in a calibration
     # stack are static and do not blink, so their own signal would end up
     # in the temporal median and be subtracted away.
+    # Beads are averaged into the PSF, so each must be whole in its box: no
+    # identification at the frame edge.
     parameters = localize.IdentificationParameters(
-        method=identification_method, box=box
+        method=identification_method, box=box, edge_spots=False
     )
     ids, _ = localize.identify(
         movie,
@@ -3572,7 +3574,7 @@ def _region_detections_by_frame(
 ) -> dict:
     """Detect single molecules inside ``rect`` and group them by frame."""
     parameters = localize.IdentificationParameters(
-        method=identification_method, box=box
+        method=identification_method, box=box, edge_spots=False
     )
     ids, _ = localize.identify(movie_sub, parameters=parameters, roi=rect)
     if len(ids) == 0:
@@ -3983,7 +3985,7 @@ def _movie_detections_by_frame(
     frame."""
     movie_sub = np.stack([np.asarray(movie[int(f)]) for f in sample_frames])
     parameters = localize.IdentificationParameters(
-        method=identification_method, box=box
+        method=identification_method, box=box, edge_spots=False
     )
     ids, _ = localize.identify(movie_sub, parameters=parameters)
     if len(ids) == 0:

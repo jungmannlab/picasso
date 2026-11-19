@@ -30,7 +30,7 @@ import pytest
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 import picasso
-from picasso import io, lib, render, transforms
+from picasso import io, lib, localize, render, transforms
 from picasso.gui import localize as gui_localize
 from tests.test_gui_localize_calibration import (
     ACCEPTED,
@@ -3536,6 +3536,19 @@ class TestJointGaussFit:
 # ---------------------------------------------------------------------------
 
 
+class TestEdgeSpotsCheckbox:
+    def test_the_checkbox_is_the_edge_spots_parameter(self, window):
+        dialog = window.parameters_dialog
+        assert dialog.edge_spots_checkbox.isChecked()
+        assert window.parameters["Edge Spots"] is True
+        dialog.edge_spots_checkbox.setChecked(False)
+        assert window.parameters["Edge Spots"] is False
+        parameters = localize.IdentificationParameters.from_info(
+            window.parameters
+        )
+        assert parameters.edge_spots is False
+
+
 class TestRememberedSettings:
     def test_the_last_settings_come_back(self, qt_offscreen, tmp_path):
         first = gui_localize.Window()
@@ -3546,6 +3559,7 @@ class TestRememberedSettings:
         dialog.fit_model.setCurrentText("2D rotated elliptical Gaussian")
         dialog.fit_optimizer.setCurrentText("MLE")
         dialog.gaussian_filter_spinbox.setValue(1.5)
+        dialog.edge_spots_checkbox.setChecked(False)
         first.close()
 
         second = gui_localize.Window()
@@ -3557,6 +3571,7 @@ class TestRememberedSettings:
         )
         assert dialog.fit_optimizer.currentText() == "MLE"
         assert dialog.gaussian_filter_spinbox.value() == 1.5
+        assert not dialog.edge_spots_checkbox.isChecked()
         assert second.pwd == str(tmp_path)
         second.close()
 

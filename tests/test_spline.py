@@ -1080,7 +1080,9 @@ class TestCalibrateSpline:
         # and records how the beads were identified
         assert localize.IdentificationParameters.from_info(
             loaded["Identification"]
-        ) == localize.IdentificationParameters(method=NG, box=BOX)
+        ) == localize.IdentificationParameters(
+            method=NG, box=BOX, edge_spots=False
+        )
 
     def test_calibrate_spline_2d(self):
         movie, _, _ = _synthetic_bead_movie()
@@ -1352,7 +1354,9 @@ class TestCalibrateSplineMultichannel:
         # one method shared by the channels is recorded once
         assert localize.IdentificationParameters.from_info(
             loaded["Identification"]
-        ) == localize.IdentificationParameters(method=NG, box=BOX)
+        ) == localize.IdentificationParameters(
+            method=NG, box=BOX, edge_spots=False
+        )
         # co-focal channels: both planes at the same focus
         np.testing.assert_allclose(
             calib["plane_offsets"], [0.0, 0.0], atol=25.0
@@ -2034,7 +2038,9 @@ class TestRefineSplitFovTransformsFromSignal:
         )
         assert localize.IdentificationParameters.from_info(
             updated["Signal registration identification"]
-        ) == localize.IdentificationParameters(method=SIGNAL_NG, box=BOX)
+        ) == localize.IdentificationParameters(
+            method=SIGNAL_NG, box=BOX, edge_spots=False
+        )
         # only ~50 frames are sampled (not all 150), so expect fewer pairs
         assert reg_info[0]["n_matches"] >= 40
         assert reg_info[0]["rms"] < 1.0
@@ -2189,7 +2195,9 @@ class TestRefineMultichannelTransformsFromSignal:
         )
         assert localize.IdentificationParameters.from_info(
             updated["Signal registration identification"]
-        ) == localize.IdentificationParameters(method=SIGNAL_NG, box=BOX)
+        ) == localize.IdentificationParameters(
+            method=SIGNAL_NG, box=BOX, edge_spots=False
+        )
         # only ~50 frames are sampled (not all 150), so expect fewer pairs
         assert reg_info[0]["n_matches"] >= 40
         assert reg_info[0]["rms"] < 1.0

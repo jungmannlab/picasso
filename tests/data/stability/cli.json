@@ -195,6 +195,7 @@
   "--max-iterations",
   "--microtime-gate",
   "--multi-emitter",
+  "--no-edge-spots",
   "--peak-radius",
   "--peak-search-z",
   "--pixelsize",
