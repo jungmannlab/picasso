@@ -87,7 +87,91 @@ __all__ = [
     "bead_inspection_data",
     "plot_bead_gallery",
     "spline_coefficients",
+    "psf_filter_kernel",
 ]
+
+
+def psf_filter_kernel(
+    calibration: dict, channel: int | None = None
+) -> np.ndarray:
+    """The PSF of a spline calibration averaged over z, as the kernel of
+    the PSF filter of the spot identification.
+
+    A spot is found where this kernel matches the frame best, i.e. at the
+    center of the calibration's PSF, whatever its shape at a given z: for
+    an astigmatic PSF the kernel is a blob, for a double helix a ring
+    around the rotation axis, where a local maximum of the frame would sit
+    on one of the lobes. See ``localize.PSFFilter``.
+
+    Parameters
+    ----------
+    calibration : dict
+        A spline calibration (``"spline-2d"``, ``"spline-3d"`` or
+        ``"spline-3d-multichannel"``), as returned by
+        :func:`calibrate_spline` or ``io.load_spline_calibration``.
+    channel : int, optional
+        For a multichannel calibration, the channel whose PSF is used.
+        None (the default) adds all channels up, as their sum is what is
+        identified on the sum of the channels.
+
+    Returns
+    -------
+    kernel : np.ndarray
+        ``(height, width)`` float32 kernel (rows are y), both sides odd,
+        non-negative and summing to 1. Its center pixel is the PSF's
+        center, i.e. where the fit puts the localization.
+
+    Raises
+    ------
+    ValueError
+        If the calibration is not a spline calibration or its PSF is
+        empty.
+    """
+    model = calibration.get("model")
+    if model not in ("spline-2d", "spline-3d", "spline-3d-multichannel"):
+        raise ValueError(
+            f"The PSF filter needs a spline calibration, got model {model!r}."
+        )
+    coeff = precision._spline_coeff_reshaped(calibration)
+    if channel is not None:
+        coeff = coeff[[int(channel)]]
+
+    def knots(n_intervals: int) -> tuple[np.ndarray, np.ndarray]:
+        # the PSF at knot k is interval k at its start (power 0 only) and,
+        # for the last knot, the last interval at its end (all powers)
+        index = np.r_[np.arange(n_intervals), n_intervals - 1]
+        weights = np.zeros((n_intervals + 1, 4))
+        weights[:-1, 0] = 1.0
+        weights[-1, :] = 1.0
+        return index, weights
+
+    if coeff.ndim == 5:  # (channel, y, x, y power, x power)
+        iy, wy = knots(coeff.shape[1])
+        ix, wx = knots(coeff.shape[2])
+        values = np.einsum("kyxbc,yb,xc->kyx", coeff[:, iy][:, :, ix], wy, wx)[
+            :, None
+        ]
+    else:  # (channel, z, y, x, z power, y power, x power)
+        iz, wz = knots(coeff.shape[1])
+        iy, wy = knots(coeff.shape[2])
+        ix, wx = knots(coeff.shape[3])
+        values = np.einsum(
+            "kzyxabc,za,yb,xc->kzyx",
+            coeff[:, iz][:, :, iy][:, :, :, ix],
+            wz,
+            wy,
+            wx,
+            optimize=True,
+        )
+    kernel = np.clip(values.sum(axis=0).mean(axis=0), 0.0, None)
+    # odd sides, so that one pixel is the center (the templates are built on
+    # odd boxes; an even one loses its last row or column)
+    kernel = kernel[: kernel.shape[0] - (1 - kernel.shape[0] % 2)]
+    kernel = kernel[:, : kernel.shape[1] - (1 - kernel.shape[1] % 2)]
+    total = float(kernel.sum())
+    if not np.isfinite(total) or total <= 0:
+        raise ValueError("The calibration's PSF is empty.")
+    return (kernel / total).astype(np.float32)
 
 
 def _natural_spline_operator(n: int) -> np.ndarray:
@@ -327,11 +411,28 @@ def _detect_bead_positions(
             "frames."
         )
 
+    return _beads_from_identifications(
+        ids, box, movie.shape[1:3], min_separation, fov_of_frame
+    )
+
+
+def _beads_from_identifications(
+    ids: pd.DataFrame,
+    box: int,
+    frame_shape: tuple[int, int],
+    min_separation: float,
+    fov_of_frame: np.ndarray | None = None,
+) -> pd.DataFrame:
+    """One bead per physical bead from spots identified on several frames:
+    rounded to the pixel grid, kept only if the whole box fits into the
+    frame, and de-duplicated (see :func:`_dedupe_beads`), per field of view
+    when ``fov_of_frame`` is given. Returns integer ``x``/``y`` columns, and
+    ``fov`` with ``fov_of_frame``."""
     x = np.rint(np.asarray(ids["x"])).astype(int)
     y = np.rint(np.asarray(ids["y"])).astype(int)
     frame = np.asarray(ids["frame"]).astype(int)
     # keep beads whose full box fits inside the frame
-    height, width = movie.shape[1], movie.shape[2]
+    height, width = int(frame_shape[0]), int(frame_shape[1])
     half = box // 2
     inside = (
         (x - half >= 0)
@@ -470,6 +571,76 @@ def _subpixel_bead_positions(
             xy[b, 0] += center[0]
             xy[b, 1] += center[1]
     return xy
+
+
+def _given_beads(
+    bead_positions: pd.DataFrame | np.ndarray,
+    movie: localize.LoadedMovie,
+    box: int,
+    d: float,
+    frames_per_step: int,
+    frame_order: str,
+    frame_bounds: tuple[int, int] | list | None,
+) -> pd.DataFrame:
+    """The beads of ``bead_positions`` (see :func:`calibrate_spline`) as
+    the integer ``x``/``y``/``fov`` frame the calibration builds on.
+
+    Spots identified on the movie (with a ``frame`` column) are reduced to
+    one per bead as in :func:`_detect_bead_positions`, from the reference
+    frames; plain positions are each one bead. Beads whose box does not fit
+    into the frame are dropped."""
+    n_frames = int(movie.shape[0])
+    frame_shape = movie.shape[1:3]
+    fov_of_frame = _fov_of_frame(n_frames, frames_per_step, frame_order)
+    if isinstance(bead_positions, pd.DataFrame):
+        positions = bead_positions
+    else:
+        array = np.asarray(bead_positions, dtype=np.float64)
+        if array.ndim != 2 or array.shape[1] != 2:
+            raise ValueError(
+                "bead_positions must be identifications (a DataFrame with "
+                "'frame', 'x' and 'y') or an (n, 2) array of x, y positions "
+                f"in camera pixels, got shape {array.shape}."
+            )
+        positions = pd.DataFrame({"x": array[:, 0], "y": array[:, 1]})
+    if "frame" in positions.columns:
+        step_of_frame, _, step_range = _step_of_frame(
+            n_frames, d, frames_per_step, frame_order, frame_bounds
+        )
+        segments = _reference_frame_segments(step_of_frame, step_range)
+        frames = np.concatenate([np.arange(a, b + 1) for a, b in segments])
+        positions = positions[np.isin(positions["frame"], frames)]
+        if len(positions) == 0:
+            raise ValueError(
+                "None of the given spots lies in the reference frames (the "
+                "middle third of the z-scan) the beads are taken from."
+            )
+        return _beads_from_identifications(
+            positions, box, frame_shape, box, fov_of_frame
+        )
+    x = np.rint(np.asarray(positions["x"], dtype=np.float64)).astype(int)
+    y = np.rint(np.asarray(positions["y"], dtype=np.float64)).astype(int)
+    fov = (
+        np.asarray(positions["fov"], dtype=int)
+        if "fov" in positions.columns
+        else np.zeros(len(x), dtype=int)
+    )
+    half = box // 2
+    height, width = int(frame_shape[0]), int(frame_shape[1])
+    inside = (
+        (x - half >= 0)
+        & (x + half < width)
+        & (y - half >= 0)
+        & (y + half < height)
+    )
+    if not inside.any():
+        raise ValueError(
+            "None of the given bead positions has its whole box inside the "
+            "frame."
+        )
+    return pd.DataFrame(
+        {"x": x[inside], "y": y[inside], "fov": fov[inside]}
+    ).reset_index(drop=True)
 
 
 def _bead_volumes(
@@ -624,7 +795,7 @@ def _focus_step(volume: np.ndarray) -> tuple[int, float]:
     the mean sigma there, using the least-squares Gaussian fitter.
 
     Only fits that describe a spot count, by the same test as
-    :func:`_focus_center_offset`: far out of focus (e.g. the broad end of an
+    :func:`_spot_center_offsets`: far out of focus (e.g. the broad end of an
     astigmatic stack) the fit can "converge" to a degenerate Gaussian with
     a negative peak and one width near zero, which would otherwise be taken
     for the sharpest slice. Of those, only the slices whose fitted peak is at
@@ -799,19 +970,28 @@ _RECENTER_MIN_SHIFT = 1e-3
 _RECENTER_MAX_SHIFT = 1.25
 
 
-def _focus_center_offset(
-    volume: np.ndarray, z_center: int
-) -> tuple[float, float]:
-    """Lateral ``(row, col)`` offset of the in-focus PSF center from the box
-    center, in pixels.
+def _psf_center_offset(volume: np.ndarray) -> tuple[float, float]:
+    """Lateral ``(row, col)`` offset of a PSF volume's center from the box
+    center, in pixels, uncapped.
 
-    Uses the same least-squares Gaussian fitter as :func:`_focus_step` (whose
-    sigma already defines "in focus" here), falling back to the
-    background-subtracted intensity centroid when the fit does not converge -
-    a PSF a single Gaussian cannot describe, such as a double helix, still has
-    a well-defined centroid. Returns ``(0.0, 0.0)`` if neither estimate is
-    usable, so the caller simply leaves the volume alone."""
-    d_row, d_col = _spot_center_offset(volume[:, :, int(z_center)])
+    The center is that of the PSF summed over all z (each slice's minimum
+    removed first, so the background does not pull it toward the box
+    center), measured like a spot (see :func:`_spot_center_offset`). It
+    needs no notion of focus, so it holds for any PSF: an astigmatic or 2D
+    PSF sums to a blob around its center, a double helix to two opposite
+    arcs around its rotation axis, where a Gaussian fitted to any one slice
+    would land on one of the lobes."""
+    volume = np.asarray(volume, dtype=np.float64)
+    above = volume - volume.min(axis=(0, 1), keepdims=True)
+    return _spot_center_offset(above.sum(axis=2))
+
+
+def _template_center_offset(volume: np.ndarray) -> tuple[float, float]:
+    """The offset of :func:`_psf_center_offset`, or ``(0.0, 0.0)`` beyond
+    :data:`_RECENTER_MAX_SHIFT`, so the caller simply leaves the volume
+    alone (a larger offset is corrected by cutting the beads' boxes
+    elsewhere, see :func:`_recut_beads`)."""
+    d_row, d_col = _psf_center_offset(volume)
     if max(abs(d_row), abs(d_col)) > _RECENTER_MAX_SHIFT:
         return 0.0, 0.0
     return d_row, d_col
@@ -820,7 +1000,7 @@ def _focus_center_offset(
 def _spot_center_offset(image: np.ndarray) -> tuple[float, float]:
     """Lateral ``(row, col)`` offset of a spot's center from the center of
     its ``(box, box)`` image, in pixels (see :func:`_spot_center_offsets`;
-    :func:`_focus_center_offset` caps it)."""
+    :func:`_template_center_offset` caps it)."""
     d_row, d_col = _spot_center_offsets(np.asarray(image)[None])[0]
     return float(d_row), float(d_col)
 
@@ -1128,7 +1308,11 @@ def _register_and_average_channels(
     # alike, so the channels keep their relative position (centering each on
     # its own focus would misregister them wherever the PSF center moves
     # with z, e.g. through coma, since the channels focus at different z).
-    d_row, d_col = _focus_center_offset(refs[0], z_ref)
+    # The center is that of the PSF summed over z (see _psf_center_offset).
+    # An offset beyond the cap is reported instead, for the caller to cut
+    # the beads' boxes there (see _recut_beads).
+    center_offset = _psf_center_offset(refs[0])
+    d_row, d_col = _template_center_offset(refs[0])
     if max(abs(d_row), abs(d_col)) > _RECENTER_MIN_SHIFT:
         for c in range(n_channels):
             refs[c] = _ndi_shift(
@@ -1151,6 +1335,9 @@ def _register_and_average_channels(
             "ncc": ncc,
             "mse": mse,
             "registered_all": a.astype(np.float32),
+            # the reference channel's PSF center before centering (pixels,
+            # row and column), whether or not it was within reach
+            "center_offset": center_offset,
             **limits,
         }
         for a in aligned
@@ -1188,6 +1375,8 @@ def _bead_quality_summary(
         xz[b] = volume[c, :, :].T
         yz[b] = volume[:, c, :].T
     summary = dict(quality)
+    # the PSF center serves the box recut only (see _recut_beads)
+    summary.pop("center_offset", None)
     summary.update({"xy": xy, "xz": xz, "yz": yz})
     summary["x"] = np.asarray(beads["x"], dtype=float)
     summary["y"] = np.asarray(beads["y"], dtype=float)
@@ -1501,13 +1690,95 @@ def build_psf_template(
         roi=roi,
         z_binning=z_binning,
     )
-    volumes = extracted["volumes"]
-    # first pass on the raw bead-average to locate focus, then register
-    z_center, _ = _focus_step(volumes.mean(axis=0))
-    mean_volume, registered, quality = _register_and_average(
-        volumes, z_center, return_registered=True
-    )
+    for recut in range(_RECUT_PASSES + 1):
+        volumes = extracted["volumes"]
+        # first pass on the raw bead-average to locate focus, then register
+        z_center, _ = _focus_step(volumes.mean(axis=0))
+        mean_volume, registered, quality = _register_and_average(
+            volumes, z_center, return_registered=True
+        )
+        # a PSF well off the center of the beads' boxes (e.g. a box detected
+        # on one lobe of a double helix) is fixed by cutting the boxes on it
+        moved = (
+            _recut_beads(
+                extracted["beads"],
+                quality["center_offset"],
+                box,
+                movie.shape[1:3],
+            )
+            if recut < _RECUT_PASSES
+            else None
+        )
+        if moved is None:
+            break
+        extracted = _extract_template_volumes(
+            movie,
+            camera_info,
+            box,
+            identification_method,
+            d,
+            frames_per_step=frames_per_step,
+            frame_bounds=frame_bounds,
+            frame_order=frame_order,
+            parallel=parallel,
+            beads=moved,
+            return_spots=return_spots,
+            roi=roi,
+            z_binning=z_binning,
+        )
     return _finish_template(extracted, mean_volume, registered, quality)
+
+
+#: How often :func:`build_psf_template` may cut the beads' boxes again on
+#: the PSF's center (see :func:`_recut_beads`). A PSF far off its boxes runs
+#: off them, which pulls its measured center toward the box center, so the
+#: boxes may need a few passes to get there.
+_RECUT_PASSES = 4
+
+
+def _recut_beads(
+    beads: pd.DataFrame,
+    center_offset: tuple[float, float],
+    box: int,
+    frame_shape: tuple[int, int],
+) -> pd.DataFrame | None:
+    """The beads with their boxes moved by whole pixels onto the PSF's
+    center, or None if the boxes need not (or cannot) move.
+
+    ``center_offset`` is the ``(row, col)`` offset of the registered PSF's
+    center from the box center (see :func:`_psf_center_offset`); every
+    bead's box moves by it, rounded, when it exceeds half a pixel (plus
+    :data:`_SUBPIXEL_HYSTERESIS`, so a PSF on a half pixel does not make the
+    boxes flip back and forth). The rest is the sub-pixel centering of the
+    template. Beads whose moved box would leave the frame are dropped; None
+    if none remains.
+
+    The bead positions come from the spot identification, which finds a
+    local maximum, not the PSF's center: on a PSF with several lobes (e.g.
+    a double helix) every box sits on a lobe, several pixels off. The
+    template is still consistent, since every bead keeps its box over the
+    whole z-stack, but off-center: every localization fitted with it is
+    shifted by the same offset, and the PSF can run off the box.
+    """
+    d_row, d_col = (float(_) for _ in center_offset)
+    if max(abs(d_row), abs(d_col)) <= 0.5 + _SUBPIXEL_HYSTERESIS:
+        return None
+    step_row, step_col = int(np.rint(d_row)), int(np.rint(d_col))
+    moved = beads.copy()
+    moved["x"] = np.asarray(moved["x"], dtype=np.int64) + step_col
+    moved["y"] = np.asarray(moved["y"], dtype=np.int64) + step_row
+    height, width = int(frame_shape[0]), int(frame_shape[1])
+    half = box // 2
+    x, y = moved["x"].to_numpy(), moved["y"].to_numpy()
+    inside = (
+        (x - half >= 0)
+        & (x + half < width)
+        & (y - half >= 0)
+        & (y + half < height)
+    )
+    if not inside.any():
+        return None
+    return moved[inside].reset_index(drop=True)
 
 
 def _extract_template_volumes(
@@ -1715,6 +1986,7 @@ def calibrate_spline(
     progress: lib.Progress | Literal["console"] | None = None,
     return_diagnostics: bool = False,
     z_binning: int = 1,
+    bead_positions: pd.DataFrame | np.ndarray | None = None,
 ) -> dict | tuple[dict, list]:
     """Generate a cubic-spline PSF calibration from a bead z-stack movie.
 
@@ -1761,8 +2033,9 @@ def calibrate_spline(
         at the raw stage-scan center (``z_of_step == 0``). Analogous to the
         astigmatism calibration pinning z = 0 to the sx == sy crossing
         (see ``picasso.zfit.calibrate_z``); only meaningful for a PSF
-        with a single, well-defined intensity focus (e.g. astigmatism).
-        Default is False.
+        with a single, well-defined intensity focus (e.g. astigmatism),
+        not for one whose brightness hardly changes with z, such as a
+        double helix. Default is False.
     roi : tuple or list of tuples, optional
         Region(s) of interest for bead detection, in the same
         ``[[y_min, x_min], [y_max, x_max]]`` form as ``localize.identify``
@@ -1792,6 +2065,17 @@ def calibrate_spline(
         Coarser knots keep stage jitter that is correlated between
         neighboring steps out of the model. Stored in the calibration.
         Default 1 (no binning).
+    bead_positions : pd.DataFrame or np.ndarray, optional
+        Where the beads' boxes are cut, instead of detecting the beads
+        with ``identification_method`` (and ``roi``): spots identified on
+        the movie (a DataFrame with ``frame``, ``x`` and ``y``, e.g. from
+        ``localize.identify``; the spots of the reference frames, the
+        middle third of the scan, are reduced to one per bead), or an
+        ``(n, 2)`` array of ``x``, ``y`` positions in camera pixels, one per
+        bead (a DataFrame with ``x``, ``y`` and, for several fields of
+        view, ``fov``). Either way, a box whose PSF lies more than half a
+        pixel off its center is still moved onto the PSF. Recorded as
+        ``"Bead positions": "given"``. Default None (detect the beads).
 
     Returns
     -------
@@ -1823,6 +2107,19 @@ def calibrate_spline(
     ) as progress:
         lib.start_phase(progress, "Calibrating spline", 3, unit="step")
         progress.set_value(0)
+        beads = (
+            None
+            if bead_positions is None
+            else _given_beads(
+                bead_positions,
+                movie,
+                box,
+                d,
+                frames_per_step,
+                frame_order,
+                frame_bounds,
+            )
+        )
         built = build_psf_template(
             movie,
             camera_info,
@@ -1832,6 +2129,7 @@ def calibrate_spline(
             frames_per_step=frames_per_step,
             frame_bounds=frame_bounds,
             frame_order=frame_order,
+            beads=beads,
             roi=roi,
             # keep the individual per-frame spots so the diagnostic PNG can
             # measure the axial precision by fitting each spot (only needed
@@ -1910,6 +2208,9 @@ def calibrate_spline(
             "box": int(box),
             "Identification": localize._calibration_identification_info(
                 identification_method, box
+            ),
+            "Bead positions": (
+                "detected" if bead_positions is None else "given"
             ),
             "pixelsize": float(pixelsize),
             "n_channels": 1,
@@ -2356,10 +2657,9 @@ def _build_per_channel_templates(
     frame_order: str,
     beads_ref: pd.DataFrame,
     transforms: list,
-    ref_xy: np.ndarray,
     n_channels: int,
     z_binning: int = 1,
-) -> list[dict]:
+) -> tuple[list[dict], pd.DataFrame]:
     """Build a per-channel PSF template from the same physical beads.
 
     Non-reference channels get the reference beads mapped through that
@@ -2374,7 +2674,72 @@ def _build_per_channel_templates(
     putting the bead where the fit expects it. The beads are then registered
     in all channels at once (see :func:`_register_and_average_channels`):
     one shift per bead and one recentering for all channels, so the
-    templates keep the channels' relative lateral and axial positions."""
+    templates keep the channels' relative lateral and axial positions.
+    When the reference PSF lies well off the center of the beads' boxes,
+    the reference boxes are cut on it and everything is rebuilt (see
+    :func:`_recut_beads`).
+
+    Returns the per-channel ``built`` dicts and the reference beads they
+    were built from (moved by the recut, if any)."""
+    for recut in range(_RECUT_PASSES + 1):
+        extracted = _extract_channel_volumes(
+            movies,
+            camera_infos,
+            box,
+            d,
+            frames_per_step,
+            frame_bounds,
+            frame_order,
+            beads_ref,
+            transforms,
+            n_channels,
+            z_binning,
+        )
+        # each channel's own focus, from its raw bead average
+        z_centers = [
+            _focus_step(ex["volumes"].mean(axis=0))[0] for ex in extracted
+        ]
+        means, registered, qualities = _register_and_average_channels(
+            [ex["volumes"] for ex in extracted], z_centers
+        )
+        moved = (
+            _recut_beads(
+                beads_ref,
+                qualities[0]["center_offset"],
+                box,
+                movies[0].shape[1:3],
+            )
+            if recut < _RECUT_PASSES
+            else None
+        )
+        if moved is None:
+            break
+        beads_ref = moved
+    per_channel = [
+        _finish_template(ex, m, r, q)
+        for ex, m, r, q in zip(extracted, means, registered, qualities)
+    ]
+    return per_channel, beads_ref
+
+
+def _extract_channel_volumes(
+    movies: list,
+    camera_infos: list[dict],
+    box: int,
+    d: float,
+    frames_per_step: int,
+    frame_bounds: tuple[int, int] | list | None,
+    frame_order: str,
+    beads_ref: pd.DataFrame,
+    transforms: list,
+    n_channels: int,
+    z_binning: int,
+) -> list[dict]:
+    """Every channel's bead volumes (see :func:`_extract_template_volumes`)
+    for the reference beads ``beads_ref``, the mapped channels' volumes
+    shifted back by their ROI remainder (see
+    :func:`_build_per_channel_templates`)."""
+    ref_xy = beads_ref[["x", "y"]].to_numpy(dtype=np.float64)
     extracted = []
     for c in range(n_channels):
         if c == 0:
@@ -2418,17 +2783,7 @@ def _build_per_channel_templates(
                         mode="nearest",
                     )
         extracted.append(ex)
-    # each channel's own focus, from its raw bead average
-    z_centers = [
-        _focus_step(ex["volumes"].mean(axis=0))[0] for ex in extracted
-    ]
-    means, registered, qualities = _register_and_average_channels(
-        [ex["volumes"] for ex in extracted], z_centers
-    )
-    return [
-        _finish_template(ex, m, r, q)
-        for ex, m, r, q in zip(extracted, means, registered, qualities)
-    ]
+    return extracted
 
 
 def _assemble_multichannel_coefficients(
@@ -2637,6 +2992,7 @@ def calibrate_spline_multichannel(
     return_diagnostics: bool = False,
     model: str = "affine",
     z_binning: int = 1,
+    bead_positions: pd.DataFrame | np.ndarray | None = None,
 ) -> dict | tuple[dict, list]:
     """Generate a multichannel cubic-spline PSF calibration from registered
     bead z-stacks (one movie per channel).
@@ -2754,6 +3110,11 @@ def calibrate_spline_multichannel(
         channel's PSF template (see ``build_psf_template``). The axial knots
         and the stored ``z_step_nm`` are then ``z_binning * d`` apart. Stored
         in the calibration. Default 1 (no binning).
+    bead_positions : pd.DataFrame or np.ndarray, optional
+        Where the reference channel's bead boxes are cut, instead of
+        detecting the beads there (see ``calibrate_spline``); in split-FOV
+        mode, positions inside the reference region. The other channels'
+        beads are still detected, to register the channels. Default None.
 
     Returns
     -------
@@ -2831,14 +3192,25 @@ def calibrate_spline_multichannel(
         # reference beads tagged with their FOV: genuine multi-FOV z-stacks
         # hold different beads per field, extracted per FOV (see
         # _bead_volumes).
-        beads_ref = _detect_bead_positions(
-            movies[0],
-            methods[0],
-            box,
-            ref_bounds,
-            roi=ref_roi,
-            fov_of_frame=fov_of_frame,
-        )
+        if bead_positions is None:
+            beads_ref = _detect_bead_positions(
+                movies[0],
+                methods[0],
+                box,
+                ref_bounds,
+                roi=ref_roi,
+                fov_of_frame=fov_of_frame,
+            )
+        else:
+            beads_ref = _given_beads(
+                bead_positions,
+                movies[0],
+                box,
+                d,
+                frames_per_step,
+                frame_order,
+                frame_bounds,
+            )
 
         # channel transforms (channel 0 is the identity reference)
         transforms, reg_info = _estimate_all_channel_transforms(
@@ -2859,9 +3231,9 @@ def calibrate_spline_multichannel(
 
         progress.set_value(1)
 
-        # per-channel PSF templates from the same physical beads
-        ref_xy = beads_ref[["x", "y"]].to_numpy(dtype=np.float64)
-        per_channel = _build_per_channel_templates(
+        # per-channel PSF templates from the same physical beads (whose
+        # boxes may move onto the PSF's center while building them)
+        per_channel, beads_ref = _build_per_channel_templates(
             movies,
             camera_infos,
             box,
@@ -2871,10 +3243,10 @@ def calibrate_spline_multichannel(
             frame_order,
             beads_ref,
             transforms,
-            ref_xy,
             n_channels,
             z_binning,
         )
+        ref_xy = beads_ref[["x", "y"]].to_numpy(dtype=np.float64)
 
         progress.set_value(2)
 
@@ -2902,6 +3274,9 @@ def calibrate_spline_multichannel(
             path,
         )
 
+        calibration["Bead positions"] = (
+            "detected" if bead_positions is None else "given"
+        )
         if photon_ratios is not None:
             _add_photon_ratios(calibration, photon_ratios, n_channels)
 
@@ -3420,6 +3795,7 @@ def calibrate_spline_split_fov(
     return_diagnostics: bool = False,
     model: str = "affine",
     z_binning: int = 1,
+    bead_positions: pd.DataFrame | np.ndarray | None = None,
 ) -> dict | tuple[dict, list]:
     """Build a multichannel spline calibration from a *single* bead z-stack in
     which several rectangular field-of-view regions are the channels (split-FOV
@@ -3504,6 +3880,10 @@ def calibrate_spline_split_fov(
         Number of consecutive z (stage) steps averaged into one slice of every
         channel's PSF template, see :func:`calibrate_spline_multichannel`.
         Default 1 (no binning).
+    bead_positions : pd.DataFrame or np.ndarray, optional
+        Where the reference region's bead boxes are cut, instead of
+        detecting the beads there, see :func:`calibrate_spline_multichannel`.
+        Default None.
 
     Returns
     -------
@@ -3554,6 +3934,7 @@ def calibrate_spline_split_fov(
         return_diagnostics=return_diagnostics,
         model=model,
         z_binning=z_binning,
+        bead_positions=bead_positions,
     )
 
 

@@ -26,6 +26,7 @@ License (MIT): ``LICENSES/Gpufit-LICENSE.txt``.
 
 from __future__ import annotations
 
+import functools
 import logging
 import math
 import numbers
@@ -94,6 +95,7 @@ __all__ = [
     "IDENTIFY_METHODS",
     "IdentificationParameters",
     "NetGradient",
+    "PSFFilter",
     "MultiEmitterParameters",
     # one channel
     "localize",
@@ -169,7 +171,10 @@ LoadedMovie: TypeAlias = Union["io.AbstractPicassoMovie", np.memmap]
 #: ``io.AbstractPicassoMovie`` so that they cannot reach the fit (see
 #: ``TemporalMedianMovie``).
 MovieLike: TypeAlias = Union[
-    LoadedMovie, "TemporalMedianMovie", "GaussianFilteredMovie"
+    LoadedMovie,
+    "TemporalMedianMovie",
+    "GaussianFilteredMovie",
+    "PSFFilteredMovie",
 ]
 
 
@@ -327,6 +332,172 @@ class NetGradient:
         object.__setattr__(self, "minimum", value)
 
 
+#: Metadata key of the PSF filter: the path of the spline calibration whose
+#: PSF the frames were filtered with (see :class:`PSFFilter`).
+PSF_FILTER_INFO_KEY = "PSF Filter Calibration"
+
+
+@dataclass(frozen=True, eq=False)
+class PSFFilter:
+    """The PSF filter of the spot identification: every frame is filtered
+    with the PSF of a spline calibration, averaged over z, before the spots
+    are identified.
+
+    This is a matched filter. A spot then shows as one maximum at the
+    center of the calibration's PSF, whatever its shape: the lobes of a
+    double helix merge into one maximum on its rotation axis, where the
+    raw frame has none. The box of every identified spot is then centered
+    where the spline fit expects the PSF, at every z. A Gaussian filter
+    (``IdentificationParameters.gaussian_filter_sigma``) merges lobes only
+    when it is about as wide as they are apart, and then not reliably.
+
+    Build it from a calibration with :meth:`from_calibration` or
+    :meth:`from_file`.
+
+    Parameters
+    ----------
+    kernel : np.ndarray
+        ``(height, width)`` kernel, both sides odd, rows are y; normalized
+        to a sum of 1. See ``spline.psf_filter_kernel``.
+    calibration_path : str, optional
+        The spline calibration the kernel was made from, recorded in the
+        identification metadata so the identification can be repeated (see
+        :meth:`IdentificationParameters.from_info`). Default None.
+
+    Raises
+    ------
+    ValueError
+        If ``kernel`` is not a 2D array with odd sides, or is not finite,
+        or has no positive sum.
+
+    Examples
+    --------
+    >>> from picasso import localize
+    >>> psf_filter = localize.PSFFilter.from_file("spline_calib.hdf5")
+    >>> parameters = localize.IdentificationParameters(
+    ...     method=localize.NetGradient(500), box=21, psf_filter=psf_filter
+    ... )
+    """
+
+    kernel: np.ndarray
+    calibration_path: str | None = None
+
+    def __post_init__(self) -> None:
+        kernel = np.array(self.kernel, dtype=np.float32)
+        if (
+            kernel.ndim != 2
+            or kernel.shape[0] % 2 == 0
+            or (kernel.shape[1] % 2 == 0)
+        ):
+            raise ValueError(
+                "The PSF filter kernel must be a 2D array with odd sides, "
+                f"got shape {kernel.shape}."
+            )
+        total = float(kernel.sum())
+        if not np.isfinite(kernel).all() or total <= 0:
+            raise ValueError(
+                "The PSF filter kernel must be finite with a positive sum."
+            )
+        kernel /= total
+        kernel.setflags(write=False)
+        object.__setattr__(self, "kernel", kernel)
+        if self.calibration_path is not None:
+            object.__setattr__(
+                self, "calibration_path", str(self.calibration_path)
+            )
+
+    @property
+    def radius(self) -> int:
+        """Half-width (pixels) of the kernel: how far from a pixel the
+        filter reaches."""
+        return int(max(self.kernel.shape) // 2)
+
+    def __eq__(self, other) -> bool:
+        return (
+            isinstance(other, PSFFilter)
+            and self.calibration_path == other.calibration_path
+            and np.array_equal(self.kernel, other.kernel)
+        )
+
+    def __hash__(self) -> int:
+        return hash(
+            (self.kernel.shape, self.kernel.tobytes(), self.calibration_path)
+        )
+
+    def __repr__(self) -> str:
+        return (
+            f"PSFFilter(kernel={self.kernel.shape[0]}x"
+            f"{self.kernel.shape[1]}, "
+            f"calibration_path={self.calibration_path!r})"
+        )
+
+    @classmethod
+    def from_calibration(
+        cls,
+        calibration: dict,
+        path: str | None = None,
+        channel: int | None = None,
+    ) -> PSFFilter:
+        """The PSF filter of a spline calibration.
+
+        Parameters
+        ----------
+        calibration : dict
+            A spline calibration (see ``spline.psf_filter_kernel``).
+        path : str, optional
+            Its file, recorded in the metadata. None (the default) uses
+            the calibration's own ``"Path"``.
+        channel : int, optional
+            For a multichannel calibration, the channel whose PSF is used;
+            None (the default) adds all channels up.
+
+        Returns
+        -------
+        PSFFilter
+            The filter.
+        """
+        from . import spline
+
+        if path is None:
+            path = calibration.get("Path")
+            if path in (None, "", "N/A"):
+                path = None
+        return cls(spline.psf_filter_kernel(calibration, channel), path)
+
+    @classmethod
+    def from_file(cls, path: str) -> PSFFilter:
+        """The PSF filter of the spline calibration saved at ``path``.
+
+        Parameters
+        ----------
+        path : str
+            A spline calibration ``.hdf5`` file.
+
+        Returns
+        -------
+        PSFFilter
+            The filter.
+        """
+        stat = os.stat(path)
+        kernel = _psf_filter_kernel_from_file(
+            os.path.abspath(path), stat.st_mtime_ns, stat.st_size
+        )
+        return cls(kernel, str(path))
+
+
+@functools.lru_cache(maxsize=8)
+def _psf_filter_kernel_from_file(
+    path: str, mtime_ns: int, size: int
+) -> np.ndarray:
+    """The PSF filter kernel of the spline calibration at ``path``, cached
+    by its modification time and size: the identification parameters are
+    rebuilt from the metadata on every preview, and a calibration file can
+    be tens of MB."""
+    from . import io, spline
+
+    return spline.psf_filter_kernel(io.load_spline_calibration(path))
+
+
 #: One spot identification method: :class:`NetGradient` or
 #: :class:`picasso.wavelet.WaveletParameters`.
 IdentificationMethod: TypeAlias = Union[
@@ -441,6 +612,13 @@ class IdentificationParameters:
         a spot that is not Gaussian-shaped into one. Applied after the
         temporal median filter, if both are used. Default is 0 (no
         filtering).
+    psf_filter : PSFFilter, optional
+        If given, every frame is filtered with the PSF of a spline
+        calibration before identifying (a matched filter, see
+        :class:`PSFFilter` and ``PSFFilteredMovie``). The spots are then
+        found at the center of the calibration's PSF, also when it has
+        several lobes, e.g. a double helix. Applied after the other
+        filters. Default is None (no filtering).
     edge_spots : bool, optional
         Also identify spots closer to the edge of the frame than half a
         box, whose box would reach past it. Their maximum and net gradient
@@ -461,11 +639,13 @@ class IdentificationParameters:
         If ``box`` is not a positive integer, ``temporal_median_window``
         is negative, ``temporal_median_stride`` is not positive or
         ``gaussian_filter_sigma`` is negative or not finite.
+    TypeError
+        If ``psf_filter`` is neither a :class:`PSFFilter` nor None.
 
     Notes
     -----
     The filters apply to the identification only: the spots are always cut
-    out of and fitted on the raw movie. Both change the scale of the net
+    out of and fitted on the raw movie. They change the scale of the net
     gradient, so the minimum net gradient has to be re-tuned when a filter
     is switched on or off. The wavelet threshold is in units of the noise
     and needs no re-tuning.
@@ -519,6 +699,7 @@ class IdentificationParameters:
     temporal_median_stride: int | None = None
     gaussian_filter_sigma: float = 0.0
     edge_spots: bool = True
+    psf_filter: PSFFilter | None = None
 
     def __post_init__(self) -> None:
         # frozen: normalize the values through object.__setattr__
@@ -551,6 +732,14 @@ class IdentificationParameters:
             )
         object.__setattr__(self, "gaussian_filter_sigma", sigma)
         object.__setattr__(self, "edge_spots", bool(self.edge_spots))
+        if self.psf_filter is not None and not isinstance(
+            self.psf_filter, PSFFilter
+        ):
+            raise TypeError(
+                "The PSF filter must be a localize.PSFFilter (e.g. "
+                "PSFFilter.from_file(path)) or None, got "
+                f"{self.psf_filter!r}."
+            )
 
     def to_info(self) -> dict:
         """The parameters under the keys of the identification metadata.
@@ -565,7 +754,9 @@ class IdentificationParameters:
             settings of the method (``"Min. Net Gradient"`` or those of
             ``wavelet.WaveletParameters.to_info``), ``"Box Size"``,
             ``"Temporal Median Window"``, ``"Gaussian Filter Sigma"`` and
-            ``"Edge Spots"``.
+            ``"Edge Spots"``, and with the PSF filter the path of its
+            calibration under ``"PSF Filter Calibration"`` ("N/A" if the
+            calibration was not saved).
         """
         if _is_wavelet(self.method):
             method_info = {
@@ -589,6 +780,10 @@ class IdentificationParameters:
         if self.temporal_median_stride is not None:
             info["Temporal Median Stride"] = self.temporal_median_stride
         info["Gaussian Filter Sigma"] = self.gaussian_filter_sigma
+        if self.psf_filter is not None:
+            info[PSF_FILTER_INFO_KEY] = (
+                self.psf_filter.calibration_path or "N/A"
+            )
         info["Edge Spots"] = self.edge_spots
         return info
 
@@ -603,7 +798,8 @@ class IdentificationParameters:
         the defaults of Izeddin et al. (2012). A missing ``"Edge Spots"``
         means False, as files written before it existed were identified
         away from the frame edge. A list under a setting holds one value
-        per ROI.
+        per ROI. A ``"PSF Filter Calibration"`` is loaded from its file to
+        rebuild the PSF filter.
 
         Parameters
         ----------
@@ -621,7 +817,7 @@ class IdentificationParameters:
         ------
         ValueError
             If a required key is missing or the identification method is
-            unknown.
+            unknown, or the calibration of the PSF filter cannot be found.
 
         References
         ----------
@@ -649,6 +845,16 @@ class IdentificationParameters:
             raise ValueError(
                 "The identification parameters need a 'Box Size'."
             )
+        psf_filter = None
+        psf_path = info.get(PSF_FILTER_INFO_KEY)
+        if psf_path:
+            if psf_path == "N/A" or not os.path.isfile(psf_path):
+                raise ValueError(
+                    "The spots were identified with the PSF filter of the "
+                    f"spline calibration {psf_path!r}, which is not found. "
+                    "Give the calibration again."
+                )
+            psf_filter = PSFFilter.from_file(psf_path)
         return cls(
             method=method,
             box=info["Box Size"],
@@ -656,6 +862,7 @@ class IdentificationParameters:
             temporal_median_stride=info.get("Temporal Median Stride"),
             gaussian_filter_sigma=info.get("Gaussian Filter Sigma") or 0.0,
             edge_spots=bool(info.get("Edge Spots", False)),
+            psf_filter=psf_filter,
         )
 
 
@@ -1515,6 +1722,7 @@ def identification_roi_pad(
     box: int,
     gaussian_filter_sigma: float | None = None,
     method: IdentificationMethod | tuple | None = None,
+    psf_filter: PSFFilter | None = None,
 ) -> int:
     """Number of pixels a ROI has to be grown by so that every pixel the
     identification actually reads is validly filtered.
@@ -1538,14 +1746,19 @@ def identification_roi_pad(
         The identification method (or one per ROI), see
         :class:`IdentificationParameters`. None stands for the net
         gradient. Default is None.
+    psf_filter : PSFFilter or None, optional
+        The PSF filter, which reaches as far as its kernel. Default is None
+        (no filtering).
 
     Returns
     -------
     pad : int
         Padding in pixels.
     """
-    return _identification_crop_pad(box, method) + gaussian_filter_radius(
-        gaussian_filter_sigma
+    return (
+        _identification_crop_pad(box, method)
+        + gaussian_filter_radius(gaussian_filter_sigma)
+        + (psf_filter.radius if psf_filter is not None else 0)
     )
 
 
@@ -1702,6 +1915,87 @@ class GaussianFilteredMovie:
 
     def __exit__(self, exc_type, exc_value, traceback):
         self.close()
+
+
+class PSFFilteredMovie(GaussianFilteredMovie):
+    """Lazily evaluated, read-only view of a movie filtered with the PSF of
+    a spline calibration (a matched filter, see :class:`PSFFilter`).
+
+    Frame ``t`` is ``movie[t]`` correlated with the kernel, as float32, the
+    borders extended by their nearest pixels. Like
+    :class:`GaussianFilteredMovie`, which it extends, it is meant for spot
+    identification only and does not implement the
+    ``io.AbstractPicassoMovie`` interface.
+
+    Parameters
+    ----------
+    movie : MovieLike
+        The movie, raw or itself a filtered view.
+    kernel : np.ndarray
+        ``(height, width)`` kernel with odd sides, e.g.
+        ``PSFFilter.kernel``.
+
+    Attributes
+    ----------
+    raw : MovieLike
+        The underlying unfiltered movie.
+    kernel : np.ndarray
+        The kernel, normalized to a sum of 1.
+    radius : int
+        Kernel half-width in pixels.
+    """
+
+    def __init__(self, movie: MovieLike, kernel: np.ndarray) -> None:
+        self.kernel = PSFFilter(kernel).kernel
+        self.raw = movie
+        self.n_frames = len(movie)
+        if self.n_frames == 0:
+            raise ValueError("Cannot filter an empty movie.")
+        self.sigma = None
+        self.truncate = None
+        self.mode = "nearest"
+        self.frame_shape = np.asarray(movie[0]).shape
+        concurrent = getattr(
+            movie, "supports_concurrent_reads", False
+        ) or isinstance(movie, np.memmap)
+        self._read_lock = None if concurrent else threading.Lock()
+
+    @property
+    def radius(self) -> int:
+        """Half-width (in pixels) of the kernel."""
+        return int(max(self.kernel.shape) // 2)
+
+    def __getitem__(self, it):
+        if isinstance(it, tuple):
+            if len(it) == 1:
+                return self[it[0]]
+            return self[it[0]][tuple(it[1:])]
+        if isinstance(it, slice):
+            return np.stack(
+                [self[i] for i in range(*it.indices(self.n_frames))]
+            )
+        index = int(it)
+        if index < 0:
+            index += self.n_frames
+        if not 0 <= index < self.n_frames:
+            raise IndexError(
+                f"Frame {it} is out of range for a movie with "
+                f"{self.n_frames} frames."
+            )
+        return psf_filter_frame(self._read_frame(index), self.kernel)
+
+
+def psf_filter_frame(frame: np.ndarray, kernel: np.ndarray) -> np.ndarray:
+    """One frame correlated with a PSF filter kernel (see
+    :class:`PSFFilteredMovie`), the borders extended by their nearest
+    pixels; float32, the frame's shape."""
+    ry, rx = kernel.shape[0] // 2, kernel.shape[1] // 2
+    padded = np.pad(
+        np.asarray(frame, dtype=np.float32), ((ry, ry), (rx, rx)), mode="edge"
+    )
+    # correlation = convolution with the flipped kernel
+    out = fftconvolve(padded, kernel[::-1, ::-1], mode="valid")
+    return out.astype(np.float32, copy=False)
 
 
 class SummedChannelsMovie:
@@ -2663,8 +2957,8 @@ def _identification_filtered_movie(
     roi: tuple[tuple[int, int], tuple[int, int]] | list | None,
 ) -> MovieLike:
     """``movie`` as :func:`identify` searches it: temporal median
-    filtered and then Gaussian smoothed, as ``parameters`` set (lazy
-    views; the movie itself without filters). The temporal median is
+    filtered, Gaussian smoothed and PSF filtered, as ``parameters`` set
+    (lazy views; the movie itself without filters). The temporal median is
     computed only within ``roi`` (with a margin)."""
     if parameters.temporal_median_window:
         movie = TemporalMedianMovie(
@@ -2676,12 +2970,15 @@ def _identification_filtered_movie(
                 parameters.box,
                 parameters.gaussian_filter_sigma,
                 parameters.method,
+                parameters.psf_filter,
             ),
         )
     # temporal median first, then smoothing: the Gaussian is meant to merge
     # the maxima of one spot, not those of the background it sits on
     if parameters.gaussian_filter_sigma:
         movie = GaussianFilteredMovie(movie, parameters.gaussian_filter_sigma)
+    if parameters.psf_filter is not None:
+        movie = PSFFilteredMovie(movie, parameters.psf_filter.kernel)
     return movie
 
 

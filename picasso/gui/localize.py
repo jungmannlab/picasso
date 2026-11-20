@@ -114,9 +114,22 @@ DEFAULT_PARAMETERS = {
     "Wavelet Noise Estimate": wavelet.WaveletParameters().noise,
     "Wavelet Min. Area": wavelet.WaveletParameters().min_area,
     "Gaussian Filter Sigma": 0.0,
+    "PSF Filter Calibration": "",
     "Temporal Median Window": 51,
     "Edge Spots": True,
 }
+PSF_FILTER_TOOLTIP = (
+    "Filter every frame with the PSF of the loaded spline calibration\n"
+    "(averaged over z) before spot identification.\n\n"
+    "Each spot then shows as one maximum at the center of the PSF,\n"
+    "whatever its shape: the lobes of a double helix merge into one\n"
+    "maximum on its rotation axis. Use it for PSFs that break up into\n"
+    "several lobes, where the boxes would otherwise land on a lobe.\n\n"
+    "Only the identification uses the filtered frames: fitting always\n"
+    "uses the raw movie. Re-tune the identification threshold with\n"
+    "'Preview' after switching it on; use the net gradient, the\n"
+    "wavelet identification does not suit the filtered frames."
+)
 #: Identification method combo box entries -> ``localize.IDENTIFY_METHODS``.
 IDENTIFICATION_METHODS = {
     "Net gradient": localize.IDENTIFY_METHOD_NET_GRADIENT,
@@ -157,6 +170,7 @@ _SUM_SETTING_KEYS = (
     "temporal_median_on",
     "temporal_median",
     "gaussian_filter_sigma",
+    "psf_filter_on",
     *_WAVELET_PARAM_KEYS.values(),
 )
 # How multichannel (and split-FOV) data is fitted: all channels tied into one
@@ -596,11 +610,12 @@ def _filtered_identification_movie(
     window: int,
     sigma: float,
     cache: list,
+    psf_path: str = "",
 ) -> tuple[object, list]:
     """Put the identification filters on top of ``movie``: the temporal
-    median background subtraction, then the Gaussian smoothing - the same
-    two stages ``localize.identify`` puts on top of the movie it searches,
-    so the preview and the batch run find the same spots.
+    median background subtraction, the Gaussian smoothing, then the PSF
+    filter - the same stages ``localize.identify`` puts on top of the movie
+    it searches, so the preview and the batch run find the same spots.
 
     Unlike the batch run, the stack is always built over the *whole* frame,
     never restricted to the drawn ROIs. The display reads its frames from
@@ -613,16 +628,17 @@ def _filtered_identification_movie(
     way. Restricting the median stays a batch-run optimization, where
     nothing is displayed.
 
-    Both stages are lazy views, so ``cache`` (a ``[temporal, gaussian]``
-    pair) keeps them across redraws: a stage is rebuilt only when its
+    The stages are lazy views, so ``cache`` (``[temporal, gaussian,
+    psf]``) keeps them across redraws: a stage is rebuilt only when its
     source movie or its setting changed. Comparing the source by identity
     chains the invalidation, so rebuilding (or dropping) the median also
-    rebuilds the Gaussian on top of it. Returns the filtered movie and the
+    rebuilds the stages on top of it. Returns the filtered movie and the
     refreshed cache; ``window`` of 0 (or a movie too short for it, which
-    the caller resolves) and ``sigma`` of 0 switch the respective stage
-    off.
+    the caller resolves), ``sigma`` of 0 and an empty ``psf_path`` (the
+    spline calibration whose PSF filters, see ``localize.PSFFilter``)
+    switch the respective stage off.
     """
-    temporal, gaussian = cache
+    temporal, gaussian, psf = (list(cache) + [None, None, None])[:3]
     if window:
         if (
             temporal is None
@@ -645,7 +661,21 @@ def _filtered_identification_movie(
         movie = gaussian
     else:
         gaussian = None
-    return movie, [temporal, gaussian]
+    if psf_path:
+        if (
+            psf is None
+            or psf.raw is not movie
+            or getattr(psf, "calibration_path", None) != psf_path
+        ):
+            psf = localize.PSFFilteredMovie(
+                movie, localize.PSFFilter.from_file(psf_path).kernel
+            )
+            # which calibration the cached view was built from
+            psf.calibration_path = psf_path
+        movie = psf
+    else:
+        psf = None
+    return movie, [temporal, gaussian, psf]
 
 
 def _compile_multi_emitter_fit() -> None:
@@ -3972,6 +4002,24 @@ class CalibrateSplineDialog(lib.Dialog):
         grid.addWidget(self.registration_label, 8, 0)
         grid.addWidget(self.registration_model, 8, 1)
 
+        # Cut the beads' boxes where the spots were identified, instead of
+        # detecting the beads again
+        self.use_identified_beads = QtWidgets.QCheckBox(
+            "Use the identified spots as bead boxes"
+        )
+        self.use_identified_beads.setToolTip(
+            "Cut each bead's box where the spots shown were identified\n"
+            "(the current identification settings, ROIs and filters, e.g.\n"
+            "the PSF filter), instead of detecting the beads again with\n"
+            "the identification threshold alone.\n\n"
+            "Each bead keeps one box over the whole z-scan, taken from the\n"
+            "middle third of the scan. A PSF that lies more than half a\n"
+            "pixel off the center of its box is still moved onto the box\n"
+            "center when the calibration is built."
+        )
+        self.use_identified_beads.setChecked(False)
+        grid.addWidget(self.use_identified_beads, 9, 0, 1, 2)
+
         self.frames_per_step.valueChanged.connect(self._update_order_enabled)
         self._update_order_enabled(self.frames_per_step.value())
 
@@ -3997,13 +4045,14 @@ class CalibrateSplineDialog(lib.Dialog):
     def getCalibrationSpecs(
         parent: QtWidgets.QWidget | None = None,
         multichannel: bool = False,
-    ) -> tuple[float, int, str, int, str, float, bool, bool, str, bool]:
+    ) -> tuple[float, int, str, int, str, float, bool, bool, str, bool, bool]:
         """Show the dialog and return the chosen step size, number of frames
         per step, frame order, z binning, spline model, magnification factor,
         whether to correct the z bias, whether to link photons across
-        channels, the channel-registration model, and whether it was
-        accepted. ``multichannel`` shows the multichannel-only options (link
-        photons, registration model); they are hidden for a single-channel
+        channels, the channel-registration model, whether to use the
+        identified spots as the bead boxes, and whether it was accepted.
+        ``multichannel`` shows the multichannel-only options (link photons,
+        registration model); they are hidden for a single-channel
         calibration."""
         dialog = CalibrateSplineDialog(parent, multichannel=multichannel)
         result = dialog.exec()
@@ -4016,6 +4065,7 @@ class CalibrateSplineDialog(lib.Dialog):
         correct_z_bias = dialog.correct_z_bias.isChecked()
         link_photons = dialog.link_photons.isChecked()
         registration = _transform_model_of(dialog.registration_model)
+        use_identified_beads = dialog.use_identified_beads.isChecked()
         accepted = result == QtWidgets.QDialog.DialogCode.Accepted
         return (
             step,
@@ -4027,6 +4077,7 @@ class CalibrateSplineDialog(lib.Dialog):
             correct_z_bias,
             link_photons,
             registration,
+            use_identified_beads,
             accepted,
         )
 
@@ -5109,6 +5160,9 @@ class ParametersDialog(lib.Dialog):
     GAUSSIAN_FILTER_URL = docs_url(
         "localize/identification.html#localize-gaussian-filter"
     )
+    PSF_FILTER_URL = docs_url(
+        "localize/identification.html#localize-psf-filter"
+    )
     EDGE_SPOTS_URL = docs_url(
         "localize/identification.html#localize-edge-spots"
     )
@@ -5483,6 +5537,22 @@ class ParametersDialog(lib.Dialog):
         gauss_row.addStretch(1)
         settings_grid.addLayout(gauss_row, 5, 0, 1, 2)
 
+        # matched filter with the loaded spline calibration's PSF
+        # (identification only), applied after the Gaussian
+        psf_row = QtWidgets.QHBoxLayout()
+        psf_row.addWidget(lib.HelpButton(self.PSF_FILTER_URL))
+        self.psf_filter_checkbox = QtWidgets.QCheckBox(
+            "PSF filter (spline calibration)"
+        )
+        self.psf_filter_checkbox.setToolTip(PSF_FILTER_TOOLTIP)
+        self.psf_filter_checkbox.setEnabled(False)
+        self.psf_filter_checkbox.stateChanged.connect(
+            self.on_psf_filter_changed
+        )
+        psf_row.addWidget(self.psf_filter_checkbox)
+        psf_row.addStretch(1)
+        settings_grid.addLayout(psf_row, 6, 0, 1, 2)
+
         # spots whose box reaches past the frame edge
         edge_row = QtWidgets.QHBoxLayout()
         edge_row.addWidget(lib.HelpButton(self.EDGE_SPOTS_URL))
@@ -5506,7 +5576,7 @@ class ParametersDialog(lib.Dialog):
         )
         edge_row.addWidget(self.edge_spots_checkbox)
         edge_row.addStretch(1)
-        settings_grid.addLayout(edge_row, 6, 0, 1, 2)
+        settings_grid.addLayout(edge_row, 7, 0, 1, 2)
 
         # preview identifications + cross-channel link color overlay
         preview_row = QtWidgets.QHBoxLayout()
@@ -7524,6 +7594,7 @@ class ParametersDialog(lib.Dialog):
             self.spline_calib_label.setText("-- no calibration loaded --")
             self.spline_calib_label.setToolTip("")
         self._update_link_photons_visibility()
+        self._update_psf_filter_state()
 
     def update_spline_calib_with_config_path(self) -> None:
         """Retrieve the spline PSF calibration path that corresponds to the
@@ -7586,6 +7657,7 @@ class ParametersDialog(lib.Dialog):
             self.spline_calib_label.setText("-- no calibration loaded --")
             self.spline_calib_label.setToolTip("")
         self._update_link_photons_visibility()
+        self._update_psf_filter_state()
         if getattr(self, "peak_search_z_edit", None) is not None:
             # the peak search in z needs a 3D calibration
             lib.resize_with_contents(
@@ -7919,6 +7991,37 @@ class ParametersDialog(lib.Dialog):
         """Refresh the display, which shows the smoothed frames whenever
         sigma is non-zero."""
         self._reset_contrast_and_refresh()
+
+    def on_psf_filter_changed(self, _state: int = 0) -> None:
+        """Refresh the display, which shows the PSF-filtered frames while
+        the filter is on."""
+        self._reset_contrast_and_refresh()
+
+    def psf_filter_path(self) -> str:
+        """The spline calibration whose PSF filters the frames, "" when the
+        PSF filter is off or no spline calibration is loaded."""
+        checkbox = getattr(self, "psf_filter_checkbox", None)
+        if checkbox is None or not checkbox.isChecked():
+            return ""
+        return self.spline_calibration_path or ""
+
+    def _update_psf_filter_state(self) -> None:
+        """Offer the PSF filter only while a spline calibration is loaded:
+        its PSF is the filter."""
+        checkbox = getattr(self, "psf_filter_checkbox", None)
+        if checkbox is None:
+            return
+        path = self.spline_calibration_path
+        checkbox.setEnabled(bool(path))
+        checkbox.setToolTip(
+            PSF_FILTER_TOOLTIP
+            + (
+                f"\n\nFilter: {path}"
+                if path
+                else "\n\nLoad a spline calibration (Experimental PSF\n"
+                "(spline)) to use it."
+            )
+        )
 
     def on_edge_spots_changed(self, _state: int = 0) -> None:
         """Refresh the preview: spots at the frame edge appear or go."""
@@ -8813,6 +8916,7 @@ class Window(QtWidgets.QMainWindow):
         # ``identification_movie``. Never used for fitting.
         self._temporal_movie = None
         self._gaussian_movie = None
+        self._psf_movie = None
         # A split-FOV channel sum is filtered on its reference region alone
         # and put back in place on the canvas for the display: the
         # ``[cropped, embedded]`` views of ``identification_movie``.
@@ -8820,7 +8924,7 @@ class Window(QtWidgets.QMainWindow):
         # The same filter stacks for the channels that are *not* on screen,
         # built for the link-color preview only (see
         # ``channel_identification_movie``): {channel index: [temporal,
-        # gaussian]}.
+        # gaussian, psf]}.
         self._channel_filter_cache = {}
         # This frame's detections per channel while the identification
         # preview draws them, so the link colors can pair spots that have
@@ -8980,6 +9084,11 @@ class Window(QtWidgets.QMainWindow):
         edge_spots = settings["Localize"].get("edge_spots", None)
         if isinstance(edge_spots, bool):
             self.parameters_dialog.edge_spots_checkbox.setChecked(edge_spots)
+        psf_filter_on = settings["Localize"].get("psf_filter_on", None)
+        if isinstance(psf_filter_on, bool):
+            self.parameters_dialog.psf_filter_checkbox.setChecked(
+                psf_filter_on
+            )
         self._load_identification_method_settings(settings)
 
     def _load_identification_method_settings(self, settings: dict) -> None:
@@ -9130,6 +9239,9 @@ class Window(QtWidgets.QMainWindow):
         settings["Localize"][
             "edge_spots"
         ] = self.parameters_dialog.edge_spots_checkbox.isChecked()
+        settings["Localize"][
+            "psf_filter_on"
+        ] = self.parameters_dialog.psf_filter_checkbox.isChecked()
         settings["Localize"][
             "identification_method"
         ] = self.parameters_dialog.identification_method()
@@ -10264,10 +10376,21 @@ class Window(QtWidgets.QMainWindow):
             correct_z_bias,
             link_photons,
             registration_model,
+            use_identified_beads,
             accepted,
         ) = specs
         if not accepted:
             return
+        bead_positions = None
+        if use_identified_beads:
+            if self.identifications is None or not len(self.identifications):
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Spline PSF Calibration",
+                    "No spots are identified to take the bead boxes from.",
+                )
+                return
+            bead_positions = self.identifications[["frame", "x", "y"]].copy()
 
         base = os.path.splitext(self.movie_path)[0] if self.movie_path else ""
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
@@ -10315,6 +10438,7 @@ class Window(QtWidgets.QMainWindow):
             infos=infos,
             camera_infos=camera_infos,
             path=path,
+            bead_positions=bead_positions,
         )
         self.spline_calibration_worker.statusChanged.connect(
             self.status_bar.showMessage
@@ -11158,6 +11282,7 @@ class Window(QtWidgets.QMainWindow):
             "temporal_median_on": pd.temporal_median_checkbox.isChecked(),
             "temporal_median": pd.temporal_median_spinbox.value(),
             "gaussian_filter_sigma": pd.gaussian_filter_spinbox.value(),
+            "psf_filter_on": pd.psf_filter_checkbox.isChecked(),
             "identification_method": pd.identification_method(),
             "wavelet_threshold": pd.wavelet_threshold_spinbox.value(),
             "wavelet_noise": pd.wavelet_noise(),
@@ -11282,6 +11407,7 @@ class Window(QtWidgets.QMainWindow):
                 DEFAULT_PARAMETERS["Gaussian Filter Sigma"],
             )
         )
+        pd.psf_filter_checkbox.setChecked(params.get("psf_filter_on", False))
 
     def sum_settings_on_dialog(self) -> bool:
         """Whether the Parameters dialog shows the channel sum's
@@ -12340,6 +12466,7 @@ class Window(QtWidgets.QMainWindow):
             parameters["Wavelet Min. Area"],
             parameters["Temporal Median Window"],
             parameters["Gaussian Filter Sigma"],
+            parameters["PSF Filter Calibration"],
             parameters["Edge Spots"],
             tuple(np.asarray(rois).ravel().tolist()) if rois else None,
             None if self.frame_range is None else str(self.frame_range),
@@ -12415,6 +12542,11 @@ class Window(QtWidgets.QMainWindow):
                 "gaussian_filter_sigma",
                 DEFAULT_PARAMETERS["Gaussian Filter Sigma"],
             )
+            parameters["PSF Filter Calibration"] = (
+                params.get("spline_calibration_path") or ""
+                if params.get("psf_filter_on", False)
+                else ""
+            )
         movie = self.channels[channel].movie
         if movie is not None and len(movie) < _TEMPORAL_MEDIAN_MIN_FRAMES:
             parameters["Temporal Median Window"] = 0
@@ -12439,7 +12571,8 @@ class Window(QtWidgets.QMainWindow):
             movie,
             parameters["Temporal Median Window"],
             parameters["Gaussian Filter Sigma"],
-            self._channel_filter_cache.get(channel, [None, None]),
+            self._channel_filter_cache.get(channel, [None, None, None]),
+            parameters["PSF Filter Calibration"],
         )
         self._channel_filter_cache[channel] = cache
         return movie
@@ -13722,6 +13855,9 @@ class Window(QtWidgets.QMainWindow):
                 if dialog.is_multi_emitter()
                 else dialog.gaussian_filter_spinbox.value()
             ),
+            "PSF Filter Calibration": (
+                "" if dialog.is_multi_emitter() else dialog.psf_filter_path()
+            ),
             "Edge Spots": dialog.edge_spots_checkbox.isChecked(),
         }
 
@@ -13805,6 +13941,7 @@ class Window(QtWidgets.QMainWindow):
             # but dropping it here makes that explicit
             self._temporal_movie = None
             self._gaussian_movie = None
+            self._psf_movie = None
             self._sum_region_views = [None, None]
         except (AttributeError, RuntimeError):
             pass  # a partially built window has no channel sum to drop
@@ -13964,19 +14101,25 @@ class Window(QtWidgets.QMainWindow):
         if movie is None:
             self._temporal_movie = None
             self._gaussian_movie = None
+            self._psf_movie = None
             return None
         parameters = self.parameters
         window = parameters["Temporal Median Window"]
         sigma = parameters["Gaussian Filter Sigma"]
+        psf_path = parameters["PSF Filter Calibration"]
         if not self.temporal_median_applicable():
             window = 0
         try:
-            cache = [self._temporal_movie, self._gaussian_movie]
+            cache = [
+                self._temporal_movie,
+                self._gaussian_movie,
+                self._psf_movie,
+            ]
             region_views = self._sum_region_views
         except (AttributeError, RuntimeError):
             # also called from a partially built window, which has no
             # cached filter stack yet
-            cache = [None, None]
+            cache = [None, None, None]
             region_views = [None, None]
         # A split-FOV sum fills its reference region only. As in the batch
         # run (see ``localize.identify``), that region alone is filtered, so
@@ -13991,9 +14134,9 @@ class Window(QtWidgets.QMainWindow):
             frame_shape = movie.frame_shape
             movie = cropped
         movie, cache = _filtered_identification_movie(
-            movie, window, sigma, cache
+            movie, window, sigma, cache, psf_path
         )
-        self._temporal_movie, self._gaussian_movie = cache
+        self._temporal_movie, self._gaussian_movie, self._psf_movie = cache
         if filled_window is not None:
             if embedded is None or embedded.raw is not movie:
                 embedded = localize.EmbeddedMovie(
@@ -14257,6 +14400,8 @@ class Window(QtWidgets.QMainWindow):
                 filtered += f"; Temporal median: {temporal_median}"
             if gaussian_sigma:
                 filtered += f"; Gaussian sigma: {gaussian_sigma:g}"
+            if parameters.get("PSF Filter Calibration"):
+                filtered += "; PSF filter"
             message = (
                 f"Identified {counted} in {elapsed_time:.2f}"
                 f" seconds. (Box Size: {box}; {threshold}"
@@ -14768,6 +14913,7 @@ class Window(QtWidgets.QMainWindow):
         # the filter stack now sits on top of the sum
         self._temporal_movie = None
         self._gaussian_movie = None
+        self._psf_movie = None
         # ... and so does the display, on the sum's intensity scale
         self._reset_contrast_to_frame()
 
@@ -18158,9 +18304,13 @@ class SplineCalibrationWorker(QtCore.QThread):
         infos=None,
         camera_infos=None,
         z_binning: int = 1,
+        bead_positions: pd.DataFrame | None = None,
     ) -> None:
         super().__init__()
         self.bead_diagnostics: list[dict] = []
+        # the identified spots to cut the beads' boxes at, or None to detect
+        # the beads (see ``spline.calibrate_spline``)
+        self.bead_positions = bead_positions
         self.movie = movie
         self.info = info
         self.camera_info = camera_info
@@ -18215,6 +18365,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                         path=self.path,
                         return_diagnostics=True,
                         progress=progress,
+                        bead_positions=self.bead_positions,
                     )
                 )
             elif self.regions:
@@ -18237,6 +18388,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                     path=self.path,
                     return_diagnostics=True,
                     progress=progress,
+                    bead_positions=self.bead_positions,
                 )
             else:
                 calibration, diagnostics = spline.calibrate_spline(
@@ -18257,6 +18409,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                     path=self.path,
                     return_diagnostics=True,
                     progress=progress,
+                    bead_positions=self.bead_positions,
                 )
         except Exception as e:  # surface any failure to the GUI
             self.failed.emit(str(e))

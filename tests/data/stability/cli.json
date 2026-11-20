@@ -199,6 +199,7 @@
   "--peak-radius",
   "--peak-search-z",
   "--pixelsize",
+  "--psf-filter",
   "--psf-model",
   "--psf-sigma",
   "--qe",

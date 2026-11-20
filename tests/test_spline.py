@@ -17,6 +17,7 @@ from picasso.fitting import precision
 
 from tests.conftest import (
     BOX,
+    _MemmapPicassoMovie,
     IDENTITY,
     PIXELSIZE,
     affine,
@@ -296,7 +297,7 @@ class TestTemplateHelpers:
         peak_row, peak_col = np.unravel_index(np.argmax(focus), focus.shape)
         assert (peak_row, peak_col) == (c, c)
 
-    def test_focus_center_offset_matches_a_known_shift(self):
+    def test_template_center_offset_matches_a_known_shift(self):
         box, nz = BOX, 3
         yy, xx = np.mgrid[0:box, 0:box]
         c = box // 2
@@ -306,11 +307,11 @@ class TestTemplateHelpers:
             volume[:, :, k] = np.exp(
                 -((xx - (c + dx)) ** 2 + (yy - (c + dy)) ** 2) / (2 * 1.2**2)
             )
-        d_row, d_col = spline._focus_center_offset(volume, z_center=1)
+        d_row, d_col = spline._template_center_offset(volume)
         assert d_row == pytest.approx(dy, abs=0.05)
         assert d_col == pytest.approx(dx, abs=0.05)
 
-    def test_focus_center_offset_is_accurate_within_its_bound(self):
+    def test_template_center_offset_is_accurate_within_its_bound(self):
         # inside the cap the measurement plus one cubic shift must land on the
         # center; this is what makes a single centering pass enough
         from scipy.ndimage import shift as ndi_shift
@@ -324,16 +325,16 @@ class TestTemplateHelpers:
                 volume[:, :, k] = np.exp(
                     -((xx - (c + d)) ** 2 + (yy - (c - d)) ** 2) / (2 * 1.1**2)
                 )
-            d_row, d_col = spline._focus_center_offset(volume, 2)
+            d_row, d_col = spline._template_center_offset(volume)
             assert d_col == pytest.approx(d, abs=0.02)
             assert d_row == pytest.approx(-d, abs=0.02)
             centered = ndi_shift(
                 volume, shift=(-d_row, -d_col, 0.0), order=3, mode="nearest"
             )
-            left = spline._focus_center_offset(centered, 2)
+            left = spline._template_center_offset(centered)
             assert max(abs(left[0]), abs(left[1])) < 0.02
 
-    def test_focus_center_offset_refuses_beyond_the_cap(self):
+    def test_template_center_offset_refuses_beyond_the_cap(self):
         # a shift this large cannot be delivered on a small box (the PSF runs
         # off the edge), so the volume is left alone rather than half-moved
         box, nz = BOX, 5
@@ -345,15 +346,42 @@ class TestTemplateHelpers:
             volume[:, :, k] = np.exp(
                 -((xx - (c + d)) ** 2 + (yy - c) ** 2) / (2 * 1.1**2)
             )
-        assert spline._focus_center_offset(volume, 2) == (0.0, 0.0)
+        assert spline._template_center_offset(volume) == (0.0, 0.0)
 
-    def test_focus_center_offset_rejects_implausible_shifts(self):
+    def test_psf_center_is_the_axis_of_a_double_helix(self):
+        """Two lobes rotating about an off-center axis: the center is the
+        axis, at every z, though no single slice has a spot there."""
+        box, nz = 31, 21
+        yy, xx = np.mgrid[0:box, 0:box]
+        axis_x, axis_y = 15 + 2.3, 15 - 1.6
+        volume = np.zeros((box, box, nz))
+        for k, angle in enumerate(np.linspace(0.3, 2.2, nz)):
+            for sign in (1, -1):
+                lx = axis_x + sign * 5 * np.cos(angle)
+                ly = axis_y + sign * 5 * np.sin(angle)
+                volume[:, :, k] += np.exp(
+                    -((xx - lx) ** 2 + (yy - ly) ** 2) / (2 * 1.3**2)
+                )
+        d_row, d_col = spline._psf_center_offset(volume + 0.05)
+        assert d_col == pytest.approx(2.3, abs=0.05)
+        assert d_row == pytest.approx(-1.6, abs=0.05)
+
+    def test_recut_moves_the_boxes_onto_the_psf(self):
+        beads = pd.DataFrame({"x": [20, 40], "y": [20, 45]})
+        # within half a pixel (plus hysteresis): nothing to cut
+        assert spline._recut_beads(beads, (0.55, -0.3), 7, (50, 50)) is None
+        # (row, col): the boxes move 4 px down and 2 px left
+        moved = spline._recut_beads(beads, (4.2, -1.6), 7, (50, 50))
+        # the second bead's box would leave the frame at the bottom: dropped
+        assert moved[["x", "y"]].to_numpy().tolist() == [[18, 24]]
+
+    def test_template_center_offset_rejects_implausible_shifts(self):
         # a bead average is centered to well under a pixel; a large estimate
         # means the estimate is wrong, and shifting on it would do harm
         box, nz = BOX, 3
         volume = np.zeros((box, box, nz), dtype=np.float32)
         volume[0, 0, :] = 1.0  # all the signal jammed into one corner
-        assert spline._focus_center_offset(volume, z_center=1) == (0.0, 0.0)
+        assert spline._template_center_offset(volume) == (0.0, 0.0)
 
 
 def _volumes_with_one_outlier(box=BOX, nz=5, n_good=5, seed=0):
@@ -2941,3 +2969,206 @@ class TestCalibrationProgress:
         assert captured.out == "" and captured.err == ""
         self._single("console")
         assert "Calibrating spline" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# Lobed PSFs (double helix): centering, PSF filter, given bead positions
+# ---------------------------------------------------------------------------
+
+DH_BEADS = [(20.0, 22.0), (45.0, 20.0), (24.0, 46.0), (48.0, 47.0)]
+DH_LOBE_RADIUS = 4.0
+DH_BOX = 21
+
+
+def _double_helix_movie(n_frames=21, size=70, beads=DH_BEADS, ratio=None):
+    """A bead z-stack of a double-helix-like PSF: two Gaussian lobes
+    ``DH_LOBE_RADIUS`` px either side of each bead, rotating by about 110
+    degrees over the scan, the same total brightness at every z. The upper
+    lobe is the brighter one in the first half of the scan and the lower in
+    the second (``ratio``), as in a real double helix, so a local maximum
+    sits on one lobe or the other depending on z."""
+    yy, xx = np.mgrid[0:size, 0:size]
+    movie = np.zeros((n_frames, size, size), dtype=np.float32)
+    angles = np.linspace(0.4, 2.3, n_frames)
+    for f, angle in enumerate(angles):
+        weight = 1.15 if f < n_frames // 2 else 0.85
+        img = np.full((size, size), 100.0)
+        for bx, by in beads:
+            for sign, w in ((1, weight), (-1, 2.0 - weight)):
+                lx = bx + sign * DH_LOBE_RADIUS * np.cos(angle)
+                ly = by + sign * DH_LOBE_RADIUS * np.sin(angle)
+                img += (
+                    2000.0
+                    * w
+                    * np.exp(-((xx - lx) ** 2 + (yy - ly) ** 2) / (2 * 1.3**2))
+                )
+        movie[f] = img
+    return movie.astype(np.uint16)
+
+
+class TestLobedPSF:
+    """A PSF of several lobes: the calibration centers it on its axis, and
+    the PSF filter puts the identification boxes there too."""
+
+    @pytest.fixture(scope="class")
+    def calibration(self, tmp_path_factory):
+        movie = _double_helix_movie()
+        path = str(tmp_path_factory.mktemp("dh") / "dh_calib.hdf5")
+        calib = spline.calibrate_spline(
+            movie,
+            [{"Frames": movie.shape[0]}],
+            camera_info=CAMERA_INFO,
+            box=DH_BOX,
+            identification_method=NG,
+            d=20.0,
+            path=path,
+        )
+        return calib, path
+
+    def test_the_template_is_centered_on_the_axis(self):
+        movie = _double_helix_movie()
+        built = spline.build_psf_template(movie, CAMERA_INFO, DH_BOX, NG, 20.0)
+        # the detected boxes sit on a lobe, ~4 px off; the template is moved
+        # onto the axis all the same
+        d_row, d_col = spline._psf_center_offset(built["template"])
+        assert max(abs(d_row), abs(d_col)) < 0.1
+
+    def test_the_kernel_is_the_z_averaged_psf(self, calibration):
+        calib, _ = calibration
+        kernel = spline.psf_filter_kernel(calib)
+        assert kernel.shape == (DH_BOX, DH_BOX)
+        assert kernel.sum() == pytest.approx(1.0)
+        assert kernel.min() >= 0
+        # a ring around the center: the center pixel is not its maximum
+        c = DH_BOX // 2
+        assert kernel[c, c] < 0.5 * kernel.max()
+        # and centered on the box
+        d_row, d_col = spline._spot_center_offset(kernel)
+        assert max(abs(d_row), abs(d_col)) < 0.1
+
+    def test_the_psf_filter_identifies_the_axis(self, calibration):
+        calib, path = calibration
+        movie = _double_helix_movie()
+        info = [{"Frames": movie.shape[0]}]
+        beads = np.array(DH_BEADS)
+
+        def box_offsets(psf_filter):
+            parameters = localize.IdentificationParameters(
+                method=localize.NetGradient(500.0),
+                box=DH_BOX,
+                psf_filter=psf_filter,
+            )
+            ids, _ = localize.identify(movie, info, parameters=parameters)
+            xy = ids[["x", "y"]].to_numpy(float)
+            d = np.hypot(*(xy[:, None, :] - beads[None, :, :]).T).T
+            return ids, d.min(axis=1)
+
+        _, raw = box_offsets(None)
+        # without the filter every box sits on a lobe
+        assert np.median(raw) > 3.0
+        ids, filtered = box_offsets(localize.PSFFilter.from_file(path))
+        # with it, one box per bead and frame, near the axis (the brighter
+        # lobe pulls the filter's maximum toward it a little) ...
+        assert len(ids) == len(DH_BEADS) * movie.shape[0]
+        assert filtered.max() <= 2.0
+        # ... close enough for the fit to land on the bead at every z
+        locs, _ = localize.fit(
+            _MemmapPicassoMovie(movie, info),
+            info,
+            camera_info=CAMERA_INFO,
+            identifications=ids,
+            box=DH_BOX,
+            fitting_method="spline-mle",
+            spline_calibration=calib,
+        )
+        xy = locs[["x", "y"]].to_numpy() / PIXELSIZE
+        nearest = np.argmin(
+            ((xy[:, None, :] - beads[None, :, :]) ** 2).sum(axis=2), axis=1
+        )
+        error = xy - beads[nearest]
+        # the template's center (that of the PSF summed over z) need not be
+        # the geometric axis exactly: a constant offset, the same for every
+        # bead at every z, and small
+        offset = np.median(error, axis=0)
+        assert np.hypot(*offset) < 0.5
+        assert np.abs(error - offset).max() < 0.05
+
+    def test_the_filter_survives_the_metadata(self, calibration):
+        _, path = calibration
+        parameters = localize.IdentificationParameters(
+            method=localize.NetGradient(500.0),
+            box=DH_BOX,
+            psf_filter=localize.PSFFilter.from_file(path),
+        )
+        info = parameters.to_info()
+        assert info["PSF Filter Calibration"] == path
+        assert localize.IdentificationParameters.from_info(info) == parameters
+        # without it, the key is absent
+        assert "PSF Filter Calibration" not in (
+            localize.IdentificationParameters(
+                method=localize.NetGradient(500.0), box=DH_BOX
+            ).to_info()
+        )
+
+    def test_a_missing_filter_calibration_is_reported(self, tmp_path):
+        info = {
+            "Box Size": 7,
+            "Min. Net Gradient": 100,
+            "PSF Filter Calibration": str(tmp_path / "gone.hdf5"),
+        }
+        with pytest.raises(ValueError, match="not found"):
+            localize.IdentificationParameters.from_info(info)
+
+    def test_the_filtered_movie_is_a_correlation(self):
+        from scipy.ndimage import correlate
+
+        rng = np.random.default_rng(0)
+        movie = rng.poisson(50, (2, 30, 40)).astype(np.uint16)
+        kernel = rng.random((5, 7))
+        filtered = localize.PSFFilteredMovie(movie, kernel)
+        expected = correlate(
+            movie[1].astype(np.float64), kernel / kernel.sum(), mode="nearest"
+        )
+        np.testing.assert_allclose(filtered[1], expected, rtol=1e-4)
+
+    def test_the_kernel_must_have_odd_sides(self):
+        with pytest.raises(ValueError, match="odd sides"):
+            localize.PSFFilter(np.ones((4, 5)))
+        with pytest.raises(TypeError):
+            localize.IdentificationParameters(
+                method=localize.NetGradient(1),
+                box=7,
+                psf_filter=np.ones((5, 5)),
+            )
+
+    @pytest.mark.parametrize("kind", ["array", "identifications"])
+    def test_given_bead_positions(self, kind):
+        movie = _double_helix_movie()
+        info = [{"Frames": movie.shape[0]}]
+        if kind == "array":
+            # one box per bead, deliberately 2 px off the axis
+            positions = np.array(DH_BEADS) + [2.0, -2.0]
+        else:
+            # the boxes the PSF filter identified: on the axis
+            positions = pd.DataFrame(
+                {
+                    "frame": np.repeat(np.arange(movie.shape[0]), 4),
+                    "x": np.tile([b[0] for b in DH_BEADS], movie.shape[0]),
+                    "y": np.tile([b[1] for b in DH_BEADS], movie.shape[0]),
+                }
+            )
+        calib = spline.calibrate_spline(
+            movie,
+            info,
+            camera_info=CAMERA_INFO,
+            box=DH_BOX,
+            identification_method=NG,
+            d=20.0,
+            bead_positions=positions,
+        )
+        assert calib["Bead positions"] == "given"
+        assert calib["n_beads"] == len(DH_BEADS)
+        # either way the PSF ends up on the box center
+        kernel = spline.psf_filter_kernel(calib)
+        d_row, d_col = spline._spot_center_offset(kernel)
+        assert max(abs(d_row), abs(d_col)) < 0.1

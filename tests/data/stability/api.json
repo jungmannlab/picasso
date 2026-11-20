@@ -166,6 +166,7 @@
   "IDENTIFY_METHODS",
   "IdentificationParameters",
   "NetGradient",
+  "PSFFilter",
   "MultiEmitterParameters",
   "localize",
   "localize_frames",
@@ -389,7 +390,8 @@
   "refine_split_fov_transforms_from_signal",
   "bead_inspection_data",
   "plot_bead_gallery",
-  "spline_coefficients"
+  "spline_coefficients",
+  "psf_filter_kernel"
  ],
  "picasso.spt": [
   "FRAME_TIME_KEY",

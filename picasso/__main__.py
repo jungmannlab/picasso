@@ -2719,14 +2719,16 @@ def _identification_parameters_from_args(
 ) -> IdentificationParameters:
     """The identification settings given on the command line, see
     ``_identification_method_from_args``."""
-    from .localize import IdentificationParameters
+    from .localize import IdentificationParameters, PSFFilter
 
+    psf_path = getattr(args, "psf_filter", None)
     return IdentificationParameters(
         method=_identification_method_from_args(args, min_net_gradient),
         box=box,
         temporal_median_window=args.temporal_median or 0,
         gaussian_filter_sigma=args.gaussian_filter or 0.0,
         edge_spots=not getattr(args, "no_edge_spots", False),
+        psf_filter=PSFFilter.from_file(psf_path) if psf_path else None,
     )
 
 
@@ -5073,6 +5075,19 @@ def _build_parser() -> (
             " spot is easier to identify. 0 (the default) disables it. "
             "Fitting always uses the raw movie, so the minimum net gradient "
             "needs re-tuning when this is changed"
+        ),
+    )
+    localize_parser.add_argument(
+        "--psf-filter",
+        metavar="CALIBRATION",
+        default=None,
+        help=(
+            "spline calibration (.hdf5) whose PSF, averaged over z, filters"
+            " every frame before spot identification (a matched filter): a"
+            " spot then shows as one maximum at the center of the PSF, also"
+            " when it has several lobes, e.g. a double helix. Fitting always"
+            " uses the raw movie, so the minimum net gradient needs re-tuning"
+            " when this is switched on"
         ),
     )
     localize_parser.add_argument(

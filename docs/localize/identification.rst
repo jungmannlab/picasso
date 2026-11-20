@@ -235,7 +235,7 @@ The same two caveats as for the temporal median filter apply:
 
 The two filters can be used together: the temporal median background is subtracted first, and the result is then smoothed.
 
-Unlike the temporal median filter, the Gaussian filter *is applied when calibrating* a 3D or an experimental (cubic-spline) PSF — smoothing does not erase static beads, and defocused beads are exactly the kind of multi-peaked PSF the filter helps with.
+Unlike the temporal median filter, the Gaussian filter *is applied when calibrating* a 3D astigmatic PSF — smoothing does not erase static beads, and defocused beads are exactly the kind of multi-peaked PSF the filter helps with. An experimental (cubic-spline) PSF calibration detects its beads with the identification threshold alone, unless ``Use the identified spots as bead boxes`` is ticked in its dialog (see :ref:`localize-spline-building`).
 
 .. dropdown:: Python
    :icon: code
@@ -250,6 +250,42 @@ Unlike the temporal median filter, the Gaussian filter *is applied when calibrat
           method=localize.NetGradient(5000), box=7, gaussian_filter_sigma=1.0
       )
       identifications, id_info = localize.identify(movie, parameters=parameters)
+
+
+.. _localize-psf-filter:
+
+PSF filter
+----------
+
+Some PSFs consist of several lobes, e.g. a double helix, whose two lobes rotate about the emitter's position with z. A local maximum then sits on one of the lobes, several pixels off the emitter, and which lobe it is changes with z. The box of every spot is centered there, and the spline fit has to reach far outside the box center, or fails.
+
+``PSF filter (spline calibration)`` in the ``Identification`` group filters every frame with the PSF of the loaded spline calibration (:ref:`localize-spline`), averaged over z, before spots are identified. This is a matched filter: a spot then shows as one maximum at the center of the PSF, whatever its shape. For a double helix, the filter is a ring around the axis, and the maximum lies on the axis at every z. The boxes are thus centered where the spline fit expects the PSF.
+
+- The checkbox is available while a spline calibration is loaded (``Experimental PSF (spline)``). The same calibration is used for the fit.
+- **The filter applies to identification only.** As for the Gaussian filter, the spots are cut out of, and fitted on, the raw movie.
+- **The detection threshold needs re-tuning.** The filtered frames are much smoother than the raw ones, so the net gradient of a spot changes a lot. Turn on ``Preview`` and sweep the minimum net gradient again. Use the net gradient identification: the wavelet identification needs the fine structure that the filter removes.
+- It is applied after the temporal median and the Gaussian filter, if those are on.
+- The identification metadata record the calibration under ``PSF Filter Calibration``.
+- To calibrate a PSF of several lobes, a first calibration is enough to filter the bead movie with: identify the beads with its PSF filter and build the final calibration with ``Use the identified spots as bead boxes`` (see :ref:`localize-spline-building`). The calibration itself also moves the beads' boxes onto the PSF's center, so the first calibration can be built without the filter.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``psf_filter`` of the ``IdentificationParameters`` takes a
+   ``localize.PSFFilter``, made from a spline calibration file (or from a
+   calibration in memory with ``PSFFilter.from_calibration``).
+
+   .. code-block:: python
+
+      psf_filter = localize.PSFFilter.from_file("dh_spline_calib.hdf5")
+      parameters = localize.IdentificationParameters(
+          method=localize.NetGradient(3000), box=21, psf_filter=psf_filter
+      )
+      identifications, id_info = localize.identify(movie, parameters=parameters)
+
+   On the command line, ``picasso localize`` takes the calibration with
+   ``--psf-filter``.
 
 
 .. _localize-edge-spots:
