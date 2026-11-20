@@ -55,7 +55,7 @@ MASK_PREVIEW_WHEEL_ZOOM = 1.2  # zoom factor per mouse wheel notch
 MASK_PREVIEW_MIN_PX = 5  # max zoom: mask pixels across the preview
 MASK_PREVIEW_KEY_PAN = 0.2  # arrow key pan, fraction of the preview
 
-STRUCTURE_PREVIEW_SIZE = 512
+STRUCTURE_PREVIEW_SIZE = 584
 STRUCTURE_PREVIEW_SCALING = 0.8 * 1.44
 STRUCTURE_PREVIEW_MOL_SIZE = 12
 STRUCTURE_PREVIEW_COLORS = [
@@ -1581,19 +1581,23 @@ class StructuresTab(lib.Dialog):
         self._rebuilding_mol_tar = False
 
         # PREVIEW
+        # the preview box hugs the fixed-size canvas; the spare width
+        # goes to the structure/target boxes on the right
         preview_box = QtWidgets.QGroupBox("Preview")
+        preview_box.setSizePolicy(
+            QtWidgets.QSizePolicy.Policy.Maximum,
+            QtWidgets.QSizePolicy.Policy.Preferred,
+        )
         layout.addWidget(preview_box, 0, 0, 2, 1)
-        preview_layout = QtWidgets.QGridLayout(preview_box)
-        preview_layout.addWidget(lib.HelpButton(self.DOCS_URL), 0, 0)
+        preview_layout = QtWidgets.QVBoxLayout(preview_box)
         self.preview = StructurePreview(self)
-        preview_layout.addWidget(self.preview, 1, 0, 1, 4)
+        preview_layout.addWidget(self.preview)
 
         # show legend and scalebar
         self.show_legend_check = QtWidgets.QCheckBox("Show legend")
         self.show_legend_check.setToolTip("Show molecular targets' names?")
         self.show_legend_check.setChecked(True)
         self.show_legend_check.stateChanged.connect(self.update_preview)
-        preview_layout.addWidget(self.show_legend_check, 2, 0)
 
         self.show_scalebar_check = QtWidgets.QCheckBox("Show scale bar")
         self.show_scalebar_check.setChecked(True)
@@ -1603,39 +1607,45 @@ class StructuresTab(lib.Dialog):
             "SPINNA", "Print scale bar length (structures)", False, parent=self
         )
         self.scalebar_options.changed.connect(self.update_preview)
-        scalebar_row = QtWidgets.QHBoxLayout()
-        scalebar_row.addWidget(self.show_scalebar_check)
-        scalebar_row.addWidget(self.scalebar_options.settings_button(self))
-        scalebar_row.addStretch()
-        preview_layout.addLayout(scalebar_row, 2, 1)
 
         length_label = QtWidgets.QLabel("Length (nm):")
         length_label.setToolTip("Scale bar length.")
-        length_label.setAlignment(QtCore.Qt.AlignmentFlag.AlignRight)
-        preview_layout.addWidget(length_label, 2, 2)
         self.scalebar_length = QtWidgets.QDoubleSpinBox()
         self.scalebar_length.setDecimals(1)
         self.scalebar_length.setValue(1.0)
         self.scalebar_length.setRange(0.1, 100)
         self.scalebar_length.setSingleStep(0.1)
         self.scalebar_length.valueChanged.connect(self.update_preview)
-        preview_layout.addWidget(self.scalebar_length, 2, 3)
+
+        display_row = QtWidgets.QHBoxLayout()
+        display_row.addWidget(self.show_legend_check)
+        display_row.addSpacing(12)
+        display_row.addWidget(self.show_scalebar_check)
+        display_row.addWidget(self.scalebar_options.settings_button(self))
+        display_row.addStretch()
+        display_row.addWidget(length_label)
+        display_row.addWidget(self.scalebar_length)
+        preview_layout.addLayout(display_row)
 
         reset_rot_button = QtWidgets.QPushButton("Reset rotation")
         reset_rot_button.setIcon(theme.icon("reload"))
         reset_rot_button.setToolTip("Reset rotation angles to 0.")
         reset_rot_button.released.connect(partial(self.update_preview, True))
-        preview_layout.addWidget(reset_rot_button, 3, 0, 1, 2)
 
         save_view_button = QtWidgets.QPushButton("Save view")
         save_view_button.setIcon(theme.icon("export-view"))
         save_view_button.setToolTip("Save current view as an image.")
         save_view_button.released.connect(self.save_preview)
-        preview_layout.addWidget(save_view_button, 3, 2, 1, 2)
+
+        button_row = QtWidgets.QHBoxLayout()
+        button_row.addWidget(lib.HelpButton(self.DOCS_URL))
+        button_row.addWidget(reset_rot_button, 1)
+        button_row.addWidget(save_view_button, 1)
+        preview_layout.addLayout(button_row)
+        preview_layout.addStretch()
 
         # STRUCTURES SUMMARY
         self.structures_box = lib.ScrollableGroupBox("Structures summary")
-        self.structures_box.setFixedHeight(250)
         layout.addWidget(self.structures_box, 0, 1)
 
         add_structure_button = QtWidgets.QPushButton("Add a new structure")
@@ -1668,8 +1678,10 @@ class StructuresTab(lib.Dialog):
 
         # MOLECULAR TARGETS IN THE CURRENT STRCTURE
         self.mol_tar_box = lib.ScrollableGroupBox("Molecular targets")
-        self.mol_tar_box.setFixedHeight(446)
         layout.addWidget(self.mol_tar_box, 1, 1)
+        layout.setColumnStretch(1, 1)
+        layout.setRowStretch(0, 1)
+        layout.setRowStretch(1, 2)
 
         label1 = QtWidgets.QLabel("Mol. target")
         label1.setToolTip("Name of each of the molecular target added.")
