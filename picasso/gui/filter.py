@@ -46,7 +46,7 @@ from .. import (
 from .app import run_gui
 from . import idle
 from . import theme
-from . import toolbars
+from . import shortcuts, toolbars
 from . import plot_style
 from .plot_style import PlotStyle
 
@@ -1056,6 +1056,7 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        shortcuts.add_menu_action(file_menu)
         help_action = file_menu.addAction("Help")
         help_action.setIcon(theme.icon("help"))
         help_action.triggered.connect(
@@ -1168,6 +1169,7 @@ class Window(QtWidgets.QMainWindow):
                 (plot_settings_action, "plot-settings", "Plot settings"),
             ],
         )
+        shortcuts.install(self, "Filter")
         # in the menus only, not on the toolbar
         remove_columns_action.setIcon(theme.icon("remove-columns"))
         self._update_undo_actions()
@@ -1510,10 +1512,14 @@ class Window(QtWidgets.QMainWindow):
             action.setEnabled(bool(stack))
             if stack and stack[-1].label:
                 text = f"{text}: {stack[-1].label}"
-            shortcut = action.shortcut().toString(
-                QtGui.QKeySequence.SequenceFormat.NativeText
-            )
+            shortcut = toolbars.shortcut_text(action)
             action.setToolTip(f"{text} ({shortcut})" if shortcut else text)
+
+    def shortcuts_applied(self) -> None:
+        """The user's shortcuts were applied (``shortcuts.apply``): the
+        tooltips of Undo and Redo show theirs."""
+        if hasattr(self, "_undo_stack"):
+            self._update_undo_actions()
 
     def _drop_columns(self, names: Iterable[str]) -> None:
         """Remove columns from the localizations, kept for ``undo``, and

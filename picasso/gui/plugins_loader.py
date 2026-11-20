@@ -41,7 +41,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import io
 from . import theme
-from . import toolbars
+from . import shortcuts, toolbars
 
 # Re-exported for backwards compatibility with code and tests that
 # imported these from this module before they moved to picasso.plugins.
@@ -205,10 +205,13 @@ def add_plugins_menu_actions(window, app_name: str) -> None:
 
     # show the plugins' actions on a toolbar customized to have them,
     # also Render's 3D window, which is built before the plugins load
+    # and give them the user's shortcuts
     toolbars.refresh(window)
+    shortcuts.refresh(window)
     window_rot = getattr(window, "window_rot", None)
     if window_rot is not None:
         toolbars.refresh(window_rot)
+        shortcuts.refresh(window_rot)
 
 
 def _open_store(window, app_name: str) -> None:

@@ -91,6 +91,49 @@ Plugin actions (see :doc:`plugins`) can be on the toolbar too; a button whose
 action is not in the menus, e.g., of a plugin that is disabled, is kept and
 shown in italics in the dialog, and returns with its plugin.
 
+.. _keyboard-shortcuts:
+
+Keyboard shortcuts
+------------------
+Every action in the menus of a Picasso window can have keyboard shortcuts,
+also one without a shortcut by default, and an action can have several, e.g.,
+both :kbd:`Ctrl+W` and :kbd:`Home` for *Fit image to window* in Render. To
+change them, open ``File > Keyboard shortcuts...`` in Render (also its 3D
+view), Localize, Filter, Average, Simulate, SPINNA, Design or nanoTRON.
+
+The dialog lists the actions grouped by menu, with their shortcuts; shortcuts
+that differ from the defaults are in bold. Besides the menus, **Keyboard
+only** lists the actions without a menu entry, i.e., moving and zooming the
+view in Render, rotating and zooming in its 3D view and zooming in Localize.
+
+The search field finds actions by name or by shortcut, e.g., ``ctrl+e``.
+
+To change the shortcuts of an action, select it in the list. Below the list:
+
+- **Add a shortcut**: click into the field and press the key combination,
+  e.g., :kbd:`Ctrl+Shift+K`. It is added to the shortcuts of the action. If
+  another action has that shortcut already, Picasso asks whether to move it to
+  the selected action, as two actions with the same shortcut block each other.
+- **Remove**: select a shortcut of the action and click *Remove*. An action
+  can be left without any shortcut.
+- **Reset**: gives the selected action its default shortcuts again, which are
+  shown below the field.
+- **Restore Defaults** gives all actions their default shortcuts, after asking
+  for confirmation.
+
+*OK* applies the shortcuts to every open window of the module and saves them
+in the ``Shortcuts`` section of ``~/.picasso/settings.yaml`` (see
+:ref:`user-settings-file`), so they are used at the next start; *Cancel*
+discards the changes. Each module has its own shortcuts, e.g., Render's 3D
+view is set separately from Render. The tooltips of the toolbar buttons show
+the current shortcuts.
+
+On macOS, :kbd:`Ctrl` in the shortcuts listed in this documentation is
+:kbd:`Cmd`; the dialog shows the keys with the symbols of the platform.
+
+Plugin actions (see :doc:`plugins`) can have shortcuts too. The shortcuts of a
+plugin that is not loaded are kept and apply once it is back.
+
 .. _accessibility:
 
 Accessibility
@@ -110,7 +153,9 @@ Accessibility
   *Increase contrast* and Windows' contrast themes.
 - **Keyboard**: Render's view is moved with the arrow keys (or :kbd:`W`,
   :kbd:`A`, :kbd:`S`, :kbd:`D`), zoomed with :kbd:`Ctrl` +/- and fitted
-  to the window with :kbd:`Home`, see :ref:`render-navigation`.
+  to the window with :kbd:`Home`, see :ref:`render-navigation`. Every
+  shortcut can be changed, and actions without one given one, see
+  :ref:`keyboard-shortcuts`.
 
 .. _user-settings-file:
 
@@ -245,6 +290,25 @@ Top level
        - ``area``: the side of the window, ``Top``, ``Bottom``, ``Left`` or
          ``Right``.
 
+``Shortcuts``
+^^^^^^^^^^^^^
+
+.. list-table::
+   :widths: 22 10 68
+   :header-rows: 1
+
+   * - Key
+     - Default
+     - Description
+   * - ``Render``, ``Render 3D``, ``Localize``, ``Filter``, ``Average``,
+       ``Simulate``, ``SPINNA``, ``Design``, ``nanoTRON``
+     - not set (the default shortcuts)
+     - The keyboard shortcuts of the module that differ from the defaults
+       (see :ref:`keyboard-shortcuts`), by the path of the action, e.g.,
+       ``File > Open`` or ``Keyboard only > Move left``: a list of key
+       combinations, e.g., ``[Ctrl+O, F2]`` (``Ctrl`` is :kbd:`Cmd` on
+       macOS), or ``[]`` for no shortcut.
+
 ``Render``
 ^^^^^^^^^^
 
@@ -287,7 +351,7 @@ Top level
      - Render warns when it drops localizations while loading a file (missing or infinite values, outside the field of view or negative values) only if more than this percentage of the file's localizations was dropped. ``0`` warns whenever a localization is dropped.
    * - ``Show Ctrl+Z notice``
      - ``True``
-     - Pressing :kbd:`Ctrl+Z` in Render shows a notice that tells that it undoes the last step rather than selecting the Zoom tool (now :kbd:`Z`), as before Picasso 1.0, and asks whether to undo the step or select the Zoom tool. Ticking *Don't show again* in the notice sets it to ``False``.
+     - Pressing :kbd:`Ctrl+Z` in Render shows a notice that tells that it undoes the last step rather than selecting the Zoom tool (now :kbd:`Z`), as before Picasso 1.0, and asks whether to undo the step or select the Zoom tool. Ticking *Don't show again* in the notice sets it to ``False``. The notice is shown only for :kbd:`Ctrl+Z` itself, not for other shortcuts given to ``File > Undo``, and no longer once :kbd:`Ctrl+Z` is taken from ``File > Undo`` in :ref:`keyboard-shortcuts`, e.g., to give it back to the Zoom tool.
    * - ``Colorbar format``
      - ``.png``
      - Format of the exported colorbar/LUT image next to a "render by property" export - ``.png`` or ``.svg``. See :ref:`render-colorbar-format`.

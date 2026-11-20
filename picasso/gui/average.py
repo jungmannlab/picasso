@@ -22,7 +22,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from .. import io, lib, average, notifications, render, __version__, docs_url
 from .app import run_gui
 from . import theme
-from . import toolbars
+from . import shortcuts, toolbars
 
 
 class PoolWorker(QtCore.QThread):
@@ -603,6 +603,7 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        shortcuts.add_menu_action(file_menu)
         lib.add_sound_notifications_menu(file_menu)
         help_action = file_menu.addAction("Help")
         help_action.setIcon(theme.icon("help"))
@@ -635,6 +636,7 @@ class Window(QtWidgets.QMainWindow):
                 (self.abort_action, "abort"),
             ],
         )
+        shortcuts.install(self, "Average")
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Shut down the averaging processes before closing.

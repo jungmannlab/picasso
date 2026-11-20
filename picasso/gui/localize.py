@@ -55,7 +55,7 @@ from .. import transforms as transforms_mod
 from ..fitting import precision, residualfit, splinefit
 from .app import run_gui
 from . import theme
-from . import toolbars
+from . import shortcuts, toolbars
 from .scalebar_settings import ScaleBarOptions
 from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -9259,6 +9259,7 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        shortcuts.add_menu_action(file_menu)
         open_config_action = file_menu.addAction(
             "Open camera config file location"
         )
@@ -9334,14 +9335,14 @@ class Window(QtWidgets.QMainWindow):
         view_menu.addSeparator()
         # zooming is not in the menu (the mouse does it), but its
         # shortcuts work in the whole window
-        for text, shortcuts, slot in (
+        for text, keys, slot in (
             ("Zoom in", ["Ctrl++", "Ctrl+="], self.zoom_in),
             ("Zoom out", ["Ctrl+-"], self.zoom_out),
         ):
             action = QtGui.QAction(text, self)
-            action.setShortcuts(shortcuts)
+            action.setShortcuts(keys)
             action.triggered.connect(slot)
-            self.addAction(action)
+            self.addAction(shortcuts.register(action, text))
         fit_in_view_action = view_menu.addAction("Fit image to window")
         fit_in_view_action.setShortcut("Ctrl+W")
         fit_in_view_action.triggered.connect(self.fit_in_view)
@@ -9522,6 +9523,7 @@ class Window(QtWidgets.QMainWindow):
                 (fit_in_view_action, "fit-view", "Fit view"),
             ],
         )
+        shortcuts.install(self, "Localize")
 
     def open_config_location(self) -> None:
         """Open the folder holding the camera config file in the system

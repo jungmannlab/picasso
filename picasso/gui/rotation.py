@@ -22,7 +22,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from scipy.spatial.transform import Rotation
 
 from .. import io, render, lib, lib_qt, __version__, docs_url
-from . import idle, theme, toolbars
+from . import idle, shortcuts, theme, toolbars
 from .grid_settings import GridGroupBox
 from .scalebar_settings import ScaleBarGroupBox
 from .render_worker import (
@@ -3329,6 +3329,8 @@ class RotationWindow(QtWidgets.QMainWindow):
         animation.setShortcut("Ctrl+Shift+E")
         animation.setIcon(theme.icon("animation"))
         animation.triggered.connect(self.animation_dialog.show)
+        file_menu.addSeparator()
+        shortcuts.add_menu_action(file_menu)
         help_action = file_menu.addAction("Help")
         help_action.setIcon(theme.icon("help"))
         help_action.triggered.connect(
@@ -3382,19 +3384,19 @@ class RotationWindow(QtWidgets.QMainWindow):
         # but their shortcuts work in the window; enabled with the menu
         # bar, see ``hideEvent``
         self._navigation_actions = []
-        for text, shortcuts, slot in (
-            ("Left", ["Left"], self.view_rot.to_left_rot),
-            ("Right", ["Right"], self.view_rot.to_right_rot),
-            ("Up", ["Up"], self.view_rot.to_up_rot),
-            ("Down", ["Down"], self.view_rot.to_down_rot),
+        for text, keys, slot in (
+            ("Rotate left", ["Left"], self.view_rot.to_left_rot),
+            ("Rotate right", ["Right"], self.view_rot.to_right_rot),
+            ("Rotate up", ["Up"], self.view_rot.to_up_rot),
+            ("Rotate down", ["Down"], self.view_rot.to_down_rot),
             ("Zoom in", ["Ctrl++", "Ctrl+="], self.view_rot.zoom_in),
             ("Zoom out", ["Ctrl+-"], self.view_rot.zoom_out),
         ):
             action = QtGui.QAction(text, self)
-            action.setShortcuts(shortcuts)
+            action.setShortcuts(keys)
             action.triggered.connect(slot)
             action.setEnabled(False)
-            self.addAction(action)
+            self.addAction(shortcuts.register(action, text))
             self._navigation_actions.append(action)
 
         # menu bar - Tools
@@ -3446,6 +3448,7 @@ class RotationWindow(QtWidgets.QMainWindow):
                 (display_settings_action, "display-settings", "Display"),
             ],
         )
+        shortcuts.install(self, "Render 3D")
         # the window is built here but shown only on demand; see
         # ``hideEvent`` for why its shortcuts must stay inert
         self.menu_bar.setEnabled(False)

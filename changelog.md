@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 19-NOV-2026 CET
+Last change: 20-NOV-2026 CET
 
 ## 1.0.0
 
@@ -23,6 +23,7 @@ Picasso 1.0 is the largest update since Picasso was first published. The highlig
 - New [documentation](https://picassosr.readthedocs.io/en/latest) that is user-friendly, intuitive and thoroughly explains every Picasso functionality. Quick start page was added with minimal introduction to Picasso. Python API can now be found by a simple browser search in the documentation.
 - New appearance of all Picasso windows: a light and a dark theme that follow the operating system, with a selectable accent color, font size and density (`File > Appearance...`); the platform's own style remains available as *Native*. See the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#appearance).
 - Toolbars in Render (also its 3D view), Localize, Filter and Average with the most used actions of the menus, see the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#toolbars).
+- Customizable keyboard shortcuts in every window (`File > Keyboard shortcuts...`), see the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#keyboard-shortcuts).
 - Icons added to menu actions and buttons.
 - The sections of the long dialogs collapse and expand by clicking their header, and each dialog remembers which sections are open across sessions (`Expanded sections` in the [user settings](https://picassosr.readthedocs.io/en/latest/others.html#user-settings-file)).
 - A Picasso window left open but unused releases its memory after 30 minutes without input. Set the time with `Release memory after idle (min)` in the [user settings](https://picassosr.readthedocs.io/en/latest/others.html#user-settings-file) where more details are explained.

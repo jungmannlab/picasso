@@ -385,15 +385,22 @@ def test_3d_window_icons_and_navigation_shortcuts(qt_offscreen):
         file_actions, view_actions = actions(0), actions(1)
         assert not file_actions["Build an animation..."].icon().isNull()
         assert not view_actions["Reset rotation"].icon().isNull()
-        moves = {"Left", "Right", "Up", "Down", "Zoom in", "Zoom out"}
+        moves = {
+            "Rotate left",
+            "Rotate right",
+            "Rotate up",
+            "Rotate down",
+            "Zoom in",
+            "Zoom out",
+        }
         assert not moves & set(view_actions)
         nav = {a.text(): a for a in rot.actions()}
         assert moves <= set(nav)
-        assert not nav["Left"].isEnabled()  # hidden window
+        assert not nav["Rotate left"].isEnabled()  # hidden window
         rot.show()
-        assert nav["Left"].isEnabled()
+        assert nav["Rotate left"].isEnabled()
         rot.hide()
-        assert not nav["Left"].isEnabled()
+        assert not nav["Rotate left"].isEnabled()
     finally:
         rot.view_rot.stop_render_worker()
         window.view.stop_render_worker()

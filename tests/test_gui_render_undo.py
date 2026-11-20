@@ -30,7 +30,7 @@ import pytest
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from picasso import io, lib, lib_qt, postprocess
-from picasso.gui import idle, render_link, render_undo, toolbars
+from picasso.gui import idle, render_link, render_undo, shortcuts, toolbars
 from picasso.gui import render as gui_render
 from tests.test_gui_render_index import _EXEMPT, _mutating_methods
 
@@ -393,6 +393,60 @@ def test_ctrl_z_notice_can_be_turned_off(
         assert len(notices) == 1
     finally:
         _close(other)
+
+
+def _press(window, qapp, key, modifiers=QtCore.Qt.KeyboardModifier.NoModifier):
+    from PyQt6 import QtTest
+
+    window.show()
+    window.activateWindow()
+    qapp.processEvents()
+    QtTest.QTest.keyClick(window.view, key, modifiers)
+    qapp.processEvents()
+
+
+def test_other_undo_shortcut_does_not_explain_ctrl_z(
+    window, qt_offscreen, notices
+):
+    """Only Ctrl+Z itself explains the change, not another shortcut the
+    user gave File > Undo; also with nothing to undo."""
+    shortcuts.apply(window, {"File > Undo": ("Ctrl+Z", "U")})
+    assert shortcuts.action_keys(window._ctrl_z_notice_action) == ("Ctrl+Z",)
+    before = _copies(window.view)
+    _drag(window.view, 2, 0)
+    _press(window, qt_offscreen, QtCore.Qt.Key.Key_U)
+    assert not notices
+    _assert_locs(window.view, before)  # undone without asking
+    _press(window, qt_offscreen, QtCore.Qt.Key.Key_U)  # nothing to undo
+    assert not notices
+    notices.answer = _click("Undo")
+    _drag(window.view, 2, 0)
+    _press_ctrl_z(window, qt_offscreen)
+    assert len(notices) == 1
+    _assert_locs(window.view, before)
+
+
+def test_ctrl_z_given_back_to_the_zoom_tool(window, qt_offscreen, notices):
+    """Without Ctrl+Z, Undo explains nothing, and Ctrl+Z selects the
+    Zoom tool as before Picasso 1.0."""
+    shortcuts.apply(
+        window,
+        {"File > Undo": ("Ctrl+Alt+Z",), "Tools > Zoom": ("Z", "Ctrl+Z")},
+    )
+    assert shortcuts.action_keys(window._ctrl_z_notice_action) == ()
+    tools = {a.text(): a for a in window.tools_actiongroup.actions()}
+    tools["Pick"].trigger()
+    _drag(window.view, 2, 0)
+    moved = _copies(window.view)
+    _press_ctrl_z(window, qt_offscreen)
+    assert not notices
+    assert window.view._mode == "Zoom"
+    _assert_locs(window.view, moved)
+    alt = QtCore.Qt.KeyboardModifier.AltModifier
+    ctrl = QtCore.Qt.KeyboardModifier.ControlModifier
+    _press(window, qt_offscreen, QtCore.Qt.Key.Key_Z, ctrl | alt)
+    assert not notices
+    assert window.view.history.undo_label is None
 
 
 def test_tooltips_name_the_step(window):

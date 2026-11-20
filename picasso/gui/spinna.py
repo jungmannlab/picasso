@@ -45,7 +45,7 @@ from scipy.spatial.transform import Rotation
 
 from .. import io, lib, lib_qt, render, spinna, __version__, docs_url
 from .app import run_gui
-from . import theme
+from . import shortcuts, theme
 from .scalebar_settings import ScaleBarOptions
 
 matplotlib.use("agg")
@@ -5612,6 +5612,7 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        shortcuts.add_menu_action(file_menu)
         help_action = file_menu.addAction("Help")
         help_action.setIcon(theme.icon("help"))
         help_action.triggered.connect(
@@ -5621,6 +5622,7 @@ class Window(QtWidgets.QMainWindow):
         )
 
         self.plugin_menu = self.menuBar().addMenu("Plugins")  # do not delete
+        shortcuts.install(self, "SPINNA")
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Save the most recent directory in the user settings on

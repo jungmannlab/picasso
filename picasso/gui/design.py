@@ -24,7 +24,7 @@ from .. import io as _io
 from .. import design, design_sequences
 from .. import lib, __version__, docs_url
 from .app import run_gui
-from . import theme
+from . import shortcuts, theme
 
 BASE_SEQUENCES = design_sequences.base_sequences
 PAINT_SEQUENCES = design_sequences.paint_sequences
@@ -1890,7 +1890,9 @@ class MainWindow(QtWidgets.QWidget):
             self.window.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        shortcuts.add_menu_action(file_menu)
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+        shortcuts.install(self, "Design")
 
 
 def main() -> None:

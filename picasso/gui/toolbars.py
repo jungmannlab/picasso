@@ -372,16 +372,29 @@ def save_area(title: str, area: QtCore.Qt.ToolBarArea) -> None:
         _save(title, entry)
 
 
+#: Dynamic property of an action holding the tooltip ``_set_tooltip``
+#: gave it.
+_TOOLTIP_PROPERTY = "picasso_shortcut_tooltip"
+
+
+def shortcut_text(action: QtGui.QAction) -> str:
+    """The shortcuts of ``action`` as the platform shows them, separated
+    by commas; empty if it has none."""
+    native = QtGui.QKeySequence.SequenceFormat.NativeText
+    keys = (sequence.toString(native) for sequence in action.shortcuts())
+    return ", ".join(dict.fromkeys(key for key in keys if key))
+
+
 def _set_tooltip(action: QtGui.QAction) -> None:
-    """Give ``action`` a tooltip with its shortcut, unless it has its
-    own tooltip."""
+    """Give ``action`` a tooltip with its shortcuts, unless it has its
+    own tooltip; again when its shortcuts changed."""
     text = theme._stripped(action.text())
-    if action.toolTip() != text:  # own tooltip, or already set
-        return
-    shortcut = action.shortcut().toString(
-        QtGui.QKeySequence.SequenceFormat.NativeText
-    )
-    action.setToolTip(f"{text} ({shortcut})" if shortcut else text)
+    if action.toolTip() not in (text, action.property(_TOOLTIP_PROPERTY)):
+        return  # own tooltip
+    shortcut = shortcut_text(action)
+    tooltip = f"{text} ({shortcut})" if shortcut else text
+    action.setToolTip(tooltip)
+    action.setProperty(_TOOLTIP_PROPERTY, tooltip)
 
 
 def _shown_buttons(

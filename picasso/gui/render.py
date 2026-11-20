@@ -81,7 +81,7 @@ from .overlay_style import OverlayStyleWidget
 from .rotation import RotationWindow, source_key
 from .app import run_gui
 from . import theme
-from . import toolbars
+from . import shortcuts, toolbars
 
 # Optional modules with external/hardware dependencies live in ext
 from ..ext.bitplane import (  # PyImarisWrite works on Windows only
@@ -21220,8 +21220,8 @@ class Window(QtWidgets.QMainWindow):
     #: they stay alive while open, also after being unlinked
     _secondary_windows = []
 
-    #: whether File > Undo is being triggered by its shortcut
-    _undo_by_key = False
+    #: the shortcut triggering File > Undo, None for a click
+    _undo_shortcut = None
 
     def __init__(
         self,
@@ -21578,6 +21578,7 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        shortcuts.add_menu_action(file_menu)
         help_action = file_menu.addAction("Help")
         help_action.setIcon(theme.icon("help"))
         help_action.triggered.connect(
@@ -22004,7 +22005,9 @@ class Window(QtWidgets.QMainWindow):
             menu.setDisabled(True)
         for action in self.data_actions:
             action.setEnabled(False)
-        self.update_undo_actions()
+        # the user's shortcuts, also of a rebuilt UI; updates the undo
+        # actions, see shortcuts_applied
+        shortcuts.install(self, "Render")
 
         self._plugins_loaded = plugins_loaded
         # reconnect the rebuilt view and dialogs (``remove_locs``)
@@ -22020,18 +22023,18 @@ class Window(QtWidgets.QMainWindow):
             self.removeAction(action)
             action.deleteLater()
         self._navigation_actions = []
-        for text, shortcuts, slot in (
-            ("Left", ["Left", "A"], self.view.to_left),
-            ("Right", ["Right", "D"], self.view.to_right),
-            ("Up", ["Up", "W"], self.view.to_up),
-            ("Down", ["Down", "S"], self.view.to_down),
+        for text, keys, slot in (
+            ("Move left", ["Left", "A"], self.view.to_left),
+            ("Move right", ["Right", "D"], self.view.to_right),
+            ("Move up", ["Up", "W"], self.view.to_up),
+            ("Move down", ["Down", "S"], self.view.to_down),
             ("Zoom in", ["Ctrl++", "Ctrl+="], self.view.zoom_in),
             ("Zoom out", ["Ctrl+-"], self.view.zoom_out),
         ):
             action = QtGui.QAction(text, self)
-            action.setShortcuts(shortcuts)
+            action.setShortcuts(keys)
             action.triggered.connect(slot)
-            self.addAction(action)
+            self.addAction(shortcuts.register(action, text))
             self._navigation_actions.append(action)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
@@ -23348,31 +23351,42 @@ class Window(QtWidgets.QMainWindow):
             action.setEnabled(label is not None)
             if label:
                 text = f"{text}: {label}"
-            shortcut = action.shortcut().toString(
-                QtGui.QKeySequence.SequenceFormat.NativeText
-            )
+            shortcut = toolbars.shortcut_text(action)
             action.setToolTip(f"{text} ({shortcut})" if shortcut else text)
         self._ctrl_z_notice_action.setEnabled(not self.undo_action.isEnabled())
 
+    def shortcuts_applied(self) -> None:
+        """The user's shortcuts were applied (``shortcuts.apply``): the
+        hidden action explaining Ctrl+Z (see ``explain_ctrl_z``) keeps
+        Ctrl+Z only while File > Undo has it, and the tooltips of Undo
+        and Redo show their shortcuts."""
+        ctrl_z = QtGui.QKeySequence(QtGui.QKeySequence.StandardKey.Undo)
+        has_ctrl_z = ctrl_z in self.undo_action.shortcuts()
+        self._ctrl_z_notice_action.setShortcuts([ctrl_z] if has_ctrl_z else [])
+        self.update_undo_actions()
+
     def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
-        # File > Undo is triggered by its shortcut, see _undo
+        # File > Undo is triggered by one of its shortcuts, see _undo
         if (
             obj is getattr(self, "undo_action", None)
             and event.type() == QtCore.QEvent.Type.Shortcut
         ):
-            self._undo_by_key = True
+            self._undo_shortcut = QtGui.QKeySequence(event.key())
         return super().eventFilter(obj, event)
 
     def _undo(self) -> None:
         """File > Undo; pressed as Ctrl+Z, see ``explain_ctrl_z``."""
-        # the native menu bar of macOS triggers the action itself, without
-        # a shortcut event; Ctrl (Cmd) is held then, unlike for a click
-        held = QtGui.QGuiApplication.queryKeyboardModifiers()
-        by_key = self._undo_by_key or bool(
-            held & QtCore.Qt.KeyboardModifier.ControlModifier
-        )
-        self._undo_by_key = False
-        if by_key and not self.explain_ctrl_z(self.view.history.undo_label):
+        ctrl_z = QtGui.QKeySequence(QtGui.QKeySequence.StandardKey.Undo)
+        if self._undo_shortcut is not None:
+            by_ctrl_z = self._undo_shortcut == ctrl_z
+        else:
+            # the native menu bar of macOS triggers the action itself,
+            # without a shortcut event; only Ctrl (Cmd) is held then for
+            # Cmd+Z, nothing for a click
+            held = QtGui.QGuiApplication.queryKeyboardModifiers()
+            by_ctrl_z = held == QtCore.Qt.KeyboardModifier.ControlModifier
+        self._undo_shortcut = None
+        if by_ctrl_z and not self.explain_ctrl_z(self.view.history.undo_label):
             return
         self.view.undo()
 
@@ -23381,7 +23395,9 @@ class Window(QtWidgets.QMainWindow):
         rather than selecting the Zoom tool, as before Picasso 1.0, which
         is now Z, and ask whether to undo the step or select the Zoom
         tool. Not shown if ``Show Ctrl+Z notice`` is False in the user
-        settings; ticking "Don't show again" sets it to False.
+        settings; ticking "Don't show again" sets it to False. Not shown
+        either once the user took Ctrl+Z from File > Undo (File >
+        Keyboard shortcuts...), e.g., to give it back to the Zoom tool.
 
         Parameters
         ----------
@@ -23394,10 +23410,14 @@ class Window(QtWidgets.QMainWindow):
             Whether to undo the step: True if the notice is not shown
             or "Undo" was chosen.
         """
-        if not ctrl_z_notice_setting():
+        standard = QtGui.QKeySequence(QtGui.QKeySequence.StandardKey.Undo)
+        if not ctrl_z_notice_setting() or (
+            standard not in self.undo_action.shortcuts()
+        ):
+            # nothing to explain once the user changed Undo's shortcut
             return True
         native = QtGui.QKeySequence.SequenceFormat.NativeText
-        undo_key = self.undo_action.shortcut().toString(native)
+        undo_key = standard.toString(native)
         box = QtWidgets.QMessageBox(self)
         box.setIcon(QtWidgets.QMessageBox.Icon.Information)
         box.setWindowTitle("Undo")
@@ -23409,7 +23429,9 @@ class Window(QtWidgets.QMainWindow):
             f"{undo_key} undoes the last step that changed the"
             f" localizations, the picks or the measurements (File > Undo)."
             f" {question}\n\nThe Zoom tool, which {undo_key} selected"
-            " before Picasso 1.0, is now selected with Z."
+            " before Picasso 1.0, is now selected with Z. To have"
+            f" {undo_key} select it again, give it to the Zoom tool in"
+            " File > Keyboard shortcuts..."
         )
         undo_button = None
         if label is None:
