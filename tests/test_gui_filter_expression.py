@@ -392,3 +392,23 @@ def test_a_table_without_x_saves_as_groups(
     assert saved_info[-1][lib.FILTER_STEPS_KEY] == [
         "n_events > median(n_events)"
     ]
+
+
+def test_test_subclustering_needs_n_events(window, monkeypatch):
+    """Without an ``n_events`` column, Test subclustering says so instead
+    of opening the dialog or raising."""
+    assert "n_events" not in window.locs_full.columns
+    messages = []
+    monkeypatch.setattr(
+        QtWidgets.QMessageBox,
+        "information",
+        staticmethod(lambda parent, title, text: messages.append(text)),
+    )
+    window.plot_subclustering()
+    assert "n_events" in messages[0]
+    assert window.subcluster_num is None
+    # data replaced while the dialog is open
+    dialog = gui_filter.SubclusterNum(window)
+    dialog.plot()
+    assert len(messages) == 2
+    assert not hasattr(dialog, "plot_window")

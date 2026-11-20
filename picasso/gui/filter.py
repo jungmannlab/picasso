@@ -865,6 +865,8 @@ class SubclusterNum(lib.Dialog):
         Main window.
     """
 
+    DOCS_URL = docs_url("filter.html#filter-test-subclustering")
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
@@ -907,13 +909,17 @@ class SubclusterNum(lib.Dialog):
         test_button.setIcon(theme.icon("subclustering"))
         test_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         test_button.clicked.connect(self.plot)
-        self.layout.addRow(test_button)
+        button_row = QtWidgets.QHBoxLayout()
+        button_row.addWidget(lib.HelpButton(self.DOCS_URL))
+        button_row.addWidget(test_button, 1)
+        self.layout.addRow(button_row)
 
     def plot(self) -> None:
         """Plot the subclustering test histogram. Optionally can save
         the histogram values to a .csv file."""
-        if "n_events" not in self.window.locs_full.columns:
-            raise ValueError("Data must have the 'n_events' attribute.")
+        # another file may have been opened while the dialog was open
+        if self.window.no_n_events_warning():
+            return
         if self.save_vals.isChecked():
             base, ext = os.path.splitext(self.window.locs_path)
             out_path = base + "_subcluster_test.csv"
@@ -1740,8 +1746,24 @@ class Window(QtWidgets.QMainWindow):
             if window:
                 window.refresh()
 
+    def no_n_events_warning(self) -> bool:
+        """Tell the user and return True if the loaded data has no
+        ``n_events`` column, needed to test for subclustering."""
+        if "n_events" in self.locs_full.columns:
+            return False
+        QtWidgets.QMessageBox.information(
+            self,
+            "Test subclustering",
+            "The data has no column 'n_events' (the number of binding\n"
+            "events per molecule). Test subclustering on molecules,\n"
+            "e.g., from G5M.",
+        )
+        return True
+
     def plot_subclustering(self) -> None:
         if self.no_locs_warning("Test subclustering"):
+            return
+        if self.no_n_events_warning():
             return
         # one dialog, shown again: a dialog parented to the window lives
         # as long as the window, with the last plot it made
