@@ -8267,7 +8267,7 @@ class MaskSettingsDialog(lib.Dialog):
         self.save_button.setEnabled(False)
         self.save_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.save_button.clicked.connect(self.save_locs)
-        mask_grid.addWidget(self.save_button, 2, 1, 1, 2)
+        mask_grid.addWidget(self.save_button, 2, 1)
 
         self.picks_button = QtWidgets.QPushButton("Add as polygon picks")
         self.picks_button.setToolTip(
@@ -8279,7 +8279,7 @@ class MaskSettingsDialog(lib.Dialog):
         self.picks_button.setEnabled(False)
         self.picks_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.picks_button.clicked.connect(self.add_mask_picks)
-        mask_grid.addWidget(self.picks_button, 3, 0)
+        mask_grid.addWidget(self.picks_button, 2, 2)
 
         self.cached_oversampling = 0
         self.cached_blur = 0
