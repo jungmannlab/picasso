@@ -256,6 +256,17 @@ def test_render_properties_collapse_while_disabled(render_window):
     assert box.toggle_button.isEnabled()
 
 
+def test_summary_can_change(qt_offscreen):
+    box = lib.CollapsibleGroupBox("Filters", summary="None")
+    assert box.summary() == "None"
+    width = box.toggle_button.sizeHint().width()
+    box.setSummary("Median 51, Gauss 1.5 px")
+    assert box.summary() == "Median 51, Gauss 1.5 px"
+    assert box.toggle_button.sizeHint().width() > width
+    box.setSummary("")
+    assert box.toggle_button.sizeHint() == box.toggle_button.minimumSizeHint()
+
+
 def test_localize_parameters_sections_are_remembered(qt_offscreen):
     window = gui_localize.Window()
     try:

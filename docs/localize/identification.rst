@@ -37,13 +37,15 @@ Identification and fitting of single-molecule spots
    - Alternatively, select ``B-spline wavelet`` as the ``Method`` to identify spots by wavelet segmentation, with a threshold in units of the noise instead of the net gradient; see :ref:`localize-wavelet`.
    - Spots closer to the edge of the frame than half a box are identified and fitted, too, unless ``Identify spots at the frame edge`` is unticked; see :ref:`localize-edge-spots`.
 
-5. (Optional) Tick ``Temporal median filter`` in the ``Identification`` group to subtract a rolling per-pixel background before spots are identified; see :ref:`localize-temporal-median-filter`.
+5. (Optional) Filter the frames that spots are searched in, in the ``Filters (identification only)`` section of the ``Identification`` group. The filters are listed in the order they are applied, and only the identification uses them: the fit always uses the raw movie. While the section is collapsed, its header lists the filters that are on.
 
-6. (Optional) Set ``Gaussian filter sigma`` in the ``Identification`` group to smooth every frame before spots are identified, which helps when spots are not Gaussian-shaped; see :ref:`localize-gaussian-filter`.
+   - Tick ``Temporal median filter`` to subtract a rolling per-pixel background; see :ref:`localize-temporal-median-filter`.
+   - Set ``Gaussian filter sigma`` to smooth every frame, which helps when spots are not Gaussian-shaped; see :ref:`localize-gaussian-filter`.
+   - Tick ``PSF filter (spline calibration)`` to filter every frame with the PSF of the loaded spline calibration, which helps for PSFs with several lobes, such as the double helix; see :ref:`localize-psf-filter`.
 
-7. (Optional) Restrict the analysis to one or more regions of interest (ROIs) instead of the whole frame; see :ref:`localize-rois`.
+6. (Optional) Restrict the analysis to one or more regions of interest (ROIs) instead of the whole frame; see :ref:`localize-rois`.
 
-8. **Set the photon conversion** in the ``Photon conversion`` group: adjust ``EM Gain``, ``Baseline`` and ``Sensitivity`` according to your camera specifications and the experimental conditions.
+7. **Set the photon conversion** in the ``Photon conversion`` group: adjust ``EM Gain``, ``Baseline`` and ``Sensitivity`` according to your camera specifications and the experimental conditions.
 
    - ``EM Gain`` is the electron-multiplying gain of an EMCCD camera. Set it to 1 for conventional output amplification and for cameras without EM gain, such as sCMOS cameras.
    - ``Baseline`` is the camera's offset, which the camera adds to every pixel: the average count of a frame recorded without light (e.g., with the shutter closed). It is neither the background of the sample nor zero for most cameras.
@@ -57,7 +59,7 @@ Identification and fitting of single-molecule spots
 
    Camera parameters can also be stored and selected automatically through a camera config file; see :ref:`localize-camera-config`.
 
-9. **Run the analysis.** From the menu bar, select ``Analyze`` > ``Localize (Identify & Fit)`` to start spot identification and fitting in all movie frames. The status of this computation is displayed in the window's status bar.
+8. **Run the analysis.** From the menu bar, select ``Analyze`` > ``Localize (Identify & Fit)`` to start spot identification and fitting in all movie frames. The status of this computation is displayed in the window's status bar.
 
    - After completion, the fit results will be saved in a new file in the same folder as the movie, in which the filename is the base name of the movie file with the extension ``_locs.hdf5``.
    - Furthermore, information about the movie and analysis procedure will be saved in an accompanying file with the extension ``_locs.yaml``; this file can be inspected using a text editor.
@@ -176,7 +178,7 @@ Temporal median filter
 
 Fluorescence movies often sit on an uneven background: out-of-focus haze, autofluorescent structures or a non-uniform illumination profile. Because a given pixel contains a blinking emitter only for a small fraction of the movie, the *median* of that pixel over a window of frames is a good estimate of its background.
 
-Ticking ``Temporal median filter`` in the ``Identification`` group subtracts that estimate from every frame (clipped at zero) before spots are identified. This removes both the uneven background and any static structure, and should make the detection less sensitive to where in the field of view a spot sits.
+Ticking ``Temporal median filter`` in the ``Filters (identification only)`` section of the ``Identification`` group subtracts that estimate from every frame (clipped at zero) before spots are identified. This removes both the uneven background and any static structure, and should make the detection less sensitive to where in the field of view a spot sits.
 
 ``Window (frames)`` sets how many frames go into the median. The default of 51 is a good starting point: it has to be long enough that a given emitter is dark for most of the window (otherwise the emitter ends up in its own background estimate) but short enough to follow slow drifts in the background.
 
@@ -224,7 +226,7 @@ Gaussian filter
 
 Spot identification looks for a *single* local maximum per spot. A non-Gaussian point spread function may break up into several local maxima, making identification challenging.
 
-Setting ``Gaussian filter sigma`` in the ``Identification`` group smooths each frame with a Gaussian of that standard deviation before spots are identified, which merges those maxima back into one. Like the box size and the regions of interest, the sigma is a quantity of the raw image and is therefore given in camera pixels, not in nm.
+Setting ``Gaussian filter sigma`` in the ``Filters (identification only)`` section of the ``Identification`` group smooths each frame with a Gaussian of that standard deviation before spots are identified, which merges those maxima back into one. Like the box size and the regions of interest, the sigma is a quantity of the raw image and is therefore given in camera pixels, not in nm.
 
 A sigma of 0 (the default, shown as ``Off``) disables the filter. Enable ``Preview`` and adapt the value of the filter until the expected regions are outlined successfully.
 
@@ -259,7 +261,7 @@ PSF filter
 
 Some PSFs consist of several lobes, e.g. a double helix, whose two lobes rotate about the emitter's position with z. A local maximum then sits on one of the lobes, several pixels off the emitter, and which lobe it is changes with z. The box of every spot is centered there, and the spline fit has to reach far outside the box center, or fails.
 
-``PSF filter (spline calibration)`` in the ``Identification`` group filters every frame with the PSF of the loaded spline calibration (:ref:`localize-spline`), averaged over z, before spots are identified. This is a matched filter: a spot then shows as one maximum at the center of the PSF, whatever its shape. For a double helix, the filter is a ring around the axis, and the maximum lies on the axis at every z. The boxes are thus centered where the spline fit expects the PSF.
+``PSF filter (spline calibration)`` in the ``Filters (identification only)`` section of the ``Identification`` group filters every frame with the PSF of the loaded spline calibration (:ref:`localize-spline`), averaged over z, before spots are identified. This is a matched filter: a spot then shows as one maximum at the center of the PSF, whatever its shape. For a double helix, the filter is a ring around the axis, and the maximum lies on the axis at every z. The boxes are thus centered where the spline fit expects the PSF.
 
 - The checkbox is available while a spline calibration is loaded (``Experimental PSF (spline)``). The same calibration is used for the fit.
 - **The filter applies to identification only.** As for the Gaussian filter, the spots are cut out of, and fitted on, the raw movie.

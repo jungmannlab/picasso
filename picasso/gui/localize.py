@@ -5249,26 +5249,29 @@ class ParametersDialog(lib.Dialog):
         self.identification_settings = QtWidgets.QWidget()
         settings_grid = QtWidgets.QGridLayout(self.identification_settings)
         settings_grid.setContentsMargins(0, 0, 0, 0)
-        identification_grid.addWidget(self.identification_settings, 0, 0, 1, 2)
+        identification_grid.addWidget(self.identification_settings, 0, 0, 1, 3)
+        # Every row of the group has its label in column 0, its control
+        # in column 1 and its help button, if any, in column 2. The method
+        # settings and the filters are grids of their own, aligned with
+        # this one (see _align_identification_columns).
+        self._identification_grids = [identification_grid, settings_grid]
+        self._identification_labels = []
 
         # Box Size
-        first_row = QtWidgets.QHBoxLayout()
-        settings_grid.addLayout(first_row, 0, 0, 1, 2)
-        first_row.addWidget(lib.HelpButton(self.IDENT_URL))
         boxsize_label = QtWidgets.QLabel("Box side length:")
         boxsize_label.setToolTip(
             "Box size in camera pixels for identification."
         )
-        first_row.addWidget(boxsize_label)
         self.box_spinbox = OddSpinBox()
         self.box_spinbox.setKeyboardTracking(False)
         self.box_spinbox.setValue(DEFAULT_PARAMETERS["Box Size"])
         self.box_spinbox.valueChanged.connect(self.on_box_changed)
-        first_row.addWidget(self.box_spinbox)
+        settings_grid.addWidget(boxsize_label, 0, 0)
+        settings_grid.addWidget(self.box_spinbox, 0, 1)
+        settings_grid.addWidget(lib.HelpButton(self.IDENT_URL), 0, 2)
+        self._identification_labels.append(boxsize_label)
 
         # identification method: net gradient or wavelet segmentation
-        method_row = QtWidgets.QHBoxLayout()
-        settings_grid.addLayout(method_row, 1, 0, 1, 2)
         method_tip = (
             "How spots are found.\n\n"
             "Net gradient: local maxima whose net gradient (a measure of\n"
@@ -5282,7 +5285,6 @@ class ParametersDialog(lib.Dialog):
         )
         method_label = QtWidgets.QLabel("Method:")
         method_label.setToolTip(method_tip)
-        method_row.addWidget(method_label)
         self.identification_method_combo = QtWidgets.QComboBox()
         for label in IDENTIFICATION_METHODS:
             self.identification_method_combo.addItem(label)
@@ -5290,14 +5292,16 @@ class ParametersDialog(lib.Dialog):
         self.identification_method_combo.currentIndexChanged.connect(
             self.on_identification_method_changed
         )
-        method_row.addWidget(self.identification_method_combo)
-        method_row.addStretch(1)
+        settings_grid.addWidget(method_label, 1, 0)
+        settings_grid.addWidget(self.identification_method_combo, 1, 1)
+        self._identification_labels.append(method_label)
 
         # the net gradient settings, shown for that method only
         self.mng_widget = QtWidgets.QWidget()
         mng_grid = QtWidgets.QGridLayout(self.mng_widget)
         mng_grid.setContentsMargins(0, 0, 0, 0)
-        settings_grid.addWidget(self.mng_widget, 2, 0, 1, 2)
+        settings_grid.addWidget(self.mng_widget, 2, 0, 1, 3)
+        self._identification_grids.append(mng_grid)
 
         # Min. Net Gradient
         mng_label = QtWidgets.QLabel("Min. net gradient:")
@@ -5305,6 +5309,7 @@ class ParametersDialog(lib.Dialog):
             "Threshold (related to brightness) for spot identification."
         )
         mng_grid.addWidget(mng_label, 0, 0)
+        self._identification_labels.append(mng_label)
         self.mng_spinbox = QtWidgets.QSpinBox()
         self.mng_spinbox.setRange(0, int(1e9))
         self.mng_spinbox.setValue(DEFAULT_PARAMETERS["Min. Net Gradient"])
@@ -5376,7 +5381,8 @@ class ParametersDialog(lib.Dialog):
         self.wavelet_widget = QtWidgets.QWidget()
         wavelet_grid = QtWidgets.QGridLayout(self.wavelet_widget)
         wavelet_grid.setContentsMargins(0, 0, 0, 0)
-        settings_grid.addWidget(self.wavelet_widget, 3, 0, 1, 2)
+        settings_grid.addWidget(self.wavelet_widget, 3, 0, 1, 3)
+        self._identification_grids.append(wavelet_grid)
         threshold_tip = (
             "Threshold on the second wavelet plane, in units of the\n"
             "standard deviation of the noise. Izeddin et al. use 0.5 to 2\n"
@@ -5391,6 +5397,7 @@ class ParametersDialog(lib.Dialog):
         threshold_label = QtWidgets.QLabel("Wavelet threshold:")
         threshold_label.setToolTip(threshold_tip)
         wavelet_grid.addWidget(threshold_label, 0, 0)
+        self._identification_labels.append(threshold_label)
         self.wavelet_threshold_spinbox = QtWidgets.QDoubleSpinBox()
         self.wavelet_threshold_spinbox.setRange(0.0, 100.0)
         self.wavelet_threshold_spinbox.setDecimals(3)
@@ -5425,6 +5432,7 @@ class ParametersDialog(lib.Dialog):
         noise_label = QtWidgets.QLabel("Noise estimate:")
         noise_label.setToolTip(noise_tip)
         wavelet_grid.addWidget(noise_label, 1, 0)
+        self._identification_labels.append(noise_label)
         self.wavelet_noise_combo = QtWidgets.QComboBox()
         for label in WAVELET_NOISE_ESTIMATES:
             self.wavelet_noise_combo.addItem(label)
@@ -5440,6 +5448,7 @@ class ParametersDialog(lib.Dialog):
         area_label = QtWidgets.QLabel("Min. region area:")
         area_label.setToolTip(area_tip)
         wavelet_grid.addWidget(area_label, 2, 0)
+        self._identification_labels.append(area_label)
         self.wavelet_min_area_spinbox = QtWidgets.QSpinBox()
         self.wavelet_min_area_spinbox.setRange(1, 100)
         self.wavelet_min_area_spinbox.setSuffix(" px")
@@ -5454,9 +5463,46 @@ class ParametersDialog(lib.Dialog):
         wavelet_grid.addWidget(self.wavelet_min_area_spinbox, 2, 1)
         self.wavelet_widget.setVisible(False)
 
-        # temporal median background subtraction (identification only)
-        tm_row = QtWidgets.QHBoxLayout()
-        tm_row.addWidget(lib.HelpButton(self.TEMPORAL_MEDIAN_URL))
+        # spots whose box reaches past the frame edge
+        self.edge_spots_checkbox = QtWidgets.QCheckBox(
+            "Identify spots at the frame edge"
+        )
+        self.edge_spots_checkbox.setToolTip(
+            "Also identify spots closer to the edge of the frame than half\n"
+            "a box. Their box is shifted inward until it lies in the frame,\n"
+            "so the spot is fitted off-center, with the pixels it has.\n\n"
+            "The Gaussian fits fit all of them. The spline fits fit those\n"
+            "as far as the calibration reaches beyond the box (calibrate\n"
+            "with a larger box than you fit with). Phasor and Vectorfit\n"
+            "need the spot centered and leave them out.\n\n"
+            "Uncheck to identify only spots whose whole box lies inside\n"
+            "the frame."
+        )
+        self.edge_spots_checkbox.setChecked(DEFAULT_PARAMETERS["Edge Spots"])
+        self.edge_spots_checkbox.stateChanged.connect(
+            self.on_edge_spots_changed
+        )
+        settings_grid.addWidget(self.edge_spots_checkbox, 4, 0, 1, 2)
+        settings_grid.addWidget(lib.HelpButton(self.EDGE_SPOTS_URL), 4, 2)
+
+        # The filters of the frames the spots are searched in, in the
+        # order they are applied. They do not change what is fitted, which
+        # the note at the bottom says, and the header lists the ones that
+        # are on while the section is collapsed (see
+        # _update_filters_summary).
+        self.filters_groupbox = lib.CollapsibleGroupBox(
+            "Filters (identification only)"
+        )
+        self.filters_groupbox.toggle_button.setToolTip(
+            "Filters applied to the frames before spots are identified,\n"
+            "in the order listed. Show or hide them."
+        )
+        settings_grid.addWidget(self.filters_groupbox, 5, 0, 1, 3)
+        filters_grid = QtWidgets.QGridLayout(self.filters_groupbox.content)
+        filters_grid.setContentsMargins(0, 0, 0, 0)
+        self._identification_grids.append(filters_grid)
+
+        # temporal median background subtraction
         self.temporal_median_checkbox = QtWidgets.QCheckBox(
             "Temporal median filter"
         )
@@ -5480,7 +5526,6 @@ class ParametersDialog(lib.Dialog):
         self.temporal_median_checkbox.stateChanged.connect(
             self.on_temporal_median_changed
         )
-        tm_row.addWidget(self.temporal_median_checkbox)
         self.temporal_median_spinbox = QtWidgets.QSpinBox()
         self.temporal_median_spinbox.setRange(3, 100_000)
         self.temporal_median_spinbox.setSingleStep(10)
@@ -5493,14 +5538,13 @@ class ParametersDialog(lib.Dialog):
             "Number of frames in the temporal window used for the median."
         )
         self.temporal_median_spinbox.valueChanged.connect(self.on_box_changed)
-        tm_row.addWidget(self.temporal_median_spinbox)
-        tm_row.addStretch(1)
-        settings_grid.addLayout(tm_row, 4, 0, 1, 2)
+        self.temporal_median_spinbox.setSuffix(" frames")
+        filters_grid.addWidget(self.temporal_median_checkbox, 0, 0)
+        filters_grid.addWidget(self.temporal_median_spinbox, 0, 1)
+        filters_grid.addWidget(lib.HelpButton(self.TEMPORAL_MEDIAN_URL), 0, 2)
 
-        # spatial Gaussian smoothing (identification only). Sits right below
-        # the temporal median filter, in the order the two are applied.
-        gauss_row = QtWidgets.QHBoxLayout()
-        gauss_row.addWidget(lib.HelpButton(self.GAUSSIAN_FILTER_URL))
+        # spatial Gaussian smoothing; its label is indented to start where
+        # the texts of the checkboxes above and below do
         gaussian_tip = (
             "Smooth every frame with a Gaussian of this standard deviation\n"
             "(in camera pixels) before spot identification. 0 turns the\n"
@@ -5517,7 +5561,6 @@ class ParametersDialog(lib.Dialog):
         )
         gaussian_label = QtWidgets.QLabel("Gaussian filter sigma:")
         gaussian_label.setToolTip(gaussian_tip)
-        gauss_row.addWidget(gaussian_label)
         self.gaussian_filter_spinbox = QtWidgets.QDoubleSpinBox()
         self.gaussian_filter_spinbox.setRange(0.0, 10.0)
         self.gaussian_filter_spinbox.setDecimals(2)
@@ -5533,14 +5576,18 @@ class ParametersDialog(lib.Dialog):
         self.gaussian_filter_spinbox.valueChanged.connect(
             self.on_gaussian_filter_changed
         )
-        gauss_row.addWidget(self.gaussian_filter_spinbox)
-        gauss_row.addStretch(1)
-        settings_grid.addLayout(gauss_row, 5, 0, 1, 2)
+        style = self.style()
+        gaussian_label.setIndent(
+            style.pixelMetric(QtWidgets.QStyle.PixelMetric.PM_IndicatorWidth)
+            + style.pixelMetric(
+                QtWidgets.QStyle.PixelMetric.PM_CheckBoxLabelSpacing
+            )
+        )
+        filters_grid.addWidget(gaussian_label, 1, 0)
+        filters_grid.addWidget(self.gaussian_filter_spinbox, 1, 1)
+        filters_grid.addWidget(lib.HelpButton(self.GAUSSIAN_FILTER_URL), 1, 2)
 
         # matched filter with the loaded spline calibration's PSF
-        # (identification only), applied after the Gaussian
-        psf_row = QtWidgets.QHBoxLayout()
-        psf_row.addWidget(lib.HelpButton(self.PSF_FILTER_URL))
         self.psf_filter_checkbox = QtWidgets.QCheckBox(
             "PSF filter (spline calibration)"
         )
@@ -5549,36 +5596,29 @@ class ParametersDialog(lib.Dialog):
         self.psf_filter_checkbox.stateChanged.connect(
             self.on_psf_filter_changed
         )
-        psf_row.addWidget(self.psf_filter_checkbox)
-        psf_row.addStretch(1)
-        settings_grid.addLayout(psf_row, 6, 0, 1, 2)
+        filters_grid.addWidget(self.psf_filter_checkbox, 2, 0, 1, 2)
+        filters_grid.addWidget(lib.HelpButton(self.PSF_FILTER_URL), 2, 2)
 
-        # spots whose box reaches past the frame edge
-        edge_row = QtWidgets.QHBoxLayout()
-        edge_row.addWidget(lib.HelpButton(self.EDGE_SPOTS_URL))
-        self.edge_spots_checkbox = QtWidgets.QCheckBox(
-            "Identify spots at the frame edge"
+        filters_note = QtWidgets.QLabel(
+            "Only the spot search uses the filtered frames: the fit always "
+            "uses the raw movie."
         )
-        self.edge_spots_checkbox.setToolTip(
-            "Also identify spots closer to the edge of the frame than half\n"
-            "a box. Their box is shifted inward until it lies in the frame,\n"
-            "so the spot is fitted off-center, with the pixels it has.\n\n"
-            "The Gaussian fits fit all of them. The spline fits fit those\n"
-            "as far as the calibration reaches beyond the box (calibrate\n"
-            "with a larger box than you fit with). Phasor and Vectorfit\n"
-            "need the spot centered and leave them out.\n\n"
-            "Uncheck to identify only spots whose whole box lies inside\n"
-            "the frame."
+        filters_note.setWordWrap(True)
+        filters_note.setForegroundRole(
+            QtGui.QPalette.ColorRole.PlaceholderText
         )
-        self.edge_spots_checkbox.setChecked(DEFAULT_PARAMETERS["Edge Spots"])
-        self.edge_spots_checkbox.stateChanged.connect(
-            self.on_edge_spots_changed
-        )
-        edge_row.addWidget(self.edge_spots_checkbox)
-        edge_row.addStretch(1)
-        settings_grid.addLayout(edge_row, 7, 0, 1, 2)
+        filters_grid.addWidget(filters_note, 3, 0, 1, 3)
+        for signal in (
+            self.temporal_median_checkbox.stateChanged,
+            self.temporal_median_spinbox.valueChanged,
+            self.gaussian_filter_spinbox.valueChanged,
+            self.psf_filter_checkbox.stateChanged,
+        ):
+            signal.connect(self._update_filters_summary)
+        self._update_filters_summary()
 
-        # preview identifications + cross-channel link color overlay
+        # preview identifications + cross-channel link color overlay, at
+        # the bottom of the group, below all that they show
         preview_row = QtWidgets.QHBoxLayout()
         self.preview_checkbox = QtWidgets.QCheckBox("Preview")
         self.preview_checkbox.setToolTip(
@@ -5607,7 +5647,6 @@ class ParametersDialog(lib.Dialog):
         self.link_colors_checkbox.hide()
         preview_row.addWidget(self.link_colors_checkbox)
         preview_row.addStretch(1)
-        identification_grid.addLayout(preview_row, 6, 0)
 
         # Multichannel: identify each channel on its own, or on the channels
         # added together. A row of its own, like the 'Fit' mode below, so
@@ -5660,8 +5699,9 @@ class ParametersDialog(lib.Dialog):
         self.identify_mode_combo.currentIndexChanged.connect(
             self.on_identify_mode_changed
         )
-        identification_grid.addWidget(self.identify_mode_label, 7, 0)
-        identification_grid.addWidget(self.identify_mode_combo, 7, 1)
+        identification_grid.addWidget(self.identify_mode_label, 1, 0)
+        identification_grid.addWidget(self.identify_mode_combo, 1, 1)
+        self._identification_labels.append(self.identify_mode_label)
         for widget in (self.identify_mode_label, self.identify_mode_combo):
             _retain_size_when_hidden(widget)
             widget.hide()
@@ -5676,10 +5716,8 @@ class ParametersDialog(lib.Dialog):
             "(y_min, x_min, y_max, x_max, in camera pixels) can be edited\n"
             "directly here. Leave empty to analyze the whole frame."
         )
-        roi_label_layout = QtWidgets.QHBoxLayout()
-        roi_label_layout.addWidget(lib.HelpButton(self.ROI_URL))
-        roi_label_layout.addWidget(label)
-        roi_label_layout.addStretch(1)
+        identification_grid.addWidget(label, 2, 0)
+        self._identification_labels.append(label)
         # Split-FOV: treat the drawn ROIs as separate channels of one movie.
         self.split_fov_checkbox = QtWidgets.QCheckBox("Regions = channels")
         self.split_fov_checkbox.setToolTip(
@@ -5698,8 +5736,8 @@ class ParametersDialog(lib.Dialog):
         )
         self.split_fov_checkbox.setTristate(False)
         self.split_fov_checkbox.stateChanged.connect(self.on_split_fov_changed)
-        roi_label_layout.addWidget(self.split_fov_checkbox)
-        identification_grid.addLayout(roi_label_layout, 8, 0)
+        # below the ROIs, which it turns into channels
+        identification_grid.addWidget(self.split_fov_checkbox, 3, 1)
 
         self._updating_roi_field = False
         self.roi_dialog = None
@@ -5717,7 +5755,8 @@ class ParametersDialog(lib.Dialog):
         self.roi_edit_button = QtWidgets.QPushButton("Edit ROIs...")
         self.roi_edit_button.clicked.connect(self.on_edit_rois)
         roi_layout.addWidget(self.roi_edit_button)
-        identification_grid.addLayout(roi_layout, 8, 1)
+        identification_grid.addLayout(roi_layout, 2, 1)
+        identification_grid.addWidget(lib.HelpButton(self.ROI_URL), 2, 2)
 
         # min/max frames
         label = QtWidgets.QLabel("Frames (min,max):")
@@ -5727,7 +5766,8 @@ class ParametersDialog(lib.Dialog):
             "Several disjoint segments can be given as min,max pairs\n"
             "separated by semicolons, e.g. '1,100; 200,300'."
         )
-        identification_grid.addWidget(label, 9, 0)
+        identification_grid.addWidget(label, 4, 0)
+        self._identification_labels.append(label)
         self.frames_edit = QtWidgets.QLineEdit()
         # one or more "min,max" pairs separated by semicolons, with
         # optional surrounding whitespace
@@ -5738,7 +5778,10 @@ class ParametersDialog(lib.Dialog):
         self.frames_edit.setValidator(validator)
         self.frames_edit.editingFinished.connect(self.on_frames_edit_finished)
         self.frames_edit.textChanged.connect(self.on_frames_edit_changed)
-        identification_grid.addWidget(self.frames_edit, 9, 1)
+        identification_grid.addWidget(self.frames_edit, 4, 1)
+
+        identification_grid.addLayout(preview_row, 5, 0, 1, 3)
+        self._align_identification_columns()
 
         # Multichannel: optionally use the same key settings for every channel.
         # Shown only when more than one channel is loaded (see the Window's
@@ -8022,6 +8065,41 @@ class ParametersDialog(lib.Dialog):
                 "(spline)) to use it."
             )
         )
+        self._update_filters_summary()
+
+    def _align_identification_columns(self) -> None:
+        """Line up the label, control and help-button columns of the
+        grids of the Identification group, which the method settings and
+        the filters, shown or hidden on their own, nest in each other."""
+        labels = [
+            label.sizeHint().width() for label in self._identification_labels
+        ]
+        helps = [
+            button.sizeHint().width()
+            for button in self.identification_settings.parentWidget().findChildren(
+                lib.HelpButton
+            )
+        ]
+        for grid in self._identification_grids:
+            grid.setColumnMinimumWidth(0, max(labels))
+            grid.setColumnStretch(1, 1)
+            grid.setColumnMinimumWidth(2, max(helps))
+
+    def _update_filters_summary(self, *_args) -> None:
+        """List the identification filters that are on in the header of
+        their section, so that they can be seen while it is collapsed."""
+        parts = []
+        temporal_median = self.temporal_median_checkbox
+        if temporal_median.isChecked() and temporal_median.isEnabled():
+            parts.append(f"median {self.temporal_median_spinbox.value()}")
+        sigma = self.gaussian_filter_spinbox.value()
+        if sigma > 0:
+            parts.append(f"Gauss {sigma:g} px")
+        psf = self.psf_filter_checkbox
+        if psf.isChecked() and psf.isEnabled():
+            parts.append("PSF")
+        summary = ", ".join(parts) if parts else "none"
+        self.filters_groupbox.setSummary(summary[0].upper() + summary[1:])
 
     def on_edge_spots_changed(self, _state: int = 0) -> None:
         """Refresh the preview: spots at the frame edge appear or go."""
@@ -13884,8 +13962,11 @@ class Window(QtWidgets.QMainWindow):
             checkbox.setEnabled(True)
             checkbox.setText(dialog._temporal_median_text)
             checkbox.setToolTip(dialog._temporal_median_tip)
+            dialog._update_filters_summary()
             return
         checkbox.setEnabled(False)
+        # the filter is ignored, so it is not listed as on
+        dialog._update_filters_summary()
         checkbox.setText(
             f"{dialog._temporal_median_text} "
             f"(needs >= {_TEMPORAL_MEDIAN_MIN_FRAMES} frames)"

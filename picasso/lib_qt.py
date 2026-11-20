@@ -1551,6 +1551,24 @@ class CollapsibleHeader(QtWidgets.QAbstractButton):
         else:
             self._set_progress(end)
 
+    def summary(self) -> str:
+        """Short description shown on the right while collapsed."""
+        return self._summary
+
+    def set_summary(self, summary: str) -> None:
+        """Change the description shown on the right while collapsed.
+
+        Parameters
+        ----------
+        summary : str
+            The new description; "" shows none.
+        """
+        if summary == self._summary:
+            return
+        self._summary = summary
+        self.updateGeometry()
+        self.update()
+
     def set_checkbox(self, checkbox: QtWidgets.QCheckBox) -> None:
         """Show a checkbox between the chevron and the title.
 
@@ -1813,6 +1831,15 @@ class CollapsibleGroupBox(QtWidgets.QGroupBox):
         self.toggle_button.setText(title)
         self.toggle_button.setAccessibleName(title)
         self.toggle_button.updateGeometry()
+
+    def summary(self) -> str:
+        """Short description shown in the header while collapsed."""
+        return self.toggle_button.summary()
+
+    def setSummary(self, summary: str) -> None:
+        """Change the description shown in the header while collapsed,
+        e.g., to list the settings that are on."""
+        self.toggle_button.set_summary(summary)
 
     def isExpanded(self) -> bool:
         """Whether the contents are shown."""

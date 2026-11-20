@@ -3587,6 +3587,54 @@ class TestPSFFilterCheckbox:
             loaded.identification_movie(), localize.PSFFilteredMovie
         )
 
+    def test_the_filters_section_lists_the_filters_that_are_on(
+        self, loaded, tmp_path, monkeypatch
+    ):
+        dialog = loaded.parameters_dialog
+        box = dialog.filters_groupbox
+        assert box.summary() == "None"
+        dialog.gaussian_filter_spinbox.setValue(1.5)
+        assert box.summary() == "Gauss 1.5 px"
+        dialog.temporal_median_checkbox.setChecked(True)
+        assert box.summary() == (
+            f"Median {dialog.temporal_median_spinbox.value()}, Gauss 1.5 px"
+        )
+        dialog.temporal_median_checkbox.setChecked(False)
+        dialog.gaussian_filter_spinbox.setValue(0.0)
+        # ticked without a calibration, the PSF filter is not on
+        dialog.psf_filter_checkbox.setChecked(True)
+        assert box.summary() == "None"
+        dialog.update_spline_calib(self._calibration(tmp_path, monkeypatch))
+        assert box.summary() == "PSF"
+        dialog.update_spline_calib(None)
+        assert box.summary() == "None"
+
+
+class TestIdentificationLayout:
+    def test_the_filters_are_one_section_of_the_identification(self, window):
+        dialog = window.parameters_dialog
+        content = dialog.filters_groupbox.content
+        for widget in (
+            dialog.temporal_median_checkbox,
+            dialog.gaussian_filter_spinbox,
+            dialog.psf_filter_checkbox,
+        ):
+            assert content.isAncestorOf(widget)
+        # the edge option is not a filter
+        assert not content.isAncestorOf(dialog.edge_spots_checkbox)
+        # the multi-emitter fit, which identifies by itself, hides them
+        # with the other identification settings
+        assert dialog.identification_settings.isAncestorOf(
+            dialog.filters_groupbox
+        )
+
+    def test_the_columns_line_up(self, window):
+        dialog = window.parameters_dialog
+        widths = {
+            grid.columnMinimumWidth(0) for grid in dialog._identification_grids
+        }
+        assert len(widths) == 1 and widths.pop() > 0
+
 
 class TestEdgeSpotsCheckbox:
     def test_the_checkbox_is_the_edge_spots_parameter(self, window):
