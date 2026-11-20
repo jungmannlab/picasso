@@ -245,7 +245,10 @@ def _dedupe_beads(
     sub-pixel jitter rounds to slightly different integer positions, so exact
     de-duplication would count it several times. We greedily keep detections
     in scan order, dropping any that fall within ``min_separation`` of an
-    already-kept bead.
+    already-kept bead. Each kept bead is then placed at the (rounded) median
+    of the detections nearest to it: the detections wander with the PSF over
+    the reference frames, and the first one in scan order is the one with
+    the lowest ``x``, a pixel or more off the bead's center.
     """
     order = np.lexsort((y, x))
     keep = np.ones(len(order), dtype=bool)
@@ -258,7 +261,21 @@ def _dedupe_beads(
         else:
             kept_xy.append((xi, yi))
     kept = order[keep]
-    return x[kept], y[kept]
+    if len(kept) == 0:
+        return x[kept], y[kept]
+    seeds = np.array(kept_xy, dtype=np.float64)
+    points = np.column_stack([x, y]).astype(np.float64)
+    d2 = ((points[:, None, :] - seeds[None, :, :]) ** 2).sum(axis=2)
+    nearest = np.argmin(d2, axis=1)
+    member = d2[np.arange(len(points)), nearest] < sq
+    out_x = np.asarray(x[kept]).copy()
+    out_y = np.asarray(y[kept]).copy()
+    for k in range(len(seeds)):
+        m = member & (nearest == k)
+        if m.any():
+            out_x[k] = np.rint(np.median(points[m, 0]))
+            out_y[k] = np.rint(np.median(points[m, 1]))
+    return out_x, out_y
 
 
 def _detect_bead_positions(
@@ -356,6 +373,103 @@ def _detect_bead_positions(
             "requested box size."
         )
     return beads
+
+
+#: Pixels around a bead's box that :func:`_subpixel_bead_positions` averages
+#: too, so it can move the box onto the bead's measured center.
+_SUBPIXEL_MARGIN = 2
+#: How far (pixels) past half a pixel a bead's measured center must lie
+#: before :func:`_subpixel_bead_positions` moves the box onto it.
+_SUBPIXEL_HYSTERESIS = 0.1
+
+
+def _subpixel_bead_positions(
+    movie: localize.LoadedMovie,
+    beads: pd.DataFrame,
+    box: int,
+    ref_frame_bounds: list[tuple[int, int]],
+    fov_of_frame: np.ndarray | None = None,
+) -> np.ndarray:
+    """Sub-pixel ``(x, y)`` centers of the beads found by
+    :func:`_detect_bead_positions`, as an ``(n_beads, 2)`` float array.
+
+    Each bead's surroundings are averaged over the reference frames of its
+    own field of view and its center is measured on that average (Gaussian
+    fit, falling back to the intensity centroid, see
+    :func:`_spot_center_offset`). When the center lies more than half a pixel
+    from the box the bead was detected in, the box is moved there and the
+    center measured again. A bead whose center cannot be measured keeps its
+    integer position.
+
+    The channel registration is fitted on these positions. Fitted on the
+    integer ones, a calibration with few beads inherits their rounding: six
+    beads that all sit 1/6 px off the grid give a registration that is 1/6 px
+    off too, which the linked multichannel fit then reads as a constant
+    lateral offset between the channels.
+    """
+    xy = beads[["x", "y"]].to_numpy(dtype=np.float64)
+    if len(xy) == 0:
+        return xy
+    bead_x = np.asarray(beads["x"], dtype=np.int64)
+    bead_y = np.asarray(beads["y"], dtype=np.int64)
+    frames = np.concatenate(
+        [np.arange(lo, hi + 1) for lo, hi in ref_frame_bounds]
+    ).astype(np.int64)
+    if "fov" in beads.columns and fov_of_frame is not None:
+        bead_fov = np.asarray(beads["fov"], dtype=int)
+        frame_fov = np.asarray(fov_of_frame)[frames]
+    else:
+        bead_fov = np.zeros(len(xy), dtype=int)
+        frame_fov = np.zeros(len(frames), dtype=int)
+    half = box // 2
+    # the average covers a margin around the box, so the box can be moved
+    # to the measured center without reading the frames again
+    margin = _SUBPIXEL_MARGIN
+    size = box + 2 * margin
+    sums = np.zeros((len(xy), size, size), dtype=np.float64)
+    counts = np.zeros(len(xy), dtype=np.int64)
+    for f, k in zip(frames, frame_fov):
+        on = np.flatnonzero(bead_fov == k)
+        if len(on) == 0:
+            continue
+        image = np.pad(
+            np.asarray(movie[int(f)], dtype=np.float64), margin, mode="edge"
+        )
+        for b in on:
+            # padded coordinates: the bead's box starts at y - half + margin
+            sums[b] += image[
+                bead_y[b] - half : bead_y[b] + half + 1 + 2 * margin,
+                bead_x[b] - half : bead_x[b] + half + 1 + 2 * margin,
+            ]
+            counts[b] += 1
+    for b in np.flatnonzero(counts):
+        mean = sums[b] / counts[b]
+        row = col = 0  # box offset from the detection, within the margin
+        center = None
+        for _ in range(margin + 1):
+            d_row, d_col = _spot_center_offset(
+                mean[
+                    margin + row : margin + row + box,
+                    margin + col : margin + col + box,
+                ]
+            )
+            if max(abs(d_row), abs(d_col)) > half:
+                break  # not a center estimate
+            # the center as measured in this box
+            center = (col + d_col, row + d_row)
+            # move the box only when the bead is clearly off its center, so
+            # a bead on a half pixel does not make it oscillate
+            if max(abs(d_row), abs(d_col)) <= 0.5 + _SUBPIXEL_HYSTERESIS:
+                break
+            row_next = row + int(np.rint(d_row))
+            col_next = col + int(np.rint(d_col))
+            if max(abs(row_next), abs(col_next)) > margin:
+                break
+            row, col = row_next, col_next
+        if center is not None:
+            xy[b, 0] += center[0]
+            xy[b, 1] += center[1]
+    return xy
 
 
 def _bead_volumes(
@@ -697,48 +811,115 @@ def _focus_center_offset(
     a PSF a single Gaussian cannot describe, such as a double helix, still has
     a well-defined centroid. Returns ``(0.0, 0.0)`` if neither estimate is
     usable, so the caller simply leaves the volume alone."""
-    focus = np.ascontiguousarray(volume[:, :, int(z_center)], dtype=np.float32)
-    box = focus.shape[0]
-    thetas, states = _fit_gauss_spots(focus[None])
+    d_row, d_col = _spot_center_offset(volume[:, :, int(z_center)])
+    if max(abs(d_row), abs(d_col)) > _RECENTER_MAX_SHIFT:
+        return 0.0, 0.0
+    return d_row, d_col
+
+
+def _spot_center_offset(image: np.ndarray) -> tuple[float, float]:
+    """Lateral ``(row, col)`` offset of a spot's center from the center of
+    its ``(box, box)`` image, in pixels (see :func:`_spot_center_offsets`;
+    :func:`_focus_center_offset` caps it)."""
+    d_row, d_col = _spot_center_offsets(np.asarray(image)[None])[0]
+    return float(d_row), float(d_col)
+
+
+def _spot_center_offsets(spots: np.ndarray) -> np.ndarray:
+    """Lateral ``(row, col)`` offsets of the spot centers from the centers
+    of their ``(box, box)`` images, ``(n_spots, 2)`` in pixels.
+
+    Uses the same least-squares Gaussian fitter as :func:`_focus_step`,
+    falling back to the background-subtracted intensity centroid where the
+    fit does not converge - a PSF a single Gaussian cannot describe, such as
+    a double helix, still has a well-defined centroid - and to ``(0, 0)``
+    where neither estimate is usable."""
+    spots = np.ascontiguousarray(spots, dtype=np.float32)
+    n, box = spots.shape[0], spots.shape[1]
+    out = np.zeros((n, 2), dtype=np.float64)
+    if n == 0:
+        return out
+    thetas, states = _fit_gauss_spots(spots)
     # theta is [photons, x, y, sx, sy, bg] in box-local pixels, x the column
     # and y the row (see picasso.fitting.seeds.initial_parameters_gauss). A
     # slice no Gaussian can describe either aborts the fit or "converges" to
     # one with no photons or a width beyond the box - neither is a center
     # estimate, and both are a reason to fall back rather than to fail the
     # calibration.
-    photons, x, y, sx, sy = (float(_) for _ in thetas[0, :5])
-    aborted = states[0] in (
-        splinefit.FIT_STATE_SINGULAR_HESSIAN,
-        splinefit.FIT_STATE_NEG_CURVATURE_MLE,
+    photons, x, y = thetas[:, 0], thetas[:, 1], thetas[:, 2]
+    sx, sy = np.abs(thetas[:, 3]), np.abs(thetas[:, 4])
+    aborted = np.isin(
+        states,
+        (
+            splinefit.FIT_STATE_SINGULAR_HESSIAN,
+            splinefit.FIT_STATE_NEG_CURVATURE_MLE,
+        ),
     )
-    usable = (
-        not aborted
-        and photons > 0.0
-        and 0.0 < abs(sx) <= box
-        and 0.0 < abs(sy) <= box
+    center = (box / 2.0) - 0.5
+    with np.errstate(invalid="ignore"):
+        usable = (
+            ~aborted
+            & (photons > 0.0)
+            & (sx > 0.0)
+            & (sx <= box)
+            & (sy > 0.0)
+            & (sy <= box)
+        )
+        fitted = np.column_stack([y - center, x - center]).astype(np.float64)
+    usable &= np.isfinite(fitted).all(axis=1)
+    out[usable] = fitted[usable]
+    rest = np.flatnonzero(~usable)
+    if len(rest):
+        flat = spots[rest].reshape(len(rest), -1).astype(np.float64)
+        weights = np.clip(flat - flat.min(axis=1, keepdims=True), 0.0, None)
+        weights = weights.reshape(len(rest), box, box)
+        total = weights.sum(axis=(1, 2))
+        rows, cols = np.mgrid[0:box, 0:box]
+        with np.errstate(invalid="ignore", divide="ignore"):
+            d_row = (weights * rows).sum(axis=(1, 2)) / total - (box - 1) / 2
+            d_col = (weights * cols).sum(axis=(1, 2)) / total - (box - 1) / 2
+        ok = (total > 0.0) & np.isfinite(d_row) & np.isfinite(d_col)
+        out[rest[ok], 0] = d_row[ok]
+        out[rest[ok], 1] = d_col[ok]
+    return out
+
+
+def _subpixel_detections(
+    movie_sub: np.ndarray, ids: pd.DataFrame, box: int
+) -> np.ndarray:
+    """Sub-pixel ``(x, y)`` of single-molecule detections in ``movie_sub``,
+    an ``(n, 2)`` float array: each detection's box is cut from its frame
+    and its center measured (see :func:`_spot_center_offsets`), the way
+    :func:`_subpixel_bead_positions` measures the beads the calibration was
+    registered on. A center that falls outside the box keeps the integer
+    detection."""
+    x = np.asarray(ids["x"], dtype=np.int64)
+    y = np.asarray(ids["y"], dtype=np.int64)
+    frame = np.asarray(ids["frame"], dtype=np.int64)
+    xy = np.column_stack([x, y]).astype(np.float64)
+    half = box // 2
+    height, width = movie_sub.shape[1], movie_sub.shape[2]
+    inside = (
+        (x - half >= 0)
+        & (x + half < width)
+        & (y - half >= 0)
+        & (y + half < height)
     )
-    if not usable:
-        d_col = d_row = np.nan
-    else:
-        center = (box / 2.0) - 0.5
-        d_col, d_row = x - center, y - center
-    if not (np.isfinite(d_row) and np.isfinite(d_col)):
-        weights = np.clip(focus - focus.min(), 0.0, None).astype(np.float64)
-        total = float(weights.sum())
-        if total <= 0.0:
-            return 0.0, 0.0
-        rows, cols = np.mgrid[0 : focus.shape[0], 0 : focus.shape[1]]
-        d_row = (
-            float((weights * rows).sum() / total) - (focus.shape[0] - 1) / 2.0
-        )
-        d_col = (
-            float((weights * cols).sum() / total) - (focus.shape[1] - 1) / 2.0
-        )
-    if not (np.isfinite(d_row) and np.isfinite(d_col)):
-        return 0.0, 0.0
-    if max(abs(d_row), abs(d_col)) > _RECENTER_MAX_SHIFT:
-        return 0.0, 0.0
-    return d_row, d_col
+    idx = np.flatnonzero(inside)
+    if len(idx) == 0:
+        return xy
+    spots = np.empty((len(idx), box, box), dtype=np.float32)
+    for k, i in enumerate(idx):
+        spots[k] = movie_sub[
+            frame[i],
+            y[i] - half : y[i] + half + 1,
+            x[i] - half : x[i] + half + 1,
+        ]
+    offsets = _spot_center_offsets(spots)
+    ok = np.abs(offsets).max(axis=1) <= half
+    xy[idx[ok], 0] += offsets[ok, 1]
+    xy[idx[ok], 1] += offsets[ok, 0]
+    return xy
 
 
 def _register_and_average(
@@ -749,6 +930,60 @@ def _register_and_average(
     upsample: int = 20,
 ):
     """Register every bead volume to a common 3D center and average.
+
+    The single-channel case of :func:`_register_and_average_channels`, which
+    describes the registration.
+
+    Returns the mean PSF volume ``(box, box, n_steps)`` (photon units). If
+    ``return_registered`` is True, also returns the stack of the retained
+    individual registered bead volumes (photon units, shape
+    ``(n_used, box, box, n_steps)``) so the averaged model can be compared
+    against the individual beads (goodness of fit), plus a ``quality`` dict
+    describing the inlier decision for *every* bead - ``keep`` (bool mask),
+    the two dissimilarity measures ``ncc`` / ``mse``, the thresholds applied
+    (see ``_keep_inliers``) and ``registered_all``, the registered volumes of
+    all beads including the rejected ones, so the rejection can be inspected
+    visually.
+    """
+    means, registered, qualities = _register_and_average_channels(
+        [volumes], [z_center], n_iter=n_iter, upsample=upsample
+    )
+    if return_registered:
+        return means[0], registered[0], qualities[0]
+    return means[0]
+
+
+def _correlation_windows(
+    z_centers: list[int], n_steps: int
+) -> list[tuple[int, int]]:
+    """The central z-band ``(z0, z1)`` around each channel's focus that
+    :func:`_register_and_average_channels` correlates.
+
+    A single channel clips its band at the stack ends. Several channels sum
+    their correlations, which needs bands of one length, so a band that
+    would run off the stack is moved inward instead."""
+    band = max(3, n_steps // 4)
+    windows = []
+    for zc in z_centers:
+        zc = int(zc)
+        if len(z_centers) == 1:
+            z0, z1 = max(0, zc - band), min(n_steps, zc + band + 1)
+        else:
+            length = min(2 * band + 1, n_steps)
+            z0 = min(max(0, zc - band), n_steps - length)
+            z1 = z0 + length
+        windows.append((z0, z1))
+    return windows
+
+
+def _register_and_average_channels(
+    volumes: list[np.ndarray],
+    z_centers: list[int],
+    n_iter: int = 3,
+    upsample: int = 20,
+) -> tuple[list[np.ndarray], list[np.ndarray], list[dict]]:
+    """Register the bead volumes of one or more channels to a common 3D
+    center and average them, per channel.
 
     Following Li et al. (Nat. Methods 2018), the beads are aligned to one
     another in all three dimensions by 3D cross-correlation: each bead's
@@ -765,19 +1000,46 @@ def _register_and_average(
     average of the aligned beads and excludes beads that are dissimilar
     from that average (by cross-correlation peak and mean-square error,
     see ``_keep_inliers``) before recomputing it. The correlation uses
-    only a central z-band (the sharp, high SNR, in-focus region) so
-    defocus rings cannot create spurious axial matches.
+    only a central z-band around focus (the sharp, high SNR, in-focus
+    region) so defocus rings cannot create spurious axial matches.
 
-    Returns the mean PSF volume ``(box, box, n_steps)`` (photon units). If
-    ``return_registered`` is True, also returns the stack of the retained
-    individual registered bead volumes (photon units, shape
-    ``(n_used, box, box, n_steps)``) so the averaged model can be compared
-    against the individual beads (goodness of fit), plus a ``quality`` dict
-    describing the inlier decision for *every* bead - ``keep`` (bool mask),
-    the two dissimilarity measures ``ncc`` / ``mse``, the thresholds applied
-    (see ``_keep_inliers``) and ``registered_all``, the registered volumes of
-    all beads including the rejected ones, so the rejection can be inspected
-    visually.
+    With several channels (``volumes[c]`` holds the same physical beads,
+    in the same order, as seen by channel ``c``) every bead gets ONE shift,
+    read from the sum of its per-channel cross-correlations, and applied to
+    all of its channels. The bead's volumes then move together and keep the
+    lateral and axial offsets between the channels, which is what a linked
+    multichannel fit reads its shared ``x, y, z`` from. Aligning each channel
+    separately would center every channel on its own, losing those offsets
+    (as in SMAP's joint bead registration for biplane calibrations, Li et
+    al., Nat. Methods 2018). The inlier decision is joint, too: a bead is
+    kept or dropped in all channels.
+
+    Parameters
+    ----------
+    volumes : list of np.ndarray
+        Per channel, the bead volumes ``(n_beads, box, box, n_steps)`` in
+        photon units; the reference channel first.
+    z_centers : list of int
+        Per channel, the in-focus slice.
+    n_iter : int, optional
+        Rounds of registration and outlier rejection. Default 3.
+    upsample : int, optional
+        Upsampling of the cross-correlation peak. Default 20.
+
+    Returns
+    -------
+    means : list of np.ndarray
+        Per channel, the mean PSF volume ``(box, box, n_steps)``.
+    registered : list of np.ndarray
+        Per channel, the retained registered bead volumes
+        ``(n_used, box, box, n_steps)``, for the goodness of fit.
+    qualities : list of dict
+        Per channel, the inlier decision for *every* bead - ``keep`` (bool
+        mask, shared by the channels), the two dissimilarity measures
+        ``ncc`` / ``mse``, the thresholds applied (see ``_keep_inliers``)
+        and ``registered_all``, the registered volumes of all beads
+        including the rejected ones, so the rejection can be inspected
+        visually.
 
     References
     ----------
@@ -785,9 +1047,9 @@ def _register_and_average(
     experimental point spread functions. Nat Methods 15, 367-369 (2018).
     https://doi.org/10.1038/nmeth.4661
     """
-    n_beads, box, _, n_steps = volumes.shape
-    vols = volumes.astype(np.float64)
-    z_center = int(z_center)
+    n_channels = len(volumes)
+    n_beads, box, _, n_steps = volumes[0].shape
+    vols = [np.asarray(v, dtype=np.float64) for v in volumes]
 
     # per-axis integer search range: small laterally (beads are already
     # detected on the pixel grid) and wider axially (beads reach focus at
@@ -795,18 +1057,20 @@ def _register_and_average(
     max_shift = np.array(
         [max(2, box // 4), max(2, box // 4), max(2, n_steps // 4)], dtype=int
     )
-    # correlate only a central z-band around focus (sharp, high-SNR slices)
-    band = max(3, n_steps // 4)
-    z0 = max(0, z_center - band)
-    z1 = min(n_steps, z_center + band + 1)
+    # correlate only a central z-band around each channel's focus
+    windows = _correlation_windows(z_centers, n_steps)
     cmax = max_shift.copy()
-    cmax[2] = min(cmax[2], (z1 - z0) // 2)
+    cmax[2] = min(cmax[2], min((z1 - z0) // 2 for z0, z1 in windows))
 
-    def central(v):
-        return v[:, :, z0:z1]
+    def central(v, c):
+        z0, z1 = windows[c]
+        return v[..., z0:z1]
 
-    # round-0 reference: the single brightest in-focus bead
-    ref = vols[int(np.argmax(vols[:, :, :, z_center].max(axis=(1, 2))))]
+    # round-0 reference: the single brightest in-focus bead of the reference
+    # channel, in every channel
+    z_ref = int(z_centers[0])
+    anchor = int(np.argmax(vols[0][:, :, :, z_ref].max(axis=(1, 2))))
+    refs = [v[anchor] for v in vols]
 
     keep = np.ones(n_beads, dtype=bool)
     ncc = np.full(n_beads, np.nan)
@@ -814,35 +1078,41 @@ def _register_and_average(
     limits = {"ncc_min": np.nan, "mse_max": np.nan, "fallback": False}
     aligned = vols
     for _ in range(n_iter):
-        ref_c = central(ref)
-        ref_z = ref_c - ref_c.mean()
-        ref_energy = float((ref_z * ref_z).sum())
-        aligned = np.empty_like(vols)
+        ref_c = [central(refs[c], c) for c in range(n_channels)]
+        ref_energy = sum(float(((r - r.mean()) ** 2).sum()) for r in ref_c)
+        aligned = [np.empty_like(v) for v in vols]
         ncc = np.zeros(n_beads)
         for b in range(n_beads):
-            vb = central(vols[b])
-            cc = _fft_cross_correlation(ref_c, vb)
+            cc = None
+            bead_energy = 0.0
+            for c in range(n_channels):
+                vb = central(vols[c][b], c)
+                cc_c = _fft_cross_correlation(ref_c[c], vb)
+                cc = cc_c if cc is None else cc + cc_c
+                vb_z = vb - vb.mean()
+                bead_energy += float((vb_z * vb_z).sum())
             shift, peak = _subpixel_shift(cc, cmax, upsample=upsample)
-            aligned[b] = _ndi_shift(
-                vols[b], shift=shift, order=3, mode="nearest"
-            )
+            for c in range(n_channels):
+                aligned[c][b] = _ndi_shift(
+                    vols[c][b], shift=shift, order=3, mode="nearest"
+                )
             # energy-normalized peak correlation, one dissimilarity measure
-            vb_z = vb - vb.mean()
-            denom = np.sqrt(ref_energy * float((vb_z * vb_z).sum()))
+            denom = np.sqrt(ref_energy * bead_energy)
             ncc[b] = peak / denom if denom > 0 else 0.0
 
         # mean-square error of each (amplitude-matched) bead vs the running
         # average, over the central band, as the second dissimilarity measure
-        avg_c = central(aligned[keep].mean(axis=0))
-        avg_energy = float((avg_c * avg_c).sum()) or 1.0
-        mse = np.empty(n_beads)
-        for b in range(n_beads):
-            bead_c = central(aligned[b])
-            scale = float((bead_c * avg_c).sum()) / avg_energy
-            mse[b] = float(((bead_c - scale * avg_c) ** 2).mean())
+        mse = np.zeros(n_beads)
+        for c in range(n_channels):
+            avg_c = central(aligned[c][keep].mean(axis=0), c)
+            avg_energy = float((avg_c * avg_c).sum()) or 1.0
+            for b in range(n_beads):
+                bead_c = central(aligned[c][b], c)
+                scale = float((bead_c * avg_c).sum()) / avg_energy
+                mse[b] += float(((bead_c - scale * avg_c) ** 2).mean())
 
         keep, limits = _keep_inliers(ncc, mse)
-        ref = aligned[keep].mean(axis=0)
+        refs = [a[keep].mean(axis=0) for a in aligned]
 
     if not keep.any():
         raise ValueError(
@@ -853,33 +1123,39 @@ def _register_and_average(
     # offset instead of sitting at the box center. Put it back on the center,
     # which is where the fit model's zero lateral shift evaluates the spline.
     # Left in, the offset is a constant lateral bias: harmless for a single
-    # channel, where it just translates the whole reconstruction, but not
-    # across channels - each picks its own anchor, so a linked multichannel fit
-    # sees a fixed inter-channel misregistration it cannot represent.
-    d_row, d_col = _focus_center_offset(ref, z_center)
+    # channel, where it just translates the whole reconstruction. The offset
+    # is measured on the reference channel and removed from all channels
+    # alike, so the channels keep their relative position (centering each on
+    # its own focus would misregister them wherever the PSF center moves
+    # with z, e.g. through coma, since the channels focus at different z).
+    d_row, d_col = _focus_center_offset(refs[0], z_ref)
     if max(abs(d_row), abs(d_col)) > _RECENTER_MIN_SHIFT:
-        shift = (-d_row, -d_col, 0.0)
-        ref = _ndi_shift(ref, shift=shift, order=3, mode="nearest")
-        if return_registered:
+        for c in range(n_channels):
+            refs[c] = _ndi_shift(
+                refs[c], shift=(-d_row, -d_col, 0.0), order=3, mode="nearest"
+            )
             # the individual beads feed the goodness of fit, which fits only
-            # amplitude and background - so they have to move with the template
-            aligned = _ndi_shift(
-                aligned,
+            # amplitude and background - so they have to move with the
+            # template
+            aligned[c] = _ndi_shift(
+                aligned[c],
                 shift=(0.0, -d_row, -d_col, 0.0),
                 order=3,
                 mode="nearest",
             )
-    mean_volume = ref.astype(np.float32)
-    if return_registered:
-        quality = {
+    means = [r.astype(np.float32) for r in refs]
+    registered = [a[keep].astype(np.float32) for a in aligned]
+    qualities = [
+        {
             "keep": keep,
             "ncc": ncc,
             "mse": mse,
-            "registered_all": aligned.astype(np.float32),
+            "registered_all": a.astype(np.float32),
             **limits,
         }
-        return mean_volume, aligned[keep].astype(np.float32), quality
-    return mean_volume
+        for a in aligned
+    ]
+    return means, registered, qualities
 
 
 def _bead_quality_summary(
@@ -1210,6 +1486,52 @@ def build_psf_template(
         spot came from), which ``_axial_precision`` fits one by one to measure
         the axial precision in the realistic single-frame regime.
     """
+    extracted = _extract_template_volumes(
+        movie,
+        camera_info,
+        box,
+        identification_method,
+        d,
+        frames_per_step=frames_per_step,
+        frame_bounds=frame_bounds,
+        frame_order=frame_order,
+        parallel=parallel,
+        beads=beads,
+        return_spots=return_spots,
+        roi=roi,
+        z_binning=z_binning,
+    )
+    volumes = extracted["volumes"]
+    # first pass on the raw bead-average to locate focus, then register
+    z_center, _ = _focus_step(volumes.mean(axis=0))
+    mean_volume, registered, quality = _register_and_average(
+        volumes, z_center, return_registered=True
+    )
+    return _finish_template(extracted, mean_volume, registered, quality)
+
+
+def _extract_template_volumes(
+    movie: localize.LoadedMovie,
+    camera_info: dict,
+    box: int,
+    identification_method: localize.IdentificationMethod | None,
+    d: float,
+    frames_per_step: int = 1,
+    frame_bounds: tuple[int, int] | list | None = None,
+    frame_order: Literal["fov", "z"] = "fov",
+    parallel: bool = True,
+    beads: pd.DataFrame | None = None,
+    return_spots: bool = False,
+    roi: tuple[tuple[int, int], tuple[int, int]] | list | None = None,
+    z_binning: int = 1,
+) -> dict:
+    """The bead volumes a PSF template is built from: the first half of
+    :func:`build_psf_template` (same parameters), up to the registration.
+
+    Returns a dict with ``beads``, the z-binned bead ``volumes``
+    ``(n_beads, box, box, n_slices)`` in photon units, ``z_of_step`` (stage z
+    of each slice), ``z_binning`` and, with ``return_spots``, the per-frame
+    spots and their ``spot_step_idx`` / ``spot_z`` / ``spot_bead_idx``."""
     n_frames = int(movie.shape[0])
     step_of_frame, z_of_step, step_range = _step_of_frame(
         n_frames, d, frames_per_step, frame_order, frame_bounds
@@ -1268,6 +1590,12 @@ def build_psf_template(
             "binning or widen the frame range."
         )
     volumes = lib.bin_z_steps(volumes, z_binning, axis=3)
+    extracted = {
+        "beads": beads,
+        "volumes": volumes,
+        "z_of_step": z_of_slice,
+        "z_binning": z_binning,
+    }
     if return_spots:
         # Keep every single-frame spot, each compared with the exact stage
         # position of its own step; drop the trailing steps binning left out.
@@ -1275,15 +1603,33 @@ def build_psf_template(
             spot_step_pos
         ]
         kept = spot_step_pos < len(z_of_slice) * z_binning
-        spots = spots[kept]
-        spot_z = spot_z[kept]
-        spot_bead_idx = spot_bead_idx[kept]
-        spot_step_pos = spot_step_pos[kept] // z_binning
-    # first pass on the raw bead-average to locate focus, then register
-    z_center, _ = _focus_step(volumes.mean(axis=0))
-    mean_volume, registered, quality = _register_and_average(
-        volumes, z_center, return_registered=True
-    )
+        # every individual per-frame bead spot, flattened to (n_spots, box,
+        # box), with for each spot the index into the template z-axis
+        # (0..n_slices-1) of its stage step's slice, and its exact stage
+        # position spot_z. Without binning spot_z == z_of_step[step_idx];
+        # with binning it resolves the spot's step within its slice (see
+        # _axial_precision).
+        extracted["spots"] = spots[kept]
+        extracted["spot_step_idx"] = spot_step_pos[kept] // z_binning
+        extracted["spot_z"] = spot_z[kept]
+        # which bead each spot came from, so a caller that knows where the
+        # beads sit can attach per-spot geometry (e.g. the multichannel ROI
+        # residuals) without re-deriving the flattening order
+        extracted["spot_bead_idx"] = spot_bead_idx[kept]
+    return extracted
+
+
+def _finish_template(
+    extracted: dict,
+    mean_volume: np.ndarray,
+    registered: np.ndarray,
+    quality: dict,
+) -> dict:
+    """The second half of :func:`build_psf_template`: smooth, normalize and
+    assess the registered bead average ``mean_volume`` of the beads in
+    ``extracted`` (see :func:`_extract_template_volumes`). Returns the
+    ``built`` dict described there."""
+    beads = extracted["beads"]
     # regularize the averaged PSF by smoothing along z (paper's smoothing
     # B-spline), then (re)locate focus and normalize on the cleaned volume
     mean_volume = _smooth_z(mean_volume)
@@ -1310,26 +1656,15 @@ def build_psf_template(
         "photon_scale": photon_scale,
         "n_beads": int(len(beads)),
         "n_beads_used": int(bead_quality["keep"].sum()),
-        "z_of_step": z_of_slice,
-        "z_binning": z_binning,
+        "z_of_step": extracted["z_of_step"],
+        "z_binning": extracted["z_binning"],
         "gof": gof,
         "registered": registered,
         "bead_quality": bead_quality,
     }
-    if return_spots:
-        # every individual per-frame bead spot, flattened to (n_spots, box,
-        # box), with for each spot the index into the template z-axis
-        # (0..n_slices-1) of its stage step's slice, and its exact stage
-        # position spot_z. Without binning spot_z == z_of_step[step_idx];
-        # with binning it resolves the spot's step within its slice (see
-        # _axial_precision).
-        result["spots"] = spots
-        result["spot_step_idx"] = spot_step_pos
-        result["spot_z"] = spot_z
-        # which bead each spot came from, so a caller that knows where the
-        # beads sit can attach per-spot geometry (e.g. the multichannel ROI
-        # residuals) without re-deriving the flattening order
-        result["spot_bead_idx"] = spot_bead_idx
+    for key in ("spots", "spot_step_idx", "spot_z", "spot_bead_idx"):
+        if key in extracted:
+            result[key] = extracted[key]
     return result
 
 
@@ -1833,8 +2168,14 @@ def _estimate_channel_transform(
         roi=channel_roi,
         fov_of_frame=fov_of_frame,
     )
-    ref_xy = beads_ref[["x", "y"]].to_numpy(dtype=np.float64)
-    c_xy = beads_c[["x", "y"]].to_numpy(dtype=np.float64)
+    # the transform is fitted on sub-pixel bead centers, not on the integer
+    # detections (see _subpixel_bead_positions)
+    ref_xy = _subpixel_bead_positions(
+        movie_ref, beads_ref, box, ref_bounds, fov_of_frame
+    )
+    c_xy = _subpixel_bead_positions(
+        movie_c, beads_c, box, ref_bounds, fov_of_frame
+    )
     # both clouds were detected with the same ``fov_of_frame``, so the labels
     # index the same fields; absent on either side, matching stays pooled
     ref_fov = (
@@ -2024,21 +2365,33 @@ def _build_per_channel_templates(
     Non-reference channels get the reference beads mapped through that
     channel's transform, carrying each bead's FOV so it is still extracted
     per field (see :func:`_bead_volumes`).
-    """
-    per_channel = []
+
+    The templates are built the way the linked fit reads them. The fit cuts
+    channel ``c``'s box at ``rint(T_c(x))`` for a detection ``x`` and
+    evaluates that channel's spline at the remainder ``T_c(x) -
+    rint(T_c(x))`` (see :func:`localize.channel_roi_residuals`). So a bead
+    box cut at ``rint(T_c(x))`` is first shifted back by that remainder,
+    putting the bead where the fit expects it. The beads are then registered
+    in all channels at once (see :func:`_register_and_average_channels`):
+    one shift per bead and one recentering for all channels, so the
+    templates keep the channels' relative lateral and axial positions."""
+    extracted = []
     for c in range(n_channels):
         if c == 0:
             beads_c = beads_ref
+            remainder = None
         else:
             mapped = transforms[c].apply(ref_xy)
+            rounded = np.rint(mapped)
+            remainder = mapped - rounded
             beads_c = pd.DataFrame(
                 {
-                    "x": np.rint(mapped[:, 0]).astype(int),
-                    "y": np.rint(mapped[:, 1]).astype(int),
+                    "x": rounded[:, 0].astype(int),
+                    "y": rounded[:, 1].astype(int),
                     "fov": beads_ref["fov"].to_numpy(),
                 }
             )
-        built = build_psf_template(
+        ex = _extract_template_volumes(
             movies[c],
             camera_infos[c],
             box,
@@ -2051,8 +2404,31 @@ def _build_per_channel_templates(
             return_spots=True,  # per-channel axial-precision diagnostic
             z_binning=z_binning,
         )
-        per_channel.append(built)
-    return per_channel
+        if remainder is not None:
+            # (row, col) = (y, x); shifting by -remainder moves the bead from
+            # T_c(x) to the box center rint(T_c(x)) + 0
+            volumes = ex["volumes"]
+            for b in range(len(volumes)):
+                dx, dy = remainder[b]
+                if max(abs(dx), abs(dy)) > _RECENTER_MIN_SHIFT:
+                    volumes[b] = _ndi_shift(
+                        volumes[b],
+                        shift=(-dy, -dx, 0.0),
+                        order=3,
+                        mode="nearest",
+                    )
+        extracted.append(ex)
+    # each channel's own focus, from its raw bead average
+    z_centers = [
+        _focus_step(ex["volumes"].mean(axis=0))[0] for ex in extracted
+    ]
+    means, registered, qualities = _register_and_average_channels(
+        [ex["volumes"] for ex in extracted], z_centers
+    )
+    return [
+        _finish_template(ex, m, r, q)
+        for ex, m, r, q in zip(extracted, means, registered, qualities)
+    ]
 
 
 def _assemble_multichannel_coefficients(
@@ -3454,6 +3830,35 @@ def estimate_transforms_from_identifications(
     return result(transforms, n_pairs_per_channel)
 
 
+#: Largest difference (nm) between the channels' focal planes for which the
+#: channels may be re-registered from the signal (see
+#: :func:`_refuse_multiplane_signal_registration`).
+_SIGNAL_REGISTRATION_MAX_PLANE_OFFSET = 100.0
+
+
+def _refuse_multiplane_signal_registration(calibration: dict) -> None:
+    """Raise a ValueError for a calibration whose channels focus at
+    different depths (e.g. biplane).
+
+    There, a molecule's center in one channel differs from its center in the
+    other by an amount that depends on its z, because each channel's PSF
+    shifts sideways with defocus in its own way. The calibration builds its
+    PSF models around the registration measured on the beads; a registration
+    measured on molecules spread over z differs from it by that z-dependent
+    amount, and the linked fit then sees channels that disagree."""
+    offsets = np.asarray(calibration.get("plane_offsets") or [0.0], float)
+    spread = float(offsets.max() - offsets.min())
+    if spread > _SIGNAL_REGISTRATION_MAX_PLANE_OFFSET:
+        raise ValueError(
+            f"The calibration's channels focus {spread:.0f} nm apart. In such "
+            "a multiplane (e.g. biplane) setup, a molecule's center differs "
+            "between the channels with its z, so a registration measured on "
+            "the blinking signal does not match the calibration's PSF models "
+            "and the linked fit would be biased. Calibrate on beads again "
+            "instead."
+        )
+
+
 def _validate_split_fov_signal_args(
     calibration: dict,
     regions: list,
@@ -3471,6 +3876,7 @@ def _validate_split_fov_signal_args(
             "refine_split_fov_transforms_from_signal requires a split-FOV "
             "calibration."
         )
+    _refuse_multiplane_signal_registration(calibration)
     n_channels = int(calibration.get("n_channels", len(regions)))
     if len(regions) != n_channels:
         raise ValueError(
@@ -3580,12 +3986,8 @@ def _region_detections_by_frame(
     if len(ids) == 0:
         return {}
     frame = np.asarray(ids["frame"], dtype=np.int64)
-    xy = np.column_stack(
-        [
-            np.asarray(ids["x"], dtype=np.float64),
-            np.asarray(ids["y"], dtype=np.float64),
-        ]
-    )
+    # sub-pixel centers, measured like the calibration's beads
+    xy = _subpixel_detections(movie_sub, ids, box)
     out = {}
     for f in np.unique(frame):
         out[int(f)] = xy[frame == f]
@@ -3837,9 +4239,14 @@ def refine_split_fov_transforms_from_signal(
     Raises
     ------
     ValueError
-        If the calibration is not split-FOV, if ``regions`` does not match its
-        channel count or the regions differ in size, if ``reference`` is out
-        of range, or if no frames fall inside ``frame_bounds``.
+        If the calibration is not split-FOV, if its channels focus more
+        than 100 nm apart (multiplane, e.g. biplane: a molecule's center
+        then differs between the channels with its z, so a registration
+        measured on the signal would not match the calibration's PSF
+        models; calibrate on beads again instead), if ``regions`` does not
+        match its channel count or the regions differ in size, if
+        ``reference`` is out of range, or if no frames fall inside
+        ``frame_bounds``.
     """
     n_channels, box, max_pair_distance = _validate_split_fov_signal_args(
         calibration, regions, reference, box, max_pair_distance
@@ -3935,6 +4342,7 @@ def _validate_multichannel_signal_args(
     stored = calibration.get("channel_transforms")
     if not stored:
         raise ValueError("Calibration has no channel_transforms to refine.")
+    _refuse_multiplane_signal_registration(calibration)
     n_channels = int(calibration.get("n_channels", len(stored)))
     if len(movies) != n_channels:
         raise ValueError(
@@ -3991,12 +4399,8 @@ def _movie_detections_by_frame(
     if len(ids) == 0:
         return {}
     frame = np.asarray(ids["frame"], dtype=np.int64)
-    xy = np.column_stack(
-        [
-            np.asarray(ids["x"], dtype=np.float64),
-            np.asarray(ids["y"], dtype=np.float64),
-        ]
-    )
+    # sub-pixel centers, measured like the calibration's beads
+    xy = _subpixel_detections(movie_sub, ids, box)
     return {int(f): xy[frame == f] for f in np.unique(frame)}
 
 
@@ -4144,8 +4548,10 @@ def refine_multichannel_transforms_from_signal(
     ------
     ValueError
         If the calibration is split-FOV, carries no ``channel_transforms``,
-        or its channel count disagrees with ``movies`` or with the stored
-        transforms, or if ``reference`` is out of range.
+        its channels focus more than 100 nm apart (multiplane, e.g. biplane,
+        see :func:`refine_split_fov_transforms_from_signal`), or its channel
+        count disagrees with ``movies`` or with the stored transforms, or if
+        ``reference`` is out of range.
     """
     n_channels, box, max_pair_distance, stored = (
         _validate_multichannel_signal_args(

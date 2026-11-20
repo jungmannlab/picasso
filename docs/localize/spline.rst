@@ -319,6 +319,10 @@ After identifying the channels, run ``Calibration`` > ``Re-align channels (curre
 
    **The re-alignment updates the loaded calibration only; the calibration file is never modified.**
 
+.. note::
+
+   Channels that focus at different depths (more than 100 nm apart, e.g., biplane) cannot be re-aligned from the signal. There, a molecule's center in one channel differs from its center in the other by an amount that depends on its z, so a registration measured on the blinking molecules does not match the PSF models of the calibration. Calibrate such a setup on beads again instead, ideally right before or after the measurement.
+
 .. _localize-identify-on-sum:
 
 Identifying on the sum of the channels

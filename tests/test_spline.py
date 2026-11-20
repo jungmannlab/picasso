@@ -1274,6 +1274,168 @@ class TestRansacMatch:
         )
 
 
+class TestSubpixelChannelGeometry:
+    """The multichannel calibration measures the beads to sub-pixel
+    precision for the channel registration and builds every channel's PSF
+    around the position the linked fit evaluates it at, so the channels'
+    models agree with each other and with the registration."""
+
+    # bead centers off the pixel grid, by different fractions
+    BEADS = [(12.3, 14.6), (30.7, 28.2), (16.1, 33.4), (35.5, 12.8)]
+    SHIFT = (0.4, -0.3)  # channel 1 = reference shifted by this (x, y)
+
+    def _movies(self):
+        ref, _, focus = _synthetic_bead_movie(bead_xy=self.BEADS)
+        shifted = [
+            (x + self.SHIFT[0], y + self.SHIFT[1]) for x, y in self.BEADS
+        ]
+        chan, _, _ = _synthetic_bead_movie(bead_xy=shifted)
+        return ref, chan, focus
+
+    def test_dedupe_places_the_bead_at_its_median_detection(self):
+        # one bead whose integer detection wanders over the reference frames;
+        # the first in scan order (lowest x) is two pixels off its center
+        x = np.array([10, 11, 12, 12, 12, 13, 12])
+        y = np.array([20, 20, 20, 21, 20, 20, 20])
+        bx, by = spline._dedupe_beads(x, y, BOX)
+        assert bx.tolist() == [12] and by.tolist() == [20]
+
+    def test_subpixel_bead_positions(self):
+        movie, _, _ = _synthetic_bead_movie(bead_xy=self.BEADS)
+        # integer detections, one of them 2 px off its bead in x
+        beads = pd.DataFrame(
+            {
+                "x": [12, 31, 16, 34],
+                "y": [15, 28, 33, 13],
+            }
+        )
+        n = movie.shape[0]
+        xy = spline._subpixel_bead_positions(
+            movie, beads, BOX, [(n // 3, 2 * n // 3)]
+        )
+        np.testing.assert_allclose(xy, np.array(self.BEADS), atol=0.02)
+
+    def test_registration_is_subpixel(self):
+        ref, chan, _ = self._movies()
+        info = [{"Frames": int(ref.shape[0])}]
+        calib = spline.calibrate_spline_multichannel(
+            [ref, chan],
+            infos=[info, info],
+            camera_infos=[CAMERA_INFO, CAMERA_INFO],
+            box=BOX,
+            identification_method=NG,
+            d=20.0,
+            model="translation",
+        )
+        shift = transforms.from_dict(calib["channel_transforms"][1]).shift
+        np.testing.assert_allclose(shift, self.SHIFT, atol=0.02)
+
+    def test_linked_fit_recovers_the_beads(self):
+        """The linked fit of the calibration's own beads lands on the true,
+        sub-pixel bead centers: the channels' models agree."""
+        ref, chan, focus = self._movies()
+        info = [{"Frames": int(ref.shape[0])}]
+        calib = spline.calibrate_spline_multichannel(
+            [ref, chan],
+            infos=[info, info],
+            camera_infos=[CAMERA_INFO, CAMERA_INFO],
+            box=BOX,
+            identification_method=NG,
+            d=20.0,
+            model="translation",
+        )
+        frames = np.arange(focus - 3, focus + 4)
+        x0 = np.array([round(x) for x, _ in self.BEADS])
+        y0 = np.array([round(y) for _, y in self.BEADS])
+        ids = pd.DataFrame(
+            {
+                "frame": np.repeat(frames, len(x0)),
+                "x": np.tile(x0, len(frames)),
+                "y": np.tile(y0, len(frames)),
+                "net_gradient": np.ones(len(frames) * len(x0), np.float32),
+            }
+        )
+        locs, _ = localize.fit_spline_multichannel(
+            [ref, chan],
+            info,
+            camera_infos=[CAMERA_INFO, CAMERA_INFO],
+            identifications=ids,
+            box=BOX,
+            calibration=calib,
+            mle=True,
+        )
+        assert len(locs) == len(ids)
+        beads = np.array(self.BEADS) * PIXELSIZE
+        fitted = locs[["x", "y"]].to_numpy()
+        nearest = np.argmin(
+            ((fitted[:, None, :] - beads[None, :, :]) ** 2).sum(axis=2), axis=1
+        )
+        # one common offset is a free choice of the template's center; what
+        # must hold is that every bead lands on its own sub-pixel center
+        error = fitted - beads[nearest]
+        error -= np.median(error, axis=0)
+        # the rest is the template's own interpolation error; channel models
+        # that disagree leave several times more
+        assert np.abs(error).max() < 0.1 * PIXELSIZE
+
+    def test_joint_registration_keeps_the_channel_offset(self):
+        """One shift per bead, applied to all channels: a constant offset
+        between the channels survives the registration (centering every
+        channel on its own would remove it)."""
+        rng = np.random.RandomState(0)
+        box, n_steps = 15, 21
+        rows, cols = np.mgrid[0:box, 0:box]
+        z = np.arange(n_steps)
+        volumes = [np.zeros((5, box, box, n_steps)) for _ in range(2)]
+        for b in range(5):
+            dr, dc = rng.uniform(-0.5, 0.5, 2)  # per-bead jitter
+            for c, (oc, s_focus) in enumerate(((0.0, 10), (0.6, 13))):
+                sigma = 1.2 * (1 + 0.08 * np.abs(z - s_focus))
+                r0, c0 = 7 + dr, 7 + dc + oc
+                volumes[c][b] = 100 + 3000 * np.exp(
+                    -(
+                        (rows[..., None] - r0) ** 2
+                        + (cols[..., None] - c0) ** 2
+                    )
+                    / (2 * sigma**2)
+                )
+        means, _, qualities = spline._register_and_average_channels(
+            volumes, [10, 13]
+        )
+        assert qualities[0]["keep"] is qualities[1]["keep"]
+        d0 = spline._spot_center_offset(means[0][:, :, 10])
+        d1 = spline._spot_center_offset(means[1][:, :, 13])
+        # the reference is centered, channel 1 keeps its 0.6 px column offset
+        np.testing.assert_allclose(d0, (0.0, 0.0), atol=0.02)
+        np.testing.assert_allclose(np.subtract(d1, d0), (0.0, 0.6), atol=0.02)
+
+    @pytest.mark.parametrize("split_fov", [False, True])
+    def test_signal_registration_refuses_multiplane(self, split_fov):
+        """A biplane calibration cannot be re-registered from the signal."""
+        calib = {
+            "n_channels": 2,
+            "box": BOX,
+            "n_data": [BOX, BOX, 1],
+            "plane_offsets": [0.0, 500.0],
+            "channel_transforms": [IDENTITY, IDENTITY],
+        }
+        with pytest.raises(ValueError, match="focus 500 nm apart"):
+            if split_fov:
+                calib["split_fov"] = True
+                movie = np.zeros((10, 48, 96), dtype=np.uint16)
+                spline.refine_split_fov_transforms_from_signal(
+                    movie,
+                    calib,
+                    identification_method=SIGNAL_NG,
+                    regions=[[[0, 0], [48, 48]], [[0, 48], [48, 96]]],
+                )
+            else:
+                movie = np.zeros((10, 48, 48), dtype=np.uint16)
+                spline.refine_multichannel_transforms_from_signal(
+                    [movie, movie], calib, identification_method=SIGNAL_NG
+                )
+
+
 class TestCalibrateSplineMultichannel:
     """Full multichannel calibration including the spline-coefficient
     step (CPU)."""
@@ -2201,10 +2363,10 @@ class TestRefineMultichannelTransformsFromSignal:
         # only ~50 frames are sampled (not all 150), so expect fewer pairs
         assert reg_info[0]["n_matches"] >= 40
         assert reg_info[0]["rms"] < 1.0
-        # the refined transform recovers the truth (a residual sub-pixel bias
-        # remains because identify uses a centroid, not a Gaussian fit) ...
+        # the refined transform recovers the truth (the detections are
+        # measured to sub-pixel precision) ...
         fitted = affine_matrix(updated["channel_transforms"][1])
-        np.testing.assert_allclose(fitted, true_transform, atol=0.35)
+        np.testing.assert_allclose(fitted, true_transform, atol=0.05)
         # ... and is much closer to the truth than the stale stored seed
         assert (
             np.abs(fitted - true_transform).max()

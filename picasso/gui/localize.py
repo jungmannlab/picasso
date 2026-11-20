@@ -16221,6 +16221,13 @@ class Window(QtWidgets.QMainWindow):
                 "(Experimental PSF (spline) > Load calibration).",
             )
             return
+        try:
+            # multiplane (e.g. biplane) calibrations cannot be re-registered
+            # from the signal; say so before asking for the frames
+            spline._refuse_multiplane_signal_registration(calibration)
+        except ValueError as e:
+            QtWidgets.QMessageBox.warning(self, title, str(e))
+            return
         split_fov = bool(calibration.get("split_fov"))
 
         # gather the layout-specific inputs and pick the refiner
