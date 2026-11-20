@@ -456,7 +456,7 @@ are in bold (``z`` only for 3D data, see :ref:`files-minimum-requirements`).
 
 .. csv-table:: Table 1: Name, description and data type for the main columns used in Picasso.
    :name: files-localization-columns
-   :file: table01.csv
+   :file: ../picasso/column_tables/localizations.csv
    :widths: 15, 65, 20
    :header-rows: 1
 
@@ -474,7 +474,7 @@ to reflect the different data type. Table 2 explains the main column names in
 molecular maps.
 
 .. csv-table:: Table 2: Name, description and data type for the main columns used in molecular maps in Picasso.
-   :file: table02.csv
+   :file: ../picasso/column_tables/molecular_maps.csv
    :widths: 15, 65, 20
    :header-rows: 1
 

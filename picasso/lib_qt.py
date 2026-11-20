@@ -3283,10 +3283,27 @@ class RemoveColumnsDialog(Dialog):
 
 
 class HelpButton(QtWidgets.QToolButton):
-    """A reusable ? button that opens a URL."""
+    """A reusable ? button that opens a URL or calls a function, e.g.,
+    one that shows a help dialog.
+
+    Parameters
+    ----------
+    url : str or callable
+        URL to open, or a function without arguments to call on click.
+    parent : QWidget, optional
+        Parent widget.
+    size : int or tuple of ints, optional
+        Width and height of the button. Default is 22.
+    tooltip : str, optional
+        Tooltip of the button. Default is "Open documentation".
+    """
 
     def __init__(
-        self, url: str, parent=None, size: int | tuple[int, int] = 22
+        self,
+        url: str | Callable[[], Any],
+        parent=None,
+        size: int | tuple[int, int] = 22,
+        tooltip: str = "Open documentation",
     ) -> None:
         super().__init__(parent)
         self.help_url = url
@@ -3294,7 +3311,7 @@ class HelpButton(QtWidgets.QToolButton):
         if isinstance(size, int):
             size = (size, size)
         self.setFixedSize(*size)
-        self.setToolTip("Open documentation")
+        self.setToolTip(tooltip)
         self.setCursor(QtCore.Qt.CursorShape.PointingHandCursor)
         # filled with the accent color, so that the button stands out;
         # inverted on hover. Shows the help icon, or "?" without it.
@@ -3341,7 +3358,10 @@ class HelpButton(QtWidgets.QToolButton):
         super().leaveEvent(event)
 
     def _open_docs(self) -> None:
-        QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.help_url))
+        if callable(self.help_url):
+            self.help_url()
+        else:
+            QtGui.QDesktopServices.openUrl(QtCore.QUrl(self.help_url))
 
 
 #: Emitter of the excepthook installed by ``install_excepthook``, kept

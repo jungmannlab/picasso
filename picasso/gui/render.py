@@ -10907,6 +10907,73 @@ class RESIDialog(lib.Dialog):
         )
 
 
+class ColumnsHelpDialog(lib.Dialog):
+    """Explain the columns of the localizations that can be rendered
+    by property, see ``lib.column_descriptions``.
+
+    Parameters
+    ----------
+    columns : list of str
+        Names of the columns, in the order shown.
+    parent : QWidget
+        Parent widget.
+    """
+
+    DOCS_URL = docs_url("files.html#files-localization-columns")
+
+    def __init__(self, columns: list[str], parent: QtWidgets.QWidget) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Columns")
+        self.setModal(False)
+        layout = QtWidgets.QVBoxLayout(self)
+        header = QtWidgets.QHBoxLayout()
+        header.addWidget(
+            lib.WrappingLabel(
+                "The columns of the localizations and what they hold. "
+                "Lengths are in nm."
+            ),
+            1,
+        )
+        header.addWidget(lib.HelpButton(self.DOCS_URL))
+        layout.addLayout(header)
+
+        descriptions = lib.column_descriptions(columns)
+        table = QtWidgets.QTableWidget(len(columns), 2)
+        table.setHorizontalHeaderLabels(["Column", "Description"])
+        table.verticalHeader().hide()
+        table.setEditTriggers(
+            QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers
+        )
+        table.setWordWrap(True)
+        for row, (column, description) in enumerate(descriptions.items()):
+            table.setItem(row, 0, QtWidgets.QTableWidgetItem(column))
+            item = QtWidgets.QTableWidgetItem(
+                description
+                or "Not a standard Picasso column, e.g., added by another "
+                "program."
+            )
+            if description is None:
+                item.setForeground(
+                    self.palette().brush(
+                        QtGui.QPalette.ColorGroup.Disabled,
+                        QtGui.QPalette.ColorRole.Text,
+                    )
+                )
+            table.setItem(row, 1, item)
+        header_view = table.horizontalHeader()
+        header_view.setSectionResizeMode(
+            0, QtWidgets.QHeaderView.ResizeMode.ResizeToContents
+        )
+        header_view.setSectionResizeMode(
+            1, QtWidgets.QHeaderView.ResizeMode.Stretch
+        )
+        # rows grow with the wrapped descriptions when the width changes
+        header_view.sectionResized.connect(table.resizeRowsToContents)
+        layout.addWidget(table)
+        self.resize(650, 500)
+        table.resizeRowsToContents()
+
+
 class DisplaySettingsDialog(lib.Dialog):
     """Change display settings, for example: zoom, display pixel size,
     contrast and blur.
@@ -11320,8 +11387,15 @@ class DisplaySettingsDialog(lib.Dialog):
         )
         render_grid.addWidget(param_label, 0, 0)
         self.parameter = QtWidgets.QComboBox()
-        render_grid.addWidget(self.parameter, 0, 1)
         self.parameter.activated.connect(self.window.view.set_property)
+        parameter_row = QtWidgets.QHBoxLayout()
+        parameter_row.addWidget(self.parameter, 1)
+        parameter_row.addWidget(
+            lib.HelpButton(
+                self.show_columns_help, tooltip="Explain the columns"
+            )
+        )
+        render_grid.addLayout(parameter_row, 0, 1)
 
         minimum_label_render = QtWidgets.QLabel("Min.:")
         minimum_label_render.setToolTip(
@@ -11420,6 +11494,23 @@ class DisplaySettingsDialog(lib.Dialog):
         # adjust the size of the dialog to fit its contents
         hint = container.sizeHint()
         lib.adjust_widget_size(self, hint)
+
+    def show_columns_help(self) -> None:
+        """Explain the columns listed under Parameter, i.e., those of
+        the loaded localizations."""
+        columns = [
+            self.parameter.itemText(i) for i in range(self.parameter.count())
+        ]
+        if not columns:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Columns",
+                "Load localizations to see what their columns hold.",
+            )
+            return
+        dialog = ColumnsHelpDialog(columns, self)
+        dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.show()
 
     def on_cmap_changed(self) -> None:
         """Load custom colormap if requested."""

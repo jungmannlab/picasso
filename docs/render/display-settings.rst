@@ -343,7 +343,9 @@ data): choose the ``Parameter``, its ``Min.`` and ``Max.``, the number of
 separately from the channel colormap above, under ``Colormap Property`` in the
 ``Render`` section of ``~/.picasso/settings.yaml`` (default ``gist_rainbow``,
 see :ref:`user-settings-file`), and restored the next time a property is
-rendered.
+rendered. The help button next to ``Parameter`` lists the columns of the
+loaded localizations with what each holds (see
+:ref:`Table 1 <files-localization-columns>`).
 
 .. _render-colorbar-format:
 

@@ -221,6 +221,7 @@ picasso = [
     "gui/icons/*.png",
     "gui/icons/*.svg",
     "config_template.yaml",
+    "column_tables/*.csv",
 ]
 
 [tool.pytest.ini_options]

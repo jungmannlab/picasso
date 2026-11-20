@@ -96,6 +96,7 @@ Picasso 1.0 is the largest update since Picasso was first published. The highlig
 - Plot profile (rectangular) allows for lower bin size.
 - *Show metadata...* (Ctrl+Shift+M) moved from the View menu to the File menu, where Localize, Filter and Average have it.
 - Optional confirmation before `File > Remove all localizations`, turned on with the user setting `Confirm removing all localizations` (off by default). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-file.html#render-remove-all-localizations).
+- A `?` button next to *Render properties > Parameter* explains what each column of the loaded localizations holds (also for molecular maps), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-properties).
 - Fixed: closing a channel in Render did not remove its drift data, so the drift of the channels after it was misaligned.
 - Fixed: the pick statistics of the Info dialog showed meaningless huge numbers when a pick held no localizations (also in `picasso.postprocess.evaluate_picks`, which now gives NaN for such picks).
 - Fixed: 3D histogram rendering scaled z unnecessarily.

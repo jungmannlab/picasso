@@ -2126,3 +2126,37 @@ class TestPermutationTest:
             True, True, fewer, more, one_sided=True
         )
         assert title.startswith("one-sided KS test")
+
+
+def test_column_descriptions_localizations():
+    """Columns are matched to the localization table, including
+    placeholders such as photons_ch<c>; unknown columns get None."""
+    descriptions = lib.column_descriptions(
+        ["frame", "lpx", "photons_ch1", "cbc_ch 2", "custom"]
+    )
+    assert list(descriptions) == [
+        "frame",
+        "lpx",
+        "photons_ch1",
+        "cbc_ch 2",
+        "custom",
+    ]
+    assert "frame in which the localization occurred" in descriptions["frame"]
+    assert "channel c" in descriptions["photons_ch1"]
+    assert "colocalization" in descriptions["cbc_ch 2"]
+    assert descriptions["custom"] is None
+    # no reStructuredText markup left
+    assert not any("**" in d or "``" in d for d in descriptions.values() if d)
+
+
+def test_column_descriptions_molecular_map():
+    """A column that only molecular maps have switches to their table,
+    with shorthands such as fitted_sigma_x/y/z expanded; columns the
+    molecular-map table lacks fall back to the localization table."""
+    descriptions = lib.column_descriptions(
+        ["x", "std_x", "fitted_sigma_z", "volume", "sy"]
+    )
+    assert "molecule/cluster center" in descriptions["x"]
+    assert "G5M" in descriptions["fitted_sigma_z"]
+    assert "volume" in descriptions["volume"]
+    assert "Point Spread Function in y" in descriptions["sy"]
