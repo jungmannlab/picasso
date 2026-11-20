@@ -168,6 +168,7 @@ Picasso 1.0 is the largest update since Picasso was first published. The highlig
 - Filtering by expression: `Filter > Filter by expression...` for universal filtering with comparisons, logic, arithmetic, functions and statistics over the shown localizations. See the [documentation](https://picassosr.readthedocs.io/en/latest/filter.html#filter-expression).
 - The metadata of a filtered file lists its filter steps in the order they were applied.
 - Filters from metadata can also be applied by dragging the .yaml file into the Filter window.
+- `Filter > Apply filters from metadata...` also opens .hdf5 files, reading the metadata embedded in them, so the .yaml file is not needed (for example if the user chooses not save it separately).
 - Filter shows 1D histograms of both variablies in the 2D histogram filtering.
 - If a column is selected, it is automatically chosen for filtering by a numeric range.
 

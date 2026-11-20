@@ -1816,7 +1816,7 @@ class Window(QtWidgets.QMainWindow):
                 self,
                 "Open metadata",
                 directory=directory,
-                filter="*.yaml",
+                filter="Metadata or localizations (*.yaml *.hdf5)",
             )
         if not path:
             return None
@@ -1827,14 +1827,16 @@ class Window(QtWidgets.QMainWindow):
             return None
 
     def apply_filters_from_metadata(self, path: str | None = None) -> None:
-        """Replay filter steps recorded in another file's .yaml metadata
-        onto the currently loaded localizations.
+        """Replay filter steps recorded in another file's metadata onto
+        the currently loaded localizations.
 
         Parameters
         ----------
         path : str, optional
-            Path to the .yaml metadata, e.g., dropped into the window.
-            If None, a file dialog asks for it.
+            Path to the .yaml metadata, e.g., dropped into the window. If
+            None, a file dialog asks for it, accepting also an .hdf5 file
+            whose metadata is read as in ``io.load_info`` (its .yaml
+            file if there is one, else the metadata embedded in it).
         """
         if not self.has_locs:
             QtWidgets.QMessageBox.information(
