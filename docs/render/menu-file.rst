@@ -660,6 +660,19 @@ it.
       channels = io.split_pyme_channels("pyme.hdf", locs, info)
 
 
+.. _render-show-metadata:
+
+Show metadata
+-------------
+
+.. rst-class:: shortcut
+
+Shortcut: :kbd:`Ctrl+Shift+M`
+
+Shows the metadata of the loaded files: the camera, the localization
+parameters and every processing step since. With several files, select the
+file in the drop-down list. See :ref:`files-metadata-settings`.
+
 .. _render-convert-files:
 
 Convert files to nm

@@ -21553,6 +21553,11 @@ class Window(QtWidgets.QMainWindow):
             export_ims_action = file_menu.addAction("Export ROI for Imaris...")
             export_ims_action.triggered.connect(self.export_fov_ims)
         file_menu.addSeparator()
+        # Ctrl+M is taken by the measure tool
+        metadata_action = file_menu.addAction("Show metadata...")
+        metadata_action.setIcon(theme.icon("metadata"))
+        metadata_action.setShortcut("Ctrl+Shift+M")
+        metadata_action.triggered.connect(self.show_metadata)
         convert_units_action = file_menu.addAction("Convert files to nm...")
         convert_units_action.setToolTip(
             "Convert files written before Picasso 1.0 (camera pixels) to nm."
@@ -21623,10 +21628,6 @@ class Window(QtWidgets.QMainWindow):
         info_action.setShortcut("Ctrl+I")
         info_action.triggered.connect(self.info_dialog.show)
         view_menu.addAction(info_action)
-        metadata_action = view_menu.addAction("Show metadata...")
-        metadata_action.setIcon(theme.icon("metadata"))
-        metadata_action.setShortcut("Ctrl+Shift+M")
-        metadata_action.triggered.connect(self.show_metadata)
         slicer_action = view_menu.addAction("Slice...")
         slicer_action.setIcon(theme.icon("slice"))
         slicer_action.triggered.connect(self.slicer_dialog.initialize)
