@@ -6847,10 +6847,25 @@ class ParametersDialog(lib.Dialog):
         if self.identification_settings is not None:
             # it finds the spots itself
             self.identification_settings.setVisible(not multi_emitter)
+        if multi_emitter:
+            self._switch_off_movie_filters()
         # The multichannel rows keep their space while hidden (see
         # _retain_size_when_hidden), but the multi-emitter fit takes one
         # channel, so it does not reserve it.
         self._retain_multichannel_rows(not multi_emitter)
+
+    def _switch_off_movie_filters(self) -> None:
+        """Untick the temporal median filter and set the Gaussian filter
+        sigma to 0. The multi-emitter fit runs on the raw frames and hides
+        the identification settings, so the display must not show (and the
+        hidden controls must not keep) filtered frames. Guarded for the
+        dialog under construction."""
+        checkbox = getattr(self, "temporal_median_checkbox", None)
+        if checkbox is not None:
+            checkbox.setChecked(False)
+        spinbox = getattr(self, "gaussian_filter_spinbox", None)
+        if spinbox is not None:
+            spinbox.setValue(0.0)
 
     def _update_spline_psf_widgets(self, spline_psf: bool) -> None:
         """Show the PSF sigma, or for the spline PSF of the multi-emitter
@@ -13697,10 +13712,16 @@ class Window(QtWidgets.QMainWindow):
                     # a movie too short for the filter reports it as off, so
                     # display, preview and identification all agree
                     and self.temporal_median_applicable()
+                    # the multi-emitter fit runs on the raw frames
+                    and not dialog.is_multi_emitter()
                 )
                 else 0
             ),
-            "Gaussian Filter Sigma": dialog.gaussian_filter_spinbox.value(),
+            "Gaussian Filter Sigma": (
+                0.0
+                if dialog.is_multi_emitter()
+                else dialog.gaussian_filter_spinbox.value()
+            ),
             "Edge Spots": dialog.edge_spots_checkbox.isChecked(),
         }
 

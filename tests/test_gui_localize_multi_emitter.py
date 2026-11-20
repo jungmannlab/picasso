@@ -86,6 +86,31 @@ def test_the_model_shows_only_what_it_uses(window):
     assert not dialog.identification_settings.isHidden()
 
 
+def test_the_model_switches_off_the_movie_filters(loaded):
+    """It fits the raw frames, so the temporal median and the Gaussian
+    filter go off: neither the display nor the hidden controls keep
+    them."""
+    window = loaded
+    dialog = window.parameters_dialog
+    dialog.fit_model.setCurrentIndex(0)
+    dialog.temporal_median_checkbox.setChecked(True)
+    dialog.gaussian_filter_spinbox.setValue(1.5)
+    assert window.parameters["Temporal Median Window"]
+    assert window.parameters["Gaussian Filter Sigma"] == 1.5
+    _select(window)
+    assert not dialog.temporal_median_checkbox.isChecked()
+    assert dialog.gaussian_filter_spinbox.value() == 0.0
+    # a settings load that turns them back on is ignored as well
+    dialog.temporal_median_checkbox.setChecked(True)
+    dialog.gaussian_filter_spinbox.setValue(1.5)
+    assert window.parameters["Temporal Median Window"] == 0
+    assert window.parameters["Gaussian Filter Sigma"] == 0.0
+    np.testing.assert_array_equal(
+        np.asarray(window.identification_movie()[0]),
+        np.asarray(window.movie[0]),
+    )
+
+
 def test_use_gpu_is_hidden(window, monkeypatch):
     """The multi-emitter fit runs on the CPU only."""
     monkeypatch.setattr(gui_localize, "CUDA_AVAILABLE", True)
