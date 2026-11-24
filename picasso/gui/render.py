@@ -12901,6 +12901,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self._driftfiles = []
         self.x_render_state = False
         self.x_locs = None
+        # the currently rendered viewport; set lazily on the first
+        # ``draw_scene``. Initialised here so a read before the first
+        # draw (e.g. an early ``resizeEvent`` while locs load on a
+        # background thread) never raises ``AttributeError``.
+        self.viewport = None
         # background loading (see ``LocsLoadWorker``)
         self._load_thread = None
         self._load_worker = None
@@ -13498,7 +13503,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         # the other window may have moved the channels' canvas
         self.fit_canvas()
         self.image = None
-        if not hasattr(self, "viewport"):
+        if self.viewport is None:  # no draw yet, nothing to refresh
             return
         if self.x_render_state:
             self.activate_render_property()  # redraws
@@ -17291,7 +17296,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         autoscale : bool, optional
             Adjust the contrast automatically. Default is False.
         """
-        if hasattr(self, "viewport"):
+        if self.viewport is not None:
             own_center = render.viewport_center(self.viewport)
             own_scale = render.viewport_height(self.viewport) / max(
                 self.height(), 1
@@ -20973,7 +20978,11 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if self.n_channels:  # a redraw of the picks reads nothing back
             if resample_locs:
                 self.invalidate_locs_index()
-            viewport = viewport or self.viewport
+            # ``self.viewport`` is None until the first draw sets it; fall
+            # back to the full FOV so an early resize (locs loaded on a
+            # background thread, before the first draw) never passes None
+            # to ``draw_scene`` -> ``adjust_viewport_to_view``.
+            viewport = viewport or self.viewport or self.full_fov_viewport()
             self.draw_scene(
                 viewport,
                 autoscale=autoscale,
@@ -21010,7 +21019,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         """
         n_channels = len(self.locs)
         if n_channels:
-            viewport = viewport or self.viewport
+            # see ``update_scene``: ``self.viewport`` may still be None
+            # before the first draw, so fall back to the full FOV.
+            viewport = viewport or self.viewport or self.full_fov_viewport()
             self.draw_scene_slicer(
                 viewport,
                 autoscale=autoscale,
@@ -23689,7 +23700,7 @@ class Window(QtWidgets.QMainWindow):
                 f"{render.viewport_width(self.view.viewport):.1f} / "
                 f"{render.viewport_height(self.view.viewport):.1f} nm"
             )
-        except AttributeError:
+        except (AttributeError, TypeError):  # no viewport set yet
             pass
         try:
             self.info_dialog.change_fov.x_box.setValue(
@@ -23704,7 +23715,7 @@ class Window(QtWidgets.QMainWindow):
             self.info_dialog.change_fov.h_box.setValue(
                 render.viewport_height(self.view.viewport)
             )
-        except AttributeError:
+        except (AttributeError, TypeError):  # no viewport set yet
             pass
         self.info_dialog.update_fit_precision()
 
