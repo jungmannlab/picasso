@@ -1034,7 +1034,7 @@ def detections_by_frame(
     """
     stack = np.stack([np.asarray(movie[int(f)]) for f in frames])
     parameters = localize.IdentificationParameters(
-        method=identification_method, box=box
+        method=identification_method, box=box, edge_spots=False
     )
     ids, _ = localize.identify(stack, parameters=parameters)
     if len(ids) == 0:

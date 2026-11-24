@@ -45,7 +45,11 @@ import sys
 import tempfile
 
 #: package data the GUIs and Localize read at runtime
-BUNDLED_FILES = ("config_template.yaml", "gui/icons/picasso.ico")
+BUNDLED_FILES = (
+    "config_template.yaml",
+    "gui/icons/picasso.ico",
+    "column_tables/localizations.csv",
+)
 CORE_MODULES = ("io", "localize", "postprocess", "render", "spinna")
 #: the GUIs of the one-click installers, except the browser-based server
 GUIS = (

@@ -190,11 +190,12 @@ of the localizations that are shown when it is applied.
 Filters from metadata
 ~~~~~~~~~~~~~~~~~~~~~
 
-The filtering information is stored in the metadata .yaml file.
+The filtering information is stored in the metadata of the saved file.
 ``Picasso: Filter`` allows the user to load the filtering steps from previously
-filtered data by clicking ``Filter > Apply filters from metadata...`` or by
-dragging the .yaml file into the main window (with localizations already
-open). The extracted information is displayed to the user before approval.
+filtered data by clicking ``Filter > Apply filters from metadata...`` and
+selecting its .yaml file or the .hdf5 file itself (useful when the .yaml file
+was not kept), or by dragging the .yaml file into the main window (with
+localizations already open). The extracted information is displayed to the user before approval.
 
 All filter steps found in the metadata are applied in the order they were
 applied originally, also over several Filter sessions: histogram selections,

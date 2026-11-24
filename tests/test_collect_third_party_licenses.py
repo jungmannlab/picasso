@@ -64,7 +64,19 @@ def test_a_declared_file_name_falls_back_to_the_classifiers():
 
 @pytest.mark.parametrize("name", ["vectorfit-py", "vectorfit-py-cu12"])
 def test_vectorfit_carries_the_notice_of_its_bundled_fftw(name):
-    ((label, text),) = collect.BUNDLED_NOTICES[name]
+    (label, text), *_ = collect.BUNDLED_NOTICES[name]
     assert "FFTW" in label
     assert "GNU General Public License" in text
     assert "https://www.fftw.org" in text
+
+
+def test_vectorfit_gpu_build_carries_the_notice_of_its_cuda_runtime():
+    """vectorfit-py-cu12 bundles cudart without a license text of its
+    own."""
+    notices = dict(collect.BUNDLED_NOTICES["vectorfit-py-cu12"])
+    text = notices["bundled CUDA Runtime"]
+    assert "NVIDIA CUDA Runtime" in text
+    assert "https://docs.nvidia.com/cuda/eula/" in text
+    assert "bundled CUDA Runtime" not in dict(
+        collect.BUNDLED_NOTICES["vectorfit-py"]
+    )

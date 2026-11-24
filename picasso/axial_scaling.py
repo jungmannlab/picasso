@@ -176,6 +176,19 @@ def near_surface_factor(
         positive, ``near_surface`` is unknown, or the midpoint estimate
         does not exist because the midpoint ray is totally internally
         reflected at the coverslip (use "full-aperture" then).
+
+    References
+    ----------
+    Loginov, S. V., Boltje, D. B., Hensgens, M. N. F., Hoogenboom, J. P.
+    & van der Wee, E. B. Depth-dependent scaling of axial distances in
+    light microscopy. Optica 11, 553-568 (2024).
+    https://doi.org/10.1364/OPTICA.520595
+
+    Lyakin, D. V., Maksimova, L. A., Sdobnov, A. Y. & Ryabukho, V. P.
+    The influence of the numerical aperture of a beam probing an object
+    on the determination of the thickness of a layered object in
+    confocal microscopy. Opt Spectrosc 123, 487-494 (2017).
+    https://doi.org/10.1134/S0030400X17090235
     """
     _check_optics(na, n_immersion, n_sample)
     n1, n2 = float(n_immersion), float(n_sample)
@@ -211,7 +224,15 @@ def _depth_dependent_factor(
     """Eq. 17 of Loginov et al. (2024) at the nominal depths ``depth`` (all
     positive, in the units of ``wavelength``). The paper writes it with
     complex square roots for ``n2 < n1``; here they are real ones with the
-    sign ``s = -1``."""
+    sign ``s = -1``.
+
+    References
+    ----------
+    Loginov, S. V., Boltje, D. B., Hensgens, M. N. F., Hoogenboom, J. P.
+    & van der Wee, E. B. Depth-dependent scaling of axial distances in
+    light microscopy. Optica 11, 553-568 (2024).
+    https://doi.org/10.1364/OPTICA.520595
+    """
     s = 1.0 if n2 >= n1 else -1.0
     m = math.sqrt(abs(n2**2 - n1**2))
     with np.errstate(over="ignore"):
@@ -270,6 +291,13 @@ def magnification_factor(
     ValueError
         If a depth is negative or not finite, ``wavelength`` is not
         positive, or for the reasons ``near_surface_factor`` gives.
+
+    References
+    ----------
+    Loginov, S. V., Boltje, D. B., Hensgens, M. N. F., Hoogenboom, J. P.
+    & van der Wee, E. B. Depth-dependent scaling of axial distances in
+    light microscopy. Optica 11, 553-568 (2024).
+    https://doi.org/10.1364/OPTICA.520595
     """
     zeta_crit = near_surface_factor(
         na=na,
@@ -340,6 +368,13 @@ def actual_depth(
     ------
     ValueError
         For the reasons ``magnification_factor`` gives.
+
+    References
+    ----------
+    Loginov, S. V., Boltje, D. B., Hensgens, M. N. F., Hoogenboom, J. P.
+    & van der Wee, E. B. Depth-dependent scaling of axial distances in
+    light microscopy. Optica 11, 553-568 (2024).
+    https://doi.org/10.1364/OPTICA.520595
     """
     factor = magnification_factor(
         depth,
@@ -394,6 +429,13 @@ def near_surface_depth(
     ValueError
         If ``wavelength`` is not positive, or for the reasons
         ``near_surface_factor`` gives.
+
+    References
+    ----------
+    Loginov, S. V., Boltje, D. B., Hensgens, M. N. F., Hoogenboom, J. P.
+    & van der Wee, E. B. Depth-dependent scaling of axial distances in
+    light microscopy. Optica 11, 553-568 (2024).
+    https://doi.org/10.1364/OPTICA.520595
     """
     zeta_crit = near_surface_factor(
         na=na,

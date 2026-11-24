@@ -46,7 +46,7 @@ from .. import (
 from .app import run_gui
 from . import idle
 from . import theme
-from . import toolbars
+from . import shortcuts, toolbars
 from . import plot_style
 from .plot_style import PlotStyle
 
@@ -685,6 +685,15 @@ class FilterNum(lib.Dialog):
         for name in names:
             self.attributes.addItem(name)
 
+    def select_column(self, name: str | None) -> None:
+        """Show column ``name`` in the combo box; None keeps the current
+        one."""
+        if name is None:
+            return
+        index = self.attributes.findText(name)
+        if index >= 0:
+            self.attributes.setCurrentIndex(index)
+
 
 EXPRESSION_TOOLTIP = (
     "Condition that the kept localizations satisfy, e.g.,\n"
@@ -856,6 +865,8 @@ class SubclusterNum(lib.Dialog):
         Main window.
     """
 
+    DOCS_URL = docs_url("filter.html#filter-test-subclustering")
+
     def __init__(self, window: QtWidgets.QMainWindow) -> None:
         super().__init__(window)
         self.window = window
@@ -898,13 +909,17 @@ class SubclusterNum(lib.Dialog):
         test_button.setIcon(theme.icon("subclustering"))
         test_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         test_button.clicked.connect(self.plot)
-        self.layout.addRow(test_button)
+        button_row = QtWidgets.QHBoxLayout()
+        button_row.addWidget(lib.HelpButton(self.DOCS_URL))
+        button_row.addWidget(test_button, 1)
+        self.layout.addRow(button_row)
 
     def plot(self) -> None:
         """Plot the subclustering test histogram. Optionally can save
         the histogram values to a .csv file."""
-        if "n_events" not in self.window.locs_full.columns:
-            raise ValueError("Data must have the 'n_events' attribute.")
+        # another file may have been opened while the dialog was open
+        if self.window.no_n_events_warning():
+            return
         if self.save_vals.isChecked():
             base, ext = os.path.splitext(self.window.locs_path)
             out_path = base + "_subcluster_test.csv"
@@ -1019,6 +1034,10 @@ class Window(QtWidgets.QMainWindow):
         self.table_model = TableModel(self)
         self.table_view.setModel(self.table_model)
         self.filter_num = FilterNum(self)
+        # the numeric filter follows the column selected in the table
+        self.table_view.selectionModel().selectionChanged.connect(
+            self._on_table_selection_changed
+        )
         self.filter_expression = FilterExpression(self)
         self.metadata_dialog = lib.MetadataDialog(self)
         self.user_settings_dialog = lib.UserSettingsDialog(self)
@@ -1043,6 +1062,7 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        shortcuts.add_menu_action(file_menu)
         help_action = file_menu.addAction("Help")
         help_action.setIcon(theme.icon("help"))
         help_action.triggered.connect(
@@ -1071,7 +1091,7 @@ class Window(QtWidgets.QMainWindow):
         filter_menu.addSeparator()
         filter_action = filter_menu.addAction("Filter numerically...")
         filter_action.setShortcut("Ctrl+F")
-        filter_action.triggered.connect(self.filter_num.show)
+        filter_action.triggered.connect(self.show_filter_num)
         filter_expression_action = filter_menu.addAction(
             "Filter by expression..."
         )
@@ -1155,6 +1175,7 @@ class Window(QtWidgets.QMainWindow):
                 (plot_settings_action, "plot-settings", "Plot settings"),
             ],
         )
+        shortcuts.install(self, "Filter")
         # in the menus only, not on the toolbar
         remove_columns_action.setIcon(theme.icon("remove-columns"))
         self._update_undo_actions()
@@ -1497,10 +1518,14 @@ class Window(QtWidgets.QMainWindow):
             action.setEnabled(bool(stack))
             if stack and stack[-1].label:
                 text = f"{text}: {stack[-1].label}"
-            shortcut = action.shortcut().toString(
-                QtGui.QKeySequence.SequenceFormat.NativeText
-            )
+            shortcut = toolbars.shortcut_text(action)
             action.setToolTip(f"{text} ({shortcut})" if shortcut else text)
+
+    def shortcuts_applied(self) -> None:
+        """The user's shortcuts were applied (``shortcuts.apply``): the
+        tooltips of Undo and Redo show theirs."""
+        if hasattr(self, "_undo_stack"):
+            self._update_undo_actions()
 
     def _drop_columns(self, names: Iterable[str]) -> None:
         """Remove columns from the localizations, kept for ``undo``, and
@@ -1636,6 +1661,34 @@ class Window(QtWidgets.QMainWindow):
         QtWidgets.QMessageBox.information(self, title, "No file loaded.")
         return True
 
+    def selected_column(self) -> str | None:
+        """Name of the column selected in the table, or None.
+
+        With several columns selected, the one clicked last (the
+        current column) wins if it is among them, otherwise the
+        leftmost.
+        """
+        if not self.has_locs:
+            return None
+        selection_model = self.table_view.selectionModel()
+        columns = sorted(i.column() for i in selection_model.selectedColumns())
+        if not columns:
+            return None
+        current = selection_model.currentIndex().column()
+        column = current if current in columns else columns[0]
+        if column >= len(self.locs_full.columns):
+            return None
+        return self.locs_full.columns[column]
+
+    def show_filter_num(self) -> None:
+        """Open the numeric filter with the selected column chosen."""
+        self.filter_num.select_column(self.selected_column())
+        self.filter_num.show()
+
+    def _on_table_selection_changed(self, *args) -> None:
+        if self.filter_num.isVisible():
+            self.filter_num.select_column(self.selected_column())
+
     def plot_histogram(self) -> None:
         if self.no_locs_warning("Histogram"):
             return
@@ -1693,8 +1746,24 @@ class Window(QtWidgets.QMainWindow):
             if window:
                 window.refresh()
 
+    def no_n_events_warning(self) -> bool:
+        """Tell the user and return True if the loaded data has no
+        ``n_events`` column, needed to test for subclustering."""
+        if "n_events" in self.locs_full.columns:
+            return False
+        QtWidgets.QMessageBox.information(
+            self,
+            "Test subclustering",
+            "The data has no column 'n_events' (the number of binding\n"
+            "events per molecule). Test subclustering on molecules,\n"
+            "e.g., from G5M.",
+        )
+        return True
+
     def plot_subclustering(self) -> None:
         if self.no_locs_warning("Test subclustering"):
+            return
+        if self.no_n_events_warning():
             return
         # one dialog, shown again: a dialog parented to the window lives
         # as long as the window, with the last plot it made
@@ -1769,7 +1838,7 @@ class Window(QtWidgets.QMainWindow):
                 self,
                 "Open metadata",
                 directory=directory,
-                filter="*.yaml",
+                filter="Metadata or localizations (*.yaml *.hdf5)",
             )
         if not path:
             return None
@@ -1780,14 +1849,16 @@ class Window(QtWidgets.QMainWindow):
             return None
 
     def apply_filters_from_metadata(self, path: str | None = None) -> None:
-        """Replay filter steps recorded in another file's .yaml metadata
-        onto the currently loaded localizations.
+        """Replay filter steps recorded in another file's metadata onto
+        the currently loaded localizations.
 
         Parameters
         ----------
         path : str, optional
-            Path to the .yaml metadata, e.g., dropped into the window.
-            If None, a file dialog asks for it.
+            Path to the .yaml metadata, e.g., dropped into the window. If
+            None, a file dialog asks for it, accepting also an .hdf5 file
+            whose metadata is read as in ``io.load_info`` (its .yaml
+            file if there is one, else the metadata embedded in it).
         """
         if not self.has_locs:
             QtWidgets.QMessageBox.information(

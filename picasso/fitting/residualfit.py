@@ -1848,7 +1848,15 @@ def _local_crlb(  # noqa: C901
     parameters; where that matrix is singular, Huang et al.'s correction
     of the x-x and y-y terms of close emitters (Eq. 11). Returns the
     number of emitters in the matrix. ``candidates`` is scratch of at
-    least ``n`` entries."""
+    least ``n`` entries.
+
+    References
+    ----------
+    Huang, F. et al. Video-rate nanoscopy using sCMOS camera-specific
+    single-molecule localization algorithms. Nat Methods 10, 653-658
+    (2013).
+    https://doi.org/10.1038/nmeth.2488
+    """
     m = _neighbors(
         p_x[i],
         p_y[i],
@@ -2104,6 +2112,13 @@ def analyze_frame(  # noqa: C901
     -------
     result : FrameResult
         The emitters, in the coordinates of the padded frame.
+
+    References
+    ----------
+    Huang, F. et al. Video-rate nanoscopy using sCMOS camera-specific
+    single-molecule localization algorithms. Nat Methods 10, 653-658
+    (2013).
+    https://doi.org/10.1038/nmeth.2488
     """
     height, width = frame.shape
     is_spline = psf_model == _SPLINE

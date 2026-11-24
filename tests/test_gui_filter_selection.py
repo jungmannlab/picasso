@@ -108,3 +108,31 @@ def test_esc_without_a_selection_does_nothing(window, hist2d):
     n = window.n_filtered
     _esc(hist2d)()
     assert window.n_filtered == n
+
+
+def _select_column(window, name) -> None:
+    """Click the header of column ``name`` in the table."""
+    column = list(window.locs_full.columns).index(name)
+    window.table_view.selectColumn(column)
+
+
+def test_numeric_filter_opens_on_the_selected_column(window):
+    _select_column(window, "photons")
+    window.show_filter_num()
+    try:
+        assert window.filter_num.attributes.currentText() == "photons"
+        # follows the selection while open
+        _select_column(window, "sx")
+        assert window.filter_num.attributes.currentText() == "sx"
+    finally:
+        window.filter_num.close()
+
+
+def test_numeric_filter_keeps_its_column_without_a_selection(window):
+    window.filter_num.select_column("bg")
+    window.table_view.clearSelection()
+    window.show_filter_num()
+    try:
+        assert window.filter_num.attributes.currentText() == "bg"
+    finally:
+        window.filter_num.close()

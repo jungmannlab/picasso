@@ -1036,6 +1036,7 @@ class TestIdentificationParameters:
             "Box Size": 7,
             "Temporal Median Window": 0,
             "Gaussian Filter Sigma": 0.0,
+            "Edge Spots": True,
         }
 
     def test_to_info_wavelet(self):
@@ -1081,12 +1082,13 @@ class TestIdentificationParameters:
         assert info["Temporal Median Stride"] == 10
 
     def test_from_info_of_old_metadata(self):
-        """Files written before the wavelet identification and the filters
-        name no method and no filter settings."""
+        """Files written before the wavelet identification, the filters and
+        the spots at the frame edge name no method, no filter settings and
+        were identified away from the edge."""
         parameters = localize.IdentificationParameters.from_info(
             {"Box Size": 7, "Min. Net Gradient": 5000}
         )
-        assert parameters == _params(5000, 7)
+        assert parameters == _params(5000, 7, edge_spots=False)
         assert parameters.temporal_median_stride is None
 
     def test_from_info_of_identify_metadata(self, movie):
@@ -5247,9 +5249,9 @@ class TestConvergenceSchedulePlumbing:
                 np.zeros(n, np.float32),
             )
 
-        monkeypatch.setattr(localize, "fit_spots_splinefit", fake)
+        monkeypatch.setattr(localize, "_fit_spots_splinefit", fake)
         monkeypatch.setattr(
-            localize, "locs_from_fits_spline", lambda *a, **k: pd.DataFrame()
+            localize, "_spline_locs", lambda *a, **k: pd.DataFrame()
         )
         localize._fit2d_spline_gpu(
             spots=np.zeros((2, box, box), np.float32),
@@ -9288,7 +9290,9 @@ class TestFitAffineTransform:
         (entry,) = lib.lateral_transforms(calibration)
         assert localize.IdentificationParameters.from_info(
             entry["Identification"]
-        ) == localize.IdentificationParameters(method=LATERAL_NG, box=BOX)
+        ) == localize.IdentificationParameters(
+            method=LATERAL_NG, box=BOX, edge_spots=False
+        )
 
     def test_a_translation_recovers_a_pure_shift(self):
         """The 2-DOF model on the only correction it claims to fit. It is
@@ -15612,7 +15616,8 @@ class TestLocalizeCliRegionsSeparately:
         assert saved == [str(tmp_path / f"{_}_locs.hdf5") for _ in names]
 
     def test_each_region_is_saved_on_its_own(self, tmp_path, monkeypatch):
-        self._run(tmp_path, monkeypatch, "-g", "100", "-a", "lq")
+        # above the noise (the spots' net gradients are about 10,000)
+        self._run(tmp_path, monkeypatch, "-g", "1000", "-a", "lq")
         ref = tmp_path / "split_ref_locs.hdf5"
         ch1 = tmp_path / "split_ch1_locs.hdf5"
         assert ref.exists() and ch1.exists()
@@ -17094,3 +17099,254 @@ class TestWaveletCli:
         )
         assert lib.get_from_metadata(info, "Wavelet Threshold") == 0.75
         assert lib.get_from_metadata(info, "Min. Net Gradient") is None
+
+
+# ---------------------------------------------------------------------------
+# Spots at the frame edge (IdentificationParameters.edge_spots)
+# ---------------------------------------------------------------------------
+
+_EDGE_BOX = 9
+_EDGE_SIZE = 32
+_EDGE_SIGMA = 1.3
+
+
+def _edge_movie(positions, photons=3000.0, background=20.0, seed=0):
+    """A noisy movie with one Gaussian spot per frame at ``positions``
+    (x, y in camera pixels, pixel centers at integers) and an identity
+    camera (baseline 100)."""
+    rng = np.random.default_rng(seed)
+    yy, xx = np.mgrid[0:_EDGE_SIZE, 0:_EDGE_SIZE]
+    peak = photons / (2 * np.pi * _EDGE_SIGMA**2)
+    frames = []
+    for x, y in positions:
+        image = background + peak * np.exp(
+            -((xx - x) ** 2 + (yy - y) ** 2) / (2 * _EDGE_SIGMA**2)
+        )
+        frames.append(rng.poisson(image) + 100)
+    return np.asarray(frames, dtype=np.uint16)
+
+
+_EDGE_CAMERA = {"Baseline": 100, "Sensitivity": 1.0, "Gain": 1}
+_EDGE_CAMERA_PX = {**_EDGE_CAMERA, "Pixelsize": PIXELSIZE}
+# one spot per frame on each of the four sides, 1.2 px from the edge
+_EDGE_POSITIONS = [
+    (1.2, 15.3),
+    (15.6, 1.2),
+    (_EDGE_SIZE - 2.2, 16.4),
+    (16.1, _EDGE_SIZE - 2.2),
+]
+
+
+def _edge_spline_2d(cal_box):
+    """A 2D spline calibration of the movie's Gaussian PSF in a box of
+    ``cal_box`` pixels."""
+    x = np.arange(cal_box, dtype=np.float32)
+    g = np.exp(-0.5 * ((x - (cal_box - 1) / 2) / _EDGE_SIGMA) ** 2)
+    template = np.outer(g, g).astype(np.float32)
+    return {
+        "model": "spline-2d",
+        "coefficients": spline.spline_coefficients(template),
+        "n_data": [cal_box, cal_box],
+        "n_intervals": [cal_box - 1, cal_box - 1],
+        "oversampling": 1.0,
+        "z_center": 0.0,
+        "z_step_nm": 20.0,
+        "effective_sigma": _EDGE_SIGMA,
+        "photon_scale": 1.0,
+        "box": cal_box,
+        "pixelsize": PIXELSIZE,
+        "Path": "synthetic",
+    }
+
+
+class TestEdgeSpots:
+    """Spots closer to the frame edge than half a box: identified with
+    ``edge_spots`` and fitted in a box shifted into the frame."""
+
+    def test_local_maxima_reach_the_edge(self):
+        image = np.zeros((20, 20), dtype=np.float32)
+        image[0, 10] = 5.0
+        image[10, 19] = 5.0
+        image[10, 10] = 5.0
+        y, x = localize._local_maxima(image, 7)
+        assert list(zip(y, x)) == [(10, 10)]
+        y, x = localize._local_maxima(image, 7, True)
+        assert sorted(zip(y, x)) == [(0, 10), (10, 10), (10, 19)]
+
+    def test_net_gradient_does_not_wrap_around(self):
+        """A spot whose box touches the first row must not see gradients
+        of the last row."""
+        image = np.full((20, 20), 10.0, dtype=np.float32)
+        image[3, 10] = 100.0
+        _, _, ng = localize.identify_in_image(image, 0.0, 7)
+        image[-1, :] = 1000.0  # bright last row
+        _, _, ng_bright = localize.identify_in_image(image, 0.0, 7)
+        np.testing.assert_allclose(ng_bright, ng)
+
+    @pytest.mark.parametrize(
+        "method",
+        [localize.NetGradient(500), wavelet.WaveletParameters(threshold=1.0)],
+        ids=["net-gradient", "wavelet"],
+    )
+    def test_identify_with_and_without_edge_spots(self, method):
+        movie = _edge_movie(_EDGE_POSITIONS)
+        found = {}
+        for edges in (False, True):
+            parameters = localize.IdentificationParameters(
+                method=method, box=_EDGE_BOX, edge_spots=edges
+            )
+            ids, info = localize.identify(
+                movie, parameters=parameters, parallel=False
+            )
+            found[edges] = ids
+            assert info[-1]["Edge Spots"] is edges
+        assert len(found[False]) == 0
+        assert len(found[True]) == len(_EDGE_POSITIONS)
+        truth = np.asarray(_EDGE_POSITIONS)
+        ids = found[True].sort_values("frame")
+        np.testing.assert_allclose(ids["x"], truth[:, 0], atol=1.0)
+        np.testing.assert_allclose(ids["y"], truth[:, 1], atol=1.0)
+
+    def test_default_is_on_and_old_files_read_as_off(self):
+        parameters = localize.IdentificationParameters(
+            method=NET_GRADIENT, box=7
+        )
+        assert parameters.edge_spots is True
+        info = parameters.to_info()
+        assert info["Edge Spots"] is True
+        assert localize.IdentificationParameters.from_info(info).edge_spots
+        del info["Edge Spots"]
+        assert not localize.IdentificationParameters.from_info(info).edge_spots
+
+    def test_calibrations_record_no_edge_spots(self):
+        info = localize._calibration_identification_info(NET_GRADIENT, 7)
+        assert info["Edge Spots"] is False
+
+    def test_get_spots_shifts_the_box_into_the_frame(self):
+        movie = (np.arange(2 * 12 * 12) + 100).astype(np.uint16)
+        movie = movie.reshape(2, 12, 12)
+        ids = pd.DataFrame({"frame": [0, 1], "x": [0, 11], "y": [5, 11]})
+        spots = localize.get_spots(movie, ids, box=5, camera_info=_EDGE_CAMERA)
+        assert spots.shape == (2, 5, 5)
+        expected = movie.astype(np.float64) - 100
+        np.testing.assert_array_equal(spots[0], expected[0, 3:8, 0:5])
+        np.testing.assert_array_equal(spots[1], expected[1, 7:12, 7:12])
+
+    def test_gauss_seeds_follow_the_offsets(self):
+        spots = np.zeros((1, 7, 7), dtype=np.float32)
+        spots[0, 3, 1] = 100.0  # 2 px left of the center
+        theta = seeds.initial_parameters_gauss(
+            spots, 7, offsets=np.array([[-2, 0]])
+        )
+        assert theta[0, 1] == pytest.approx(1.0)
+        assert theta[0, 2] == pytest.approx(3.0)
+        centered = seeds.initial_parameters_gauss(spots, 7)
+        assert centered[0, 1] == pytest.approx(3.0)
+
+    @pytest.mark.parametrize("fitting_method", ["gausslq", "gaussmle"])
+    def test_gauss_fits_spots_at_the_edge(
+        self, picasso_movie_factory, fitting_method
+    ):
+        movie_data = _edge_movie(_EDGE_POSITIONS * 5)
+        movie = picasso_movie_factory(movie_data, _movie_info(movie_data))
+        parameters = localize.IdentificationParameters(
+            method=localize.NetGradient(500), box=_EDGE_BOX
+        )
+        ids, ids_info = localize.identify(
+            movie_data, parameters=parameters, parallel=False
+        )
+        assert len(ids) == len(movie_data)
+        locs, info = localize.fit(
+            movie,
+            ids_info,
+            camera_info=_EDGE_CAMERA_PX,
+            identifications=ids,
+            box=_EDGE_BOX,
+            fitting_method=fitting_method,
+            parallel=False,
+        )
+        assert len(locs) == len(movie_data)
+        assert "Edge spots not fitted" not in info[-1]
+        truth = np.asarray(_EDGE_POSITIONS * 5)[locs["frame"]] * PIXELSIZE
+        error = np.hypot(locs["x"] - truth[:, 0], locs["y"] - truth[:, 1])
+        assert np.median(error) < 10.0  # nm; the fits are ~4 nm precise
+
+    def test_shifted_and_centered_spots_fit_together(
+        self, picasso_movie_factory
+    ):
+        """Centered spots are fitted exactly as without edge spots."""
+        positions = [(1.2, 15.3), (15.2, 14.7)] * 3
+        movie_data = _edge_movie(positions)
+        movie = picasso_movie_factory(movie_data, _movie_info(movie_data))
+        ids = pd.DataFrame(
+            {
+                "frame": np.arange(len(positions)),
+                "x": [1, 15] * 3,
+                "y": [15, 15] * 3,
+                "net_gradient": np.ones(len(positions), dtype=np.float32),
+            }
+        )
+        kwargs = dict(
+            camera_info=_EDGE_CAMERA_PX,
+            box=_EDGE_BOX,
+            fitting_method="gaussmle",
+            parallel=False,
+        )
+        locs, _ = localize.fit(movie, identifications=ids, **kwargs)
+        assert list(locs["frame"]) == list(range(len(positions)))
+        centered = ids.iloc[1::2].reset_index(drop=True)
+        alone, _ = localize.fit(movie, identifications=centered, **kwargs)
+        pd.testing.assert_frame_equal(
+            locs.iloc[1::2].reset_index(drop=True),
+            alone.reset_index(drop=True),
+        )
+
+    def test_spline_fits_as_far_as_the_calibration_reaches(
+        self, picasso_movie_factory
+    ):
+        movie_data = _edge_movie(_EDGE_POSITIONS * 3)
+        movie = picasso_movie_factory(movie_data, _movie_info(movie_data))
+        ids = pd.DataFrame(
+            {
+                "frame": np.arange(len(movie_data)),
+                "x": [1, 16, _EDGE_SIZE - 2, 16] * 3,
+                "y": [15, 1, 16, _EDGE_SIZE - 2] * 3,
+            }
+        )
+        # spots 1 px from the edge need a shift of 3 px in a box of 9
+        assert localize._edge_spot_margin(_edge_spline_2d(9), 9) == 0
+        assert localize._edge_spot_margin(_edge_spline_2d(13), 9) == 2
+        assert localize._edge_spot_margin(_edge_spline_2d(21), 9) == 4
+        for cal_box, n_fitted in ((9, 0), (13, 0), (21, len(ids))):
+            locs, info = localize.fit(
+                movie,
+                camera_info=_EDGE_CAMERA_PX,
+                identifications=ids,
+                box=_EDGE_BOX,
+                fitting_method="spline-mle",
+                spline_calibration=_edge_spline_2d(cal_box),
+                parallel=False,
+            )
+            assert len(locs) == n_fitted
+            if n_fitted < len(ids):
+                assert info[-1]["Edge spots not fitted"] == len(ids) - n_fitted
+        truth = np.asarray(_EDGE_POSITIONS * 3)[locs["frame"]] * PIXELSIZE
+        error = np.hypot(locs["x"] - truth[:, 0], locs["y"] - truth[:, 1])
+        assert np.median(error) < 10.0
+        assert np.all(np.isfinite(locs["lpx"])) and np.all(locs["lpx"] > 0)
+
+    def test_phasor_leaves_spots_at_the_edge_out(self, picasso_movie_factory):
+        positions = [(1.2, 15.3), (15.2, 14.7)]
+        movie_data = _edge_movie(positions)
+        movie = picasso_movie_factory(movie_data, _movie_info(movie_data))
+        ids = pd.DataFrame({"frame": [0, 1], "x": [1, 15], "y": [15, 15]})
+        locs, info = localize.fit(
+            movie,
+            camera_info=_EDGE_CAMERA_PX,
+            identifications=ids,
+            box=_EDGE_BOX,
+            fitting_method="phasor",
+            parallel=False,
+        )
+        assert list(locs["frame"]) == [1]
+        assert info[-1]["Edge spots not fitted"] == 1

@@ -12,7 +12,7 @@ Single-Particle Tracking
 Single-particle tracking (SPT) follows individual molecules over time to
 measure how they move. Picasso provides a basic SPT workflow, following
 Module 7 of `Martens, Turkowyd and Endesfelder, Frontiers in Bioinformatics,
-2021 <https://doi.org/10.3389/fbinf.2021.817254>`__:
+2022 <https://doi.org/10.3389/fbinf.2021.817254>`__:
 
 1. **Track particles**: link the localizations of consecutive frames into
    tracks by nearest-neighbor tracking (:ref:`render-spt-track`).
@@ -186,7 +186,7 @@ first), and the histogram of the track lengths. ``Save results...`` saves them
 (see :ref:`render-spt-track-table`).
 
 The analysis follows Module 7 of `Martens, Turkowyd and Endesfelder, Frontiers
-in Bioinformatics, 2021 <https://doi.org/10.3389/fbinf.2021.817254>`__.
+in Bioinformatics, 2022 <https://doi.org/10.3389/fbinf.2021.817254>`__.
 Please cite the paper when using these analyses.
 
 .. _render-spt-msd:

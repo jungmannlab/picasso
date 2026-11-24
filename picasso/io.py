@@ -22,6 +22,7 @@ import os
 import shutil
 import tempfile
 import threading
+import time
 import warnings
 import weakref
 from collections.abc import Sequence
@@ -3191,20 +3192,81 @@ def save_user_settings(settings: dict) -> None:
     file first and renamed into place, so an interrupted save cannot
     leave a half-written file behind.
 
+    On Windows, the rename is refused while another process has the
+    settings file open (another Picasso window reading it, a virus
+    scanner, the search indexer, OneDrive). The rename is then retried
+    briefly, and if the file stays locked, it is overwritten in place,
+    which such readers allow.
+
     Parameters
     ----------
     settings : dict
         The settings to save; nested mappings are converted to plain dicts
         first so PyYAML does not tag them.
+
+    Raises
+    ------
+    OSError
+        If the settings file cannot be written at all, e.g., in a
+        read-only home folder.
     """
     settings = _to_dict_walk(settings)
     settings_filename = _user_settings_filename()
     os.makedirs(os.path.dirname(settings_filename), exist_ok=True)
     _backup_user_settings(settings_filename)
+    text = yaml.dump(dict(settings), default_flow_style=False)
     temporary = settings_filename + ".tmp"
-    with open(temporary, "w") as settings_file:
-        yaml.dump(dict(settings), settings_file, default_flow_style=False)
-    os.replace(temporary, settings_filename)
+    try:
+        with open(temporary, "w") as settings_file:
+            settings_file.write(text)
+        _replace_with_retry(temporary, settings_filename)
+    except PermissionError as error:
+        _settings_log.info(
+            "Could not replace the user settings file (%s); overwriting it"
+            " in place instead.",
+            error,
+        )
+        try:
+            os.remove(temporary)
+        except OSError:
+            pass
+        with open(settings_filename, "w") as settings_file:
+            settings_file.write(text)
+
+
+def _replace_with_retry(
+    source: str,
+    destination: str,
+    attempts: int = 10,
+    delay: float = 0.05,
+) -> None:
+    """``os.replace`` that retries while Windows reports the destination
+    as in use (``PermissionError``), which another process holding it
+    open briefly causes.
+
+    Parameters
+    ----------
+    source, destination : str
+        Paths passed on to ``os.replace``.
+    attempts : int, optional
+        How often to try. Default is 10.
+    delay : float, optional
+        Seconds to wait between attempts. Default is 0.05, so at most
+        about half a second is spent waiting.
+
+    Raises
+    ------
+    PermissionError
+        If the last attempt fails as well.
+    """
+    for attempt in range(attempts):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(delay)
 
 
 def _save_metadata_in_yaml() -> bool:
@@ -7190,6 +7252,11 @@ def validate_locs(
         )
 
 
+# attribute of the ``logging.LogRecord`` of the warning about the
+# localizations dropped while a file is loaded: the fraction dropped
+_DROPPED_FRACTION_ATTR = "dropped_fraction"
+
+
 def _report_dropped_locs(
     locs: pd.DataFrame,
     kept: pd.DataFrame,
@@ -7225,7 +7292,11 @@ def _report_dropped_locs(
             f"{docs_url('files.html#files-legacy')}). Else Width, Height "
             "or Pixelsize in the metadata are too small."
         )
-    _log.warning(message)
+    # the fraction lets a GUI skip the warning for a few dropped
+    # localizations (see Render's ``Dropped localizations warning (%)``)
+    _log.warning(
+        message, extra={_DROPPED_FRACTION_ATTR: n_dropped / len(locs)}
+    )
 
 
 def _render_index_to_save(locs: pd.DataFrame, info: list[dict], render_index):

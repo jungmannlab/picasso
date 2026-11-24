@@ -41,6 +41,8 @@ def latest_release(monkeypatch):
         return LATEST
 
     monkeypatch.setattr(updater, "get_latest_version", get_latest_version)
+    # nor the plugin registry, unless a test serves one
+    monkeypatch.setattr(updater, "_fetch_plugin_manifest", lambda: None)
     return requests
 
 
@@ -722,3 +724,126 @@ def test_unfinished_install_is_reported_at_start(qt_offscreen, monkeypatch):
     updater.setup_gui_update_check()
     _wait_until(lambda: shown)
     assert "Picasso v99.0 was not installed" in shown[0]
+
+
+# ---------------------------------------------------------------------------
+# Plugin updates, told with the update check of Picasso
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def plugin_registry(tmp_path, monkeypatch):
+    """An installed plugin "drift" 1.0; returns the manifest the check
+    downloads, initially with "drift" 1.1 and a plugin not installed."""
+    from picasso import plugins
+
+    directory = tmp_path / "plugins"
+    directory.mkdir()
+    monkeypatch.setattr(io, "plugins_directory", lambda: str(directory))
+    state = plugins.load_state()
+    state["plugins"]["drift"] = {"file": "drift.py", "version": "1.0"}
+    plugins.save_state(state)
+    manifest = [
+        {
+            "id": "drift",
+            "display_name": "Drift",
+            "version": "1.1",
+            "file": "plugins/drift.py",
+            "sha256": "0" * 64,
+        },
+        {
+            "id": "brand_new",
+            "display_name": "Brand new",
+            "version": "1.0",
+            "file": "plugins/brand_new.py",
+            "sha256": "0" * 64,
+        },
+    ]
+    monkeypatch.setattr(updater, "update_check_due", lambda: True)
+    monkeypatch.setattr(updater, "is_update_available", lambda: (False, None))
+    monkeypatch.setattr(updater, "_fetch_plugin_manifest", lambda: manifest)
+    return manifest
+
+
+@pytest.fixture
+def plugin_boxes(monkeypatch):
+    """The message boxes shown; ``answer`` is the label of the button to
+    click, if any."""
+    from PyQt6 import QtWidgets
+
+    class Shown(list):
+        answer = None
+
+    shown = Shown()
+
+    def exec_(box):
+        shown.append(box)
+        for button in box.buttons():
+            if button.text() == shown.answer:
+                button.click()
+        return 0
+
+    monkeypatch.setattr(QtWidgets.QMessageBox, "exec", exec_)
+    return shown
+
+
+def test_installed_plugin_updates_are_told(
+    qt_offscreen, plugin_registry, plugin_boxes
+):
+    updater.setup_gui_update_check(plugin_app="render")
+    _wait_until(lambda: plugin_boxes)
+    (box,) = plugin_boxes
+    assert "Updates are available for installed plugins" in box.text()
+    assert "Drift: 1.0 \u2192 1.1" in box.text()
+    assert "Brand new" not in box.text()  # not installed
+    labels = [b.text() for b in box.buttons()]
+    assert "Review Updates" in labels and "Skip These Versions" in labels
+
+
+def test_review_opens_the_plugins_dialog(
+    qt_offscreen, plugin_registry, plugin_boxes, monkeypatch
+):
+    from picasso.gui import plugins_loader
+
+    opened = []
+    monkeypatch.setattr(
+        plugins_loader, "_open_store", lambda *args: opened.append(args)
+    )
+    plugin_boxes.answer = "Review Updates"
+    updater.setup_gui_update_check(plugin_app="render")
+    _wait_until(lambda: opened)
+    assert opened == [(None, "render")]
+
+
+def test_skipped_plugin_versions_are_not_told_again(
+    qt_offscreen, plugin_registry, plugin_boxes
+):
+    from picasso import plugins
+
+    plugin_boxes.answer = "Skip These Versions"
+    updater.setup_gui_update_check(plugin_app="render")
+    _wait_until(lambda: plugin_boxes)
+    assert plugins.load_state()["skipped_updates"] == {"drift": "1.1"}
+    updates = plugins.available_updates(plugin_registry, plugins.load_state())
+    assert updates == []
+
+
+def test_update_for_a_newer_picasso_cannot_be_reviewed(
+    qt_offscreen, plugin_registry, plugin_boxes
+):
+    plugin_registry[0]["min_picasso_version"] = "99.0"
+    updater.setup_gui_update_check(plugin_app="render")
+    _wait_until(lambda: plugin_boxes)
+    (box,) = plugin_boxes
+    assert "requires Picasso \u2265 99.0" in box.text()
+    assert "keep working" in box.informativeText()
+    assert "Review Updates" not in [b.text() for b in box.buttons()]
+
+
+def test_no_plugin_box_without_updates(
+    qt_offscreen, plugin_registry, plugin_boxes
+):
+    plugin_registry[0]["version"] = "1.0"
+    updater.setup_gui_update_check(plugin_app="render")
+    _wait_until(lambda: "Last update check" in _updates())
+    assert plugin_boxes == []

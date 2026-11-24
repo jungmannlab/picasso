@@ -202,7 +202,9 @@ changed:
    * - Render, *Apply expression*: ``uspiral`` to reverse ``spiral R N``
      - ``File > Undo``.
    * - Render, ``Tools > Zoom`` (Ctrl+Z)
-     - :kbd:`Z`; Ctrl+Z is ``File > Undo``.
+     - :kbd:`Z`; Ctrl+Z is ``File > Undo``. To have Ctrl+Z select the Zoom
+       tool again, change the shortcuts in ``File > Keyboard shortcuts...``,
+       see :ref:`keyboard-shortcuts`.
    * - Brush picks: a right click undoes the last stroke
      - A right click removes the pick under the cursor, as for the other pick
        shapes, see :doc:`render/picking`.

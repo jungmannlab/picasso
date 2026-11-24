@@ -769,7 +769,9 @@ class TestWaveletDetection:
         assert identification["Identification Method"] == "wavelet"
         assert localize.IdentificationParameters.from_info(
             identification
-        ) == localize.IdentificationParameters(method=self.WAVELET, box=BOX)
+        ) == localize.IdentificationParameters(
+            method=self.WAVELET, box=BOX, edge_spots=False
+        )
         assert "Min. Net Gradient" not in identification
 
     def test_signal(self):
@@ -818,7 +820,9 @@ class TestWaveletDetection:
         loaded = io.load_any_calibration(path)["Identification"]
         assert localize.IdentificationParameters.from_info(
             loaded
-        ) == localize.IdentificationParameters(method=self.WAVELET, box=BOX)
+        ) == localize.IdentificationParameters(
+            method=self.WAVELET, box=BOX, edge_spots=False
+        )
 
     def test_detections_by_frame(self):
         truth = _rotation(0.0, 0.0, 0.0)

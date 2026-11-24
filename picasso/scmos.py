@@ -329,6 +329,13 @@ def calibrate_scmos(
         If the dark movie is too short, if a bright movie's frame size does
         not match the dark movie's, or if ``bright_levels`` has a different
         length than ``bright_movies``.
+
+    References
+    ----------
+    Huang, F. et al. Video-rate nanoscopy using sCMOS camera-specific
+    single-molecule localization algorithms. Nat Methods 10, 653-658
+    (2013).
+    https://doi.org/10.1038/nmeth.2488
     """
     bright_movies = list(bright_movies) if bright_movies is not None else []
     if bright_levels is not None and len(bright_levels) != len(bright_movies):
@@ -755,6 +762,13 @@ def save_calibration_plot(calibration: dict, path: str) -> str:
     -------
     str
         ``path``, for convenience when reporting where it went.
+
+    References
+    ----------
+    Huang, F. et al. Video-rate nanoscopy using sCMOS camera-specific
+    single-molecule localization algorithms. Nat Methods 10, 653-658
+    (2013).
+    https://doi.org/10.1038/nmeth.2488
     """
     # Imported here, and through the non-interactive Agg backend, so that
     # importing this module costs nothing and so that writing the file never

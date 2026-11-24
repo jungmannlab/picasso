@@ -2168,6 +2168,26 @@ class TestLocalizeAutoGradient:
         assert os.path.exists(_out(path, "_locs.hdf5"))
 
 
+class TestLocalizeEdgeSpots:
+    @pytest.mark.parametrize(
+        "flag, expected", [((), True), (("--no-edge-spots",), False)]
+    )
+    def test_edge_spots_option(self, tmp_path, monkeypatch, flag, expected):
+        path = _copy_testdata(tmp_path)
+        _picasso(
+            monkeypatch,
+            "localize",
+            path,
+            "-g", 5000,
+            "-d", 0,
+            "-px", 160,
+            *flag,
+        )  # fmt: skip
+        _, info = io.load_locs(_out(path, "_locs.hdf5"))
+        identify = next(entry for entry in info if "Edge Spots" in entry)
+        assert identify["Edge Spots"] is expected
+
+
 # ---------------------------------------------------------------------------
 # Pick similar
 # ---------------------------------------------------------------------------

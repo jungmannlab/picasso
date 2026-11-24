@@ -174,6 +174,12 @@ def _get_structures_permutation(t_counts: lib.FloatArray2D) -> lib.IntArray1D:
     -------
     perm : lib.IntArray1D
         The permutation array, shape (S,).
+
+    References
+    ----------
+    Polyanin, A. D. & Manzhirov, A. V. Handbook of Mathematics for
+    Engineers and Scientists (Chapman & Hall/CRC, 2007).
+    https://doi.org/10.1201/9781420010510
     """
     n_t, n_s = t_counts.shape
     perm = np.arange(n_s)  # initiate the permutation array
@@ -845,6 +851,8 @@ def get_NN_dist(
     data1: lib.FloatArray2D,
     data2: lib.FloatArray2D,
     n_neighbors: int,
+    *,
+    exclude_self: bool | None = None,
 ) -> lib.FloatArray2D:
     """Find nearest neighbors distances between data1 and data2 for
     n_neighbors closest neighbors.
@@ -860,6 +868,13 @@ def get_NN_dist(
         different number of points but of the same dimensionality.
     n_neighbors : int
         Number of neighbors to consider.
+    exclude_self : bool or None, optional
+        If True, data1 and data2 hold the same molecular target and each
+        point's zero distance to itself is not counted. Two different
+        targets with identical coordinates (e.g., the same file loaded
+        twice) must pass False so that their 0 nm matches are kept. If
+        None (default), self-counting is excluded only when data1 is
+        data2 (the same array object).
 
     Returns
     -------
@@ -877,8 +892,10 @@ def get_NN_dist(
             "data1 and data2 must have the same number of dimensions."
         )
 
-    # avoid self-counting if data1 and data2 are the same
-    reduce = 1 if np.array_equal(data1, data2) else 0
+    # avoid self-counting if data1 and data2 are the same target
+    if exclude_self is None:
+        exclude_self = data1 is data2
+    reduce = 1 if exclude_self else 0
 
     # find distances
     tree = KDTree(data2)
@@ -888,7 +905,7 @@ def get_NN_dist(
     if n_neighbors + reduce == 1:
         dist = np.expand_dims(dist, 1)
 
-    # avoid self-counting if data1 and data2 are the same
+    # avoid self-counting if data1 and data2 are the same target
     if reduce:
         dist = dist[:, 1:]
 
@@ -929,7 +946,9 @@ def get_NN_dist_experimental(
     current_idx = 0
     for t1, t2, n in neighbor_idx:
         if n:
-            dist = get_NN_dist(coords[t1], coords[t2], n)
+            dist = get_NN_dist(
+                coords[t1], coords[t2], n, exclude_self=t1 == t2
+            )
             dists[current_idx].append(dist)
             current_idx += 1
     # for consistency with get_NN_dist_simulated:
@@ -982,7 +1001,9 @@ def get_NN_dist_simulated(
         current_idx = 0
         for t1, t2, n in neighbor_idx:
             if n:
-                dist = get_NN_dist(coords[t1], coords[t2], n)
+                dist = get_NN_dist(
+                    coords[t1], coords[t2], n, exclude_self=t1 == t2
+                )
                 dists[current_idx].append(dist)
                 current_idx += 1
 
@@ -6593,6 +6614,12 @@ def batch_analysis(
     summary : pd.DataFrame
         Results of all rows, one row each, as saved in
         "summary_results.csv".
+
+    References
+    ----------
+    Hellmeier, J. et al. Quantification of absolute labeling efficiency
+    at the single-protein level. Nat Methods 21, 1702-1707 (2024).
+    https://doi.org/10.1038/s41592-024-02242-5
     """
     parameters, result_dir = _spinna_validate_parameters(parameters_filename)
     os.makedirs(result_dir, exist_ok=True)

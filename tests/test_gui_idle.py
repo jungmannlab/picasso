@@ -709,7 +709,10 @@ def test_filter_reuses_the_subclustering_dialog(qt_offscreen):
     from picasso.gui import filter as gui_filter
 
     window = gui_filter.Window()
-    window.locs_full = _locs(n=10)
+    locs = _locs(n=10)
+    # the dialog opens only for molecules, i.e., data with n_events
+    locs["n_events"] = np.arange(1, 11, dtype=np.int32)
+    window.locs_full = locs
     window.plot_subclustering()
     dialog = window.subcluster_num
     dialog.close()

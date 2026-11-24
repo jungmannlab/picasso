@@ -164,7 +164,9 @@ for the pixel size instead of failing. Without metadata at all, a
 Localizations with NaN or infinite values in any column, negative ``x``, ``y``
 or precisions, or ``x`` ≥ ``Width × Pixelsize`` or ``y`` ≥
 ``Height × Pixelsize`` are discarded on loading. Picasso reports how many were
-discarded (Render shows a message): if most of them lie beyond the field of
+discarded (Render shows a message if more than 5% were discarded, see
+``Dropped localizations warning (%)`` in the :ref:`user settings
+<user-settings-file>`): if most of them lie beyond the field of
 view, ``Width``, ``Height`` or ``Pixelsize`` are too small, or the file holds
 camera pixels although it carries the format marker.
 
@@ -454,7 +456,7 @@ are in bold (``z`` only for 3D data, see :ref:`files-minimum-requirements`).
 
 .. csv-table:: Table 1: Name, description and data type for the main columns used in Picasso.
    :name: files-localization-columns
-   :file: table01.csv
+   :file: ../picasso/column_tables/localizations.csv
    :widths: 15, 65, 20
    :header-rows: 1
 
@@ -472,7 +474,7 @@ to reflect the different data type. Table 2 explains the main column names in
 molecular maps.
 
 .. csv-table:: Table 2: Name, description and data type for the main columns used in molecular maps in Picasso.
-   :file: table02.csv
+   :file: ../picasso/column_tables/molecular_maps.csv
    :widths: 15, 65, 20
    :header-rows: 1
 

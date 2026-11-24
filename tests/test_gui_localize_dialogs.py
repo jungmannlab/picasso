@@ -30,7 +30,7 @@ import pytest
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 import picasso
-from picasso import io, lib, render, transforms
+from picasso import io, lib, localize, render, transforms
 from picasso.gui import localize as gui_localize
 from tests.test_gui_localize_calibration import (
     ACCEPTED,
@@ -3536,6 +3536,119 @@ class TestJointGaussFit:
 # ---------------------------------------------------------------------------
 
 
+class TestPSFFilterCheckbox:
+    @staticmethod
+    def _calibration(tmp_path, monkeypatch):
+        """A spline calibration of a 7x7 Gaussian PSF over 5 z slices."""
+        from picasso import spline
+
+        yy, xx = np.mgrid[0:7, 0:7]
+        slice_ = np.exp(-((xx - 3.0) ** 2 + (yy - 3.0) ** 2) / 2.0)
+        template = np.repeat(slice_[:, :, None], 5, axis=2)
+        calibration = {
+            "model": "spline-3d",
+            "coefficients": spline.spline_coefficients(template),
+            "n_data": [7, 7, 5],
+            "z_center": 2.0,
+            "z_step_nm": 10.0,
+        }
+        return _calibration_file(
+            tmp_path,
+            "psf.hdf5",
+            monkeypatch,
+            "load_spline_calibration",
+            calibration,
+        )
+
+    def test_the_filter_is_offered_with_a_spline_calibration(
+        self, loaded, tmp_path, monkeypatch
+    ):
+        dialog = loaded.parameters_dialog
+        assert not dialog.psf_filter_checkbox.isEnabled()
+        path = self._calibration(tmp_path, monkeypatch)
+        dialog.update_spline_calib(path)
+        assert dialog.psf_filter_checkbox.isEnabled()
+        assert loaded.parameters["PSF Filter Calibration"] == ""
+        dialog.psf_filter_checkbox.setChecked(True)
+        assert loaded.parameters["PSF Filter Calibration"] == path
+        # the identification and the display use the filtered frames
+        parameters = localize.IdentificationParameters.from_info(
+            loaded.parameters
+        )
+        assert parameters.psf_filter.kernel.shape == (7, 7)
+        assert isinstance(
+            loaded.identification_movie(), localize.PSFFilteredMovie
+        )
+        # without a calibration there is no filter
+        dialog.update_spline_calib(None)
+        assert not dialog.psf_filter_checkbox.isEnabled()
+        assert loaded.parameters["PSF Filter Calibration"] == ""
+        assert not isinstance(
+            loaded.identification_movie(), localize.PSFFilteredMovie
+        )
+
+    def test_the_filters_section_lists_the_filters_that_are_on(
+        self, loaded, tmp_path, monkeypatch
+    ):
+        dialog = loaded.parameters_dialog
+        box = dialog.filters_groupbox
+        assert box.summary() == "None"
+        dialog.gaussian_filter_spinbox.setValue(1.5)
+        assert box.summary() == "Gauss 1.5 px"
+        dialog.temporal_median_checkbox.setChecked(True)
+        assert box.summary() == (
+            f"Median {dialog.temporal_median_spinbox.value()}, Gauss 1.5 px"
+        )
+        dialog.temporal_median_checkbox.setChecked(False)
+        dialog.gaussian_filter_spinbox.setValue(0.0)
+        # ticked without a calibration, the PSF filter is not on
+        dialog.psf_filter_checkbox.setChecked(True)
+        assert box.summary() == "None"
+        dialog.update_spline_calib(self._calibration(tmp_path, monkeypatch))
+        assert box.summary() == "PSF"
+        dialog.update_spline_calib(None)
+        assert box.summary() == "None"
+
+
+class TestIdentificationLayout:
+    def test_the_filters_are_one_section_of_the_identification(self, window):
+        dialog = window.parameters_dialog
+        content = dialog.filters_groupbox.content
+        for widget in (
+            dialog.temporal_median_checkbox,
+            dialog.gaussian_filter_spinbox,
+            dialog.psf_filter_checkbox,
+        ):
+            assert content.isAncestorOf(widget)
+        # the edge option is not a filter
+        assert not content.isAncestorOf(dialog.edge_spots_checkbox)
+        # the multi-emitter fit, which identifies by itself, hides them
+        # with the other identification settings
+        assert dialog.identification_settings.isAncestorOf(
+            dialog.filters_groupbox
+        )
+
+    def test_the_columns_line_up(self, window):
+        dialog = window.parameters_dialog
+        widths = {
+            grid.columnMinimumWidth(0) for grid in dialog._identification_grids
+        }
+        assert len(widths) == 1 and widths.pop() > 0
+
+
+class TestEdgeSpotsCheckbox:
+    def test_the_checkbox_is_the_edge_spots_parameter(self, window):
+        dialog = window.parameters_dialog
+        assert dialog.edge_spots_checkbox.isChecked()
+        assert window.parameters["Edge Spots"] is True
+        dialog.edge_spots_checkbox.setChecked(False)
+        assert window.parameters["Edge Spots"] is False
+        parameters = localize.IdentificationParameters.from_info(
+            window.parameters
+        )
+        assert parameters.edge_spots is False
+
+
 class TestRememberedSettings:
     def test_the_last_settings_come_back(self, qt_offscreen, tmp_path):
         first = gui_localize.Window()
@@ -3546,6 +3659,7 @@ class TestRememberedSettings:
         dialog.fit_model.setCurrentText("2D rotated elliptical Gaussian")
         dialog.fit_optimizer.setCurrentText("MLE")
         dialog.gaussian_filter_spinbox.setValue(1.5)
+        dialog.edge_spots_checkbox.setChecked(False)
         first.close()
 
         second = gui_localize.Window()
@@ -3557,6 +3671,7 @@ class TestRememberedSettings:
         )
         assert dialog.fit_optimizer.currentText() == "MLE"
         assert dialog.gaussian_filter_spinbox.value() == 1.5
+        assert not dialog.edge_spots_checkbox.isChecked()
         assert second.pwd == str(tmp_path)
         second.close()
 

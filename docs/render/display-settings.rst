@@ -60,6 +60,12 @@ colormap; they can also be dragged on the slider below them. ``Colormap``
 offers over 100 colormaps. The last option, ``Custom``, loads a ``.npy`` file
 with a numpy array of shape (256, 4) and values between 0 and 1.
 
+The slider runs from zero to the brightest pixel of the image, or to a higher
+``Max. Density`` typed in. Dragging does not change its length, so a finer
+range is set by typing a lower ``Max. Density``. Double-clicking the slider
+fits it to the brightest pixel (or to ``Max. Density``, if higher) without
+changing the contrast; panning or zooming does so, too.
+
 With several channels loaded, the contrast of each channel can be adjusted
 relative to this one in ``View > Files...``, see
 :ref:`Per-channel contrast <render-channel-contrast>`.
@@ -343,7 +349,9 @@ data): choose the ``Parameter``, its ``Min.`` and ``Max.``, the number of
 separately from the channel colormap above, under ``Colormap Property`` in the
 ``Render`` section of ``~/.picasso/settings.yaml`` (default ``gist_rainbow``,
 see :ref:`user-settings-file`), and restored the next time a property is
-rendered.
+rendered. The help button next to ``Parameter`` lists the columns of the
+loaded localizations with what each holds (see
+:ref:`Table 1 <files-localization-columns>`).
 
 .. _render-colorbar-format:
 

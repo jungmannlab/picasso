@@ -219,7 +219,7 @@ def run_gui(
 
     from ..updater import setup_gui_update_check
 
-    setup_gui_update_check(window)
+    setup_gui_update_check(window, plugin_app=name)
 
     # release memory while the GUI is left open but unused
     from . import idle

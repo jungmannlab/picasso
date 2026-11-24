@@ -569,6 +569,55 @@ class TestRenderLoader:
         # the field of view with the values of the metadata
         assert "(8,320 x 8,320 nm) or have" in (warned[0])
 
+    def _set_threshold(self, value) -> None:
+        from picasso.gui.render import DROPPED_LOCS_WARNING_KEY
+
+        settings = io.load_user_settings()
+        settings["Render"][DROPPED_LOCS_WARNING_KEY] = value
+        io.save_user_settings(settings)
+
+    def _write_with_dropped(self, path, n_dropped: int) -> str:
+        """100 localizations of which ``n_dropped`` are outside the field
+        of view."""
+        locs = make_locs()
+        locs.loc[: n_dropped - 1, "x"] = 1e6
+        return write_raw(path, locs, attrs={"picasso_format": "1.0"})
+
+    def test_few_dropped_localizations_are_not_shown(self, qapp, tmp_path):
+        # the default is 5%: 5 of 100 is not more
+        path = self._write_with_dropped(tmp_path / "few.hdf5", 5)
+        loaded, failed, warned = self._run(path)
+        assert loaded == [path]
+        assert warned == []
+        # the default is written, so that it is visible in the file
+        from picasso.gui.render import DROPPED_LOCS_WARNING_KEY
+
+        settings = io.load_user_settings()
+        assert settings["Render"][DROPPED_LOCS_WARNING_KEY] == 5.0
+        path = self._write_with_dropped(tmp_path / "more.hdf5", 6)
+        assert len(self._run(path)[2]) == 1
+
+    @pytest.mark.parametrize(
+        "threshold, n_dropped, shown",
+        [(0, 1, True), (10, 10, False), (10, 11, True), ("bad", 6, True)],
+    )
+    def test_threshold_from_user_settings(
+        self, qapp, tmp_path, threshold, n_dropped, shown
+    ):
+        self._set_threshold(threshold)  # invalid values use the default
+        path = self._write_with_dropped(tmp_path / "t.hdf5", n_dropped)
+        assert bool(self._run(path)[2]) is shown
+
+    def test_other_warnings_ignore_the_threshold(self, qapp):
+        from picasso.gui.render import _ThreadLogRecords
+
+        records = _ThreadLogRecords(dropped_percent=50)
+        record = logging.LogRecord(
+            "picasso.io", logging.WARNING, "", 0, "other", None, None
+        )
+        records.emit(record)
+        assert records.messages == ["other"]
+
     def test_format_errors_are_shown(self, qapp, tmp_path):
         path = write_raw(tmp_path / "f.hdf5", make_locs().drop(columns="lpy"))
         loaded, failed, warned = self._run(path)

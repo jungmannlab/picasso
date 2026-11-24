@@ -94,8 +94,8 @@ The arguments fall into a few groups:
 Spot identification
    Box side length, the identification method (``--identification-method``)
    with its threshold (the minimum net gradient, or the ``--wavelet-*``
-   settings), and the pre-filters ``--temporal-median`` and
-   ``--gaussian-filter``.
+   settings), the pre-filters ``--temporal-median`` and
+   ``--gaussian-filter``, and ``--no-edge-spots``.
 Fitting
    The fit method and the calibration files that some methods require (a
    spline PSF calibration for the spline fits, a magnification factor and a 3D
@@ -193,6 +193,13 @@ Pre-filters
    re-tuning when it is changed. It can be combined with
    ``--temporal-median``, which is applied first. See
    :ref:`localize-gaussian-filter`.
+
+Spots at the frame edge
+~~~~~~~~~~~~~~~~~~~~~~~
+By default, spots closer to the frame edge than half a box are identified,
+too, and fitted in a box shifted into the frame. ``--no-edge-spots``
+identifies only spots whose whole box lies inside the frame. See
+:ref:`localize-edge-spots`.
 
 B-spline wavelet identification
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

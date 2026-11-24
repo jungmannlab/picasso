@@ -5,8 +5,7 @@ picasso.spt
 Basic single-particle tracking (SPT): linking localizations into tracks
 and measuring how fast the tracked particles diffuse.
 
-The workflow follows Module 7 of Martens, et al. Frontiers in
-Bioinformatics, 2021. DOI: 10.3389/fbinf.2021.817254:
+The workflow follows Module 7 of Martens et al. (2022):
 
 1. **Linking.** :func:`link_tracks` links the localizations of
    consecutive frames into tracks by nearest-neighbor tracking. A
@@ -56,6 +55,14 @@ Tracking and analysis are 2D (z is ignored). The linking has no motion
 model and does not merge or split tracks, so it is meant for sparse
 particles, i.e., when the particles are further apart than they move
 between frames.
+
+References
+----------
+Martens, K. J. A., Turkowyd, B. & Endesfelder, U. Raw data to results: a
+hands-on introduction and overview of computational analysis for
+single-molecule localization microscopy. Front Bioinform 1, 817254
+(2022).
+https://doi.org/10.3389/fbinf.2021.817254
 
 :author: Rafal Kowalewski
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -274,8 +281,7 @@ def link_tracks(
 
     Frame by frame, every localization continues the track whose last
     localization is the closest one within ``max_jump``, as in Module 7
-    of Martens, et al. Frontiers in Bioinformatics, 2021. DOI:
-    10.3389/fbinf.2021.817254. A track may skip up to ``max_gap``
+    of Martens et al. (2022). A track may skip up to ``max_gap``
     frames, e.g., when the fluorophore blinks or the particle is not
     detected. Each track gets at most one localization per frame and
     each localization belongs to one track: when several tracks reach
@@ -327,6 +333,14 @@ def link_tracks(
     ValueError
         If ``max_jump`` is not positive, ``max_gap`` is negative or
         ``min_length`` is smaller than 1.
+
+    References
+    ----------
+    Martens, K. J. A., Turkowyd, B. & Endesfelder, U. Raw data to
+    results: a hands-on introduction and overview of computational
+    analysis for single-molecule localization microscopy. Front
+    Bioinform 1, 817254 (2022).
+    https://doi.org/10.3389/fbinf.2021.817254
     """
     if not np.isfinite(max_jump) or max_jump <= 0:
         raise ValueError(f"max_jump must be positive, got {max_jump}.")
@@ -893,8 +907,8 @@ def fit_jump_distances(
     The jump distances are fitted with a mixture of ``n_populations``
     such distributions, with free diffusion coefficients and fractions.
     The fit maximizes the likelihood of the jump distances themselves,
-    so the result does not depend on a histogram binning (Martens, et
-    al. Frontiers in Bioinformatics, 2021, fit the histogram).
+    so the result does not depend on a histogram binning (Martens et
+    al., 2022, fit the histogram).
 
     A single time lag cannot tell the localization error from
     diffusion, since both broaden the distribution in the same way.
@@ -940,6 +954,14 @@ def fit_jump_distances(
     ValueError
         If the parameters are invalid or there are too few jumps for
         the number of populations.
+
+    References
+    ----------
+    Martens, K. J. A., Turkowyd, B. & Endesfelder, U. Raw data to
+    results: a hands-on introduction and overview of computational
+    analysis for single-molecule localization microscopy. Front
+    Bioinform 1, 817254 (2022).
+    https://doi.org/10.3389/fbinf.2021.817254
     """
     if int(n_populations) != n_populations or n_populations < 1:
         raise ValueError(

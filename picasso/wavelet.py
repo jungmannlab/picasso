@@ -145,6 +145,12 @@ class WaveletParameters:
     ValueError
         If ``threshold`` is negative or not finite, ``noise`` is unknown
         or ``min_area`` is smaller than 1.
+
+    References
+    ----------
+    Izeddin, I. et al. Wavelet analysis for single molecule localization
+    microscopy. Opt Express 20, 2081-2095 (2012).
+    https://doi.org/10.1364/OE.20.002081
     """
 
     threshold: float = 0.5
@@ -439,20 +445,26 @@ def _identify_in_image(
     threshold: float,
     use_mad: bool,
     min_area: int,
+    edges: bool = False,
 ) -> tuple[lib.IntArray1D, lib.IntArray1D]:
     """Box centers of the wavelet regions, see ``identify_in_image``."""
     cy, cx, _ = _detect_regions(image, threshold, use_mad, min_area)
     n_y, n_x = image.shape
     box_half = box // 2
-    # the band localize._local_maxima searches, so that every box can be
-    # cut from the frame; a map also merges regions rounding to one pixel
+    if edges:
+        y_min, y_max, x_min, x_max = 0, n_y, 0, n_x
+    else:
+        # the band localize._local_maxima searches, so that every box can
+        # be cut from the frame
+        y_min, y_max = box_half, n_y - box_half - 1
+        x_min, x_max = box_half, n_x - box_half - 1
+    # a map merges regions rounding to one pixel
     centers = np.zeros((n_y, n_x), dtype=np.uint8)
     for i in range(len(cy)):
         y = int(np.floor(cy[i] + 0.5))
         x = int(np.floor(cx[i] + 0.5))
-        if box_half <= y < n_y - box_half - 1:
-            if box_half <= x < n_x - box_half - 1:
-                centers[y, x] = 1
+        if y_min <= y < y_max and x_min <= x < x_max:
+            centers[y, x] = 1
     return np.where(centers)
 
 
@@ -540,6 +552,12 @@ def detect_regions(
         in pixels.
     area : lib.IntArray1D
         Number of pixels of each region.
+
+    References
+    ----------
+    Izeddin, I. et al. Wavelet analysis for single molecule localization
+    microscopy. Opt Express 20, 2081-2095 (2012).
+    https://doi.org/10.1364/OE.20.002081
     """
     if parameters is None:
         parameters = WaveletParameters()
@@ -555,14 +573,16 @@ def identify_in_image(
     image: np.ndarray,
     box: int,
     parameters: WaveletParameters | None = None,
+    *,
+    edges: bool = False,
 ) -> tuple[lib.IntArray1D, lib.IntArray1D]:
     """Identify spots in an image by wavelet segmentation.
 
     Each region found by :func:`detect_regions` is one spot, centered at
-    its centroid rounded to the nearest pixel. Spots whose box of side
-    ``box`` would not fit into the image are dropped, exactly as the net
-    gradient identification does, and regions that round to the same
-    pixel are reported once.
+    its centroid rounded to the nearest pixel. Unless ``edges``, spots
+    whose box of side ``box`` would not fit into the image are dropped,
+    exactly as the net gradient identification does. Regions that round
+    to the same pixel are reported once.
 
     Parameters
     ----------
@@ -573,11 +593,16 @@ def identify_in_image(
         be an odd integer.
     parameters : WaveletParameters, optional
         Segmentation settings. Default is ``WaveletParameters()``.
+    edges : bool, optional
+        Keep the spots whose box reaches past the image edge too (see
+        ``picasso.localize.IdentificationParameters.edge_spots``). Default
+        is False.
 
     Returns
     -------
     y, x : lib.IntArray1D
-        Pixel coordinates of the box centers, in raster order.
+        Pixel coordinates of the spots (the box centers unless the box
+        reaches past the edge), in raster order.
     """
     if parameters is None:
         parameters = WaveletParameters()
@@ -587,4 +612,5 @@ def identify_in_image(
         parameters.threshold,
         parameters.noise == NOISE_W1_MAD,
         parameters.min_area,
+        edges,
     )

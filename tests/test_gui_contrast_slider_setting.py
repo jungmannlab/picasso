@@ -112,6 +112,75 @@ def test_render_slider_is_bound_to_the_density_boxes(render_window):
     assert dialog.contrast_slider.values() == pytest.approx(values)
 
 
+@pytest.mark.parametrize("dragged", ["dialog", "bar"])
+def test_render_sliders_keep_one_track(render_window, dragged):
+    """Dragging either slider moves the other one's handle to the same
+    place: the track does not shrink to the dragged value, so the other
+    slider can still be dragged back up."""
+    render_window.view.async_rendering = False
+    render_window.view.update_scene(autoscale=True)
+    dialog = render_window.display_settings_dlg
+    sliders = {
+        "dialog": dialog.contrast_slider,
+        "bar": render_window.contrast_slider,
+    }
+    other = sliders["bar" if dragged == "dialog" else "dialog"]
+    top = 4 * float(render_window.view.image.max())
+    dialog.maximum.setValue(top)
+    for high in (0.5 * top, 0.1 * top):
+        sliders[dragged].setValues(0.0, high, moved="high")
+        assert dialog.maximum.value() == pytest.approx(high, rel=1e-3)
+        for slider in sliders.values():
+            assert slider.range() == pytest.approx((0.0, top))
+    # the other slider can be dragged back up past the dragged value
+    other.setValues(0.0, 0.8 * top, moved="high")
+    assert dialog.maximum.value() == pytest.approx(0.8 * top, rel=1e-3)
+
+
+def test_render_typed_maximum_fits_the_tracks(render_window):
+    """A typed maximum sets the track of both sliders, also when it is
+    lower than the track was; it never goes below the brightest pixel."""
+    render_window.view.async_rendering = False
+    render_window.view.update_scene(autoscale=True)
+    dialog = render_window.display_settings_dlg
+    sliders = (dialog.contrast_slider, render_window.contrast_slider)
+    brightest = float(render_window.view.image.max())
+    for top in (10 * brightest, 4 * brightest):
+        dialog.maximum.setValue(top)
+        top = dialog.maximum.value()
+        for slider in sliders:
+            assert slider.range() == pytest.approx((0.0, top))
+    dialog.maximum.setValue(0.5 * brightest)
+    for slider in sliders:
+        assert slider.range() == pytest.approx((0.0, brightest))
+
+
+def test_render_double_click_fits_the_tracks(render_window):
+    """Double-clicking fits both tracks to the brightest pixel and keeps
+    the contrast, although its first click moved a handle."""
+    from PyQt6 import QtCore
+    from PyQt6.QtTest import QTest
+
+    render_window.view.async_rendering = False
+    render_window.view.update_scene(autoscale=True)
+    dialog = render_window.display_settings_dlg
+    bar = render_window.contrast_slider
+    brightest = float(render_window.view.image.max())
+    dialog.maximum.setValue(10 * brightest)
+    bar.setValues(0.0, 0.5 * brightest, moved="high")
+    values = (dialog.minimum.value(), dialog.maximum.value())
+    bar.resize(300, 15)
+    QTest.mouseDClick(
+        bar, QtCore.Qt.MouseButton.LeftButton, pos=QtCore.QPoint(280, 7)
+    )
+    assert (dialog.minimum.value(), dialog.maximum.value()) == (
+        pytest.approx(values)
+    )
+    for slider in (dialog.contrast_slider, bar):
+        assert slider.range() == pytest.approx((0.0, brightest))
+    assert "Double-click" in bar.toolTip()
+
+
 def test_render_slider_follows_silent_updates(render_window):
     render_window.display_settings_dlg.silent_maximum_update(7.0)
     assert render_window.contrast_slider.values()[1] == pytest.approx(7.0)

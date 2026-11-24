@@ -380,8 +380,8 @@ def _link_all_channels(view, qapp, monkeypatch) -> list[str]:
     parameters; return the texts of the information boxes shown."""
     messages = []
     monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
+        lib_qt,
+        "get_path_item",
         lambda *a, **k: ("Apply to all sequentially", True),
     )
     monkeypatch.setattr(

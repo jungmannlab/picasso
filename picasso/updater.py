@@ -365,18 +365,120 @@ def cli_notify_update(latest_version):
         disable_updates()
 
 
-def setup_gui_update_check(parent=None):  # noqa: C901
+def _fetch_plugin_manifest() -> list[dict] | None:
+    """The online plugin registry, None if it cannot be reached."""
+    from . import plugins
+
+    try:
+        return plugins.fetch_manifest()
+    except Exception:  # noqa: BLE001 - the check is best effort
+        return None
+
+
+def _plugin_updates_text(updates: list[dict]) -> str:
+    """List of plugin updates for the notification, see
+    ``plugins.available_updates``."""
+    lines = []
+    for update in updates:
+        line = f"\u2022 {update['name']}: {update['installed']} \u2192 "
+        line += str(update["version"])
+        if not update["compatible"]:
+            line += (
+                " (requires Picasso"
+                f" \u2265 {update['min_picasso_version']})"
+            )
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def show_plugin_updates(
+    updates: list[dict],
+    parent=None,
+    plugin_app: str | None = None,
+) -> None:
+    """Tell that updates of installed plugins are available.
+
+    "Review Updates" opens the online plugins dialog of ``plugin_app``
+    (see ``picasso.gui.plugins_loader``), where the plugins are updated
+    after their changes can be viewed. "Skip These Versions" stops the
+    notifications about these versions (``plugins.skip_updates``).
+    Updates that need a newer Picasso are listed but cannot be
+    installed.
+
+    Parameters
+    ----------
+    updates : list of dict
+        Updates as returned by ``plugins.available_updates``.
+    parent : QtWidgets.QWidget, optional
+        Parent of the message box and of the plugins dialog. Default
+        None.
+    plugin_app : str, optional
+        GUI whose plugins dialog opens, e.g. ``"render"``. None (no
+        plugins in this GUI) offers no "Review Updates". Default None.
+    """
+    from PyQt6 import QtWidgets
+
+    from . import plugins
+
+    box = QtWidgets.QMessageBox(
+        QtWidgets.QMessageBox.Icon.Information,
+        "Plugin updates available",
+        "Updates are available for installed plugins:\n\n"
+        + _plugin_updates_text(updates),
+        parent=parent,
+    )
+    info = (
+        "Plugins > Browse online plugins... shows what changed and updates"
+        " them. Untick Notify there to stop the notifications about a"
+        " plugin."
+    )
+    if not all(update["compatible"] for update in updates):
+        info = (
+            f"This is Picasso {__version__}; the installed versions of the"
+            " plugins whose updates require a newer Picasso keep working.\n\n"
+            + info
+        )
+    box.setInformativeText(info)
+    review_btn = None
+    if plugin_app is not None and any(u["compatible"] for u in updates):
+        review_btn = box.addButton(
+            "Review Updates", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+        )
+    skip_btn = box.addButton(
+        "Skip These Versions", QtWidgets.QMessageBox.ButtonRole.ActionRole
+    )
+    box.addButton(QtWidgets.QMessageBox.StandardButton.Close)
+    box.exec()
+    if review_btn is not None and box.clickedButton() is review_btn:
+        from .gui import plugins_loader
+
+        plugins_loader._open_store(parent, plugin_app)
+    elif box.clickedButton() is skip_btn:
+        try:
+            plugins.skip_updates(plugins.load_state(), updates)
+        except OSError:  # e.g., a read-only plugins folder
+            pass
+
+
+def setup_gui_update_check(  # noqa: C901
+    parent=None, plugin_app: str | None = None
+):
     """Schedule a background update check that shows a QMessageBox
-    if an update is available.
+    if an update of Picasso or of an installed plugin is available.
 
     Must be called after QApplication is created (e.g. after
-    ``window.show()``). The HTTP request runs in a background thread;
-    the dialog is delivered to the main thread via a Qt signal.
+    ``window.show()``). The HTTP requests run in a background thread;
+    the dialogs are delivered to the main thread via a Qt signal. The
+    plugins are checked with Picasso, once a day unless switched off;
+    only installed plugins are told about (``show_plugin_updates``).
 
     Parameters
     ----------
     parent : QtWidgets.QWidget, optional
         Parent of the message box. Default None.
+    plugin_app : str, optional
+        GUI whose plugins the notification of plugin updates offers to
+        update, e.g. ``"render"``. Default None.
     """
     from PyQt6 import QtCore, QtWidgets
 
@@ -388,13 +490,28 @@ def setup_gui_update_check(parent=None):  # noqa: C901
         return
 
     class _Notifier(QtCore.QObject):
-        checked = QtCore.pyqtSignal(bool, str)
+        checked = QtCore.pyqtSignal(bool, str, object)
 
     notifier = _Notifier()
 
-    def _on_checked(available, latest_version):
+    def _on_checked(available, latest_version, manifest):
         # in the main thread, like all access to the user settings
-        mark_checked()
+        try:
+            mark_checked()
+        except OSError:  # e.g., a read-only home folder
+            pass
+        # the plugins first: "Install Now" of Picasso quits
+        if manifest:
+            from . import plugins
+
+            try:
+                updates = plugins.available_updates(
+                    manifest, plugins.load_state()
+                )
+            except Exception:  # noqa: BLE001 - the check is best effort
+                updates = []
+            if updates:
+                show_plugin_updates(updates, parent, plugin_app)
         if available and not is_skipped(latest_version):
             _show_dialog(latest_version)
 
@@ -457,7 +574,8 @@ def setup_gui_update_check(parent=None):  # noqa: C901
 
     def _check():
         available, latest = is_update_available()
-        notifier.checked.emit(available, latest or "")
+        manifest = _fetch_plugin_manifest()
+        notifier.checked.emit(available, latest or "", manifest)
 
     threading.Thread(target=_check, daemon=True).start()
 

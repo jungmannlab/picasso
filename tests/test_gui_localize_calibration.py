@@ -164,6 +164,7 @@ class TestCalibrateSplineDialog:
             gui_localize._select_transform_model(
                 dialog.registration_model, "translation"
             )
+            dialog.use_identified_beads.setChecked(True)
 
         _answer(
             monkeypatch, gui_localize.CalibrateSplineDialog, ACCEPTED, fill
@@ -181,6 +182,7 @@ class TestCalibrateSplineDialog:
             True,
             False,
             "translation",
+            True,
             True,
         )
 
@@ -834,7 +836,9 @@ def recording_worker(monkeypatch):
     return _RecordingWorker.created
 
 
-def _spline_specs(monkeypatch, accepted=True, asked=None):
+def _spline_specs(
+    monkeypatch, accepted=True, asked=None, use_identified_beads=False
+):
     def specs(parent=None, multichannel=False):
         if asked is not None:
             asked.append(multichannel)
@@ -848,6 +852,7 @@ def _spline_specs(monkeypatch, accepted=True, asked=None):
             False,
             True,
             "affine",
+            use_identified_beads,
             accepted,
         )
 
@@ -925,6 +930,29 @@ class TestBuildSplineCalibration:
         assert worker.kwargs["movies"] is None
         assert worker.kwargs["regions"] is None
         assert worker.kwargs["step"] == 10.0
+        # the beads are detected by the calibration itself
+        assert worker.kwargs["bead_positions"] is None
+
+    def test_the_identified_spots_can_be_the_bead_boxes(
+        self, window, tmp_path, monkeypatch, recording_worker
+    ):
+        messages = _Messages(monkeypatch)
+        _load(window, [_stack()], tmp_path)
+        _spline_specs(monkeypatch, use_identified_beads=True)
+        _spline_save_to(monkeypatch, str(tmp_path / "spline.hdf5"))
+        # nothing identified yet: said so, nothing started
+        window.identifications = None
+        window.build_spline_calibration()
+        assert recording_worker == []
+        assert "No spots are identified" in messages.text("information")
+        window.identifications = pd.DataFrame(
+            {"frame": [0, 1], "x": [10, 10], "y": [12, 12], "extra": [1, 2]}
+        )
+        window.build_spline_calibration()
+        (worker,) = recording_worker
+        given = worker.kwargs["bead_positions"]
+        assert list(given.columns) == ["frame", "x", "y"]
+        assert given["x"].tolist() == [10, 10]
 
     def test_a_multichannel_build_passes_every_channel(
         self, window, tmp_path, monkeypatch, recording_worker

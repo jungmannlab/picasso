@@ -90,7 +90,7 @@ def calibrate_z(
     """Given localizations of a calibration sample (e.g., gold beads at
     different z positions), calibrate the z-axis by fitting a polynomial
     to the mean spot width/height of each z (stage) position. See Huang
-    et al. Science, 2008. DOI: 10.1126/science.1153529.
+    et al. (2008).
 
     Several frames may be acquired at each z (stage) position to
     increase the number of localizations per position and thus the
@@ -155,6 +155,13 @@ def calibrate_z(
         factor, how the beads were identified (``"Identification"``, see
         ``localize.IdentificationParameters.from_info``; only if ``info``
         records it) and the format marker (``io.FORMAT_VERSION_ATTR``).
+
+    References
+    ----------
+    Huang, B., Wang, W., Bates, M. & Zhuang, X. Three-dimensional
+    super-resolution imaging by stochastic optical reconstruction
+    microscopy. Science 319, 810-813 (2008).
+    https://doi.org/10.1126/science.1153529
     """
     n_frames = info[0]["Frames"]
     pixelsize = lib.get_from_metadata(info, "Pixelsize", raise_error=True)
@@ -318,8 +325,7 @@ def calibrate_z_phasor(
 ) -> dict:
     """Calibrate astigmatic z for phasor localization, from localizations
     of a calibration sample (e.g., beads at different z positions) found
-    with ``fitting_method="phasor"``. Martens et al., J. Chem. Phys.,
-    2018, Sec. S6. DOI: 10.1063/1.5005899.
+    with ``fitting_method="phasor"``. Martens et al. (2018), Sec. S6.
 
     The normalized phasor magnitudes of a spot fall as it widens, in x and
     in y separately (see ``picasso.fitting.phasor``). As in the paper
@@ -392,6 +398,14 @@ def calibrate_z_phasor(
         If ``locs`` are not phasor localizations, if fewer than 3 axial
         bins remain, or if the ratio of the fitted curves is not monotonic
         around z = 0.
+
+    References
+    ----------
+    Martens, K. J. A., Bader, A. N., Baas, S., Rieger, B. & Hohlbein, J.
+    Phasor based single-molecule localization microscopy in 3D
+    (pSMLM-3D): an algorithm for MHz localization rates using standard
+    CPUs. J Chem Phys 148, 123311 (2018).
+    https://doi.org/10.1063/1.5005899
     """
     missing = [c for c in _PHASOR_MAGNITUDES if c not in locs.columns]
     if missing:
@@ -752,8 +766,15 @@ def _fit_z_target(
     well as the calibration curve coefficients (spot widths in nm
     against z in nm). It calculates the difference between the square
     root of the spot width/height and the polynomial fit of the z-axis
-    calibration curve. Based on Huang et al. Science, 2008. DOI:
-    10.1126/science.1153529."""
+    calibration curve. Based on Huang et al. (2008).
+
+    References
+    ----------
+    Huang, B., Wang, W., Bates, M. & Zhuang, X. Three-dimensional
+    super-resolution imaging by stochastic optical reconstruction
+    microscopy. Science 319, 810-813 (2008).
+    https://doi.org/10.1126/science.1153529
+    """
     z2 = z * z
     z3 = z * z2
     z4 = z * z3
@@ -1651,8 +1672,7 @@ def axial_localization_precision_astig(
     """Calculate axial localization precision for astigmatic 3D imaging
     for given localizations based on calibration.
 
-    Based on Kowalewski, Reinhardt, et al. Nature Comms, 2026.
-    DOI: https://doi.org/10.1038/s41467-026-70198-5
+    Based on Kowalewski et al. (2026).
 
 
     Parameters
@@ -1674,6 +1694,12 @@ def axial_localization_precision_astig(
     -------
     lpz : lib.FloatArray1D
         Calculated lpz values for the given localizations in nm.
+
+    References
+    ----------
+    Kowalewski, R. et al. Molecular mapping in DNA-PAINT via modified
+    Gaussian Mixture Modeling. Nat Commun 17, 2315 (2026).
+    https://doi.org/10.1038/s41467-026-70198-5
     """
     assert fitting_method in [
         "gausslq",
@@ -1713,8 +1739,7 @@ def _axial_localization_precision_astig(
     """Calculate axial localization precision for astigmatic 3D imaging
     for given localizations based on calibration.
 
-    Based on Kowalewski, Reinhardt, et al. Nature Comms, 2026.
-    DOI: https://doi.org/10.1038/s41467-026-70198-5
+    Based on Kowalewski et al. (2026).
 
     Parameters
     ----------
@@ -1743,6 +1768,12 @@ def _axial_localization_precision_astig(
     -------
     lpz : lib.FloatArray1D
         Calculated lpz values for the given localizations in nm.
+
+    References
+    ----------
+    Kowalewski, R. et al. Molecular mapping in DNA-PAINT via modified
+    Gaussian Mixture Modeling. Nat Commun 17, 2315 (2026).
+    https://doi.org/10.1038/s41467-026-70198-5
     """
     sx_px = locs["sx"] / pixelsize
     sy_px = locs["sy"] / pixelsize
@@ -1803,7 +1834,15 @@ def _get_calib_size(
     coeffs: lib.FloatArray1D, z: lib.FloatArray1D
 ) -> lib.FloatArray1D:
     """Calculate calibration spot size at the given z position given
-    the calibration coefficients. Based on Huang et al., Science 2008."""
+    the calibration coefficients. Based on Huang et al., Science 2008.
+
+    References
+    ----------
+    Huang, B., Wang, W., Bates, M. & Zhuang, X. Three-dimensional
+    super-resolution imaging by stochastic optical reconstruction
+    microscopy. Science 319, 810-813 (2008).
+    https://doi.org/10.1126/science.1153529
+    """
     size = (
         coeffs[0] * z**6
         + coeffs[1] * z**5

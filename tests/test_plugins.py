@@ -574,3 +574,83 @@ def test_importing_plugins_does_not_import_qt():
 
     assert out.returncode == 0, out.stderr
     assert out.stdout.strip() == "False"
+
+
+# ---------------------------------------------------------------------------
+# Update notifications
+# ---------------------------------------------------------------------------
+
+
+def _install_record(plugin_id, version):
+    state = plugins.load_state()
+    state["plugins"][plugin_id] = {
+        "file": f"{plugin_id}.py",
+        "version": version,
+    }
+    plugins.save_state(state)
+
+
+def _entry(plugin_id, version, **extra):
+    return {
+        "id": plugin_id,
+        "display_name": plugin_id.title(),
+        "version": version,
+        "file": f"plugins/{plugin_id}.py",
+        "sha256": "0" * 64,
+        **extra,
+    }
+
+
+class TestAvailableUpdates:
+    def test_only_installed_plugins_with_a_newer_version(self):
+        _install_record("drift", "1.0")
+        _install_record("tracker", "2.0")
+        manifest = [
+            _entry("drift", "1.1"),
+            _entry("tracker", "2.0"),
+            _entry("brand_new", "1.0"),  # not installed: never told
+        ]
+        (update,) = plugins.available_updates(manifest, plugins.load_state())
+        assert update == {
+            "id": "drift",
+            "name": "Drift",
+            "installed": "1.0",
+            "version": "1.1",
+            "compatible": True,
+            "min_picasso_version": None,
+        }
+
+    def test_update_for_a_newer_picasso_is_marked(self):
+        _install_record("drift", "1.0")
+        manifest = [_entry("drift", "2.0", min_picasso_version="99.0")]
+        state = plugins.load_state()
+        (update,) = plugins.available_updates(manifest, state)
+        assert not update["compatible"]
+        assert update["min_picasso_version"] == "99.0"
+
+    def test_switched_off_plugins_are_not_told(self):
+        _install_record("drift", "1.0")
+        plugins.set_notified(plugins.load_state(), "drift", False)
+        state = plugins.load_state()
+        assert not plugins.is_notified(state, "drift")
+        assert plugins.available_updates([_entry("drift", "1.1")], state) == []
+
+    def test_skipped_versions_until_the_next_one(self):
+        _install_record("drift", "1.0")
+        updates = plugins.available_updates(
+            [_entry("drift", "1.1")], plugins.load_state()
+        )
+        plugins.skip_updates(plugins.load_state(), updates)
+        state = plugins.load_state()
+        assert plugins.available_updates([_entry("drift", "1.1")], state) == []
+        (update,) = plugins.available_updates([_entry("drift", "1.2")], state)
+        assert update["version"] == "1.2"
+
+    def test_uninstalling_forgets_the_notification_choices(self):
+        _install_record("drift", "1.0")
+        state = plugins.load_state()
+        plugins.set_notified(state, "drift", False)
+        plugins.skip_updates(state, [{"id": "drift", "version": "1.1"}])
+        plugins.uninstall("drift", state)
+        state = plugins.load_state()
+        assert state["notify"] == {} and state["skipped_updates"] == {}

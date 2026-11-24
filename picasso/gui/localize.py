@@ -55,7 +55,7 @@ from .. import transforms as transforms_mod
 from ..fitting import precision, residualfit, splinefit
 from .app import run_gui
 from . import theme
-from . import toolbars
+from . import shortcuts, toolbars
 from .scalebar_settings import ScaleBarOptions
 from PyQt6 import QtCore, QtGui, QtWidgets
 
@@ -114,8 +114,22 @@ DEFAULT_PARAMETERS = {
     "Wavelet Noise Estimate": wavelet.WaveletParameters().noise,
     "Wavelet Min. Area": wavelet.WaveletParameters().min_area,
     "Gaussian Filter Sigma": 0.0,
+    "PSF Filter Calibration": "",
     "Temporal Median Window": 51,
+    "Edge Spots": True,
 }
+PSF_FILTER_TOOLTIP = (
+    "Filter every frame with the PSF of the loaded spline calibration\n"
+    "(averaged over z) before spot identification.\n\n"
+    "Each spot then shows as one maximum at the center of the PSF,\n"
+    "whatever its shape: the lobes of a double helix merge into one\n"
+    "maximum on its rotation axis. Use it for PSFs that break up into\n"
+    "several lobes, where the boxes would otherwise land on a lobe.\n\n"
+    "Only the identification uses the filtered frames: fitting always\n"
+    "uses the raw movie. Re-tune the identification threshold with\n"
+    "'Preview' after switching it on; use the net gradient, the\n"
+    "wavelet identification does not suit the filtered frames."
+)
 #: Identification method combo box entries -> ``localize.IDENTIFY_METHODS``.
 IDENTIFICATION_METHODS = {
     "Net gradient": localize.IDENTIFY_METHOD_NET_GRADIENT,
@@ -156,6 +170,7 @@ _SUM_SETTING_KEYS = (
     "temporal_median_on",
     "temporal_median",
     "gaussian_filter_sigma",
+    "psf_filter_on",
     *_WAVELET_PARAM_KEYS.values(),
 )
 # How multichannel (and split-FOV) data is fitted: all channels tied into one
@@ -546,9 +561,8 @@ GPU_TOOLTIP = (
 VECTORFIT_GPU_TOOLTIP = (
     "Fit the vectorial PSF on a CUDA-capable GPU, with VectorFit's GPU\n"
     "build (vectorfit-py-cu12, installed in place of vectorfit-py).\n\n"
-    "Despite its name, it needs CUDA 13, i.e. an NVIDIA driver of\n"
-    "version 580 or newer, and an Ampere or newer GPU; a driver that\n"
-    "supports CUDA 12 only is not enough."
+    "It needs CUDA 12, i.e. an NVIDIA driver of version 525 or newer,\n"
+    "and a GPU of compute capability 6.0 (Pascal) or higher."
 )
 
 CAMERA_CALIB_TOOLTIP = (
@@ -596,11 +610,12 @@ def _filtered_identification_movie(
     window: int,
     sigma: float,
     cache: list,
+    psf_path: str = "",
 ) -> tuple[object, list]:
     """Put the identification filters on top of ``movie``: the temporal
-    median background subtraction, then the Gaussian smoothing - the same
-    two stages ``localize.identify`` puts on top of the movie it searches,
-    so the preview and the batch run find the same spots.
+    median background subtraction, the Gaussian smoothing, then the PSF
+    filter - the same stages ``localize.identify`` puts on top of the movie
+    it searches, so the preview and the batch run find the same spots.
 
     Unlike the batch run, the stack is always built over the *whole* frame,
     never restricted to the drawn ROIs. The display reads its frames from
@@ -613,16 +628,17 @@ def _filtered_identification_movie(
     way. Restricting the median stays a batch-run optimization, where
     nothing is displayed.
 
-    Both stages are lazy views, so ``cache`` (a ``[temporal, gaussian]``
-    pair) keeps them across redraws: a stage is rebuilt only when its
+    The stages are lazy views, so ``cache`` (``[temporal, gaussian,
+    psf]``) keeps them across redraws: a stage is rebuilt only when its
     source movie or its setting changed. Comparing the source by identity
     chains the invalidation, so rebuilding (or dropping) the median also
-    rebuilds the Gaussian on top of it. Returns the filtered movie and the
+    rebuilds the stages on top of it. Returns the filtered movie and the
     refreshed cache; ``window`` of 0 (or a movie too short for it, which
-    the caller resolves) and ``sigma`` of 0 switch the respective stage
-    off.
+    the caller resolves), ``sigma`` of 0 and an empty ``psf_path`` (the
+    spline calibration whose PSF filters, see ``localize.PSFFilter``)
+    switch the respective stage off.
     """
-    temporal, gaussian = cache
+    temporal, gaussian, psf = (list(cache) + [None, None, None])[:3]
     if window:
         if (
             temporal is None
@@ -645,7 +661,21 @@ def _filtered_identification_movie(
         movie = gaussian
     else:
         gaussian = None
-    return movie, [temporal, gaussian]
+    if psf_path:
+        if (
+            psf is None
+            or psf.raw is not movie
+            or getattr(psf, "calibration_path", None) != psf_path
+        ):
+            psf = localize.PSFFilteredMovie(
+                movie, localize.PSFFilter.from_file(psf_path).kernel
+            )
+            # which calibration the cached view was built from
+            psf.calibration_path = psf_path
+        movie = psf
+    else:
+        psf = None
+    return movie, [temporal, gaussian, psf]
 
 
 def _compile_multi_emitter_fit() -> None:
@@ -1654,6 +1684,36 @@ def format_hover_tooltip(row: pd.Series) -> str:
 OVERLAPPING_MARKER_COLOR = QtGui.QColor(86, 180, 233)
 
 
+class _MarkerLine(QtWidgets.QGraphicsLineItem):
+    """Line of a :class:`FitMarker` whose width follows the zoom.
+
+    Its pen is one camera pixel wide, which makes a blob of the marker
+    when zoomed in, where the marker is drawn large. On screen, the line
+    is as wide as the pen up to 2 px and then grows with a sixteenth of
+    the zoom, so the marker gets relatively thinner as it gets bigger.
+    The width comes from the painter's transform, so the exported view
+    (drawn at the scale of the view) looks like the screen.
+    """
+
+    def paint(
+        self,
+        painter: QtGui.QPainter,
+        option: QtWidgets.QStyleOptionGraphicsItem,
+        widget: QtWidgets.QWidget | None = None,
+    ) -> None:
+        # screen pixels per camera pixel
+        zoom = option.levelOfDetailFromTransform(painter.worldTransform())
+        pen = QtGui.QPen(self.pen())
+        if zoom > 0:
+            width_px = min(zoom, max(2.0, zoom / 16))
+            pen.setWidthF(width_px / zoom)
+        painter.save()
+        painter.setRenderHint(QtGui.QPainter.RenderHint.Antialiasing)
+        painter.setPen(pen)
+        painter.drawLine(self.line())
+        painter.restore()
+
+
 class FitMarker(QtWidgets.QGraphicsItemGroup):
     """Marker showing fitted position: a green x, or, for an emitter of a
     multi-emitter fit with neighbors (``overlapping``), a sky blue +, so
@@ -1671,12 +1731,12 @@ class FitMarker(QtWidgets.QGraphicsItemGroup):
         L = size / 2
         if overlapping:
             color = OVERLAPPING_MARKER_COLOR
-            line1 = QtWidgets.QGraphicsLineItem(x - L, y, x + L, y)
-            line2 = QtWidgets.QGraphicsLineItem(x, y - L, x, y + L)
+            line1 = _MarkerLine(x - L, y, x + L, y)
+            line2 = _MarkerLine(x, y - L, x, y + L)
         else:
             color = QtGui.QColor(0, 255, 0)
-            line1 = QtWidgets.QGraphicsLineItem(x - L, y - L, x + L, y + L)
-            line2 = QtWidgets.QGraphicsLineItem(x - L, y + L, x + L, y - L)
+            line1 = _MarkerLine(x - L, y - L, x + L, y + L)
+            line2 = _MarkerLine(x - L, y + L, x + L, y - L)
         line1.setPen(QtGui.QPen(color))
         self.addToGroup(line1)
         line2.setPen(QtGui.QPen(color))
@@ -3942,6 +4002,24 @@ class CalibrateSplineDialog(lib.Dialog):
         grid.addWidget(self.registration_label, 8, 0)
         grid.addWidget(self.registration_model, 8, 1)
 
+        # Cut the beads' boxes where the spots were identified, instead of
+        # detecting the beads again
+        self.use_identified_beads = QtWidgets.QCheckBox(
+            "Use the identified spots as bead boxes"
+        )
+        self.use_identified_beads.setToolTip(
+            "Cut each bead's box where the spots shown were identified\n"
+            "(the current identification settings, ROIs and filters, e.g.\n"
+            "the PSF filter), instead of detecting the beads again with\n"
+            "the identification threshold alone.\n\n"
+            "Each bead keeps one box over the whole z-scan, taken from the\n"
+            "middle third of the scan. A PSF that lies more than half a\n"
+            "pixel off the center of its box is still moved onto the box\n"
+            "center when the calibration is built."
+        )
+        self.use_identified_beads.setChecked(False)
+        grid.addWidget(self.use_identified_beads, 9, 0, 1, 2)
+
         self.frames_per_step.valueChanged.connect(self._update_order_enabled)
         self._update_order_enabled(self.frames_per_step.value())
 
@@ -3967,13 +4045,14 @@ class CalibrateSplineDialog(lib.Dialog):
     def getCalibrationSpecs(
         parent: QtWidgets.QWidget | None = None,
         multichannel: bool = False,
-    ) -> tuple[float, int, str, int, str, float, bool, bool, str, bool]:
+    ) -> tuple[float, int, str, int, str, float, bool, bool, str, bool, bool]:
         """Show the dialog and return the chosen step size, number of frames
         per step, frame order, z binning, spline model, magnification factor,
         whether to correct the z bias, whether to link photons across
-        channels, the channel-registration model, and whether it was
-        accepted. ``multichannel`` shows the multichannel-only options (link
-        photons, registration model); they are hidden for a single-channel
+        channels, the channel-registration model, whether to use the
+        identified spots as the bead boxes, and whether it was accepted.
+        ``multichannel`` shows the multichannel-only options (link photons,
+        registration model); they are hidden for a single-channel
         calibration."""
         dialog = CalibrateSplineDialog(parent, multichannel=multichannel)
         result = dialog.exec()
@@ -3986,6 +4065,7 @@ class CalibrateSplineDialog(lib.Dialog):
         correct_z_bias = dialog.correct_z_bias.isChecked()
         link_photons = dialog.link_photons.isChecked()
         registration = _transform_model_of(dialog.registration_model)
+        use_identified_beads = dialog.use_identified_beads.isChecked()
         accepted = result == QtWidgets.QDialog.DialogCode.Accepted
         return (
             step,
@@ -3997,6 +4077,7 @@ class CalibrateSplineDialog(lib.Dialog):
             correct_z_bias,
             link_photons,
             registration,
+            use_identified_beads,
             accepted,
         )
 
@@ -5079,6 +5160,12 @@ class ParametersDialog(lib.Dialog):
     GAUSSIAN_FILTER_URL = docs_url(
         "localize/identification.html#localize-gaussian-filter"
     )
+    PSF_FILTER_URL = docs_url(
+        "localize/identification.html#localize-psf-filter"
+    )
+    EDGE_SPOTS_URL = docs_url(
+        "localize/identification.html#localize-edge-spots"
+    )
     IDENT_URL = docs_url(
         "localize/identification.html#localize-identification"
     )
@@ -5162,26 +5249,29 @@ class ParametersDialog(lib.Dialog):
         self.identification_settings = QtWidgets.QWidget()
         settings_grid = QtWidgets.QGridLayout(self.identification_settings)
         settings_grid.setContentsMargins(0, 0, 0, 0)
-        identification_grid.addWidget(self.identification_settings, 0, 0, 1, 2)
+        identification_grid.addWidget(self.identification_settings, 0, 0, 1, 3)
+        # Every row of the group has its label in column 0, its control
+        # in column 1 and its help button, if any, in column 2. The method
+        # settings and the filters are grids of their own, aligned with
+        # this one (see _align_identification_columns).
+        self._identification_grids = [identification_grid, settings_grid]
+        self._identification_labels = []
 
         # Box Size
-        first_row = QtWidgets.QHBoxLayout()
-        settings_grid.addLayout(first_row, 0, 0, 1, 2)
-        first_row.addWidget(lib.HelpButton(self.IDENT_URL))
         boxsize_label = QtWidgets.QLabel("Box side length:")
         boxsize_label.setToolTip(
             "Box size in camera pixels for identification."
         )
-        first_row.addWidget(boxsize_label)
         self.box_spinbox = OddSpinBox()
         self.box_spinbox.setKeyboardTracking(False)
         self.box_spinbox.setValue(DEFAULT_PARAMETERS["Box Size"])
         self.box_spinbox.valueChanged.connect(self.on_box_changed)
-        first_row.addWidget(self.box_spinbox)
+        settings_grid.addWidget(boxsize_label, 0, 0)
+        settings_grid.addWidget(self.box_spinbox, 0, 1)
+        settings_grid.addWidget(lib.HelpButton(self.IDENT_URL), 0, 2)
+        self._identification_labels.append(boxsize_label)
 
         # identification method: net gradient or wavelet segmentation
-        method_row = QtWidgets.QHBoxLayout()
-        settings_grid.addLayout(method_row, 1, 0, 1, 2)
         method_tip = (
             "How spots are found.\n\n"
             "Net gradient: local maxima whose net gradient (a measure of\n"
@@ -5195,7 +5285,6 @@ class ParametersDialog(lib.Dialog):
         )
         method_label = QtWidgets.QLabel("Method:")
         method_label.setToolTip(method_tip)
-        method_row.addWidget(method_label)
         self.identification_method_combo = QtWidgets.QComboBox()
         for label in IDENTIFICATION_METHODS:
             self.identification_method_combo.addItem(label)
@@ -5203,14 +5292,16 @@ class ParametersDialog(lib.Dialog):
         self.identification_method_combo.currentIndexChanged.connect(
             self.on_identification_method_changed
         )
-        method_row.addWidget(self.identification_method_combo)
-        method_row.addStretch(1)
+        settings_grid.addWidget(method_label, 1, 0)
+        settings_grid.addWidget(self.identification_method_combo, 1, 1)
+        self._identification_labels.append(method_label)
 
         # the net gradient settings, shown for that method only
         self.mng_widget = QtWidgets.QWidget()
         mng_grid = QtWidgets.QGridLayout(self.mng_widget)
         mng_grid.setContentsMargins(0, 0, 0, 0)
-        settings_grid.addWidget(self.mng_widget, 2, 0, 1, 2)
+        settings_grid.addWidget(self.mng_widget, 2, 0, 1, 3)
+        self._identification_grids.append(mng_grid)
 
         # Min. Net Gradient
         mng_label = QtWidgets.QLabel("Min. net gradient:")
@@ -5218,6 +5309,7 @@ class ParametersDialog(lib.Dialog):
             "Threshold (related to brightness) for spot identification."
         )
         mng_grid.addWidget(mng_label, 0, 0)
+        self._identification_labels.append(mng_label)
         self.mng_spinbox = QtWidgets.QSpinBox()
         self.mng_spinbox.setRange(0, int(1e9))
         self.mng_spinbox.setValue(DEFAULT_PARAMETERS["Min. Net Gradient"])
@@ -5289,7 +5381,8 @@ class ParametersDialog(lib.Dialog):
         self.wavelet_widget = QtWidgets.QWidget()
         wavelet_grid = QtWidgets.QGridLayout(self.wavelet_widget)
         wavelet_grid.setContentsMargins(0, 0, 0, 0)
-        settings_grid.addWidget(self.wavelet_widget, 3, 0, 1, 2)
+        settings_grid.addWidget(self.wavelet_widget, 3, 0, 1, 3)
+        self._identification_grids.append(wavelet_grid)
         threshold_tip = (
             "Threshold on the second wavelet plane, in units of the\n"
             "standard deviation of the noise. Izeddin et al. use 0.5 to 2\n"
@@ -5304,6 +5397,7 @@ class ParametersDialog(lib.Dialog):
         threshold_label = QtWidgets.QLabel("Wavelet threshold:")
         threshold_label.setToolTip(threshold_tip)
         wavelet_grid.addWidget(threshold_label, 0, 0)
+        self._identification_labels.append(threshold_label)
         self.wavelet_threshold_spinbox = QtWidgets.QDoubleSpinBox()
         self.wavelet_threshold_spinbox.setRange(0.0, 100.0)
         self.wavelet_threshold_spinbox.setDecimals(3)
@@ -5338,6 +5432,7 @@ class ParametersDialog(lib.Dialog):
         noise_label = QtWidgets.QLabel("Noise estimate:")
         noise_label.setToolTip(noise_tip)
         wavelet_grid.addWidget(noise_label, 1, 0)
+        self._identification_labels.append(noise_label)
         self.wavelet_noise_combo = QtWidgets.QComboBox()
         for label in WAVELET_NOISE_ESTIMATES:
             self.wavelet_noise_combo.addItem(label)
@@ -5353,6 +5448,7 @@ class ParametersDialog(lib.Dialog):
         area_label = QtWidgets.QLabel("Min. region area:")
         area_label.setToolTip(area_tip)
         wavelet_grid.addWidget(area_label, 2, 0)
+        self._identification_labels.append(area_label)
         self.wavelet_min_area_spinbox = QtWidgets.QSpinBox()
         self.wavelet_min_area_spinbox.setRange(1, 100)
         self.wavelet_min_area_spinbox.setSuffix(" px")
@@ -5367,9 +5463,46 @@ class ParametersDialog(lib.Dialog):
         wavelet_grid.addWidget(self.wavelet_min_area_spinbox, 2, 1)
         self.wavelet_widget.setVisible(False)
 
-        # temporal median background subtraction (identification only)
-        tm_row = QtWidgets.QHBoxLayout()
-        tm_row.addWidget(lib.HelpButton(self.TEMPORAL_MEDIAN_URL))
+        # spots whose box reaches past the frame edge
+        self.edge_spots_checkbox = QtWidgets.QCheckBox(
+            "Identify spots at the frame edge"
+        )
+        self.edge_spots_checkbox.setToolTip(
+            "Also identify spots closer to the edge of the frame than half\n"
+            "a box. Their box is shifted inward until it lies in the frame,\n"
+            "so the spot is fitted off-center, with the pixels it has.\n\n"
+            "The Gaussian fits fit all of them. The spline fits fit those\n"
+            "as far as the calibration reaches beyond the box (calibrate\n"
+            "with a larger box than you fit with). Phasor and Vectorfit\n"
+            "need the spot centered and leave them out.\n\n"
+            "Uncheck to identify only spots whose whole box lies inside\n"
+            "the frame."
+        )
+        self.edge_spots_checkbox.setChecked(DEFAULT_PARAMETERS["Edge Spots"])
+        self.edge_spots_checkbox.stateChanged.connect(
+            self.on_edge_spots_changed
+        )
+        settings_grid.addWidget(self.edge_spots_checkbox, 4, 0, 1, 2)
+        settings_grid.addWidget(lib.HelpButton(self.EDGE_SPOTS_URL), 4, 2)
+
+        # The filters of the frames the spots are searched in, in the
+        # order they are applied. They do not change what is fitted, which
+        # the note at the bottom says, and the header lists the ones that
+        # are on while the section is collapsed (see
+        # _update_filters_summary).
+        self.filters_groupbox = lib.CollapsibleGroupBox(
+            "Filters (identification only)"
+        )
+        self.filters_groupbox.toggle_button.setToolTip(
+            "Filters applied to the frames before spots are identified,\n"
+            "in the order listed. Show or hide them."
+        )
+        settings_grid.addWidget(self.filters_groupbox, 5, 0, 1, 3)
+        filters_grid = QtWidgets.QGridLayout(self.filters_groupbox.content)
+        filters_grid.setContentsMargins(0, 0, 0, 0)
+        self._identification_grids.append(filters_grid)
+
+        # temporal median background subtraction
         self.temporal_median_checkbox = QtWidgets.QCheckBox(
             "Temporal median filter"
         )
@@ -5393,7 +5526,6 @@ class ParametersDialog(lib.Dialog):
         self.temporal_median_checkbox.stateChanged.connect(
             self.on_temporal_median_changed
         )
-        tm_row.addWidget(self.temporal_median_checkbox)
         self.temporal_median_spinbox = QtWidgets.QSpinBox()
         self.temporal_median_spinbox.setRange(3, 100_000)
         self.temporal_median_spinbox.setSingleStep(10)
@@ -5406,14 +5538,13 @@ class ParametersDialog(lib.Dialog):
             "Number of frames in the temporal window used for the median."
         )
         self.temporal_median_spinbox.valueChanged.connect(self.on_box_changed)
-        tm_row.addWidget(self.temporal_median_spinbox)
-        tm_row.addStretch(1)
-        settings_grid.addLayout(tm_row, 4, 0, 1, 2)
+        self.temporal_median_spinbox.setSuffix(" frames")
+        filters_grid.addWidget(self.temporal_median_checkbox, 0, 0)
+        filters_grid.addWidget(self.temporal_median_spinbox, 0, 1)
+        filters_grid.addWidget(lib.HelpButton(self.TEMPORAL_MEDIAN_URL), 0, 2)
 
-        # spatial Gaussian smoothing (identification only). Sits right below
-        # the temporal median filter, in the order the two are applied.
-        gauss_row = QtWidgets.QHBoxLayout()
-        gauss_row.addWidget(lib.HelpButton(self.GAUSSIAN_FILTER_URL))
+        # spatial Gaussian smoothing; its label is indented to start where
+        # the texts of the checkboxes above and below do
         gaussian_tip = (
             "Smooth every frame with a Gaussian of this standard deviation\n"
             "(in camera pixels) before spot identification. 0 turns the\n"
@@ -5430,7 +5561,6 @@ class ParametersDialog(lib.Dialog):
         )
         gaussian_label = QtWidgets.QLabel("Gaussian filter sigma:")
         gaussian_label.setToolTip(gaussian_tip)
-        gauss_row.addWidget(gaussian_label)
         self.gaussian_filter_spinbox = QtWidgets.QDoubleSpinBox()
         self.gaussian_filter_spinbox.setRange(0.0, 10.0)
         self.gaussian_filter_spinbox.setDecimals(2)
@@ -5446,11 +5576,49 @@ class ParametersDialog(lib.Dialog):
         self.gaussian_filter_spinbox.valueChanged.connect(
             self.on_gaussian_filter_changed
         )
-        gauss_row.addWidget(self.gaussian_filter_spinbox)
-        gauss_row.addStretch(1)
-        settings_grid.addLayout(gauss_row, 5, 0, 1, 2)
+        style = self.style()
+        gaussian_label.setIndent(
+            style.pixelMetric(QtWidgets.QStyle.PixelMetric.PM_IndicatorWidth)
+            + style.pixelMetric(
+                QtWidgets.QStyle.PixelMetric.PM_CheckBoxLabelSpacing
+            )
+        )
+        filters_grid.addWidget(gaussian_label, 1, 0)
+        filters_grid.addWidget(self.gaussian_filter_spinbox, 1, 1)
+        filters_grid.addWidget(lib.HelpButton(self.GAUSSIAN_FILTER_URL), 1, 2)
 
-        # preview identifications + cross-channel link color overlay
+        # matched filter with the loaded spline calibration's PSF
+        self.psf_filter_checkbox = QtWidgets.QCheckBox(
+            "PSF filter (spline calibration)"
+        )
+        self.psf_filter_checkbox.setToolTip(PSF_FILTER_TOOLTIP)
+        self.psf_filter_checkbox.setEnabled(False)
+        self.psf_filter_checkbox.stateChanged.connect(
+            self.on_psf_filter_changed
+        )
+        filters_grid.addWidget(self.psf_filter_checkbox, 2, 0, 1, 2)
+        filters_grid.addWidget(lib.HelpButton(self.PSF_FILTER_URL), 2, 2)
+
+        filters_note = QtWidgets.QLabel(
+            "Only the spot search uses the filtered frames: the fit always "
+            "uses the raw movie."
+        )
+        filters_note.setWordWrap(True)
+        filters_note.setForegroundRole(
+            QtGui.QPalette.ColorRole.PlaceholderText
+        )
+        filters_grid.addWidget(filters_note, 3, 0, 1, 3)
+        for signal in (
+            self.temporal_median_checkbox.stateChanged,
+            self.temporal_median_spinbox.valueChanged,
+            self.gaussian_filter_spinbox.valueChanged,
+            self.psf_filter_checkbox.stateChanged,
+        ):
+            signal.connect(self._update_filters_summary)
+        self._update_filters_summary()
+
+        # preview identifications + cross-channel link color overlay, at
+        # the bottom of the group, below all that they show
         preview_row = QtWidgets.QHBoxLayout()
         self.preview_checkbox = QtWidgets.QCheckBox("Preview")
         self.preview_checkbox.setToolTip(
@@ -5479,7 +5647,6 @@ class ParametersDialog(lib.Dialog):
         self.link_colors_checkbox.hide()
         preview_row.addWidget(self.link_colors_checkbox)
         preview_row.addStretch(1)
-        identification_grid.addLayout(preview_row, 6, 0)
 
         # Multichannel: identify each channel on its own, or on the channels
         # added together. A row of its own, like the 'Fit' mode below, so
@@ -5532,8 +5699,9 @@ class ParametersDialog(lib.Dialog):
         self.identify_mode_combo.currentIndexChanged.connect(
             self.on_identify_mode_changed
         )
-        identification_grid.addWidget(self.identify_mode_label, 7, 0)
-        identification_grid.addWidget(self.identify_mode_combo, 7, 1)
+        identification_grid.addWidget(self.identify_mode_label, 1, 0)
+        identification_grid.addWidget(self.identify_mode_combo, 1, 1)
+        self._identification_labels.append(self.identify_mode_label)
         for widget in (self.identify_mode_label, self.identify_mode_combo):
             _retain_size_when_hidden(widget)
             widget.hide()
@@ -5548,10 +5716,8 @@ class ParametersDialog(lib.Dialog):
             "(y_min, x_min, y_max, x_max, in camera pixels) can be edited\n"
             "directly here. Leave empty to analyze the whole frame."
         )
-        roi_label_layout = QtWidgets.QHBoxLayout()
-        roi_label_layout.addWidget(lib.HelpButton(self.ROI_URL))
-        roi_label_layout.addWidget(label)
-        roi_label_layout.addStretch(1)
+        identification_grid.addWidget(label, 2, 0)
+        self._identification_labels.append(label)
         # Split-FOV: treat the drawn ROIs as separate channels of one movie.
         self.split_fov_checkbox = QtWidgets.QCheckBox("Regions = channels")
         self.split_fov_checkbox.setToolTip(
@@ -5570,8 +5736,8 @@ class ParametersDialog(lib.Dialog):
         )
         self.split_fov_checkbox.setTristate(False)
         self.split_fov_checkbox.stateChanged.connect(self.on_split_fov_changed)
-        roi_label_layout.addWidget(self.split_fov_checkbox)
-        identification_grid.addLayout(roi_label_layout, 8, 0)
+        # below the ROIs, which it turns into channels
+        identification_grid.addWidget(self.split_fov_checkbox, 3, 1)
 
         self._updating_roi_field = False
         self.roi_dialog = None
@@ -5589,7 +5755,8 @@ class ParametersDialog(lib.Dialog):
         self.roi_edit_button = QtWidgets.QPushButton("Edit ROIs...")
         self.roi_edit_button.clicked.connect(self.on_edit_rois)
         roi_layout.addWidget(self.roi_edit_button)
-        identification_grid.addLayout(roi_layout, 8, 1)
+        identification_grid.addLayout(roi_layout, 2, 1)
+        identification_grid.addWidget(lib.HelpButton(self.ROI_URL), 2, 2)
 
         # min/max frames
         label = QtWidgets.QLabel("Frames (min,max):")
@@ -5599,7 +5766,8 @@ class ParametersDialog(lib.Dialog):
             "Several disjoint segments can be given as min,max pairs\n"
             "separated by semicolons, e.g. '1,100; 200,300'."
         )
-        identification_grid.addWidget(label, 9, 0)
+        identification_grid.addWidget(label, 4, 0)
+        self._identification_labels.append(label)
         self.frames_edit = QtWidgets.QLineEdit()
         # one or more "min,max" pairs separated by semicolons, with
         # optional surrounding whitespace
@@ -5610,7 +5778,10 @@ class ParametersDialog(lib.Dialog):
         self.frames_edit.setValidator(validator)
         self.frames_edit.editingFinished.connect(self.on_frames_edit_finished)
         self.frames_edit.textChanged.connect(self.on_frames_edit_changed)
-        identification_grid.addWidget(self.frames_edit, 9, 1)
+        identification_grid.addWidget(self.frames_edit, 4, 1)
+
+        identification_grid.addLayout(preview_row, 5, 0, 1, 3)
+        self._align_identification_columns()
 
         # Multichannel: optionally use the same key settings for every channel.
         # Shown only when more than one channel is loaded (see the Window's
@@ -6241,8 +6412,8 @@ class ParametersDialog(lib.Dialog):
             "Optics of the vectorial PSF model fitted by VectorFit.\n"
             "Runs on the CPU, or on the GPU with Use GPU; requires the\n"
             "optional VectorFit library (pip install picassosr[vectorfit],\n"
-            "or vectorfit-py-cu12 for the GPU, which needs CUDA 13 despite\n"
-            "its name). Supported box sizes are\n"
+            "or picassosr[vectorfit-gpu] for the GPU, which needs CUDA 12).\n"
+            "Supported box sizes are\n"
             f"{vectorfit.supported_boxes_text()}."
         )
         vbox.addWidget(vectorfit_groupbox)
@@ -6789,10 +6960,25 @@ class ParametersDialog(lib.Dialog):
         if self.identification_settings is not None:
             # it finds the spots itself
             self.identification_settings.setVisible(not multi_emitter)
+        if multi_emitter:
+            self._switch_off_movie_filters()
         # The multichannel rows keep their space while hidden (see
         # _retain_size_when_hidden), but the multi-emitter fit takes one
         # channel, so it does not reserve it.
         self._retain_multichannel_rows(not multi_emitter)
+
+    def _switch_off_movie_filters(self) -> None:
+        """Untick the temporal median filter and set the Gaussian filter
+        sigma to 0. The multi-emitter fit runs on the raw frames and hides
+        the identification settings, so the display must not show (and the
+        hidden controls must not keep) filtered frames. Guarded for the
+        dialog under construction."""
+        checkbox = getattr(self, "temporal_median_checkbox", None)
+        if checkbox is not None:
+            checkbox.setChecked(False)
+        spinbox = getattr(self, "gaussian_filter_spinbox", None)
+        if spinbox is not None:
+            spinbox.setValue(0.0)
 
     def _update_spline_psf_widgets(self, spline_psf: bool) -> None:
         """Show the PSF sigma, or for the spline PSF of the multi-emitter
@@ -7451,6 +7637,7 @@ class ParametersDialog(lib.Dialog):
             self.spline_calib_label.setText("-- no calibration loaded --")
             self.spline_calib_label.setToolTip("")
         self._update_link_photons_visibility()
+        self._update_psf_filter_state()
 
     def update_spline_calib_with_config_path(self) -> None:
         """Retrieve the spline PSF calibration path that corresponds to the
@@ -7513,6 +7700,7 @@ class ParametersDialog(lib.Dialog):
             self.spline_calib_label.setText("-- no calibration loaded --")
             self.spline_calib_label.setToolTip("")
         self._update_link_photons_visibility()
+        self._update_psf_filter_state()
         if getattr(self, "peak_search_z_edit", None) is not None:
             # the peak search in z needs a 3D calibration
             lib.resize_with_contents(
@@ -7846,6 +8034,76 @@ class ParametersDialog(lib.Dialog):
         """Refresh the display, which shows the smoothed frames whenever
         sigma is non-zero."""
         self._reset_contrast_and_refresh()
+
+    def on_psf_filter_changed(self, _state: int = 0) -> None:
+        """Refresh the display, which shows the PSF-filtered frames while
+        the filter is on."""
+        self._reset_contrast_and_refresh()
+
+    def psf_filter_path(self) -> str:
+        """The spline calibration whose PSF filters the frames, "" when the
+        PSF filter is off or no spline calibration is loaded."""
+        checkbox = getattr(self, "psf_filter_checkbox", None)
+        if checkbox is None or not checkbox.isChecked():
+            return ""
+        return self.spline_calibration_path or ""
+
+    def _update_psf_filter_state(self) -> None:
+        """Offer the PSF filter only while a spline calibration is loaded:
+        its PSF is the filter."""
+        checkbox = getattr(self, "psf_filter_checkbox", None)
+        if checkbox is None:
+            return
+        path = self.spline_calibration_path
+        checkbox.setEnabled(bool(path))
+        checkbox.setToolTip(
+            PSF_FILTER_TOOLTIP
+            + (
+                f"\n\nFilter: {path}"
+                if path
+                else "\n\nLoad a spline calibration (Experimental PSF\n"
+                "(spline)) to use it."
+            )
+        )
+        self._update_filters_summary()
+
+    def _align_identification_columns(self) -> None:
+        """Line up the label, control and help-button columns of the
+        grids of the Identification group, which the method settings and
+        the filters, shown or hidden on their own, nest in each other."""
+        labels = [
+            label.sizeHint().width() for label in self._identification_labels
+        ]
+        helps = [
+            button.sizeHint().width()
+            for button in self.identification_settings.parentWidget().findChildren(
+                lib.HelpButton
+            )
+        ]
+        for grid in self._identification_grids:
+            grid.setColumnMinimumWidth(0, max(labels))
+            grid.setColumnStretch(1, 1)
+            grid.setColumnMinimumWidth(2, max(helps))
+
+    def _update_filters_summary(self, *_args) -> None:
+        """List the identification filters that are on in the header of
+        their section, so that they can be seen while it is collapsed."""
+        parts = []
+        temporal_median = self.temporal_median_checkbox
+        if temporal_median.isChecked() and temporal_median.isEnabled():
+            parts.append(f"median {self.temporal_median_spinbox.value()}")
+        sigma = self.gaussian_filter_spinbox.value()
+        if sigma > 0:
+            parts.append(f"Gauss {sigma:g} px")
+        psf = self.psf_filter_checkbox
+        if psf.isChecked() and psf.isEnabled():
+            parts.append("PSF")
+        summary = ", ".join(parts) if parts else "none"
+        self.filters_groupbox.setSummary(summary[0].upper() + summary[1:])
+
+    def on_edge_spots_changed(self, _state: int = 0) -> None:
+        """Refresh the preview: spots at the frame edge appear or go."""
+        self.window.on_parameters_changed()
 
     def _reset_contrast_and_refresh(self) -> None:
         """Re-derive the contrast and redraw after an identification
@@ -8736,6 +8994,7 @@ class Window(QtWidgets.QMainWindow):
         # ``identification_movie``. Never used for fitting.
         self._temporal_movie = None
         self._gaussian_movie = None
+        self._psf_movie = None
         # A split-FOV channel sum is filtered on its reference region alone
         # and put back in place on the canvas for the display: the
         # ``[cropped, embedded]`` views of ``identification_movie``.
@@ -8743,7 +9002,7 @@ class Window(QtWidgets.QMainWindow):
         # The same filter stacks for the channels that are *not* on screen,
         # built for the link-color preview only (see
         # ``channel_identification_movie``): {channel index: [temporal,
-        # gaussian]}.
+        # gaussian, psf]}.
         self._channel_filter_cache = {}
         # This frame's detections per channel while the identification
         # preview draws them, so the link colors can pair spots that have
@@ -8900,6 +9159,14 @@ class Window(QtWidgets.QMainWindow):
             self.parameters_dialog.gaussian_filter_spinbox.setValue(
                 float(gaussian_sigma)
             )
+        edge_spots = settings["Localize"].get("edge_spots", None)
+        if isinstance(edge_spots, bool):
+            self.parameters_dialog.edge_spots_checkbox.setChecked(edge_spots)
+        psf_filter_on = settings["Localize"].get("psf_filter_on", None)
+        if isinstance(psf_filter_on, bool):
+            self.parameters_dialog.psf_filter_checkbox.setChecked(
+                psf_filter_on
+            )
         self._load_identification_method_settings(settings)
 
     def _load_identification_method_settings(self, settings: dict) -> None:
@@ -9048,6 +9315,12 @@ class Window(QtWidgets.QMainWindow):
             "gaussian_filter_sigma"
         ] = self.parameters_dialog.gaussian_filter_spinbox.value()
         settings["Localize"][
+            "edge_spots"
+        ] = self.parameters_dialog.edge_spots_checkbox.isChecked()
+        settings["Localize"][
+            "psf_filter_on"
+        ] = self.parameters_dialog.psf_filter_checkbox.isChecked()
+        settings["Localize"][
             "identification_method"
         ] = self.parameters_dialog.identification_method()
         settings["Localize"][
@@ -9191,6 +9464,7 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        shortcuts.add_menu_action(file_menu)
         open_config_action = file_menu.addAction(
             "Open camera config file location"
         )
@@ -9266,14 +9540,14 @@ class Window(QtWidgets.QMainWindow):
         view_menu.addSeparator()
         # zooming is not in the menu (the mouse does it), but its
         # shortcuts work in the whole window
-        for text, shortcuts, slot in (
+        for text, keys, slot in (
             ("Zoom in", ["Ctrl++", "Ctrl+="], self.zoom_in),
             ("Zoom out", ["Ctrl+-"], self.zoom_out),
         ):
             action = QtGui.QAction(text, self)
-            action.setShortcuts(shortcuts)
+            action.setShortcuts(keys)
             action.triggered.connect(slot)
-            self.addAction(action)
+            self.addAction(shortcuts.register(action, text))
         fit_in_view_action = view_menu.addAction("Fit image to window")
         fit_in_view_action.setShortcut("Ctrl+W")
         fit_in_view_action.triggered.connect(self.fit_in_view)
@@ -9285,15 +9559,15 @@ class Window(QtWidgets.QMainWindow):
         # in the menu only, not on the toolbar
         constract_action.setIcon(theme.icon("contrast"))
         view_menu.addAction(constract_action)
-        # photon-counting movies only (enabled in update_lifetime_controls)
+        # photon-counting movies only (shown in update_lifetime_controls)
         self.lifetime_action = view_menu.addAction("Show lifetime")
         self.lifetime_action.setCheckable(True)
-        self.lifetime_action.setEnabled(False)
+        self.lifetime_action.setVisible(False)
         self.lifetime_action.toggled.connect(self.set_lifetime_shown)
         self.lifetime_settings_action = view_menu.addAction(
             "Lifetime display..."
         )
-        self.lifetime_settings_action.setEnabled(False)
+        self.lifetime_settings_action.setVisible(False)
         self.lifetime_settings_action.triggered.connect(
             self.lifetime_dialog.show
         )
@@ -9454,6 +9728,7 @@ class Window(QtWidgets.QMainWindow):
                 (fit_in_view_action, "fit-view", "Fit view"),
             ],
         )
+        shortcuts.install(self, "Localize")
 
     def open_config_location(self) -> None:
         """Open the folder holding the camera config file in the system
@@ -10179,10 +10454,21 @@ class Window(QtWidgets.QMainWindow):
             correct_z_bias,
             link_photons,
             registration_model,
+            use_identified_beads,
             accepted,
         ) = specs
         if not accepted:
             return
+        bead_positions = None
+        if use_identified_beads:
+            if self.identifications is None or not len(self.identifications):
+                QtWidgets.QMessageBox.information(
+                    self,
+                    "Spline PSF Calibration",
+                    "No spots are identified to take the bead boxes from.",
+                )
+                return
+            bead_positions = self.identifications[["frame", "x", "y"]].copy()
 
         base = os.path.splitext(self.movie_path)[0] if self.movie_path else ""
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
@@ -10230,6 +10516,7 @@ class Window(QtWidgets.QMainWindow):
             infos=infos,
             camera_infos=camera_infos,
             path=path,
+            bead_positions=bead_positions,
         )
         self.spline_calibration_worker.statusChanged.connect(
             self.status_bar.showMessage
@@ -11073,6 +11360,7 @@ class Window(QtWidgets.QMainWindow):
             "temporal_median_on": pd.temporal_median_checkbox.isChecked(),
             "temporal_median": pd.temporal_median_spinbox.value(),
             "gaussian_filter_sigma": pd.gaussian_filter_spinbox.value(),
+            "psf_filter_on": pd.psf_filter_checkbox.isChecked(),
             "identification_method": pd.identification_method(),
             "wavelet_threshold": pd.wavelet_threshold_spinbox.value(),
             "wavelet_noise": pd.wavelet_noise(),
@@ -11197,6 +11485,7 @@ class Window(QtWidgets.QMainWindow):
                 DEFAULT_PARAMETERS["Gaussian Filter Sigma"],
             )
         )
+        pd.psf_filter_checkbox.setChecked(params.get("psf_filter_on", False))
 
     def sum_settings_on_dialog(self) -> bool:
         """Whether the Parameters dialog shows the channel sum's
@@ -11509,6 +11798,11 @@ class Window(QtWidgets.QMainWindow):
             )
         self.parameters_dialog.gaussian_filter_spinbox.setValue(
             float(gaussian_sigma or 0.0)
+        )
+        # files written before the setting existed were identified away
+        # from the edge (as ``IdentificationParameters.from_info`` reads them)
+        self.parameters_dialog.edge_spots_checkbox.setChecked(
+            bool(lib.get_from_metadata(info, "Edge Spots") or False)
         )
         self._restore_identification_method(info, min_ng)
         self._clean_up_external_ids(info)
@@ -11868,6 +12162,11 @@ class Window(QtWidgets.QMainWindow):
                     self.curr_frame_number,
                     roi=self.identification_rois(),
                     frame_bounds=self.frame_range,
+                    # as ``localize.identify``: never at the edge of a sum
+                    edges=(
+                        parameters.edge_spots
+                        and self.identify_mode() not in IDENTIFY_SUM_MODES
+                    ),
                 )
                 self.draw_preview_identifications(
                     identifications_frame,
@@ -12033,6 +12332,17 @@ class Window(QtWidgets.QMainWindow):
         )
         return True
 
+    def _frame_shape(self) -> tuple[int, int] | None:
+        """``(height, width)`` of the displayed movie's frames, or None
+        without a movie."""
+        movie = getattr(self, "movie", None)
+        if movie is None:
+            return None
+        try:
+            return localize._frame_shape(movie)
+        except Exception:
+            return None
+
     def draw_identifications(
         self,
         identifications: pd.DataFrame,
@@ -12045,12 +12355,18 @@ class Window(QtWidgets.QMainWindow):
         box_half = int(box / 2)
         locs_frame = self._current_frame_locs()
         pixelsize = self.parameters_dialog.pixelsize.value()
+        frame_shape = self._frame_shape()
         for _, identification in identifications.iterrows():
             x = identification["x"]
             y = identification["y"]
-            item = self.scene.addRect(
-                x - box_half, y - box_half, box, box, color
-            )
+            # the box that is fitted: shifted into the frame for a spot at
+            # its edge (see localize.fit)
+            left, top = x - box_half, y - box_half
+            if frame_shape is not None:
+                height, width = frame_shape
+                left = max(0, min(left, width - box))
+                top = max(0, min(top, height - box))
+            item = self.scene.addRect(left, top, box, box, color)
             loc = self._loc_near(locs_frame, x, y, box_half, pixelsize)
             item.setToolTip(
                 format_hover_tooltip(identification if loc is None else loc)
@@ -12228,6 +12544,8 @@ class Window(QtWidgets.QMainWindow):
             parameters["Wavelet Min. Area"],
             parameters["Temporal Median Window"],
             parameters["Gaussian Filter Sigma"],
+            parameters["PSF Filter Calibration"],
+            parameters["Edge Spots"],
             tuple(np.asarray(rois).ravel().tolist()) if rois else None,
             None if self.frame_range is None else str(self.frame_range),
         )
@@ -12245,6 +12563,7 @@ class Window(QtWidgets.QMainWindow):
                 frame_number,
                 roi=rois,
                 frame_bounds=self.frame_range,
+                edges=identification.edge_spots,
             )
         except Exception:
             # another channel's movie must never break the display; without
@@ -12301,6 +12620,11 @@ class Window(QtWidgets.QMainWindow):
                 "gaussian_filter_sigma",
                 DEFAULT_PARAMETERS["Gaussian Filter Sigma"],
             )
+            parameters["PSF Filter Calibration"] = (
+                params.get("spline_calibration_path") or ""
+                if params.get("psf_filter_on", False)
+                else ""
+            )
         movie = self.channels[channel].movie
         if movie is not None and len(movie) < _TEMPORAL_MEDIAN_MIN_FRAMES:
             parameters["Temporal Median Window"] = 0
@@ -12325,7 +12649,8 @@ class Window(QtWidgets.QMainWindow):
             movie,
             parameters["Temporal Median Window"],
             parameters["Gaussian Filter Sigma"],
-            self._channel_filter_cache.get(channel, [None, None]),
+            self._channel_filter_cache.get(channel, [None, None, None]),
+            parameters["PSF Filter Calibration"],
         )
         self._channel_filter_cache[channel] = cache
         return movie
@@ -13043,8 +13368,8 @@ class Window(QtWidgets.QMainWindow):
     def update_lifetime_controls(self) -> None:
         """Offer the lifetime display for photon-counting movies only."""
         available = self.lifetime_available()
-        self.lifetime_action.setEnabled(available)
-        self.lifetime_settings_action.setEnabled(available)
+        self.lifetime_action.setVisible(available)
+        self.lifetime_settings_action.setVisible(available)
         self.lifetime_button.setVisible(available)
         self.lifetime_dialog.update_decay()
 
@@ -13598,10 +13923,20 @@ class Window(QtWidgets.QMainWindow):
                     # a movie too short for the filter reports it as off, so
                     # display, preview and identification all agree
                     and self.temporal_median_applicable()
+                    # the multi-emitter fit runs on the raw frames
+                    and not dialog.is_multi_emitter()
                 )
                 else 0
             ),
-            "Gaussian Filter Sigma": dialog.gaussian_filter_spinbox.value(),
+            "Gaussian Filter Sigma": (
+                0.0
+                if dialog.is_multi_emitter()
+                else dialog.gaussian_filter_spinbox.value()
+            ),
+            "PSF Filter Calibration": (
+                "" if dialog.is_multi_emitter() else dialog.psf_filter_path()
+            ),
+            "Edge Spots": dialog.edge_spots_checkbox.isChecked(),
         }
 
     def temporal_median_applicable(self) -> bool:
@@ -13627,8 +13962,11 @@ class Window(QtWidgets.QMainWindow):
             checkbox.setEnabled(True)
             checkbox.setText(dialog._temporal_median_text)
             checkbox.setToolTip(dialog._temporal_median_tip)
+            dialog._update_filters_summary()
             return
         checkbox.setEnabled(False)
+        # the filter is ignored, so it is not listed as on
+        dialog._update_filters_summary()
         checkbox.setText(
             f"{dialog._temporal_median_text} "
             f"(needs >= {_TEMPORAL_MEDIAN_MIN_FRAMES} frames)"
@@ -13684,6 +14022,7 @@ class Window(QtWidgets.QMainWindow):
             # but dropping it here makes that explicit
             self._temporal_movie = None
             self._gaussian_movie = None
+            self._psf_movie = None
             self._sum_region_views = [None, None]
         except (AttributeError, RuntimeError):
             pass  # a partially built window has no channel sum to drop
@@ -13843,19 +14182,25 @@ class Window(QtWidgets.QMainWindow):
         if movie is None:
             self._temporal_movie = None
             self._gaussian_movie = None
+            self._psf_movie = None
             return None
         parameters = self.parameters
         window = parameters["Temporal Median Window"]
         sigma = parameters["Gaussian Filter Sigma"]
+        psf_path = parameters["PSF Filter Calibration"]
         if not self.temporal_median_applicable():
             window = 0
         try:
-            cache = [self._temporal_movie, self._gaussian_movie]
+            cache = [
+                self._temporal_movie,
+                self._gaussian_movie,
+                self._psf_movie,
+            ]
             region_views = self._sum_region_views
         except (AttributeError, RuntimeError):
             # also called from a partially built window, which has no
             # cached filter stack yet
-            cache = [None, None]
+            cache = [None, None, None]
             region_views = [None, None]
         # A split-FOV sum fills its reference region only. As in the batch
         # run (see ``localize.identify``), that region alone is filtered, so
@@ -13870,9 +14215,9 @@ class Window(QtWidgets.QMainWindow):
             frame_shape = movie.frame_shape
             movie = cropped
         movie, cache = _filtered_identification_movie(
-            movie, window, sigma, cache
+            movie, window, sigma, cache, psf_path
         )
-        self._temporal_movie, self._gaussian_movie = cache
+        self._temporal_movie, self._gaussian_movie, self._psf_movie = cache
         if filled_window is not None:
             if embedded is None or embedded.raw is not movie:
                 embedded = localize.EmbeddedMovie(
@@ -14136,6 +14481,8 @@ class Window(QtWidgets.QMainWindow):
                 filtered += f"; Temporal median: {temporal_median}"
             if gaussian_sigma:
                 filtered += f"; Gaussian sigma: {gaussian_sigma:g}"
+            if parameters.get("PSF Filter Calibration"):
+                filtered += "; PSF filter"
             message = (
                 f"Identified {counted} in {elapsed_time:.2f}"
                 f" seconds. (Box Size: {box}; {threshold}"
@@ -14647,6 +14994,7 @@ class Window(QtWidgets.QMainWindow):
         # the filter stack now sits on top of the sum
         self._temporal_movie = None
         self._gaussian_movie = None
+        self._psf_movie = None
         # ... and so does the display, on the sum's intensity scale
         self._reset_contrast_to_frame()
 
@@ -16099,6 +16447,13 @@ class Window(QtWidgets.QMainWindow):
                 "Load a multichannel or split-FOV spline calibration first "
                 "(Experimental PSF (spline) > Load calibration).",
             )
+            return
+        try:
+            # multiplane (e.g. biplane) calibrations cannot be re-registered
+            # from the signal; say so before asking for the frames
+            spline._refuse_multiplane_signal_registration(calibration)
+        except ValueError as e:
+            QtWidgets.QMessageBox.warning(self, title, str(e))
             return
         split_fov = bool(calibration.get("split_fov"))
 
@@ -18030,9 +18385,13 @@ class SplineCalibrationWorker(QtCore.QThread):
         infos=None,
         camera_infos=None,
         z_binning: int = 1,
+        bead_positions: pd.DataFrame | None = None,
     ) -> None:
         super().__init__()
         self.bead_diagnostics: list[dict] = []
+        # the identified spots to cut the beads' boxes at, or None to detect
+        # the beads (see ``spline.calibrate_spline``)
+        self.bead_positions = bead_positions
         self.movie = movie
         self.info = info
         self.camera_info = camera_info
@@ -18087,6 +18446,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                         path=self.path,
                         return_diagnostics=True,
                         progress=progress,
+                        bead_positions=self.bead_positions,
                     )
                 )
             elif self.regions:
@@ -18109,6 +18469,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                     path=self.path,
                     return_diagnostics=True,
                     progress=progress,
+                    bead_positions=self.bead_positions,
                 )
             else:
                 calibration, diagnostics = spline.calibrate_spline(
@@ -18129,6 +18490,7 @@ class SplineCalibrationWorker(QtCore.QThread):
                     path=self.path,
                     return_diagnostics=True,
                     progress=progress,
+                    bead_positions=self.bead_positions,
                 )
         except Exception as e:  # surface any failure to the GUI
             self.failed.emit(str(e))

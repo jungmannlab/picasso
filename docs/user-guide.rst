@@ -102,7 +102,7 @@ All modules
       :link-type: doc
       :class-card: sd-card-hover
 
-      Appearance, toolbars, sound notifications and the settings file.
+      Appearance, toolbars, keyboard shortcuts, sound notifications and the settings file.
 
 .. toctree::
    :hidden:

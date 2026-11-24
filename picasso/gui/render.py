@@ -81,7 +81,7 @@ from .overlay_style import OverlayStyleWidget
 from .rotation import RotationWindow, source_key
 from .app import run_gui
 from . import theme
-from . import toolbars
+from . import shortcuts, toolbars
 
 # Optional modules with external/hardware dependencies live in ext
 from ..ext.bitplane import (  # PyImarisWrite works on Windows only
@@ -176,6 +176,11 @@ KEEP_NON_OVERLAPPING_KEY = "Keep non-overlapping after alignment"
 # Remove all localizations asks for confirmation first
 CONFIRM_REMOVE_LOCS_KEY = "Confirm removing all localizations"
 CTRL_Z_NOTICE_KEY = "Show Ctrl+Z notice"
+# key (in the Render section of the user settings) of the percentage of
+# a file's localizations that must be dropped while loading it for
+# Render to warn about it, and its default
+DROPPED_LOCS_WARNING_KEY = "Dropped localizations warning (%)"
+DROPPED_LOCS_WARNING_DEFAULT = 5.0
 POLYGON_POINTER_SIZE = 16  # must be even
 # shortest drag (display pixels, in x and y) that still yields a box
 # pick, so that a stray click does not create one of zero area
@@ -279,6 +284,43 @@ def _render_bool_setting(key: str, default: bool) -> bool:
         render_settings[key] = default
         io.save_user_settings(settings)
     return default
+
+
+def dropped_locs_warning_setting() -> float:
+    """The percentage of a file's localizations that must be dropped
+    while loading it (missing or infinite values, outside the field of
+    view, negative values) for Render to warn about it.
+
+    Reads ``Dropped localizations warning (%)`` from the ``Render``
+    section of the user settings; a missing key is written with the
+    default (5), so that it is visible in the file, unless the file on
+    disk could not be read. A value that is not a non-negative number
+    is left in the file and the default is used. 0 warns whenever a
+    localization is dropped.
+
+    Returns
+    -------
+    percent : float
+        Render warns if more than this percentage is dropped.
+    """
+    settings = io.load_user_settings()
+    render_settings = settings["Render"]
+    if not isinstance(render_settings, dict):
+        return DROPPED_LOCS_WARNING_DEFAULT
+    value = render_settings.get(DROPPED_LOCS_WARNING_KEY)
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and np.isfinite(value)
+        and value >= 0
+    ):
+        return float(value)
+    if value is None and not io.settings_file_is_broken():
+        render_settings[DROPPED_LOCS_WARNING_KEY] = (
+            DROPPED_LOCS_WARNING_DEFAULT
+        )
+        io.save_user_settings(settings)
+    return DROPPED_LOCS_WARNING_DEFAULT
 
 
 def keep_non_overlapping_setting() -> bool:
@@ -6511,7 +6553,9 @@ class InfoDialog(lib.Dialog):
         self.precision_channel_label = QtWidgets.QLabel("Channel:")
         grid.addWidget(self.precision_channel_label, 0, 0)
         # the channel selector is shown only with several channels
-        self.precision_channel = QtWidgets.QComboBox()
+        # long file names must not widen the dialog: the box shows their
+        # end, the popup list the full names
+        self.precision_channel = lib_qt.TailElidedComboBox(max_chars=20)
         self.precision_channel.setToolTip(
             "Channel whose precision and resolution are shown and"
             " calculated."
@@ -8223,7 +8267,7 @@ class MaskSettingsDialog(lib.Dialog):
         self.save_button.setEnabled(False)
         self.save_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.save_button.clicked.connect(self.save_locs)
-        mask_grid.addWidget(self.save_button, 2, 1, 1, 2)
+        mask_grid.addWidget(self.save_button, 2, 1)
 
         self.picks_button = QtWidgets.QPushButton("Add as polygon picks")
         self.picks_button.setToolTip(
@@ -8235,7 +8279,7 @@ class MaskSettingsDialog(lib.Dialog):
         self.picks_button.setEnabled(False)
         self.picks_button.setFocusPolicy(QtCore.Qt.FocusPolicy.NoFocus)
         self.picks_button.clicked.connect(self.add_mask_picks)
-        mask_grid.addWidget(self.picks_button, 3, 0)
+        mask_grid.addWidget(self.picks_button, 2, 2)
 
         self.cached_oversampling = 0
         self.cached_blur = 0
@@ -9351,8 +9395,7 @@ class ToolsSettingsDialog(lib.Dialog):
 
 class CBCDialog(lib.Dialog):
     """Choose the channels and parameters for coordinate-based
-    colocalization (CBC, Malkusch, et al. Histochem Cell Biol, 2012.
-    DOI: 10.1007/s00418-011-0880-5).
+    colocalization (CBC, Malkusch et al., 2012).
 
     The CBC is not symmetric, so the channel whose localizations are
     scored and the partner channel are chosen separately, or all pairs
@@ -9385,6 +9428,13 @@ class CBCDialog(lib.Dialog):
     use_z : QCheckBox
         If checked, the CBC is computed in 3D. Only enabled if all
         channels involved contain z.
+
+    References
+    ----------
+    Malkusch, S., Endesfelder, U., Mondry, J. et al. Coordinate-based
+    colocalization analysis of single-molecule localization microscopy
+    data. Histochem Cell Biol 137, 1-10 (2012).
+    https://doi.org/10.1007/s00418-011-0880-5
     """
 
     DOCS_URL = docs_url("render/analysis.html#render-cbc")
@@ -10857,6 +10907,73 @@ class RESIDialog(lib.Dialog):
         )
 
 
+class ColumnsHelpDialog(lib.Dialog):
+    """Explain the columns of the localizations that can be rendered
+    by property, see ``lib.column_descriptions``.
+
+    Parameters
+    ----------
+    columns : list of str
+        Names of the columns, in the order shown.
+    parent : QWidget
+        Parent widget.
+    """
+
+    DOCS_URL = docs_url("files.html#files-localization-columns")
+
+    def __init__(self, columns: list[str], parent: QtWidgets.QWidget) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Columns")
+        self.setModal(False)
+        layout = QtWidgets.QVBoxLayout(self)
+        header = QtWidgets.QHBoxLayout()
+        header.addWidget(
+            lib.WrappingLabel(
+                "The columns of the localizations and what they hold. "
+                "Lengths are in nm."
+            ),
+            1,
+        )
+        header.addWidget(lib.HelpButton(self.DOCS_URL))
+        layout.addLayout(header)
+
+        descriptions = lib.column_descriptions(columns)
+        table = QtWidgets.QTableWidget(len(columns), 2)
+        table.setHorizontalHeaderLabels(["Column", "Description"])
+        table.verticalHeader().hide()
+        table.setEditTriggers(
+            QtWidgets.QAbstractItemView.EditTrigger.NoEditTriggers
+        )
+        table.setWordWrap(True)
+        for row, (column, description) in enumerate(descriptions.items()):
+            table.setItem(row, 0, QtWidgets.QTableWidgetItem(column))
+            item = QtWidgets.QTableWidgetItem(
+                description
+                or "Not a standard Picasso column, e.g., added by another "
+                "program."
+            )
+            if description is None:
+                item.setForeground(
+                    self.palette().brush(
+                        QtGui.QPalette.ColorGroup.Disabled,
+                        QtGui.QPalette.ColorRole.Text,
+                    )
+                )
+            table.setItem(row, 1, item)
+        header_view = table.horizontalHeader()
+        header_view.setSectionResizeMode(
+            0, QtWidgets.QHeaderView.ResizeMode.ResizeToContents
+        )
+        header_view.setSectionResizeMode(
+            1, QtWidgets.QHeaderView.ResizeMode.Stretch
+        )
+        # rows grow with the wrapped descriptions when the width changes
+        header_view.sectionResized.connect(table.resizeRowsToContents)
+        layout.addWidget(table)
+        self.resize(650, 500)
+        table.resizeRowsToContents()
+
+
 class DisplaySettingsDialog(lib.Dialog):
     """Change display settings, for example: zoom, display pixel size,
     contrast and blur.
@@ -11270,8 +11387,15 @@ class DisplaySettingsDialog(lib.Dialog):
         )
         render_grid.addWidget(param_label, 0, 0)
         self.parameter = QtWidgets.QComboBox()
-        render_grid.addWidget(self.parameter, 0, 1)
         self.parameter.activated.connect(self.window.view.set_property)
+        parameter_row = QtWidgets.QHBoxLayout()
+        parameter_row.addWidget(self.parameter, 1)
+        parameter_row.addWidget(
+            lib.HelpButton(
+                self.show_columns_help, tooltip="Explain the columns"
+            )
+        )
+        render_grid.addLayout(parameter_row, 0, 1)
 
         minimum_label_render = QtWidgets.QLabel("Min.:")
         minimum_label_render.setToolTip(
@@ -11371,6 +11495,23 @@ class DisplaySettingsDialog(lib.Dialog):
         hint = container.sizeHint()
         lib.adjust_widget_size(self, hint)
 
+    def show_columns_help(self) -> None:
+        """Explain the columns listed under Parameter, i.e., those of
+        the loaded localizations."""
+        columns = [
+            self.parameter.itemText(i) for i in range(self.parameter.count())
+        ]
+        if not columns:
+            QtWidgets.QMessageBox.information(
+                self,
+                "Columns",
+                "Load localizations to see what their columns hold.",
+            )
+            return
+        dialog = ColumnsHelpDialog(columns, self)
+        dialog.setAttribute(QtCore.Qt.WidgetAttribute.WA_DeleteOnClose)
+        dialog.show()
+
     def on_cmap_changed(self) -> None:
         """Load custom colormap if requested."""
         if self.colormap.currentText() == "Custom":
@@ -11421,7 +11562,15 @@ class DisplaySettingsDialog(lib.Dialog):
     def _update_quadtree_snr(self, *args) -> None:
         """Show the signal-to-noise ratio the leaf capacity implies:
         bins hold about half the capacity on average and their counts
-        are Poisson distributed (Baddeley et al. 2010, sqrt(N / 2))."""
+        are Poisson distributed (Baddeley et al. 2010, sqrt(N / 2)).
+
+        References
+        ----------
+        Baddeley, D., Cannell, M. B. & Soeller, C. Visualization of
+        localization microscopy data. Microsc Microanal 16, 64-72
+        (2010).
+        https://doi.org/10.1017/S143192760999122X
+        """
         snr = np.sqrt(self.quadtree_capacity.value() / 2.0)
         self.quadtree_snr.setText(f"Mean SNR per bin \u2248 {snr:.1f}")
 
@@ -12501,15 +12650,26 @@ class _ThreadLogRecords(logging.Handler):
 
     Records of other threads are passed on to ``logging.lastResort``
     when no other handler would take them, as without this handler.
+
+    Parameters
+    ----------
+    dropped_percent : float, optional
+        The warning about dropped localizations is collected only if
+        more than this percentage of the file's localizations was
+        dropped. Default is 0, i.e., always.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, dropped_percent: float = 0.0) -> None:
         super().__init__(logging.WARNING)
         self.thread = threading.get_ident()
+        self.dropped_percent = dropped_percent
         self.messages = []
 
     def emit(self, record: logging.LogRecord) -> None:
         if record.thread == self.thread:
+            fraction = getattr(record, io._DROPPED_FRACTION_ATTR, None)
+            if fraction is not None and 100 * fraction <= self.dropped_percent:
+                return
             self.messages.append(record.getMessage())
         elif not logging.getLogger().handlers and logging.lastResort:
             logging.lastResort.handle(record)
@@ -12529,8 +12689,9 @@ class LocsLoadWorker(QtCore.QObject):
     the GUI thread *before* the worker starts (see
     ``View._prompt_pixelsize``), errors are reported via ``failed`` and
     the warnings logged while a file is read (e.g., about localizations
-    that were dropped) via ``warned``, such that the GUI thread displays
-    the message box.
+    that were dropped, if more than ``Dropped localizations warning
+    (%)`` of the user settings were) via ``warned``, such that the GUI
+    thread displays the message box.
 
     Parameters
     ----------
@@ -12567,6 +12728,8 @@ class LocsLoadWorker(QtCore.QObject):
         self.jobs = jobs
         self.average_traces = average_traces
         self._canceled = False
+        # read here, on the GUI thread, as it may write the settings
+        self.dropped_percent = dropped_locs_warning_setting()
 
     def cancel(self) -> None:
         """Request cancellation; takes effect at the next block of
@@ -12588,7 +12751,7 @@ class LocsLoadWorker(QtCore.QObject):
         _LoadCanceledError
             Propagated so the caller can stop the whole run.
         """
-        records = _ThreadLogRecords()
+        records = _ThreadLogRecords(self.dropped_percent)
         io_log = logging.getLogger(io.__name__)
         io_log.addHandler(records)
         try:
@@ -12862,7 +13025,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         self.locs = []
         self.infos = []
         self.locs_paths = []
-        self.group_color = []
+        self.group_color = np.zeros(0, dtype=np.int64)
         self._mode = "Zoom"
         self._pan = False
         self._pan_button = None  # the button whose release ends a pan
@@ -13197,8 +13360,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 [np.median(locs["lpx"]), np.median(locs["lpy"])]
             )
             if "group" in locs.columns:
-                if len(self.group_color) == 0 and len(locs):
-                    self.group_color = render.get_group_color(self.locs[0])
+                # also for a file without localizations, whose group
+                # colors must be an (empty) array as well
+                self.group_color = render.get_group_color(self.locs[0])
             disp_sett_dlg.parameter.clear()
             disp_sett_dlg.parameter.addItems(locs.columns.to_list())
             disp_sett_dlg.render_groupbox.content.setEnabled(True)
@@ -16072,6 +16236,20 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                     qimage_scale = self.draw_scalebar(qimage, force=True)
                     qimage_scale.save(spath)
 
+    def _ask_channel(self, title: str, extra_items: list[str]) -> int | None:
+        """Ask for a channel in an input dialog listing the paths of the
+        loaded channels followed by ``extra_items``. Return the index of
+        the chosen item, or None if canceled.
+
+        The closed box shows only the end of a long path so that the
+        dialog does not grow with it; the popup list shows full paths.
+        """
+        items = list(self.locs_paths) + extra_items
+        item, ok = lib_qt.get_path_item(self, title, "Channel:", items)
+        if ok and item in items:
+            return items.index(item)
+        return None
+
     def get_channel(self, title: str = "Choose a channel") -> int | None:
         """Open an input dialog to ask for a channel. Return the channel
         index or None if no locs loaded.
@@ -16086,15 +16264,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return None
         elif n_channels == 1:
             return 0
-        elif len(self.locs_paths) > 1:
-            pathlist = list(self.locs_paths)
-            index, ok = QtWidgets.QInputDialog.getItem(
-                self, title, "Channel:", pathlist, editable=False
-            )
-            if ok:
-                return pathlist.index(index)
-            else:
-                return None
+        return self._ask_channel(title, [])
 
     def get_channel_save_locs(
         self,
@@ -16114,21 +16284,9 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return None
         elif n_channels == 1:
             return 0
-        elif n_channels > 1:
-            pathlist = list(self.locs_paths)
-            pathlist.append("Apply to all sequentially")
-            pathlist.append("Combine all channels")
-            index, ok = QtWidgets.QInputDialog.getItem(
-                self,
-                title,
-                "Channel:",
-                pathlist,
-                editable=False,
-            )
-            if ok:
-                return pathlist.index(index)
-            else:
-                return None
+        return self._ask_channel(
+            title, ["Apply to all sequentially", "Combine all channels"]
+        )
 
     def get_channel_all_seq(
         self,
@@ -16148,20 +16306,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return None
         elif n_channels == 1:
             return 0
-        elif len(self.locs_paths) > 1:
-            pathlist = list(self.locs_paths)
-            pathlist.append("Apply to all sequentially")
-            index, ok = QtWidgets.QInputDialog.getItem(
-                self,
-                title,
-                "Channel:",
-                pathlist,
-                editable=False,
-            )
-            if ok:
-                return pathlist.index(index)
-            else:
-                return None
+        return self._ask_channel(title, ["Apply to all sequentially"])
 
     def get_channel3d(self, title: str = "Select channel") -> int | None:
         """Similar to ``self.get_channel``, used in selecting 3D picks.
@@ -16171,16 +16316,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return None
         elif n_channels == 1:
             return 0
-        elif len(self.locs_paths) > 1:
-            pathlist = list(self.locs_paths)
-            pathlist.append("Show all channels")
-            index, ok = QtWidgets.QInputDialog.getItem(
-                self, title, "Channel:", pathlist, editable=False
-            )
-            if ok:
-                return pathlist.index(index)
-            else:
-                return None
+        return self._ask_channel(title, ["Show all channels"])
 
     def get_render_kwargs(
         self,
@@ -19199,17 +19335,21 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             )
             locs, info = self.locs[channel], self.infos[channel]
             pick_args = self._pick_args()
-            new_picks = lib.run_with_status(
-                lambda: postprocess.pick_similar(
-                    locs=locs,
-                    info=info,
-                    **pick_args,
-                    std_range=std_range,
-                    index_blocks=index_blocks,
-                ),
-                "Picking similar...",
-                self.window,
-            )
+            try:
+                new_picks = lib.run_with_status(
+                    lambda: postprocess.pick_similar(
+                        locs=locs,
+                        info=info,
+                        **pick_args,
+                        std_range=std_range,
+                        index_blocks=index_blocks,
+                    ),
+                    "Picking similar...",
+                    self.window,
+                )
+            except ValueError as e:
+                QtWidgets.QMessageBox.warning(self, "Pick Error", str(e))
+                return
             # the current picks come first and keep their sizes, the new
             # ones take the median size
             n_picks = len(self._picks)
@@ -20339,7 +20479,15 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     def undrift_aim(self) -> None:
         """Undrift with Adaptive Intersection Maximization (AIM).
 
-        See Ma H., et al. Science Advances. 2024."""
+        See Ma H., et al. Science Advances. 2024.
+
+        References
+        ----------
+        Ma, H., Chen, M., Nguyen, P. & Liu, Y. Toward drift-free
+        high-throughput nanoscopy through adaptive intersection
+        maximization. Sci Adv 10, eadm7765 (2024).
+        https://doi.org/10.1126/sciadv.adm7765
+        """
         channel = self.get_channel_all_seq("Undrift by AIM")
         if channel is None:
             return
@@ -20387,7 +20535,15 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
     def undrift_rcc(self) -> None:
         """Undrift with RCC.
 
-        See Wang Y., et al. Optics Express. 2014."""
+        See Wang Y., et al. Optics Express. 2014.
+
+        References
+        ----------
+        Wang, Y. et al. Localization events-based sample drift
+        correction for localization microscopy with redundant
+        cross-correlation algorithm. Opt Express 22, 15982 (2014).
+        https://doi.org/10.1364/OE.22.015982
+        """
         channel = self.get_channel_all_seq("Undrift by RCC")
         if channel is None:
             return
@@ -21166,8 +21322,8 @@ class Window(QtWidgets.QMainWindow):
     #: they stay alive while open, also after being unlinked
     _secondary_windows = []
 
-    #: whether File > Undo is being triggered by its shortcut
-    _undo_by_key = False
+    #: the shortcut triggering File > Undo, None for a click
+    _undo_shortcut = None
 
     def __init__(
         self,
@@ -21499,6 +21655,11 @@ class Window(QtWidgets.QMainWindow):
             export_ims_action = file_menu.addAction("Export ROI for Imaris...")
             export_ims_action.triggered.connect(self.export_fov_ims)
         file_menu.addSeparator()
+        # Ctrl+M is taken by the measure tool
+        metadata_action = file_menu.addAction("Show metadata...")
+        metadata_action.setIcon(theme.icon("metadata"))
+        metadata_action.setShortcut("Ctrl+Shift+M")
+        metadata_action.triggered.connect(self.show_metadata)
         convert_units_action = file_menu.addAction("Convert files to nm...")
         convert_units_action.setToolTip(
             "Convert files written before Picasso 1.0 (camera pixels) to nm."
@@ -21524,6 +21685,7 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        shortcuts.add_menu_action(file_menu)
         help_action = file_menu.addAction("Help")
         help_action.setIcon(theme.icon("help"))
         help_action.triggered.connect(
@@ -21568,10 +21730,6 @@ class Window(QtWidgets.QMainWindow):
         info_action.setShortcut("Ctrl+I")
         info_action.triggered.connect(self.info_dialog.show)
         view_menu.addAction(info_action)
-        metadata_action = view_menu.addAction("Show metadata...")
-        metadata_action.setIcon(theme.icon("metadata"))
-        metadata_action.setShortcut("Ctrl+Shift+M")
-        metadata_action.triggered.connect(self.show_metadata)
         slicer_action = view_menu.addAction("Slice...")
         slicer_action.setIcon(theme.icon("slice"))
         slicer_action.triggered.connect(self.slicer_dialog.initialize)
@@ -21950,7 +22108,9 @@ class Window(QtWidgets.QMainWindow):
             menu.setDisabled(True)
         for action in self.data_actions:
             action.setEnabled(False)
-        self.update_undo_actions()
+        # the user's shortcuts, also of a rebuilt UI; updates the undo
+        # actions, see shortcuts_applied
+        shortcuts.install(self, "Render")
 
         self._plugins_loaded = plugins_loaded
         # reconnect the rebuilt view and dialogs (``remove_locs``)
@@ -21966,18 +22126,18 @@ class Window(QtWidgets.QMainWindow):
             self.removeAction(action)
             action.deleteLater()
         self._navigation_actions = []
-        for text, shortcuts, slot in (
-            ("Left", ["Left", "A"], self.view.to_left),
-            ("Right", ["Right", "D"], self.view.to_right),
-            ("Up", ["Up", "W"], self.view.to_up),
-            ("Down", ["Down", "S"], self.view.to_down),
+        for text, keys, slot in (
+            ("Move left", ["Left", "A"], self.view.to_left),
+            ("Move right", ["Right", "D"], self.view.to_right),
+            ("Move up", ["Up", "W"], self.view.to_up),
+            ("Move down", ["Down", "S"], self.view.to_down),
             ("Zoom in", ["Ctrl++", "Ctrl+="], self.view.zoom_in),
             ("Zoom out", ["Ctrl+-"], self.view.zoom_out),
         ):
             action = QtGui.QAction(text, self)
-            action.setShortcuts(shortcuts)
+            action.setShortcuts(keys)
             action.triggered.connect(slot)
-            self.addAction(action)
+            self.addAction(shortcuts.register(action, text))
             self._navigation_actions.append(action)
 
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
@@ -23294,70 +23454,100 @@ class Window(QtWidgets.QMainWindow):
             action.setEnabled(label is not None)
             if label:
                 text = f"{text}: {label}"
-            shortcut = action.shortcut().toString(
-                QtGui.QKeySequence.SequenceFormat.NativeText
-            )
+            shortcut = toolbars.shortcut_text(action)
             action.setToolTip(f"{text} ({shortcut})" if shortcut else text)
         self._ctrl_z_notice_action.setEnabled(not self.undo_action.isEnabled())
 
+    def shortcuts_applied(self) -> None:
+        """The user's shortcuts were applied (``shortcuts.apply``): the
+        hidden action explaining Ctrl+Z (see ``explain_ctrl_z``) keeps
+        Ctrl+Z only while File > Undo has it, and the tooltips of Undo
+        and Redo show their shortcuts."""
+        ctrl_z = QtGui.QKeySequence(QtGui.QKeySequence.StandardKey.Undo)
+        has_ctrl_z = ctrl_z in self.undo_action.shortcuts()
+        self._ctrl_z_notice_action.setShortcuts([ctrl_z] if has_ctrl_z else [])
+        self.update_undo_actions()
+
     def eventFilter(self, obj: QtCore.QObject, event: QtCore.QEvent) -> bool:
-        # File > Undo is triggered by its shortcut, see _undo
+        # File > Undo is triggered by one of its shortcuts, see _undo
         if (
             obj is getattr(self, "undo_action", None)
             and event.type() == QtCore.QEvent.Type.Shortcut
         ):
-            self._undo_by_key = True
+            self._undo_shortcut = QtGui.QKeySequence(event.key())
         return super().eventFilter(obj, event)
 
     def _undo(self) -> None:
         """File > Undo; pressed as Ctrl+Z, see ``explain_ctrl_z``."""
-        # the native menu bar of macOS triggers the action itself, without
-        # a shortcut event; Ctrl (Cmd) is held then, unlike for a click
-        held = QtGui.QGuiApplication.queryKeyboardModifiers()
-        by_key = self._undo_by_key or bool(
-            held & QtCore.Qt.KeyboardModifier.ControlModifier
-        )
-        self._undo_by_key = False
-        label = self.view.history.undo_label
-        if self.view.undo() and by_key:
-            self.explain_ctrl_z(label)
+        ctrl_z = QtGui.QKeySequence(QtGui.QKeySequence.StandardKey.Undo)
+        if self._undo_shortcut is not None:
+            by_ctrl_z = self._undo_shortcut == ctrl_z
+        else:
+            # the native menu bar of macOS triggers the action itself,
+            # without a shortcut event; only Ctrl (Cmd) is held then for
+            # Cmd+Z, nothing for a click
+            held = QtGui.QGuiApplication.queryKeyboardModifiers()
+            by_ctrl_z = held == QtCore.Qt.KeyboardModifier.ControlModifier
+        self._undo_shortcut = None
+        if by_ctrl_z and not self.explain_ctrl_z(self.view.history.undo_label):
+            return
+        self.view.undo()
 
-    def explain_ctrl_z(self, label: str | None) -> None:
+    def explain_ctrl_z(self, label: str | None) -> bool:
         """Tell, when Ctrl+Z is pressed, that it undoes the last step
         rather than selecting the Zoom tool, as before Picasso 1.0, which
-        is now Z. Not shown if ``Show Ctrl+Z notice`` is False in the
-        user settings; ticking "Don't show again" sets it to False.
+        is now Z, and ask whether to undo the step or select the Zoom
+        tool. Not shown if ``Show Ctrl+Z notice`` is False in the user
+        settings; ticking "Don't show again" sets it to False. Not shown
+        either once the user took Ctrl+Z from File > Undo (File >
+        Keyboard shortcuts...), e.g., to give it back to the Zoom tool.
 
         Parameters
         ----------
         label : str or None
-            Name of the step undone, None if there was nothing to undo.
+            Name of the step to undo, None if there is nothing to undo.
+
+        Returns
+        -------
+        undo : bool
+            Whether to undo the step: True if the notice is not shown
+            or "Undo" was chosen.
         """
-        if not ctrl_z_notice_setting():
-            return
+        standard = QtGui.QKeySequence(QtGui.QKeySequence.StandardKey.Undo)
+        if not ctrl_z_notice_setting() or (
+            standard not in self.undo_action.shortcuts()
+        ):
+            # nothing to explain once the user changed Undo's shortcut
+            return True
         native = QtGui.QKeySequence.SequenceFormat.NativeText
-        undo_key = self.undo_action.shortcut().toString(native)
-        redo_key = self.redo_action.shortcut().toString(native)
-        if label is None:
-            done = "There was nothing to undo."
-        else:
-            done = (
-                f'It undid "{label}"; {redo_key} (File > Redo) puts it'
-                " back."
-            )
+        undo_key = standard.toString(native)
         box = QtWidgets.QMessageBox(self)
         box.setIcon(QtWidgets.QMessageBox.Icon.Information)
         box.setWindowTitle("Undo")
+        if label is None:
+            question = "There is nothing to undo."
+        else:
+            question = f'Undo "{label}"?'
         box.setText(
             f"{undo_key} undoes the last step that changed the"
             f" localizations, the picks or the measurements (File > Undo)."
-            f" {done}\n\nThe Zoom tool, which {undo_key} selected before"
-            " Picasso 1.0, is now selected with Z."
+            f" {question}\n\nThe Zoom tool, which {undo_key} selected"
+            " before Picasso 1.0, is now selected with Z. To have"
+            f" {undo_key} select it again, give it to the Zoom tool in"
+            " File > Keyboard shortcuts..."
         )
-        box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
+        undo_button = None
+        if label is None:
+            box.addButton(QtWidgets.QMessageBox.StandardButton.Ok)
+        else:
+            undo_button = box.addButton(
+                "Undo", QtWidgets.QMessageBox.ButtonRole.AcceptRole
+            )
         zoom_button = box.addButton(
             "Select Zoom tool", QtWidgets.QMessageBox.ButtonRole.ActionRole
         )
+        if undo_button is not None:
+            box.setDefaultButton(undo_button)
         dont_show = QtWidgets.QCheckBox("Don't show again")
         box.setCheckBox(dont_show)
         box.exec()
@@ -23369,6 +23559,7 @@ class Window(QtWidgets.QMainWindow):
         if box.clickedButton() is zoom_button:
             tools = self.tools_actiongroup.actions()
             next(a for a in tools if a.text() == "Zoom").trigger()
+        return undo_button is not None and box.clickedButton() is undo_button
 
     def link_channels_changed(self, changes: list[tuple]) -> None:
         """Pass changed channels on to the linked windows sharing them;

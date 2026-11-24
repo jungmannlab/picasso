@@ -178,10 +178,12 @@ def _status(dialog, name):
 
 
 def _buttons(dialog, name):
-    widget = dialog.table.cellWidget(_row(dialog, name), 5)
+    """The enabled action buttons of a row."""
+    widget = dialog.table.cellWidget(_row(dialog, name), 6)
     return {
         button.text(): button
         for button in widget.findChildren(QtWidgets.QPushButton)
+        if button.isEnabled()
     }
 
 
@@ -191,6 +193,11 @@ def _click(dialog, name, label):
 
 def _checkbox(dialog, name):
     widget = dialog.table.cellWidget(_row(dialog, name), 4)
+    return widget.findChild(QtWidgets.QCheckBox)
+
+
+def _notify(dialog, name):
+    widget = dialog.table.cellWidget(_row(dialog, name), 5)
     return widget.findChild(QtWidgets.QCheckBox)
 
 
@@ -392,6 +399,22 @@ class TestUpdate:
         assert _status(outdated, "Drift") == "Installed"
         assert "drift v2.0" in _menu(host)
         assert "drift v1.0" not in _menu(host)
+
+
+class TestNotify:
+    def test_installed_plugins_are_notified_until_unticked(
+        self, store, registry, answers
+    ):
+        registry.publish("drift")
+        registry.publish("tracker")
+        _click(store(), "Drift", "Install")
+        dialog = store()
+        assert _notify(dialog, "Tracker") is None  # not installed
+        check = _notify(dialog, "Drift")
+        assert check.isChecked()
+        check.click()
+        assert not plugins.is_notified(plugins.load_state(), "drift")
+        assert not _notify(store(), "Drift").isChecked()
 
 
 class TestUninstall:

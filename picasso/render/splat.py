@@ -480,7 +480,14 @@ def _render_triangulation(
     Cannell & Soeller (2010), see ``picasso.render.triangulation``.
     Rotated (``ang``), the rows in view are projected onto the screen
     first, as for the quad-tree. The passes are spread over the render
-    thread pool's budget."""
+    thread pool's budget.
+
+    References
+    ----------
+    Baddeley, D., Cannell, M. B. & Soeller, C. Visualization of
+    localization microscopy data. Microsc Microanal 16, 64-72 (2010).
+    https://doi.org/10.1017/S143192760999122X
+    """
     if passes is None:
         passes = triangulation.PASSES_DEFAULT
     if jitter is None:
@@ -541,6 +548,12 @@ def _render_quadtree(
     projected onto the screen (``_locs_rotation_arrays``) and a
     tree of the projected coordinates is built per render, which costs
     a sort of the rows in view each time.
+
+    References
+    ----------
+    Baddeley, D., Cannell, M. B. & Soeller, C. Visualization of
+    localization microscopy data. Microsc Microanal 16, 64-72 (2010).
+    https://doi.org/10.1017/S143192760999122X
     """
     if capacity is None:
         capacity = lib.RENDER_QUADTREE_CAPACITY_DEFAULT

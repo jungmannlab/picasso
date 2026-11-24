@@ -1,7 +1,7 @@
 Camera Configuration
 ====================
 
-Converting camera counts to photons correctly is needed for accurate photon counts, background and localization precisions, and for the noise model of the maximum-likelihood fit (see step 8 of :ref:`localize-identification`). This page describes how Picasso can remember camera parameters in a config file, and how to measure and use a per-pixel calibration of an sCMOS camera.
+Converting camera counts to photons correctly is needed for accurate photon counts, background and localization precisions, and for the noise model of the maximum-likelihood fit (see step 7 of :ref:`localize-identification`). This page describes how Picasso can remember camera parameters in a config file, and how to measure and use a per-pixel calibration of an sCMOS camera.
 
 .. _localize-camera-config:
 

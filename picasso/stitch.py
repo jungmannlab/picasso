@@ -29,9 +29,9 @@ share. All positions are in nm:
    neighbors. For 3D data, the matched pairs also give the z offset
    between the tiles.
 3. **Global positions.** The pairwise offsets are combined by weighted
-   least squares, similar to Preibisch, et al. Bioinformatics, 2009.
-   DOI: 10.1093/bioinformatics/btp184. While the offsets disagree, the
-   worst-matching offset of the disagreeing ones is dropped.
+   least squares, similar to Preibisch et al. (2009). While the offsets
+   disagree, the worst-matching offset of the disagreeing ones is
+   dropped.
 4. **Merging.** The tiles of each target are translated and merged into
    one localization table. Optionally, each overlap is cut at the seam
    (the localizations of the tile whose center is closest are kept), so
@@ -41,6 +41,13 @@ share. All positions are in nm:
 Several files recorded at the same stage position (e.g., the targets of
 an Exchange-PAINT experiment) form one tile: they are aligned together
 and the tiles of each target are merged separately.
+
+References
+----------
+Preibisch, S., Saalfeld, S. & Tomancak, P. Globally optimal stitching of
+tiled 3D microscopic image acquisitions. Bioinformatics 25, 1463-1465
+(2009).
+https://doi.org/10.1093/bioinformatics/btp184
 
 :authors: Rafal Kowalewski
 :copyright: Copyright (c) 2026 Jungmann Lab, MPI of Biochemistry
@@ -341,6 +348,11 @@ def _normalized_xcorr(image_a: np.ndarray, image_b: np.ndarray) -> np.ndarray:
         Correlation coefficient (-1 to 1) of each window; element
         ``k`` compares ``image_b`` with ``image_a`` shifted by ``k``.
         0 where the window of ``image_a`` is empty.
+
+    References
+    ----------
+    Lewis, J. P. Fast normalized cross-correlation. In Vision Interface
+    120-123 (1995).
     """
     b = image_b - image_b.mean()
     norm_b = np.sqrt(np.sum(b**2))

@@ -8,10 +8,11 @@ picassosr[vectorfit]``; its GPU (CUDA) build is the ``vectorfit-py-cu12``
 package, which installs the same ``vectorfit_py`` module. Both exist for
 Windows and Linux only.
 
-Despite its name, ``vectorfit-py-cu12`` is built with CUDA 13 (driver 580
-or newer). On an older driver its GPU fit crashes the process, so
-:func:`gpu_unavailable_reason` checks the binary against the driver before
-VectorFit touches the GPU. Its CPU fit runs on an older driver, too.
+``vectorfit-py-cu12`` is built with CUDA 12 (driver 525 or newer). On a
+driver too old for its CUDA version its GPU fit crashes the process,
+so :func:`gpu_unavailable_reason` checks the binary against the driver and
+the GPU before VectorFit touches the GPU. The GPU build needs the NVIDIA
+driver to be imported at all, even for its CPU fit.
 
 The vectorial model describes the PSF from the optics (numerical aperture,
 emission wavelength, refractive indices) rather than from a measured
@@ -34,11 +35,11 @@ from __future__ import annotations
 
 import functools
 import importlib
-import importlib.machinery
 import importlib.util
 import re
+import struct
 from pathlib import Path
-from typing import Callable, Literal
+from typing import Callable, Iterable, Iterator, Literal, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -54,11 +55,17 @@ VECTORFIT_AVAILABLE = importlib.util.find_spec("vectorfit_py") is not None
 #: precision).
 GPU_DEVICE = "gpu-lowaccuracy"
 
-#: Oldest NVIDIA driver of each CUDA major version (its minor versions run
-#: on it). Despite its name, vectorfit-py-cu12 (0.3.0 to 0.3.2) is built
-#: with CUDA 13.1, so it needs driver 580: on a CUDA 12 driver it cannot
-#: use the GPU, see :func:`gpu_unavailable_reason`.
+#: Oldest NVIDIA driver of each CUDA major version (machine code built with
+#: any of its minor versions runs on it, see :func:`gpu_unavailable_reason`).
 _MIN_DRIVER = {11: 450, 12: 525, 13: 580}
+
+#: Magic number of a CUDA fat binary, the container in which NVCC embeds a
+#: library's GPU code: per GPU architecture, machine code (SASS) and/or PTX,
+#: which the driver compiles for GPUs without machine code of their own.
+_FATBIN_MAGIC = struct.pack("<I", 0xBA55ED50)
+#: Kinds of fat binary entries.
+_FATBIN_PTX = 1
+_FATBIN_SASS = 2
 
 #: Default convergence schedule, Vermeer's. Tighter than the defaults of
 #: ``vectorfit_py.FitParams`` (1e-6, 30), which stop small boxes after a
@@ -193,45 +200,122 @@ def outliers_discarded(info: dict | list[dict]) -> int | None:
 
 
 def _import_vectorfit():
-    """Import the VectorFit bindings, with an install hint if missing."""
+    """Import the VectorFit bindings, with an install hint if missing or
+    broken."""
     try:
         return importlib.import_module("vectorfit_py")
     except ImportError as e:
+        if isinstance(e, ModuleNotFoundError) and e.name == "vectorfit_py":
+            raise ImportError(
+                "Fitting with VectorFit requires the optional 'vectorfit-py' "
+                "package. Install it with 'pip install picassosr[vectorfit]'."
+            ) from e
+        # typically the GPU build without an NVIDIA driver: its library
+        # links against the driver's (nvcuda.dll, libcuda.so.1)
         raise ImportError(
-            "Fitting with VectorFit requires the optional 'vectorfit-py' "
-            "package. Install it with 'pip install picassosr[vectorfit]'."
+            f"VectorFit is installed but cannot be loaded ({e}). Its GPU "
+            "build (vectorfit-py-cu12) needs an NVIDIA driver, even to fit "
+            "on the CPU; without one, install the CPU build instead with "
+            "'pip uninstall vectorfit-py vectorfit-py-cu12' followed by "
+            "'pip install vectorfit-py'."
         ) from e
 
 
-def _extension_path() -> Path | None:
-    """The compiled ``vectorfit_py._vectorfit_py`` module on disk, found
-    without importing ``vectorfit_py``."""
+def _binary_paths() -> list[Path]:
+    """The compiled files of the installed ``vectorfit_py`` package, found
+    without importing it: its extension module and, on Linux, the library
+    beside it that holds the GPU code (``libVectorFitter_lib.so``)."""
     spec = importlib.util.find_spec("vectorfit_py")
     if spec is None or not spec.submodule_search_locations:
-        return None
-    for directory in spec.submodule_search_locations:
-        for suffix in importlib.machinery.EXTENSION_SUFFIXES:
-            path = Path(directory, "_vectorfit_py" + suffix)
-            if path.is_file():
-                return path
-    return None
+        return []
+    return sorted(
+        path
+        for directory in spec.submodule_search_locations
+        if Path(directory).is_dir()
+        for path in Path(directory).iterdir()
+        if path.is_file()
+        and re.search(r"\.(pyd|dll|dylib|so)(\.[\d.]+)?$", path.name)
+    )
 
 
-def _cuda_build(path: Path) -> tuple[tuple[int, int], int] | None:
-    """The CUDA toolkit version a VectorFit binary was compiled with and
-    the lowest GPU architecture (compute capability as an int, e.g. 80)
-    it carries code for; None for a CPU build.
+class _CudaBuild(NamedTuple):
+    """The GPU code of VectorFit's binaries, see :func:`_cuda_build`."""
+
+    #: CUDA version the code needs, (major, minor): that of its PTX, or of
+    #: NVCC without PTX; None if neither is known.
+    cuda: tuple[int, int] | None
+    #: GPU architectures with machine code, as compute capabilities
+    #: written as ints (86 for 8.6).
+    sass: frozenset[int]
+    #: GPU architectures with PTX.
+    ptx: frozenset[int]
+
+
+def _fatbin_entries(data: bytes) -> Iterator[tuple[int, tuple[int, int], int]]:
+    """``(kind, version, arch)`` of every entry of the CUDA fat binaries
+    in ``data``: ``_FATBIN_PTX`` or ``_FATBIN_SASS``, the entry's version
+    ((major, minor), for PTX its ISA version) and the GPU architecture
+    (e.g. 86). The PTX itself is usually compressed, so it is not read;
+    the entry headers are not."""
+    start = data.find(_FATBIN_MAGIC)
+    while 0 <= start <= len(data) - 16:
+        # container header: magic, version, header size, size of entries
+        _, version, header_size, size = struct.unpack_from(
+            "<IHHQ", data, start
+        )
+        if version == 1 and header_size == 16:
+            position = start + header_size
+            end = min(position + size, len(data))
+            # entry header: kind, ?, header size, payload size, ...,
+            # version (minor, major) at 24 and architecture at 28
+            while position + 64 <= end:
+                kind, _, entry_size, payload = struct.unpack_from(
+                    "<HHIQ", data, position
+                )
+                if kind not in (_FATBIN_PTX, _FATBIN_SASS) or entry_size < 64:
+                    break
+                minor, major, arch = struct.unpack_from(
+                    "<HHI", data, position + 24
+                )
+                yield kind, (major, minor), arch
+                position += entry_size + payload
+        start = data.find(_FATBIN_MAGIC, start + 4)
+
+
+def _cuda_build(paths: Iterable[Path]) -> _CudaBuild | None:
+    """The GPU code in VectorFit's binaries ``paths`` (see
+    :func:`_binary_paths`); None for a CPU build.
 
     The two builds install the same module, ``vectorfit_py`` (with both
     installed, the one installed last wins) and neither reports which one
-    it is, so the binary itself is read. NVCC leaves its version and the
-    PTX targets in it as plain text."""
-    data = path.read_bytes()
-    version = re.search(rb"Cuda compilation tools, release (\d+)\.(\d+)", data)
-    if version is None:
+    it is, so the binaries themselves are read: the headers of the fat
+    binaries NVCC embeds give each entry's architecture and, for PTX, its
+    ISA version. PTX ISA 7.x, 8.x and 9.x came with CUDA 11, 12 and 13, and
+    needs a driver of at least the CUDA version with the same minor (ISA
+    8.5 needs CUDA 12.5). Without PTX, the CUDA version is that of NVCC if
+    it left it in plain text."""
+    sass, ptx, isa, nvcc = set(), set(), [], []
+    for path in paths:
+        data = Path(path).read_bytes()
+        for kind, version, arch in _fatbin_entries(data):
+            if kind == _FATBIN_PTX:
+                ptx.add(arch)
+                isa.append(version)
+            else:
+                sass.add(arch)
+        release = re.search(
+            rb"Cuda compilation tools, release (\d+)\.(\d+)", data
+        )
+        if release is not None:
+            nvcc.append((int(release[1]), int(release[2])))
+    if not sass and not ptx:
         return None
-    archs = [int(_) for _ in re.findall(rb"\.target sm_(\d+)", data)]
-    return (int(version[1]), int(version[2])), min(archs, default=0)
+    if isa:
+        major, minor = max(isa)
+        cuda = (major + 4, minor)
+    else:
+        cuda = max(nvcc, default=None)
+    return _CudaBuild(cuda, frozenset(sass), frozenset(ptx))
 
 
 def _cuda_device() -> tuple[tuple[int, int], tuple[int, int]] | None:
@@ -255,9 +339,13 @@ def gpu_unavailable_reason() -> str | None:
     The checks run before VectorFit touches the GPU because its GPU build,
     on a driver too old for the CUDA it was compiled with, crashes the
     process rather than raising an error. They need the GPU build of
-    VectorFit (``vectorfit-py-cu12``), a CUDA GPU of at least the lowest
-    architecture it was compiled for, and a driver supporting its CUDA
-    version. Cached: the answer cannot change while Picasso runs.
+    VectorFit (``vectorfit-py-cu12``), a CUDA GPU it has code for, and a
+    driver that runs that code. Machine code for the GPU's generation (the
+    same major compute capability, at most its minor) runs on any driver of
+    the CUDA major version it was built with, CUDA's minor version
+    compatibility. Otherwise the driver compiles the PTX of an older
+    architecture, which needs a driver of at least the PTX's CUDA version.
+    Cached: the answer cannot change while Picasso runs.
 
     Returns
     -------
@@ -269,8 +357,7 @@ def gpu_unavailable_reason() -> str | None:
             "VectorFit is not installed; install its GPU build with "
             "'pip install vectorfit-py-cu12'."
         )
-    path = _extension_path()
-    build = None if path is None else _cuda_build(path)
+    build = _cuda_build(_binary_paths())
     if build is None:
         # The builds share their files, so uninstalling one deletes the
         # other's too: both go before the GPU build is installed.
@@ -279,40 +366,62 @@ def gpu_unavailable_reason() -> str | None:
             "build instead with 'pip uninstall vectorfit-py "
             "vectorfit-py-cu12' followed by 'pip install vectorfit-py-cu12'."
         )
-    (cuda_major, _), min_arch = build
     try:
         device = _cuda_device()
     except Exception as e:  # a broken CUDA setup
         return f"The CUDA GPU could not be queried ({e})."
     if device is None:
         return "No CUDA-capable GPU was found."
-    driver, capability = device
-    if driver[0] < cuda_major:
-        # the package name says CUDA 12, which misleads users of CUDA 12
-        misnamed = (
-            f" Despite its name, vectorfit-py-cu12 is built with CUDA "
-            f"{cuda_major}."
-            if cuda_major != 12
-            else ""
-        )
-        newer = (
-            f"to version {_MIN_DRIVER[cuda_major]} or newer"
-            if cuda_major in _MIN_DRIVER
-            else f"to one supporting CUDA {cuda_major}"
-        )
-        return (
-            f"The GPU build of VectorFit needs CUDA {cuda_major}, but the "
-            f"NVIDIA driver supports CUDA {driver[0]}.{driver[1]} only."
-            f"{misnamed} Update the NVIDIA driver {newer}, or fit on the "
-            "CPU."
-        )
-    if 10 * capability[0] + capability[1] < min_arch:
+    driver, (major, minor) = device
+    capability = 10 * major + minor
+    native = any(
+        arch // 10 == major and arch <= capability for arch in build.sass
+    )
+    if not native and not any(arch <= capability for arch in build.ptx):
+        lowest = min(build.sass | build.ptx)
         return (
             "The GPU build of VectorFit needs a GPU of compute capability "
-            f"{min_arch // 10}.{min_arch % 10} or higher, but the GPU has "
-            f"{capability[0]}.{capability[1]}."
+            f"{lowest // 10}.{lowest % 10} or higher, but the GPU has "
+            f"{major}.{minor}."
         )
-    return None
+    if build.cuda is None:
+        return None  # nothing to check the driver against
+    return _driver_reason(build.cuda, native, driver, (major, minor))
+
+
+def _driver_reason(
+    cuda: tuple[int, int],
+    native: bool,
+    driver: tuple[int, int],
+    capability: tuple[int, int],
+) -> str | None:
+    """Why the NVIDIA driver, supporting CUDA ``driver``, cannot run GPU
+    code of CUDA version ``cuda`` on a GPU of compute ``capability``, or
+    None if it can; ``native`` if the code has machine code for the GPU,
+    else the driver compiles its PTX. See :func:`gpu_unavailable_reason`."""
+    if native:
+        needed = (cuda[0], 0)
+        need = f"needs CUDA {needed[0]}"
+        newer = (
+            f"to version {_MIN_DRIVER[needed[0]]} or newer"
+            if needed[0] in _MIN_DRIVER
+            else f"to one supporting CUDA {needed[0]}"
+        )
+    else:
+        needed = cuda
+        need = (
+            f"has no machine code for this GPU (compute capability "
+            f"{capability[0]}.{capability[1]}); compiling its PTX code for "
+            f"it needs CUDA {needed[0]}.{needed[1]}"
+        )
+        newer = f"to one supporting CUDA {needed[0]}.{needed[1]} or newer"
+    if tuple(driver) >= needed:
+        return None
+    return (
+        f"The GPU build of VectorFit {need}, but the NVIDIA driver supports "
+        f"CUDA {driver[0]}.{driver[1]} only. Update the NVIDIA driver "
+        f"{newer}, or fit on the CPU."
+    )
 
 
 def gpu_available() -> bool:

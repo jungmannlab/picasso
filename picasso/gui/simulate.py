@@ -39,7 +39,7 @@ from .. import (
     docs_url,
 )
 from .app import run_gui
-from . import plot_style, theme
+from . import plot_style, shortcuts, theme
 
 
 def fitFuncBg(x: lib.FloatArray2D, a: float, b: float) -> lib.FloatArray1D:
@@ -331,6 +331,7 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        shortcuts.add_menu_action(file_menu)
         lib.add_sound_notifications_menu(file_menu)
         plot_settings_action = file_menu.addAction("Plot settings...")
         plot_settings_action.setIcon(theme.icon("plot-settings"))
@@ -1088,6 +1089,7 @@ class Window(QtWidgets.QMainWindow):
 
         menu_bar = self.menuBar()
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+        shortcuts.install(self, "Simulate")
 
     def editStructure(self) -> None:
         """Edit the docking strands of the structure in a table. The

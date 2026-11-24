@@ -41,7 +41,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import io
 from . import theme
-from . import toolbars
+from . import shortcuts, toolbars
 
 # Re-exported for backwards compatibility with code and tests that
 # imported these from this module before they moved to picasso.plugins.
@@ -78,6 +78,7 @@ from ..plugins import (  # noqa: F401
     install,
     is_compatible,
     is_enabled,
+    is_notified,
     is_safe_filename,
     is_safe_id,
     is_safe_repo_path,
@@ -89,6 +90,7 @@ from ..plugins import (  # noqa: F401
     read_local_source,
     save_state,
     set_enabled,
+    set_notified,
     sha256_bytes,
     status_for,
     uninstall,
@@ -203,10 +205,13 @@ def add_plugins_menu_actions(window, app_name: str) -> None:
 
     # show the plugins' actions on a toolbar customized to have them,
     # also Render's 3D window, which is built before the plugins load
+    # and give them the user's shortcuts
     toolbars.refresh(window)
+    shortcuts.refresh(window)
     window_rot = getattr(window, "window_rot", None)
     if window_rot is not None:
         toolbars.refresh(window_rot)
+        shortcuts.refresh(window_rot)
 
 
 def _open_store(window, app_name: str) -> None:
@@ -312,9 +317,17 @@ class PluginStoreDialog(QtWidgets.QDialog):
         self.show_all.stateChanged.connect(self._populate)
         layout.addWidget(self.show_all)
 
-        self.table = QtWidgets.QTableWidget(0, 6)
+        self.table = QtWidgets.QTableWidget(0, 7)
         self.table.setHorizontalHeaderLabels(
-            ["Plugin", "App", "Description", "Status", "Enabled", "Action"]
+            [
+                "Plugin",
+                "App",
+                "Description",
+                "Status",
+                "Enabled",
+                "Notify",
+                "Action",
+            ]
         )
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(
@@ -440,8 +453,9 @@ class PluginStoreDialog(QtWidgets.QDialog):
             self.table.setItem(row, 3, status_item)
 
             self.table.setCellWidget(row, 4, self._enabled_widget(entry))
+            self.table.setCellWidget(row, 5, self._notify_widget(entry))
             self.table.setCellWidget(
-                row, 5, self._action_widget(entry, status)
+                row, 6, self._action_widget(entry, status)
             )
         self.table.resizeColumnsToContents()
         self.table.horizontalHeader().setSectionResizeMode(
@@ -478,6 +492,29 @@ class PluginStoreDialog(QtWidgets.QDialog):
         )
         check.clicked.connect(
             lambda checked, f=filename: self._toggle_enabled(f, checked)
+        )
+        box.addWidget(check)
+        return container
+
+    def _notify_widget(self, entry: dict) -> QtWidgets.QWidget:
+        """A checkbox controlling whether Picasso tells at startup that
+        an update of the installed plugin is available (see
+        ``plugins.available_updates``); a placeholder for plugins not
+        installed from the registry."""
+        container = QtWidgets.QWidget()
+        box = QtWidgets.QHBoxLayout(container)
+        box.setContentsMargins(2, 2, 2, 2)
+        plugin_id = entry["id"]
+        if entry.get("_local") or plugin_id not in self.state["plugins"]:
+            box.addWidget(QtWidgets.QLabel("—"))
+            return container
+        check = QtWidgets.QCheckBox()
+        check.setChecked(is_notified(self.state, plugin_id))
+        check.setToolTip(
+            "Tell at startup when an update of this plugin is available."
+        )
+        check.clicked.connect(
+            lambda checked, i=plugin_id: set_notified(self.state, i, checked)
         )
         box.addWidget(check)
         return container

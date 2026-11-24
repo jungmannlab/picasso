@@ -30,7 +30,7 @@ import pytest
 from PyQt6 import QtCore, QtGui, QtWidgets
 
 from picasso import io, lib, lib_qt, postprocess
-from picasso.gui import idle, render_link, render_undo, toolbars
+from picasso.gui import idle, render_link, render_undo, shortcuts, toolbars
 from picasso.gui import render as gui_render
 from tests.test_gui_render_index import _EXEMPT, _mutating_methods
 
@@ -291,6 +291,16 @@ def _press_ctrl_z(window, qapp) -> None:
     qapp.processEvents()
 
 
+def _click(text):
+    """Answer for ``notices`` that clicks the button labeled ``text``."""
+
+    def answer(box):
+        (button,) = [b for b in box.buttons() if b.text() == text]
+        button.click()
+
+    return answer
+
+
 def test_ctrl_z_explains_itself_until_turned_off(
     window, qt_offscreen, notices
 ):
@@ -300,10 +310,11 @@ def test_ctrl_z_explains_itself_until_turned_off(
     _drag(view, 0, 2)
     window.undo_action.trigger()  # from the menu: no notice
     assert not notices
+    notices.answer = _click("Undo")
     _press_ctrl_z(window, qt_offscreen)
-    _assert_locs(view, before)  # it also undid
+    _assert_locs(view, before)  # undone after the notice
     (box,) = notices
-    assert 'It undid "Move"' in box.text()
+    assert 'Undo "Move"?' in box.text()
     assert "now selected with Z" in box.text()
     # without "Don't show again", the next Ctrl+Z explains again
     view.redo()
@@ -312,20 +323,43 @@ def test_ctrl_z_explains_itself_until_turned_off(
     _assert_locs(view, before)
 
 
+@pytest.mark.parametrize("answer", ["Select Zoom tool", None])
+def test_ctrl_z_notice_undoes_only_when_asked(
+    window, qt_offscreen, notices, answer
+):
+    """Choosing the Zoom tool or closing the notice keeps the step."""
+    view = window.view
+    tools = {a.text(): a for a in window.tools_actiongroup.actions()}
+    _drag(view, 2, 0)
+    moved = _copies(view)
+    tools["Pick"].trigger()
+    if answer is not None:
+        notices.answer = _click(answer)
+    _press_ctrl_z(window, qt_offscreen)
+    assert len(notices) == 1
+    _assert_locs(view, moved)
+    assert view.history.undo_label == "Move"
+    expected = "Zoom" if answer == "Select Zoom tool" else "Pick"
+    assert view._mode == expected
+
+
 def test_ctrl_z_from_the_native_menu_bar_explains_itself(
     window, notices, monkeypatch
 ):
     """The menu bar of macOS triggers File > Undo itself for Cmd+Z,
     without a shortcut event; Cmd (Ctrl to Qt) is held then."""
+    before = _copies(window.view)
     _drag(window.view, 2, 0)
     monkeypatch.setattr(
         QtGui.QGuiApplication,
         "queryKeyboardModifiers",
         staticmethod(lambda: QtCore.Qt.KeyboardModifier.ControlModifier),
     )
+    notices.answer = _click("Undo")
     window.undo_action.trigger()
     (box,) = notices
-    assert 'It undid "Move"' in box.text()
+    assert 'Undo "Move"?' in box.text()
+    _assert_locs(window.view, before)
 
 
 def test_ctrl_z_with_nothing_to_undo_explains_itself(
@@ -334,14 +368,10 @@ def test_ctrl_z_with_nothing_to_undo_explains_itself(
     tools = {a.text(): a for a in window.tools_actiongroup.actions()}
     tools["Pick"].trigger()
 
-    def select_zoom(box):
-        (zoom,) = [b for b in box.buttons() if b.text() == "Select Zoom tool"]
-        zoom.click()
-
-    notices.answer = select_zoom
+    notices.answer = _click("Select Zoom tool")
     _press_ctrl_z(window, qt_offscreen)
     (box,) = notices
-    assert "There was nothing to undo." in box.text()
+    assert "There is nothing to undo." in box.text()
     assert window.view._mode == "Zoom"
 
 
@@ -363,6 +393,60 @@ def test_ctrl_z_notice_can_be_turned_off(
         assert len(notices) == 1
     finally:
         _close(other)
+
+
+def _press(window, qapp, key, modifiers=QtCore.Qt.KeyboardModifier.NoModifier):
+    from PyQt6 import QtTest
+
+    window.show()
+    window.activateWindow()
+    qapp.processEvents()
+    QtTest.QTest.keyClick(window.view, key, modifiers)
+    qapp.processEvents()
+
+
+def test_other_undo_shortcut_does_not_explain_ctrl_z(
+    window, qt_offscreen, notices
+):
+    """Only Ctrl+Z itself explains the change, not another shortcut the
+    user gave File > Undo; also with nothing to undo."""
+    shortcuts.apply(window, {"File > Undo": ("Ctrl+Z", "U")})
+    assert shortcuts.action_keys(window._ctrl_z_notice_action) == ("Ctrl+Z",)
+    before = _copies(window.view)
+    _drag(window.view, 2, 0)
+    _press(window, qt_offscreen, QtCore.Qt.Key.Key_U)
+    assert not notices
+    _assert_locs(window.view, before)  # undone without asking
+    _press(window, qt_offscreen, QtCore.Qt.Key.Key_U)  # nothing to undo
+    assert not notices
+    notices.answer = _click("Undo")
+    _drag(window.view, 2, 0)
+    _press_ctrl_z(window, qt_offscreen)
+    assert len(notices) == 1
+    _assert_locs(window.view, before)
+
+
+def test_ctrl_z_given_back_to_the_zoom_tool(window, qt_offscreen, notices):
+    """Without Ctrl+Z, Undo explains nothing, and Ctrl+Z selects the
+    Zoom tool as before Picasso 1.0."""
+    shortcuts.apply(
+        window,
+        {"File > Undo": ("Ctrl+Alt+Z",), "Tools > Zoom": ("Z", "Ctrl+Z")},
+    )
+    assert shortcuts.action_keys(window._ctrl_z_notice_action) == ()
+    tools = {a.text(): a for a in window.tools_actiongroup.actions()}
+    tools["Pick"].trigger()
+    _drag(window.view, 2, 0)
+    moved = _copies(window.view)
+    _press_ctrl_z(window, qt_offscreen)
+    assert not notices
+    assert window.view._mode == "Zoom"
+    _assert_locs(window.view, moved)
+    alt = QtCore.Qt.KeyboardModifier.AltModifier
+    ctrl = QtCore.Qt.KeyboardModifier.ControlModifier
+    _press(window, qt_offscreen, QtCore.Qt.Key.Key_Z, ctrl | alt)
+    assert not notices
+    assert window.view.history.undo_label is None
 
 
 def test_tooltips_name_the_step(window):

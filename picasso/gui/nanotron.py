@@ -29,7 +29,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 
 from .. import io, lib, render, nanotron, legacy, __version__
 from .app import run_gui
-from . import theme
+from . import shortcuts, theme
 
 
 class Generator(QtCore.QThread):
@@ -1195,6 +1195,7 @@ class Window(QtWidgets.QMainWindow):
             self.user_settings_dialog.show
         )
         theme.add_menu_action(file_menu)
+        shortcuts.add_menu_action(file_menu)
 
         tools_menu = menu_bar.addMenu("Tools")
         load_model_action = tools_menu.addAction("Load Model...")
@@ -1275,6 +1276,7 @@ class Window(QtWidgets.QMainWindow):
         self.setCentralWidget(mainWidget)
 
         self.plugin_menu = menu_bar.addMenu("Plugins")  # do not delete
+        shortcuts.install(self, "nanoTRON")
 
     def _complete_model_info(self):
         """Ask for the pick diameter and display pixel size the model

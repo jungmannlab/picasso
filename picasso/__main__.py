@@ -1245,7 +1245,15 @@ def _dye_performance_cli(
     drop and the destroyed docking sites and saves the summary
     (``<file>_dye_performance.csv``), the values of each site
     (``..._sites.csv``) and a plot (``.png``) next to each file. See
-    ``postprocess.dye_performance`` for details."""
+    ``postprocess.dye_performance`` for details.
+
+    References
+    ----------
+    Steen, P. R. et al. The DNA-PAINT palette: a comprehensive
+    performance analysis of fluorescent dyes. Nat Methods 21, 1755-1762
+    (2024).
+    https://doi.org/10.1038/s41592-024-02374-8
+    """
     import pandas as pd
     from . import io, postprocess
 
@@ -2711,13 +2719,16 @@ def _identification_parameters_from_args(
 ) -> IdentificationParameters:
     """The identification settings given on the command line, see
     ``_identification_method_from_args``."""
-    from .localize import IdentificationParameters
+    from .localize import IdentificationParameters, PSFFilter
 
+    psf_path = getattr(args, "psf_filter", None)
     return IdentificationParameters(
         method=_identification_method_from_args(args, min_net_gradient),
         box=box,
         temporal_median_window=args.temporal_median or 0,
         gaussian_filter_sigma=args.gaussian_filter or 0.0,
+        edge_spots=not getattr(args, "no_edge_spots", False),
+        psf_filter=PSFFilter.from_file(psf_path) if psf_path else None,
     )
 
 
@@ -4953,8 +4964,9 @@ def _build_parser() -> (
             "computed from the optics (see the --vf-* options) with the "
             "optional VectorFit library (pip install picassosr[vectorfit]), "
             "'vectorfit-gpu' does the same on the GPU with VectorFit's GPU "
-            "build (pip install vectorfit-py-cu12), which, despite its "
-            "name, needs CUDA 13 (NVIDIA driver 580 or newer). 'phasor' "
+            "build (pip install picassosr[vectorfit-gpu]; CUDA 12, NVIDIA "
+            "driver 525 or newer, compute capability 6.0 or higher). "
+            "'phasor' "
             "localizes by phasors (Martens et al. 2018; non-iterative, CPU; "
             "its lpx/lpy are Picasso's error-propagation estimate, not part "
             "of the published method), 'phasor-3d' adds z from an "
@@ -5063,6 +5075,31 @@ def _build_parser() -> (
             " spot is easier to identify. 0 (the default) disables it. "
             "Fitting always uses the raw movie, so the minimum net gradient "
             "needs re-tuning when this is changed"
+        ),
+    )
+    localize_parser.add_argument(
+        "--psf-filter",
+        metavar="CALIBRATION",
+        default=None,
+        help=(
+            "spline calibration (.hdf5) whose PSF, averaged over z, filters"
+            " every frame before spot identification (a matched filter): a"
+            " spot then shows as one maximum at the center of the PSF, also"
+            " when it has several lobes, e.g. a double helix. Fitting always"
+            " uses the raw movie, so the minimum net gradient needs re-tuning"
+            " when this is switched on"
+        ),
+    )
+    localize_parser.add_argument(
+        "--no-edge-spots",
+        action="store_true",
+        help=(
+            "identify only spots whose whole box lies inside the frame. By"
+            " default, spots closer to the frame edge than half a box are"
+            " identified, too, and fitted in a box shifted into the frame:"
+            " by the Gaussian fits, and by the spline fits as far as the"
+            " calibration reaches beyond the box; the phasor and Vectorfit"
+            " fits leave them out"
         ),
     )
     _add_identification_method_args(localize_parser)

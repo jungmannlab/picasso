@@ -12,11 +12,13 @@ from __future__ import annotations
 
 import glob
 import collections
+import csv
 import colorsys
 import contextlib
 import importlib
 import multiprocessing
 import os
+import re
 import sys
 import warnings
 from copy import deepcopy
@@ -90,6 +92,88 @@ _dialogs = []
 
 # Columns that are required for Picasso
 REQUIRED_COLUMNS = ["frame", "x", "y", "z", "lpx", "lpy", "lpz"]
+
+#: Tables describing the columns of localizations and of molecular maps
+#: (cluster centers), shared with docs/files.rst.
+_COLUMN_TABLES_DIR = os.path.join(os.path.dirname(__file__), "column_tables")
+#: Columns that only molecular maps (cluster centers) have; their other
+#: columns, e.g., x or photons, mean something else than for
+#: localizations.
+_MOLECULAR_MAP_MARKERS = ("std_x", "std_frame", "n_locs")
+
+
+def _read_column_table(filename: str) -> list[tuple[re.Pattern, str]]:
+    """Read one of the column tables in ``_COLUMN_TABLES_DIR``.
+
+    A name such as ``x/y/z`` or ``fitted_sigma_x/y/z`` stands for
+    several columns, and a placeholder such as ``photons_ch<c>`` for any
+    text.
+
+    Parameters
+    ----------
+    filename : str
+        Name of the CSV file.
+
+    Returns
+    -------
+    patterns : list of (re.Pattern, str)
+        Pattern matching the names of each row's columns and the
+        description of the row, without reStructuredText markup.
+    """
+    path = os.path.join(_COLUMN_TABLES_DIR, filename)
+    with open(path, encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.reader(f))[1:]  # without the header
+    patterns = []
+    for row in rows:
+        name = row[0].replace("*", "").strip()
+        parts = name.split("/")
+        names = [parts[0]]
+        for part in parts[1:]:
+            # fitted_sigma_x/y/z: the later parts replace the suffix
+            prefix, sep, _ = parts[0].rpartition("_")
+            names.append(prefix + sep + part if len(part) == 1 else part)
+        # re.escape leaves the "<" and ">" of placeholders as they are
+        regex = "|".join(re.sub(r"<[^>]+>", ".+", re.escape(n)) for n in names)
+        description = row[1].replace("``", "").replace("*", "").strip()
+        patterns.append((re.compile(f"(?:{regex})"), description))
+    return patterns
+
+
+def column_descriptions(columns: Sequence[str]) -> dict[str, str | None]:
+    """Describe what the columns of localizations or of a molecular
+    map (cluster centers) hold, see docs/files.rst.
+
+    The columns are taken for a molecular map if they include a column
+    that only molecular maps have (e.g., ``std_x``).
+
+    Parameters
+    ----------
+    columns : sequence of str
+        Column names, e.g., ``locs.columns``.
+
+    Returns
+    -------
+    descriptions : dict
+        Description of each column, in the order of ``columns``; None
+        for a column that Picasso does not define, e.g., one added by
+        another program.
+    """
+    tables = [_read_column_table("localizations.csv")]
+    if any(_ in columns for _ in _MOLECULAR_MAP_MARKERS):
+        tables.insert(0, _read_column_table("molecular_maps.csv"))
+    descriptions = {}
+    for column in columns:
+        descriptions[column] = next(
+            (
+                description
+                for table in tables
+                for pattern, description in table
+                if pattern.fullmatch(column)
+            ),
+            None,
+        )
+    return descriptions
+
 
 #: Shapes that a pick region can take. "Circle" and "Square" are placed
 #: by a single click and have a size (diameter, side length);

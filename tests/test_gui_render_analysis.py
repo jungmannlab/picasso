@@ -25,7 +25,7 @@ import pandas as pd
 import pytest
 from PyQt6 import QtWidgets
 
-from picasso import io
+from picasso import io, lib_qt
 from picasso.gui import render as gui_render
 from tests.test_gui_render_tasks import (
     HEIGHT,
@@ -110,6 +110,8 @@ class _Answers:
             return ("", False) if item is None else (item, True)
 
         self.monkeypatch.setattr(QtWidgets.QInputDialog, "getItem", ask)
+        # the channel input dialogs
+        self.monkeypatch.setattr(lib_qt, "get_path_item", ask)
 
     def text(self, *texts):
         """Answer ``QInputDialog.getText`` (None cancels)."""
@@ -641,6 +643,52 @@ def test_resolutions_of_the_selected_channel(window2, answers, qt_offscreen):
     combo.setCurrentIndex(1)
     assert info_dialog.frc_resolution.text() == frc_text
     assert info_dialog.decorrelation_resolution.text() == decorrelation_text
+
+
+def test_long_channel_names_do_not_widen_the_info_dialog(window2):
+    """The channel selector shows the end of long file names; the popup
+    list shows them in full."""
+    info_dialog = window2.info_dialog
+    long_name = "very_long_file_name_" * 8 + "locs.hdf5"
+    for check in window2.dataset_dialog.checks:
+        check.setText(long_name)
+    info_dialog._sync_channels()
+    combo = info_dialog.precision_channel
+    assert isinstance(combo, lib_qt.TailElidedComboBox)
+    assert combo.currentText() == long_name
+    shown = combo.displayed_text()
+    assert shown.startswith("\u2026") and long_name.endswith(shown[1:])
+    name_width = combo.fontMetrics().horizontalAdvance(long_name)
+    assert combo.sizeHint().width() < name_width
+
+
+@pytest.mark.parametrize(
+    "method, extra",
+    [
+        ("get_channel", []),
+        ("get_channel_all_seq", ["Apply to all sequentially"]),
+        (
+            "get_channel_save_locs",
+            ["Apply to all sequentially", "Combine all channels"],
+        ),
+        ("get_channel3d", ["Show all channels"]),
+    ],
+)
+def test_channel_dialogs_list_full_paths(window2, monkeypatch, method, extra):
+    """The channel input dialogs list the full paths and the extra
+    options and return the index of the chosen item."""
+    view = window2.view
+    shown = []
+
+    def get_path_item(parent, title, label, items, *args, **kwargs):
+        shown.append(list(items))
+        return items[-1], True
+
+    monkeypatch.setattr(lib_qt, "get_path_item", get_path_item)
+    assert getattr(view, method)() == len(shown[0]) - 1
+    assert shown[0] == list(view.locs_paths) + extra
+    monkeypatch.setattr(lib_qt, "get_path_item", lambda *a, **k: ("", False))
+    assert getattr(view, method)() is None
 
 
 def test_frc_records_nena(window, answers, monkeypatch):

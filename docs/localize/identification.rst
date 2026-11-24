@@ -35,14 +35,17 @@ Identification and fitting of single-molecule spots
    - By checking ``Preview``, the spots identified with the current settings will be marked in the displayed frame. Adjust ``Min. net gradient`` to a value at which only spots are detected (no background).
    - ``Estimate``, next to ``Min. net gradient``, sets a starting value from the background of the movie; see :ref:`localize-estimate-min-net-gradient`.
    - Alternatively, select ``B-spline wavelet`` as the ``Method`` to identify spots by wavelet segmentation, with a threshold in units of the noise instead of the net gradient; see :ref:`localize-wavelet`.
+   - Spots closer to the edge of the frame than half a box are identified and fitted, too, unless ``Identify spots at the frame edge`` is unticked; see :ref:`localize-edge-spots`.
 
-5. (Optional) Tick ``Temporal median filter`` in the ``Identification`` group to subtract a rolling per-pixel background before spots are identified; see :ref:`localize-temporal-median-filter`.
+5. (Optional) Filter the frames that spots are searched in, in the ``Filters (identification only)`` section of the ``Identification`` group. The filters are listed in the order they are applied, and only the identification uses them: the fit always uses the raw movie. While the section is collapsed, its header lists the filters that are on.
 
-6. (Optional) Set ``Gaussian filter sigma`` in the ``Identification`` group to smooth every frame before spots are identified, which helps when spots are not Gaussian-shaped; see :ref:`localize-gaussian-filter`.
+   - Tick ``Temporal median filter`` to subtract a rolling per-pixel background; see :ref:`localize-temporal-median-filter`.
+   - Set ``Gaussian filter sigma`` to smooth every frame, which helps when spots are not Gaussian-shaped; see :ref:`localize-gaussian-filter`.
+   - Tick ``PSF filter (spline calibration)`` to filter every frame with the PSF of the loaded spline calibration, which helps for PSFs with several lobes, such as the double helix; see :ref:`localize-psf-filter`.
 
-7. (Optional) Restrict the analysis to one or more regions of interest (ROIs) instead of the whole frame; see :ref:`localize-rois`.
+6. (Optional) Restrict the analysis to one or more regions of interest (ROIs) instead of the whole frame; see :ref:`localize-rois`.
 
-8. **Set the photon conversion** in the ``Photon conversion`` group: adjust ``EM Gain``, ``Baseline`` and ``Sensitivity`` according to your camera specifications and the experimental conditions.
+7. **Set the photon conversion** in the ``Photon conversion`` group: adjust ``EM Gain``, ``Baseline`` and ``Sensitivity`` according to your camera specifications and the experimental conditions.
 
    - ``EM Gain`` is the electron-multiplying gain of an EMCCD camera. Set it to 1 for conventional output amplification and for cameras without EM gain, such as sCMOS cameras.
    - ``Baseline`` is the camera's offset, which the camera adds to every pixel: the average count of a frame recorded without light (e.g., with the shutter closed). It is neither the background of the sample nor zero for most cameras.
@@ -56,7 +59,7 @@ Identification and fitting of single-molecule spots
 
    Camera parameters can also be stored and selected automatically through a camera config file; see :ref:`localize-camera-config`.
 
-9. **Run the analysis.** From the menu bar, select ``Analyze`` > ``Localize (Identify & Fit)`` to start spot identification and fitting in all movie frames. The status of this computation is displayed in the window's status bar.
+8. **Run the analysis.** From the menu bar, select ``Analyze`` > ``Localize (Identify & Fit)`` to start spot identification and fitting in all movie frames. The status of this computation is displayed in the window's status bar.
 
    - After completion, the fit results will be saved in a new file in the same folder as the movie, in which the filename is the base name of the movie file with the extension ``_locs.hdf5``.
    - Furthermore, information about the movie and analysis procedure will be saved in an accompanying file with the extension ``_locs.yaml``; this file can be inspected using a text editor.
@@ -163,6 +166,7 @@ The following values entered in the ``Parameters`` dialog are all remembered acr
 
 - ``Box side length``, the identification ``Method``, ``Min. net gradient`` and the wavelet settings,
 - the temporal median and Gaussian filters (and whether each is ticked),
+- whether spots at the frame edge are identified (``Identify spots at the frame edge``),
 - the fit **Model**, **Optimizer** and **Fit mode**.
 
 The same section also stores the last directory used in the file dialogs (``PWD``) and which columns are ticked in the ``File`` > ``Select columns to save...`` dialog when saving fit results.
@@ -174,7 +178,7 @@ Temporal median filter
 
 Fluorescence movies often sit on an uneven background: out-of-focus haze, autofluorescent structures or a non-uniform illumination profile. Because a given pixel contains a blinking emitter only for a small fraction of the movie, the *median* of that pixel over a window of frames is a good estimate of its background.
 
-Ticking ``Temporal median filter`` in the ``Identification`` group subtracts that estimate from every frame (clipped at zero) before spots are identified. This removes both the uneven background and any static structure, and should make the detection less sensitive to where in the field of view a spot sits.
+Ticking ``Temporal median filter`` in the ``Filters (identification only)`` section of the ``Identification`` group subtracts that estimate from every frame (clipped at zero) before spots are identified. This removes both the uneven background and any static structure, and should make the detection less sensitive to where in the field of view a spot sits.
 
 ``Window (frames)`` sets how many frames go into the median. The default of 51 is a good starting point: it has to be long enough that a given emitter is dark for most of the window (otherwise the emitter ends up in its own background estimate) but short enough to follow slow drifts in the background.
 
@@ -222,7 +226,7 @@ Gaussian filter
 
 Spot identification looks for a *single* local maximum per spot. A non-Gaussian point spread function may break up into several local maxima, making identification challenging.
 
-Setting ``Gaussian filter sigma`` in the ``Identification`` group smooths each frame with a Gaussian of that standard deviation before spots are identified, which merges those maxima back into one. Like the box size and the regions of interest, the sigma is a quantity of the raw image and is therefore given in camera pixels, not in nm.
+Setting ``Gaussian filter sigma`` in the ``Filters (identification only)`` section of the ``Identification`` group smooths each frame with a Gaussian of that standard deviation before spots are identified, which merges those maxima back into one. Like the box size and the regions of interest, the sigma is a quantity of the raw image and is therefore given in camera pixels, not in nm.
 
 A sigma of 0 (the default, shown as ``Off``) disables the filter. Enable ``Preview`` and adapt the value of the filter until the expected regions are outlined successfully.
 
@@ -233,7 +237,7 @@ The same two caveats as for the temporal median filter apply:
 
 The two filters can be used together: the temporal median background is subtracted first, and the result is then smoothed.
 
-Unlike the temporal median filter, the Gaussian filter *is applied when calibrating* a 3D or an experimental (cubic-spline) PSF — smoothing does not erase static beads, and defocused beads are exactly the kind of multi-peaked PSF the filter helps with.
+Unlike the temporal median filter, the Gaussian filter *is applied when calibrating* a 3D astigmatic PSF — smoothing does not erase static beads, and defocused beads are exactly the kind of multi-peaked PSF the filter helps with. An experimental (cubic-spline) PSF calibration detects its beads with the identification threshold alone, unless ``Use the identified spots as bead boxes`` is ticked in its dialog (see :ref:`localize-spline-building`).
 
 .. dropdown:: Python
    :icon: code
@@ -246,6 +250,75 @@ Unlike the temporal median filter, the Gaussian filter *is applied when calibrat
 
       parameters = localize.IdentificationParameters(
           method=localize.NetGradient(5000), box=7, gaussian_filter_sigma=1.0
+      )
+      identifications, id_info = localize.identify(movie, parameters=parameters)
+
+
+.. _localize-psf-filter:
+
+PSF filter
+----------
+
+Some PSFs consist of several lobes, e.g. a double helix, whose two lobes rotate about the emitter's position with z. A local maximum then sits on one of the lobes, several pixels off the emitter, and which lobe it is changes with z. The box of every spot is centered there, and the spline fit has to reach far outside the box center, or fails.
+
+``PSF filter (spline calibration)`` in the ``Filters (identification only)`` section of the ``Identification`` group filters every frame with the PSF of the loaded spline calibration (:ref:`localize-spline`), averaged over z, before spots are identified. This is a matched filter: a spot then shows as one maximum at the center of the PSF, whatever its shape. For a double helix, the filter is a ring around the axis, and the maximum lies on the axis at every z. The boxes are thus centered where the spline fit expects the PSF.
+
+- The checkbox is available while a spline calibration is loaded (``Experimental PSF (spline)``). The same calibration is used for the fit.
+- **The filter applies to identification only.** As for the Gaussian filter, the spots are cut out of, and fitted on, the raw movie.
+- **The detection threshold needs re-tuning.** The filtered frames are much smoother than the raw ones, so the net gradient of a spot changes a lot. Turn on ``Preview`` and sweep the minimum net gradient again. Use the net gradient identification: the wavelet identification needs the fine structure that the filter removes.
+- It is applied after the temporal median and the Gaussian filter, if those are on.
+- The identification metadata record the calibration under ``PSF Filter Calibration``.
+- To calibrate a PSF of several lobes, a first calibration is enough to filter the bead movie with: identify the beads with its PSF filter and build the final calibration with ``Use the identified spots as bead boxes`` (see :ref:`localize-spline-building`). The calibration itself also moves the beads' boxes onto the PSF's center, so the first calibration can be built without the filter.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``psf_filter`` of the ``IdentificationParameters`` takes a
+   ``localize.PSFFilter``, made from a spline calibration file (or from a
+   calibration in memory with ``PSFFilter.from_calibration``).
+
+   .. code-block:: python
+
+      psf_filter = localize.PSFFilter.from_file("dh_spline_calib.hdf5")
+      parameters = localize.IdentificationParameters(
+          method=localize.NetGradient(3000), box=21, psf_filter=psf_filter
+      )
+      identifications, id_info = localize.identify(movie, parameters=parameters)
+
+   On the command line, ``picasso localize`` takes the calibration with
+   ``--psf-filter``.
+
+
+.. _localize-edge-spots:
+
+Spots at the frame edge
+-----------------------
+
+A spot closer to the edge of the frame than half a box has a box that reaches past the edge. With ``Identify spots at the frame edge`` ticked (the default) in the ``Identification`` group, such spots are identified, too: the local maximum and the net gradient are taken over the part of the box inside the frame, and the wavelet identification keeps the regions there. Unticked, only spots whose whole box lies inside the frame are identified, which leaves a band of half a box along every edge empty.
+
+The box of a spot at the edge keeps its size and is shifted inward until it lies in the frame, so the spot sits off its center. The identification boxes are drawn where they are fitted. The fit uses the pixels the camera recorded; the closer a spot is to the edge, the more of it lies outside the frame and the less precisely it is localized. The maximum-likelihood fits account for that in the localization precision. The least-squares precision is a closed-form expression for a whole spot and is optimistic for a spot cut by the edge.
+
+Whether a spot in a shifted box can be fitted depends on the fit method:
+
+- **Gaussian fits** (least squares and maximum likelihood, every model) fit all of them.
+- **Spline fits** fit them as far as the calibrated PSF reaches beyond the fit box: the box can be shifted by up to half the difference between the box of the spline calibration and the fit box. A calibration made with a larger box than the one you fit with therefore covers the spots at the edge (see :ref:`localize-spline`); with equal boxes, no box is shifted.
+- **Phasor**, **Vectorfit** and **Average** take the spot to be at the center of its box and leave the spots at the edge out.
+
+Spots that are left out are counted under ``Edge spots not fitted`` in the metadata of the localizations. The fits of several channels together (:ref:`localize-multichannel`) and the identification on a sum of channels never use spots at the edge, since the box must lie inside every channel. The calibrations never use beads at the edge, either. Identifications loaded from a file made before this setting existed count as made with it unticked.
+
+.. dropdown:: Python
+   :icon: code
+   :class-container: api-example
+
+   ``edge_spots`` of the ``IdentificationParameters`` is ``Identify spots
+   at the frame edge``; ``localize.fit`` shifts the boxes of the spots at
+   the edge by itself.
+
+   .. code-block:: python
+
+      parameters = localize.IdentificationParameters(
+          method=localize.NetGradient(5000), box=7, edge_spots=False
       )
       identifications, id_info = localize.identify(movie, parameters=parameters)
 

@@ -426,6 +426,31 @@ def test_get_NN_dist_excludes_self_when_data1_is_data2():
     assert np.allclose(d[:, 0], 5.0)
 
 
+def test_get_NN_dist_keeps_zero_for_identical_different_targets():
+    # the same file loaded as two targets: copies with equal coordinates
+    pts = np.array([[0.0, 0.0], [3.0, 4.0]])
+    d = spinna.get_NN_dist(pts, pts.copy(), n_neighbors=1)
+    assert np.allclose(d[:, 0], 0.0)
+    d = spinna.get_NN_dist(pts, pts, n_neighbors=1, exclude_self=False)
+    assert np.allclose(d[:, 0], 0.0)
+    d = spinna.get_NN_dist(pts, pts.copy(), n_neighbors=1, exclude_self=True)
+    assert np.allclose(d[:, 0], 5.0)
+
+
+def test_get_NN_dist_experimental_same_file_twice():
+    pts = np.array([[0.0, 0.0], [3.0, 4.0], [10.0, 0.0]])
+    coords = {"A": pts, "B": pts.copy()}
+
+    class _Mixer:
+        def get_neighbor_idx(self, duplicate=False):
+            return [("A", "A", 1), ("A", "B", 1), ("B", "A", 1)]
+
+    aa, ab, ba = spinna.get_NN_dist_experimental(coords, _Mixer())
+    assert np.allclose(aa[:, 0], [5.0, 5.0, np.sqrt(65.0)])
+    assert np.allclose(ab[:, 0], 0.0)
+    assert np.allclose(ba[:, 0], 0.0)
+
+
 def test_get_NN_dist_empty_input_returns_empty():
     pts = np.zeros((0, 2))
     other = np.array([[1.0, 2.0]])

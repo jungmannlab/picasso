@@ -223,6 +223,12 @@ def _knot_tangents(
     velocity, so that the path never overshoots a checkpoint (the
     monotonicity condition of Fritsch & Carlson, *SIAM J. Numer.
     Anal.* 1980).
+
+    References
+    ----------
+    Fritsch, F. N. & Carlson, R. E. Monotone piecewise cubic
+    interpolation. SIAM J Numer Anal 17, 238-246 (1980).
+    https://doi.org/10.1137/0717021
     """
     if per_component:
         return np.column_stack(
@@ -291,6 +297,14 @@ def _smooth_rotations(
     -------
     rotations : Rotation
         One rotation per fraction.
+
+    References
+    ----------
+    Kim, M.-J., Kim, M.-S. & Shin, S. Y. A general construction scheme
+    for unit quaternion curves with simple high order derivatives. In
+    Proc. 22nd Annual Conference on Computer Graphics and Interactive
+    Techniques (SIGGRAPH '95) 369-376 (1995).
+    https://doi.org/10.1145/218380.218486
     """
     w1 = tangent1 / 3
     w3 = tangent2 / 3

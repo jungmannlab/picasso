@@ -172,8 +172,8 @@ def test_tracked_and_linked_channels_are_skipped(
     linked = _locs(1).assign(len=np.int32(1))
     view.add(str(tmp_path / "linked.hdf5"), linked, _info(), render_=False)
     monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
+        lib_qt,
+        "get_path_item",
         lambda *a, **k: ("Apply to all sequentially", True),
     )
     before = [view.locs[0], view.locs[1]]
@@ -190,8 +190,8 @@ def test_track_all_channels(
     view = window.view
     view.add(str(tmp_path / "second.hdf5"), _locs(1), _info(), render_=False)
     monkeypatch.setattr(
-        QtWidgets.QInputDialog,
-        "getItem",
+        lib_qt,
+        "get_path_item",
         lambda *a, **k: ("Apply to all sequentially", True),
     )
     _track(window, qt_offscreen)

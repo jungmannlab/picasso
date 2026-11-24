@@ -35,7 +35,8 @@ A calibration is built from a **bead z-stack**: image a sample of sparse, bright
 
    - Detection runs on the middle third of the scan, where the beads should be closest to focus and brightest, with the identification settings of the ``Parameters`` dialog (net gradient or wavelet).
    - The temporal median filter is never applied here: the beads are static, so it would subtract them.
-   - Each detection is rounded to the pixel grid. Detections closer than one box size are merged into one.
+   - Each detection is rounded to the pixel grid. Detections closer than one box size are merged into one bead, placed at the median of its detections.
+   - Instead, ``Use the identified spots as bead boxes`` in the ``Calibrate spline PSF`` dialog cuts the boxes where the spots shown were identified, with all the identification settings, ROIs and filters (e.g. the :ref:`PSF filter <localize-psf-filter>`).
    - Beads whose box would reach past the frame edge are dropped.
    - With several fields of view per z step, beads are detected and merged within each field of view separately.
 
@@ -55,7 +56,8 @@ A calibration is built from a **bead z-stack**: image a sample of sparse, bright
    - **Alignment.** Each bead is aligned to a reference by 3D cross-correlation. Only the slices around focus are correlated. The correlation peak is located with sub-voxel precision by upsampling it 20-fold with cubic-spline interpolation, and the bead volume is shifted there by cubic-spline interpolation.
    - **Iteration.** The first reference is the brightest bead at focus. In two further rounds, all beads are realigned to the average of the beads kept so far.
    - **Outliers.** In every round, a bead is rejected if its normalized cross-correlation with the average is unusually low or its mean-square difference from the (brightness-matched) average is unusually high, i.e. more than 2.5 robust standard deviations from the median of all beads. At least half of the beads, and never fewer than three, are always kept. The bead gallery written next to the calibration shows which beads were kept and why the others were rejected (see :ref:`localize-spline-beads`).
-   - **Centering.** The average is finally shifted laterally so that its center at focus sits exactly on the box center, where a fitted shift of zero places the emitter.
+   - **Centering.** The average is finally shifted laterally so that its center sits exactly on the box center, where a fitted shift of zero places the emitter. The center is that of the PSF summed over all z, which needs no notion of focus: for an astigmatic PSF it is the center of the spot, for a double helix the axis the two lobes rotate about.
+   - **Re-cutting the boxes.** A detected bead box sits on a local maximum, which for a PSF of several lobes, such as a double helix, is one of the lobes, several pixels off the PSF's center. When the center lies more than half a pixel off the box center, the beads' boxes are moved onto it and the beads are registered again. Beads whose box would then leave the frame are dropped.
 
 .. dropdown:: 4 · Smooth along z
    :icon: pulse
@@ -106,7 +108,10 @@ A calibration is built from a **bead z-stack**: image a sample of sparse, bright
          Scales the fitted ``z`` to correct for the refractive-index mismatch, as in the astigmatism fit (`Huang et al., Science 319, 810–813 (2008) <https://doi.org/10.1126/science.1153529>`__). It is stored in the calibration and applied at fit time, not during calibration. ``Calculate...`` estimates it from the objective and the refractive indices, see :ref:`localize-magnification-factor`.
 
       **Set z = 0 at max. intensity**
-         Define ``z = 0`` at the axial intensity peak of the averaged PSF instead of the center of the stage scan. Only meaningful for a PSF with a single, well-defined focus (e.g. astigmatism); off by default. This will impact the effect of the magnification factor if the measured calibration data is offset.
+         Define ``z = 0`` at the axial intensity peak of the averaged PSF instead of the center of the stage scan. Only meaningful for a PSF with a single, well-defined focus (e.g. astigmatism), not for one whose brightness hardly changes with z, such as a double helix; off by default. This will impact the effect of the magnification factor if the measured calibration data is offset.
+
+      **Use the identified spots as bead boxes** (off by default)
+         Cut each bead's box where the spots shown were identified, instead of detecting the beads again with the identification threshold alone. The identification settings, ROIs and filters all apply, e.g. the :ref:`PSF filter <localize-psf-filter>` of an earlier calibration of the same PSF. Each bead keeps one box over the whole scan, taken from the middle third of it.
 
       The box size and minimum net gradient are taken from the main ``Parameters`` dialog. You are then asked where to save the calibration ``.hdf5``. Written next to it are:
 
@@ -156,6 +161,8 @@ A calibration is built from a **bead z-stack**: image a sample of sparse, bright
 .. important::
 
    **The fit box size must not be larger than the box size the calibration was built with.** If it is larger, Picasso Localize shows a dialog and offers to set the box size to the calibration's value (you then re-run identification before fitting).
+
+A calibration box larger than the fit box also lets the spline fit the spots at the frame edge: their box is shifted into the frame, and the spot can sit up to half the difference between the two boxes off its center. See :ref:`localize-edge-spots`.
 
 .. _localize-spline-plot:
 
@@ -316,6 +323,10 @@ After identifying the channels, run ``Calibration`` > ``Re-align channels (curre
 .. important::
 
    **The re-alignment updates the loaded calibration only; the calibration file is never modified.**
+
+.. note::
+
+   Channels that focus at different depths (more than 100 nm apart, e.g., biplane) cannot be re-aligned from the signal. There, a molecule's center in one channel differs from its center in the other by an amount that depends on its z, so a registration measured on the blinking molecules does not match the PSF models of the calibration. Calibrate such a setup on beads again instead, ideally right before or after the measurement.
 
 .. _localize-identify-on-sum:
 

@@ -16,8 +16,9 @@ How to install
 2. Open the downloaded exe file and follow the installation instructions.
 
 Which edition? The standard edition runs on any PC. For GPU fitting on an NVIDIA graphics card, choose a CUDA edition. To find out which one your PC supports, open a Command Prompt and run "nvidia-smi": the first lines show "CUDA Version", the highest CUDA version your NVIDIA driver supports. Then run "nvidia-smi --query-gpu=name,compute_cap --format=csv" for the compute capability of the GPU.
-- CUDA Version 13.0 or higher and compute capability 7.5 or higher (Turing or newer, e.g., RTX 20xx): the CUDA13 edition. Its GPU VectorFit (vectorial PSF) fitting needs compute capability 8.0 or higher (Ampere or newer, e.g., RTX 30xx or A-series).
+- CUDA Version 13.0 or higher and compute capability 7.5 or higher (Turing or newer, e.g., RTX 20xx): the CUDA13 edition.
 - CUDA Version 12.x, or compute capability below 7.5: the CUDA12 edition.
+Both CUDA editions also fit vectorial PSFs (VectorFit) on the GPU, which needs compute capability 6.0 or higher (Pascal or newer, e.g., GTX 10xx).
 - CUDA Version below 12.0: update the NVIDIA driver (https://www.nvidia.com/drivers), or use the standard edition.
 - "nvidia-smi" not found: no NVIDIA GPU or no NVIDIA driver; use the standard edition.
 The CUDA editions bring their own CUDA runtime, so there is no need to install the CUDA toolkit. Updating the NVIDIA driver to version 580 or newer adds CUDA 13 support (Turing or newer GPUs). See https://picassosr.readthedocs.io/en/latest/getting-started/installation.html#installation-check-cuda
@@ -40,8 +41,8 @@ You can create the exe file yourself by cloning our GitHub repo and running the 
 
 There are three editions of the installer:
 - create_installer_windows.bat builds the standard (CPU) installer (Picasso-Windows-64bit-<version>.exe, installs to C:\Picasso).
-- create_installer_windows_cuda12.bat builds the CUDA12 edition (Picasso-Windows-64bit-CUDA12-<version>.exe, installs to C:\Picasso-CUDA12). It additionally bundles the CUDA 12 runtime (numba-cuda[cu12]) so GPU-accelerated (numba.cuda) code can run. It requires an NVIDIA (CUDA-capable) GPU and produces a noticeably larger installer.
-- create_installer_windows_cuda13.bat builds the CUDA13 edition (Picasso-Windows-64bit-CUDA13-<version>.exe, installs to C:\Picasso-CUDA13). It bundles the CUDA 13 runtime (numba-cuda[cu13]) instead and also VectorFit's GPU build, so vectorial PSF fitting can run on the GPU ("vectorfit-gpu", on Ampere or newer GPUs, compute capability 8.0). It requires an NVIDIA GPU of the Turing generation or newer (compute capability 7.5, e.g., RTX 20xx, Quadro RTX, T4 or newer) and an NVIDIA driver of version 580 or newer. For older GPUs or drivers, use the CUDA12 edition.
+- create_installer_windows_cuda12.bat builds the CUDA12 edition (Picasso-Windows-64bit-CUDA12-<version>.exe, installs to C:\Picasso-CUDA12). It additionally bundles the CUDA 12 runtime (numba-cuda[cu12]) so GPU-accelerated (numba.cuda) code can run, and VectorFit's GPU build instead of its CPU build, so vectorial PSF fitting can run on the GPU too ("vectorfit-gpu", on GPUs of compute capability 6.0 or higher). It requires an NVIDIA (CUDA-capable) GPU and produces a noticeably larger installer.
+- create_installer_windows_cuda13.bat builds the CUDA13 edition (Picasso-Windows-64bit-CUDA13-<version>.exe, installs to C:\Picasso-CUDA13). It bundles the CUDA 13 runtime (numba-cuda[cu13]) instead, and the same VectorFit GPU build. It requires an NVIDIA GPU of the Turing generation or newer (compute capability 7.5, e.g., RTX 20xx, Quadro RTX, T4 or newer) and an NVIDIA driver of version 580 or newer. For older GPUs or drivers, use the CUDA12 edition.
 
 The editions install to separate folders and can coexist. GPU rendering in Picasso: Render (via wgpu, any graphics card) is included in all editions; the CUDA editions are only needed for CUDA-accelerated fitting.
 
@@ -122,7 +123,7 @@ Many of the functionalities provided by Picasso were published independently, pl
 - Edge-corrected (Kaplan-Meier) nearest neighbor distance distributions: Baddeley and Gill, Ann. Stat., 1997; 10.1214/aos/1034276629 (https://doi.org/10.1214/aos/1034276629)
 - Signal-to-background ratio, localization drop and destroyed docking sites (dye performance): Steen et al., Nat. Methods, 2024; 10.1038/s41592-024-02374-8 (https://doi.org/10.1038/s41592-024-02374-8)
 - Stitching tiles (global tile positions, inspired by): Preibisch et al., Bioinformatics, 2009; 10.1093/bioinformatics/btp184 (https://doi.org/10.1093/bioinformatics/btp184)
-- Single-particle tracking (nearest-neighbor tracking, jump distance and MSD analysis): Martens et al., Front. Bioinform., 2021; 10.3389/fbinf.2021.817254 (https://doi.org/10.3389/fbinf.2021.817254)
+- Single-particle tracking (nearest-neighbor tracking, jump distance and MSD analysis): Martens et al., Front. Bioinform., 2022; 10.3389/fbinf.2021.817254 (https://doi.org/10.3389/fbinf.2021.817254)
 
 .. SYNC-END: citing
 

@@ -894,6 +894,15 @@ class TestImageProcessing:
         assert len(limits) == 2
         assert limits[0] == 1.0 and limits[1] == 4.0
 
+    def test_scale_contrast_autoscale_all_channels_empty(self):
+        # e.g., the group-color planes of a file without localizations
+        im = np.zeros((8, 4, 4), dtype=np.float32)
+        out, limits = render.scale_contrast(
+            im, autoscale=True, return_contrast_limits=True
+        )
+        assert np.isfinite(out).all()
+        assert limits[0] < limits[1]
+
     def test_scale_contrast_constant_image(self):
         """Exercises the vmin == vmax + 1e-6 branch."""
         im = np.full((4, 4), 5.0, dtype=np.float32)
@@ -907,6 +916,13 @@ class TestImageProcessing:
         assert out.dtype == np.uint8
         assert out.max() == 255
         assert out.min() >= 0
+
+    def test_to_8bit_does_not_stretch(self):
+        """A dim image stays dim; values outside [0, 1] are clipped."""
+        im = np.array([[0.0, 0.5], [-0.2, 1.5]], dtype=np.float32)
+        out = render.to_8bit(im)
+        np.testing.assert_array_equal(out, [[0, 128], [0, 255]])
+        assert render.to_8bit(np.full((2, 2), 0.25)).max() == 64
 
     def test_to_8bit_zero_image(self):
         """No div-by-zero on all-zero input."""
@@ -951,6 +967,14 @@ class TestColors:
         df = pd.DataFrame({"group": np.arange(20)})
         out = render.get_group_color(df)
         assert (out == np.arange(20) % render.N_GROUP_COLORS).all()
+
+    def test_get_group_color_empty(self):
+        # a file with a group column but no localizations, e.g., after
+        # filtering everything out
+        df = pd.DataFrame({"group": np.zeros(0, dtype=np.int32)})
+        for shuffle in (False, True):
+            out = render.get_group_color(df, shuffle=shuffle)
+            assert isinstance(out, np.ndarray) and out.size == 0
 
 
 # ---------------------------------------------------------------------------
@@ -1263,6 +1287,14 @@ class TestSplitLocs:
         assert len(groups) == n_colors
         assert sum(len(g) for g in groups) == len(locs)
 
+    def test_by_group_empty_list(self, locs):
+        # a list (as Render held before any group colors were set) used
+        # to compare to a single False, i.e., index a column "False"
+        empty = locs.iloc[:0].assign(group=np.zeros(0, dtype=np.int32))
+        groups = render.split_locs_by_group(empty, group_color=[])
+        assert len(groups) == render.N_GROUP_COLORS
+        assert all(len(g) == 0 for g in groups)
+
 
 # ---------------------------------------------------------------------------
 # Scalebar
@@ -1343,6 +1375,33 @@ class TestRenderScene:
         )
         assert isinstance(qimage, QtGui.QImage)
         assert n_locs == 2 * len(locs)
+
+    @pytest.mark.parametrize("multi", [False, True])
+    def test_vmax_above_brightest_pixel_dims(self, locs, info, multi):
+        """Raising the maximum contrast limit past the brightest pixel
+        must keep dimming the image (it used to be stretched back to
+        full brightness, so the view froze there)."""
+        kwargs = dict(disp_px_size=PIXELSIZE, viewport=FULL_VIEWPORT)
+        if multi:
+            # one channel through the multi-channel (LUT) path; two
+            # overlapping channels would saturate
+            data = ([locs], [info])
+            kwargs["colors"] = [render.solid_to_lut((0.0, 1.0, 1.0))]
+        else:
+            data = (locs, info)
+        raw = render.render_scene(*data, return_raw_image=True, **kwargs)[2]
+        top = float(raw.max())
+        images = [
+            _qimage_to_array(
+                render.render_scene(*data, contrast=(0.0, vmax), **kwargs)[0]
+            )[..., :3].astype(np.int64)
+            for vmax in (top, 2 * top, 4 * top)
+        ]
+        sums = [image.sum() for image in images]
+        assert sums[0] > sums[1] > sums[2]
+        # the brightest pixel is not stretched back to full brightness
+        brightest = [image.max() for image in images]
+        assert brightest[0] > brightest[1] > brightest[2]
 
     def test_multi_channel_color_isolation(self, locs, info):
         """Pure-red channel must leave G and B at zero in the output."""
