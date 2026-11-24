@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 20-NOV-2026 CET
+Last change: 24-NOV-2026 CET
 
 ## 1.0.0
 
@@ -232,6 +232,7 @@ The [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html)
 - `picasso.spinna.batch_analysis` runs the batch analysis of a parameters file (`picasso spinna -p`) from Python and returns the folder with the results and the summary of all rows.
 - SPINNA gives the uncertainty of fitted labeling efficiencies, see the [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html#spinna-le-fitting).
 - Fixed: SPINNA's batch analysis (`picasso spinna -p`) read the `rotation_mode` *None* as missing and used *2D*. Also, the summary's column *File location of experimental data* was misspelled, and the experimental data were converted to nm with 130 nm whatever their pixel size.
+- Fixed: SPINNA dropped the 0 nm nearest neighbors between two molecular targets with identical coordinates (e.g., the same file loaded twice), so that *reference → target* looked like *reference → reference*. Whether self-distances are skipped is now decided by the target names, not by comparing coordinates; `picasso.spinna.get_NN_dist` takes `exclude_self` for this.
 - Fixed: the GUIs could crash when quitting (seen on macOS): their windows were left to Python's shutdown, which deletes them in no fixed order.
 - Fixed: a camera configuration (`~/.picasso/config.yaml`) that is not valid stopped every Picasso module and command from starting. Picasso now starts without cameras configured and warns; Localize shows why when it opens.
 - Fixed: `picasso.nanotron.roi_to_img` hid every error of rendering behind an `UnboundLocalError`, and returned an empty image for a pick without localizations, which failed later. It now raises the error of rendering, or a `ValueError` that names the empty pick.

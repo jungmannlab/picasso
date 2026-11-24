@@ -4993,7 +4993,9 @@ class SimulationsTab(lib.Dialog):
         if self.dim_widget.currentIndex() == 0 and exp2.shape[1] == 3:
             exp2 = exp2[:, :2]
         n_neighbors = plot_params["nn_counts"][f"{t1}-{t2}"].value()
-        dist = spinna.get_NN_dist(exp1, exp2, n_neighbors)
+        dist = spinna.get_NN_dist(
+            exp1, exp2, n_neighbors, exclude_self=t1 == t2
+        )
         for n in range(n_neighbors):
             data = dist[:, n]
             counts, bins = np.histogram(
