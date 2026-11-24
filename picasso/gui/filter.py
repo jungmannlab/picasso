@@ -306,7 +306,7 @@ class PlotWindow(QtWidgets.QWidget):
 #: Columns in nm that the legacy table does not list (they were never in
 #: camera pixels).
 _NM_COLUMNS = frozenset({"z", "lpz", "std_z"})
-_UNITS = {1: "nm", 2: "nm^2", 3: "nm^3"}
+_UNITS = {0.5: "nm^0.5", 1: "nm", 2: "nm^2", 3: "nm^3"}
 
 
 def _axis_label(field: str | None) -> str | None:
@@ -324,7 +324,10 @@ def _axis_label(field: str | None) -> str | None:
     power = legacy.LEGACY_PIXEL_COLUMNS.get(base)
     if power is None or (base != field and power != 1):
         return field
-    return f"{field} ({_UNITS[power]})"
+    unit = _UNITS.get(power)
+    if unit is None:
+        return field
+    return f"{field} ({unit})"
 
 
 class HistWindow(PlotWindow):
