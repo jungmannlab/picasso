@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 24-NOV-2026 CEST
+Last change: 24-NOV-2026 CET
 
 ## 1.0.0
 
@@ -119,7 +119,7 @@ Picasso 1.0 is the largest update since Picasso was first published. The highlig
 - Fixed: resetting a channel title in the Files dialog showed "reset" for short file paths; *Export current view* with all channels hidden and *Save picked localizations* (also separately) without picks raised an error; *Filter picks by count* kept every histogram figure in memory.
 - Fixed: *Mask image* with *Mask all channels* failed for a channel with localizations beyond the field of view of the channel the mask was made from; they are now outside the mask (also in `picasso.masking.mask_locs`, which takes the extent of the mask as `field_of_view`).
 - Fixed: *Export ROI for Imaris* showed pixels brighter than the contrast maximum as dark, and failed, after deleting an existing file, with all channels hidden or with channels with and without z.
-- Fixed: loading localizations could crash with `AttributeError: 'View' object has no attribute 'viewport'` when the window was resized in the short gap between the background load finishing and the first render; the view now falls back to the full field of view.
+- Fixed: loading localizations could crash with `AttributeError: 'View' object has no attribute 'viewport'` when the window was resized in the short gap between the background load finishing and the first render; the view now falls back to the full field of view, and linked windows ignore a window until its first render.
 
 ### Localize
 - **Multi-emitter fitting:** the new fit model *Overlapping emitters (3D-DAOSTORM)* localizes emitters closer than about 2 PSF σ in the same frame separately. The 3D-DAOSTORM analysis of Babcock et al. (*Optical Nanoscopy* 2012), ported from storm-analysis. See the [documentation](https://picassosr.readthedocs.io/en/latest/localize/multi-emitter.html).

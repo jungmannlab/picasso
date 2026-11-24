@@ -19,12 +19,7 @@ import pytest
 
 from picasso.gui import render as gui_render
 
-from tests.test_gui_render_async import (  # noqa: F401 (constants)
-    HEIGHT_NM,
-    WIDTH_NM,
-    _info,
-    _locs,
-)
+from tests._render_data import HEIGHT_NM, WIDTH_NM, make_info, make_locs
 
 
 @pytest.fixture
@@ -34,7 +29,7 @@ def view_before_draw(qt_offscreen, tmp_path):
     background locs load, before the first full render)."""
     window = gui_render.Window(plugins_loaded=True)
     path = str(tmp_path / "locs.hdf5")
-    window.view.add(path, _locs(), _info(), render_=False)
+    window.view.add(path, make_locs(), make_info(), render_=False)
     # a square canvas over the square field of view, so the viewport the
     # draw settles on equals the full FOV exactly (no aspect padding, see
     # ``adjust_viewport_to_view``).

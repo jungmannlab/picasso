@@ -428,9 +428,11 @@ def copy_picks(picks: list) -> list:
 
 
 def has_data(window) -> bool:
-    """Whether a window has localizations loaded and rendered."""
+    """Whether a window has localizations loaded and rendered. The
+    view's viewport is None until its first draw, which may come after
+    the localizations finished loading on a background thread."""
     view = window.view
-    return bool(len(view.locs)) and hasattr(view, "viewport")
+    return bool(len(view.locs)) and view.viewport is not None
 
 
 class LinkGroup(QtCore.QObject):
