@@ -18,12 +18,12 @@ from picasso import lib, render, spatial_index
 from picasso.gui import render as gui_render
 from picasso.gui.render_worker import subsample_request
 
-from tests.test_gui_render_async import (
+from tests._render_data import (
     HEIGHT_NM,
     PIXELSIZE,
     WIDTH_NM,
-    _info,
-    _locs,
+    make_info,
+    make_locs,
 )
 
 
@@ -39,7 +39,7 @@ def _select(dialog, method):
 def window(qt_offscreen, tmp_path):
     window = gui_render.Window(plugins_loaded=True)
     path = str(tmp_path / "locs.hdf5")
-    window.view.add(path, _locs(), _info(), render_=False)
+    window.view.add(path, make_locs(), make_info(), render_=False)
     window.view.viewport = [(0.0, 0.0), (HEIGHT_NM, WIDTH_NM)]
     window.view.resize(128, 128)
     window.view.async_rendering = False

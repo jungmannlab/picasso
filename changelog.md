@@ -124,6 +124,7 @@ Picasso 1.0 is the largest update since Picasso was first published. The highlig
 - Fixed: *Mask image* with *Mask all channels* failed for a channel with localizations beyond the field of view of the channel the mask was made from; they are now outside the mask (also in `picasso.masking.mask_locs`, which takes the extent of the mask as `field_of_view`).
 - Fixed: *Export ROI for Imaris* showed pixels brighter than the contrast maximum as dark, and failed, after deleting an existing file, with all channels hidden or with channels with and without z.
 - Fixed: Render failed to display a file with a `group` column but no localizations, e.g., one filtered down to nothing (`KeyError: False`), and autoscaling the contrast failed when the image was empty.
+- Fixed: loading localizations could crash with `AttributeError: 'View' object has no attribute 'viewport'` when the window was resized in the short gap between the background load finishing and the first render; the view now falls back to the full field of view, and linked windows ignore a window until its first render.
 
 ### Localize
 - **Multi-emitter fitting:** the new fit model *Overlapping emitters (3D-DAOSTORM)* localizes emitters closer than about 2 PSF σ in the same frame separately. The 3D-DAOSTORM analysis of Babcock et al. (*Optical Nanoscopy* 2012), ported from storm-analysis. See the [documentation](https://picassosr.readthedocs.io/en/latest/localize/multi-emitter.html).

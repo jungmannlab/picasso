@@ -16,24 +16,24 @@ from picasso import io, render
 from picasso.gui import render as gui_render
 from picasso.gui import render_link
 
-from tests.test_gui_render_async import (
+from tests._render_data import (
     HEIGHT_NM,
     PIXELSIZE,
     WIDTH_NM,
-    _info,
-    _locs,
-    _wait_until,
+    make_info,
+    make_locs,
 )
+from tests.test_gui_render_async import _wait_until
 from tests.test_gui_rotation_navigation import _Mouse
 
 
 def _load(window, tmp_path, name, size, seed=0, z=False):
-    locs = _locs(seed=seed)
+    locs = make_locs(seed=seed)
     if z:
         rng = np.random.default_rng(seed)
         locs["z"] = rng.uniform(-300.0, 300.0, size=len(locs))
     path = str(tmp_path / f"{name}.hdf5")
-    window.view.add(path, locs, _info(), render_=False)
+    window.view.add(path, locs, make_info(), render_=False)
     window.view.resize(*size)
     window.view.async_rendering = False
     window.view.viewport = [(0.0, 0.0), (HEIGHT_NM, WIDTH_NM)]
@@ -283,7 +283,10 @@ def test_first_load_adopts_the_group(linked, tmp_path):
     try:
         third.view.async_rendering = False
         third.view.add(
-            str(tmp_path / "c.hdf5"), _locs(seed=2), _info(), render_=False
+            str(tmp_path / "c.hdf5"),
+            make_locs(seed=2),
+            make_info(),
+            render_=False,
         )
         third.view.resize(90, 150)
         group.adopt(third)
@@ -369,7 +372,10 @@ def test_async_pan_and_first_load_adoption(linked, qapp, tmp_path):
     try:
         third.view.async_rendering = True
         third.view.add(
-            str(tmp_path / "c.hdf5"), _locs(seed=2), _info(), render_=False
+            str(tmp_path / "c.hdf5"),
+            make_locs(seed=2),
+            make_info(),
+            render_=False,
         )
         third.view.resize(90, 150)
         group.adopt(third)
@@ -392,7 +398,9 @@ def test_new_linked_window_from_the_menu(qt_offscreen, qapp, tmp_path):
     paths = []
     for seed, name in enumerate(("a", "b")):
         path = str(tmp_path / f"{name}.hdf5")
-        io.save_locs(path, _locs(seed=seed), _info(), render_index=False)
+        io.save_locs(
+            path, make_locs(seed=seed), make_info(), render_index=False
+        )
         paths.append(path)
     primary = gui_render.Window(plugins_loaded=True)
     primary.resize(400, 300)
@@ -458,7 +466,7 @@ def test_new_linked_window_from_the_menu(qt_offscreen, qapp, tmp_path):
 
 def _add(window, tmp_path, name, seed):
     path = str(tmp_path / f"{name}.hdf5")
-    window.view.add(path, _locs(seed=seed), _info(), render_=False)
+    window.view.add(path, make_locs(seed=seed), make_info(), render_=False)
 
 
 @pytest.fixture
@@ -532,7 +540,7 @@ def test_reordered_channels_are_not_adopted(shared):
 def test_drift_applied_in_place_is_adopted(shared, monkeypatch):
     _, primary, secondary = shared
     calls = _count_calls(monkeypatch, primary.view, "update_scene")
-    n_frames = _info()[0]["Frames"]
+    n_frames = make_info()[0]["Frames"]
     # shifts towards larger x and y, such that the canvas stays put
     drift = pd.DataFrame(
         {"x": np.full(n_frames, -65.0), "y": np.full(n_frames, -32.5)}
@@ -548,7 +556,7 @@ def test_drift_applied_in_place_is_adopted(shared, monkeypatch):
     # shared keep theirs
     assert primary.view.infos[1] is secondary.view.infos[0]
     assert primary.view.infos[1][-1]["Step"] == "Apply drift"
-    assert primary.view.infos[0] == _info()
+    assert primary.view.infos[0] == make_info()
     assert len(calls) >= 1
 
 
@@ -700,3 +708,27 @@ def test_linking_channel_contrast_copies_it_once(
     assert _channel_contrast(secondary)[0] == (10.0, 50.0)
     # re-colored once, from the cached render
     assert [kwargs for _, kwargs in calls] == [{"use_cache": True}]
+
+
+def test_a_window_loaded_but_not_drawn_is_not_linked(linked, tmp_path):
+    """Localizations load on a background thread and the viewport is
+    set by the first draw: a window in that gap has no viewport yet
+    (None), so it must neither be mirrored from nor mirrored to."""
+    group, primary, secondary = linked
+    undrawn = gui_render.Window(plugins_loaded=True, link_group=group)
+    try:
+        undrawn.view.add(
+            str(tmp_path / "c.hdf5"), make_locs(), make_info(), render_=False
+        )
+        assert undrawn.view.n_channels > 0
+        assert undrawn.view.viewport is None
+        assert not render_link.has_data(undrawn)
+        assert group._targets(undrawn) == []
+        assert undrawn not in group._targets(primary)
+        # a pan in a drawn window must skip the undrawn one
+        primary.view.update_scene(
+            viewport=[(650.0, 650.0), (650.0 + HEIGHT_NM, 650.0 + WIDTH_NM)]
+        )
+        assert undrawn.view.viewport is None
+    finally:
+        _close(undrawn)

@@ -24,36 +24,12 @@ from PyQt6 import QtCore
 from picasso import render
 from picasso.gui import render as gui_render
 
-
-WIDTH = HEIGHT = 64.0  # camera pixels
-PIXELSIZE = 130.0
-WIDTH_NM = WIDTH * PIXELSIZE
-HEIGHT_NM = HEIGHT * PIXELSIZE
-
-
-def _locs(n: int = 3000, seed: int = 0) -> pd.DataFrame:
-    rng = np.random.default_rng(seed)
-    return pd.DataFrame(
-        {
-            "x": rng.uniform(0.0, WIDTH_NM, size=n),
-            "y": rng.uniform(0.0, HEIGHT_NM, size=n),
-            "lpx": rng.uniform(0.05, 0.3, size=n) * PIXELSIZE,
-            "lpy": rng.uniform(0.05, 0.3, size=n) * PIXELSIZE,
-            "photons": rng.uniform(500.0, 5000.0, size=n),
-            "frame": rng.integers(0, 1000, size=n).astype(np.int32),
-        }
-    )
-
-
-def _info() -> list[dict]:
-    return [
-        {
-            "Width": WIDTH,
-            "Height": HEIGHT,
-            "Frames": 1000,
-            "Pixelsize": PIXELSIZE,
-        }
-    ]
+from tests._render_data import (
+    HEIGHT_NM,
+    WIDTH_NM,
+    make_info,
+    make_locs,
+)
 
 
 def _qimage_bytes(qimage) -> bytes:
@@ -76,7 +52,7 @@ def window(qt_offscreen, tmp_path):
     """A Render window with one channel and async rendering enabled."""
     window = gui_render.Window(plugins_loaded=True)
     path = str(tmp_path / "locs.hdf5")
-    window.view.add(path, _locs(), _info(), render_=False)
+    window.view.add(path, make_locs(), make_info(), render_=False)
     window.view.viewport = [(0.0, 0.0), (HEIGHT_NM, WIDTH_NM)]
     window.view.resize(128, 128)
     window.view.async_rendering = True  # instance attr shadows the stub
