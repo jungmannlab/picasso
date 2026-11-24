@@ -729,7 +729,7 @@ def _render_multi_channel(
         bg = np.asarray(
             background_color if has_bg else (0.0, 0.0, 0.0), dtype=np.float32
         )
-        rgb32, max_value = _compose_multi_lut(
+        rgb32 = _compose_multi_lut(
             np.ascontiguousarray(raw_image, dtype=np.float32),
             np.ascontiguousarray(colors_arr),
             vmins.astype(np.float32),
@@ -737,7 +737,7 @@ def _render_multi_channel(
             bg,
             has_bg,
         )
-        rgb = _quantize_rgb(rgb32, max_value)
+        rgb = _quantize_rgb(rgb32)
     else:
         # legacy solid-color path: each channel is a single (r, g, b),
         # rendered as intensity x rgb through the numpy reference chain
@@ -868,9 +868,8 @@ def color_range(
     localizations and pixels where every channel is at the maximum
     contrast, e.g., to tell localizations apart from the background.
 
-    The multi-channel path renormalizes each image by its maximum; the
-    colors are those of an image containing both kinds of pixels, as a
-    typical view does.
+    The colors are those of an image containing both kinds of pixels,
+    as a typical view does.
 
     Parameters
     ----------
@@ -994,17 +993,16 @@ def to_8bit(
     Parameters
     ----------
     image : FloatArray2D or FloatArray3D
-        Image(s) with values between 0 and 1. Normalized in place so that the
-        maximum is 1 before the conversion.
+        Image(s) with values between 0 and 1; values outside are clipped.
+        The image is not rescaled, so an image whose maximum is below 1
+        stays below 255.
 
     Returns
     -------
     image : IntArray2D or IntArray3D
         The image as ``uint8``.
     """
-    # normalize to max value of 1 and convert to 8-bit
-    image /= image.max() if image.max() > 0 else 1.0
-    return np.round(image * 255).astype(np.uint8)
+    return np.round(255 * np.clip(image, 0.0, 1.0)).astype(np.uint8)
 
 
 def apply_colormap(

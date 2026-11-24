@@ -939,7 +939,7 @@ def _compose_multi_lut(
     rng32: lib.FloatArray1D,
     bg: lib.FloatArray1D,
     has_bg: bool,
-) -> tuple[lib.FloatArray3D, np.float32]:
+) -> lib.FloatArray3D:
     """Fused replacement for the multi-channel numpy post-processing
     chain (contrast scale -> LUT gather -> additive blend -> background
     compositing), reading the raw stack once.
@@ -951,13 +951,10 @@ def _compose_multi_lut(
     Reproduces the chain's float32 arithmetic step for step (subtract
     then divide, non-finite to zero, clip, truncating int cast for the
     LUT index) so results match the legacy path bit-for-bit up to
-    quantization. Returns the float RGB image plus its global maximum,
-    which ``_quantize_rgb`` needs for ``to_8bit``'s renormalization.
+    quantization. Returns the float RGB image, clipped to [0, 1].
     """
     n_channels, n_y, n_x = raw.shape
-    zero = np.float32(0.0)
     rgb = np.empty((n_y, n_x, 3), dtype=np.float32)
-    max_value = zero
     for i in range(n_y):
         for j in range(n_x):
             r, g, b, coverage = _lut_pixel_rgb(
@@ -968,28 +965,20 @@ def _compose_multi_lut(
             rgb[i, j, 0] = r
             rgb[i, j, 1] = g
             rgb[i, j, 2] = b
-            if r > max_value:
-                max_value = r
-            if g > max_value:
-                max_value = g
-            if b > max_value:
-                max_value = b
-    return rgb, max_value
+    return rgb
 
 
 @numba.njit(cache=True, nogil=True)
-def _quantize_rgb(
-    rgb: lib.FloatArray3D, max_value: np.float32
-) -> lib.IntArray3D:
-    """``to_8bit`` as a kernel: divide by the global maximum (when
-    positive) and round to uint8, matching numpy's half-to-even."""
+def _quantize_rgb(rgb: lib.FloatArray3D) -> lib.IntArray3D:
+    """``to_8bit`` as a kernel: round to uint8, matching numpy's
+    half-to-even. Not renormalized by the image's maximum, so that a
+    maximum contrast limit above the brightest pixel dims the image."""
     n_y, n_x, _ = rgb.shape
-    denom = max_value if max_value > np.float32(0.0) else np.float32(1.0)
     out = np.empty((n_y, n_x, 3), dtype=np.uint8)
     for i in range(n_y):
         for j in range(n_x):
             for k in range(3):
-                t = (rgb[i, j, k] / denom) * np.float32(255.0)
+                t = rgb[i, j, k] * np.float32(255.0)
                 out[i, j, k] = np.uint8(np.rint(t))
     return out
 
@@ -1003,15 +992,15 @@ def _compose_single(
 ) -> lib.IntArray3D:
     """Fused replacement for the single-channel chain
     (``scale_contrast`` -> ``to_8bit`` -> ``apply_colormap``): contrast
-    scale with clipping, renormalize by the global maximum, round to the
-    256-entry colormap index and gather RGB."""
+    scale with clipping, round to the 256-entry colormap index and
+    gather RGB. Not renormalized by the image's maximum, so that a
+    maximum contrast limit above the brightest pixel dims the image."""
     n_y, n_x = raw.shape
     vmin32 = np.float32(vmin)
     rng32 = np.float32(vmax - vmin)
     one = np.float32(1.0)
     zero = np.float32(0.0)
     scaled = np.empty((n_y, n_x), dtype=np.float32)
-    max_value = zero
     for i in range(n_y):
         for j in range(n_x):
             v = (raw[i, j] - vmin32) / rng32
@@ -1022,13 +1011,10 @@ def _compose_single(
             elif v > one:
                 v = one
             scaled[i, j] = v
-            if v > max_value:
-                max_value = v
-    denom = max_value if max_value > zero else one
     out = np.empty((n_y, n_x, 3), dtype=np.uint8)
     for i in range(n_y):
         for j in range(n_x):
-            t = (scaled[i, j] / denom) * np.float32(255.0)
+            t = scaled[i, j] * np.float32(255.0)
             idx = np.int64(np.rint(t))
             out[i, j, 0] = cmap[idx, 0]
             out[i, j, 1] = cmap[idx, 1]

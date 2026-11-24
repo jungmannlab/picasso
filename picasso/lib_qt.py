@@ -21,6 +21,7 @@ import re
 import sys
 import time
 import traceback
+import weakref
 from collections.abc import Callable
 from typing import Any
 
@@ -3000,6 +3001,10 @@ class SpinBoxRangeSlider(RangeSlider):
         The spin boxes holding the low and the high value.
     """
 
+    # ids of the spin boxes a slider is writing into, so that the other
+    # sliders bound to them can tell a drag from a typed value
+    _driven_boxes: set[int] = set()
+
     def __init__(
         self,
         minimum_box: QtWidgets.QDoubleSpinBox,
@@ -3076,6 +3081,8 @@ class SpinBoxRangeSlider(RangeSlider):
             The new handle positions.
         """
         self._updating = True
+        boxes = {id(self.minimum_box), id(self.maximum_box)}
+        SpinBoxRangeSlider._driven_boxes |= boxes
         try:
             # only the handle that actually moved, so that a drag
             # triggers a single update
@@ -3085,6 +3092,12 @@ class SpinBoxRangeSlider(RangeSlider):
                 self.maximum_box.setValue(high)
         finally:
             self._updating = False
+            SpinBoxRangeSlider._driven_boxes -= boxes
+
+    def _driven_by_slider(self) -> bool:
+        """Whether a slider (this one or another bound to the same spin
+        boxes) is writing into the spin boxes right now."""
+        return id(self.maximum_box) in SpinBoxRangeSlider._driven_boxes
 
 
 class DensityContrastSlider(SpinBoxRangeSlider):
@@ -3101,11 +3114,21 @@ class DensityContrastSlider(SpinBoxRangeSlider):
     strongly skewed - on a linear track the useful part of the range
     would sit within a couple of pixels of the left end.
 
+    The track is raised to a higher value typed into the spin boxes and
+    keeps its length while a slider is dragged, so that all sliders
+    bound to the same spin boxes (e.g., in the dialog and below the
+    image) keep the same track. Typing a value, a new image or a double
+    click fits the track to the values again.
+
     Attributes
     ----------
     minimum_box, maximum_box : QDoubleSpinBox
         The spin boxes holding the minimum and maximum density.
     """
+
+    # all density sliders, so that a double click fits the tracks of
+    # every slider bound to the same spin boxes
+    _instances: weakref.WeakSet = weakref.WeakSet()
 
     def __init__(
         self,
@@ -3135,6 +3158,14 @@ class DensityContrastSlider(SpinBoxRangeSlider):
         self._last_upper = 0.0
         # see release_image
         self._keep_upper = False
+        # top of the track at the last sync: the track never shrinks
+        # below it while the image stays the same, so that dragging one
+        # slider does not rescale the other slider bound to the same
+        # spin boxes (both keep the same track); reset by a new image
+        self._peak = 0.0
+        # set when the last sync met a new image, see sync
+        self._new_image = False
+        DensityContrastSlider._instances.add(self)
         super().__init__(
             minimum_box,
             maximum_box,
@@ -3144,19 +3175,102 @@ class DensityContrastSlider(SpinBoxRangeSlider):
         )
         self.setValueLabels("Min. density", "Max. density")
 
+    def sync(self, *args) -> None:
+        """Re-derive the track and move the handles onto the spin box
+        values, without emitting ``valuesChanged``. The track keeps its
+        top while the image stays the same, see ``_image_maximum``.
+
+        Parameters
+        ----------
+        *args
+            The new value when connected to the spin boxes' value
+            signals; a value not written by a slider fits the track to
+            the values.
+        """
+        if self._updating:  # the slider itself is driving the change
+            return
+        if args and not self._driven_by_slider():
+            # a value typed (or set) in a spin box: the track fits it
+            self._peak = 0.0
+        self._new_image = False
+        super().sync()
+        # a new render updates the minimum and maximum one after the
+        # other, so the sync that meets the new image may still see the
+        # previous values; the track is remembered from the next sync on
+        self._peak = 0.0 if self._new_image else self.maximum()
+
+    def fit_track(self) -> None:
+        """Fit the track of this slider and of every other density
+        slider bound to the same spin boxes to the brightest pixel of
+        the image or the values, whichever is higher."""
+        for slider in list(DensityContrastSlider._instances):
+            if sip.isdeleted(slider):
+                continue
+            if slider.maximum_box is self.maximum_box:
+                slider._peak = 0.0
+                slider.sync()
+
+    def mousePressEvent(self, event: QtGui.QMouseEvent) -> None:
+        """Remember the values before a click moves a handle, so that a
+        double click can restore them, see ``mouseDoubleClickEvent``.
+
+        Parameters
+        ----------
+        event : QtGui.QMouseEvent
+            The Qt mouse event.
+        """
+        self._values_before_press = self.values()
+        super().mousePressEvent(event)
+
+    def mouseDoubleClickEvent(self, event: QtGui.QMouseEvent) -> None:
+        """Fit the track to the values, see ``fit_track``. The first
+        click of the double click moved a handle; it is moved back.
+
+        Parameters
+        ----------
+        event : QtGui.QMouseEvent
+            The Qt mouse event; anything but a left double click is
+            passed on.
+        """
+        if event.button() != QtCore.Qt.MouseButton.LeftButton:
+            super().mouseDoubleClickEvent(event)
+            return
+        self._pressed_handle = None
+        values = getattr(self, "_values_before_press", None)
+        if values is not None:
+            self.setValues(*values)
+        self.fit_track()
+        event.accept()
+
+    def _update_tooltip(self) -> None:
+        super()._update_tooltip()
+        self.setToolTip(
+            self.toolTip() + "\nDouble-click to fit the range to the values."
+        )
+
     def _image_maximum(self) -> float:
-        """The brightest pixel of the rendered image, or 0 if there is
-        none. Cached, as ``sync`` runs on every drag step."""
+        """The top of the track before it is raised to the spin box
+        values: the brightest pixel of the rendered image (0 if there is
+        none), or the track's previous top if higher, unless the image
+        changed since. Cached, as ``sync`` runs on every drag step."""
         if self._image is None:
-            return 0.0
+            return self._peak
         image = self._image()
         if image is None or not getattr(image, "size", 0):
-            return self._last_upper if self._keep_upper else 0.0
+            upper = self._last_upper if self._keep_upper else 0.0
+            return max(upper, self._peak)
         if image is not self._last_image:
+            upper = float(image.max())
+            # a contrast redraw re-renders the cached image, with the
+            # same maximum; only a new image (new data, pan, zoom)
+            # lets the track shrink to it
+            if upper != self._last_upper:
+                self._peak = 0.0
+                self._new_image = True
             self._last_image = image
-            self._last_upper = float(image.max())
+            self._last_upper = upper
             self._keep_upper = False
-        return self._last_upper
+        return max(self._last_upper, self._peak)
 
     def release_image(self) -> None:
         """Let go of the last image, so that its memory can be freed
