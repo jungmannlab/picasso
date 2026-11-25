@@ -61,7 +61,7 @@ Picasso 1.0 is the largest update since Picasso was first published. The highlig
 - Faster FRC.
 - FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*).
 - FRC links localizations into binding events before splitting them into two halves, so that the localizations of one binding event do not correlate the halves and inflate the resolution. Already linked localizations are used as they are. FRC in several ROIs shows the bin size used (was labeled *NeNA*).
-- Resolution by decorrelation analysis (Descloux et al., *Nat. Methods* 2019), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-info-decorrelation).
+- Resolution by decorrelation analysis (Descloux et al., *Nat. Methods* 2019), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-info-decorrelation). As for the FRC, unlinked localizations are linked into binding events first (`picasso.postprocess.decorrelation`'s `r_max` and `max_dark_time`; `picasso decorrelation -d` and `-t`).
 - The pick statistics of the Info dialog include the dye performance of picked docking sites (Steen et al., *Nat. Methods* 2024). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-info-dye-performance).
 - Pick similar without seed picks, see the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-pick-by-n-locs-rmsd).
 - *Mask image* refines the mask: fill holes, remove small regions, keep the largest ones, and grow or shrink it by a distance. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-mask-image).

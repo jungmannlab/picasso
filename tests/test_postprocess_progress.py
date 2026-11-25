@@ -372,12 +372,12 @@ CASES = [
     (
         "decorrelation",
         lambda l, i, p: postprocess.decorrelation(
-            _molecules(2000, 0),
+            _molecules(2000, 0).assign(lpx=5.0, lpy=5.0),
             STAT_INFO,
             pixel_size=[50.0, 100.0],
             progress=p,
         ),
-        ["Calculating decorrelation"],
+        ["Linking localizations", "Calculating decorrelation"],
     ),
     (
         "knn_density",

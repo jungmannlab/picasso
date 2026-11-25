@@ -1159,10 +1159,15 @@ def _decorrelation(
     n_radii: int,
     n_filters: int,
     max_image_size: int,
+    distance: float | None = None,
+    tolerance: int = 3,
 ) -> None:
     """Decorrelation resolution of the localizations in each of
     ``files`` over the whole field of view, at ``pixel_sizes`` (nm;
-    None scans the default pixel sizes). Prints the resolution at each
+    None scans the default pixel sizes). Unlinked localizations are
+    linked first with ``distance`` (nm; None: 3 x the median
+    localization precision) and ``tolerance`` (dark frames). Prints the
+    resolution at each
     pixel size and saves them (``<file>_decorrelation.csv``), the
     decorrelation functions (``..._curves.csv``) and a plot (``.png``)
     next to each file. See ``postprocess.decorrelation`` for
@@ -1186,6 +1191,8 @@ def _decorrelation(
                 n_radii=n_radii,
                 n_filters=n_filters,
                 max_image_size=max_image_size or None,
+                r_max="auto" if distance is None else distance,
+                max_dark_time=tolerance,
                 progress="console",
             )
         except ValueError as e:
@@ -1218,7 +1225,8 @@ def _decorrelation(
         else:
             print("  no resolution: no decorrelation function has a peak")
         print(
-            f"  {result['n_locs']:,} localizations,"
+            f"  {result['n_locs']:,}"
+            f" {'binding events' if result['linked'] else 'localizations'},"
             f" {result['density']:,.0f} per um^2 of sample"
         )
         base = os.path.splitext(path)[0] + "_decorrelation"
@@ -6341,6 +6349,27 @@ def _build_parser() -> (
             " pixel sizes are skipped, 0 for no limit (default=8192)"
         ),
     )
+    decorrelation_parser.add_argument(
+        "-d",
+        "--distance",
+        type=float,
+        default=None,
+        help=(
+            "maximum distance in nm for linking unlinked localizations into"
+            " binding events first (default: 3 x the median localization"
+            " precision); linked files are used as they are"
+        ),
+    )
+    decorrelation_parser.add_argument(
+        "-t",
+        "--tolerance",
+        type=int,
+        default=3,
+        help=(
+            "maximum dark time in frames for linking unlinked localizations"
+            " (default=3)"
+        ),
+    )
 
     # dye performance of picked docking sites
     dye_parser = subparsers.add_parser(
@@ -7505,6 +7534,8 @@ def main():  # noqa: C901
                 args.n_radii,
                 args.n_filters,
                 args.max_image_size,
+                args.distance,
+                args.tolerance,
             )
         elif args.command == "dye-performance":
             _dye_performance_cli(

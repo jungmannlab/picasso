@@ -3228,6 +3228,25 @@ def _is_linked(locs: pd.DataFrame) -> bool:
     return len(locs) > 0 and {"len", "n"}.issubset(locs.columns)
 
 
+def _to_link(locs: pd.DataFrame) -> bool:
+    """Whether the resolution estimates (``frc``, ``frc_rois``,
+    ``decorrelation``) link ``locs``: not if they are linked already,
+    and not, with a warning, if they lack the columns ``link`` needs."""
+    if _is_linked(locs):
+        return False
+    missing = sorted({"frame", "lpx", "lpy"} - set(locs.columns))
+    if missing:
+        warnings.warn(
+            f"The localizations have no {', '.join(missing)} and cannot be"
+            " linked into binding events. The localizations of one binding"
+            " event may make the resolution appear better than it is.",
+            UserWarning,
+            stacklevel=3,  # the caller of frc, frc_rois or decorrelation
+        )
+        return False
+    return True
+
+
 def _frc_precision(
     locs: pd.DataFrame,
     info: list[dict],
@@ -3257,15 +3276,7 @@ def _frc_precision(
     """
     # median localization precision, needed for linking (r_max) or as a
     # fallback for lp
-    median_lp = None
-    if (not linked or lp is None) and {"lpx", "lpy"}.issubset(locs.columns):
-        value = float(
-            np.nanmean(
-                [np.nanmedian(locs["lpx"]), np.nanmedian(locs["lpy"])]
-            )
-        )
-        if np.isfinite(value) and value > 0:
-            median_lp = value
+    median_lp = _median_lp(locs) if not linked or lp is None else None
 
     found_nena = None
     if lp is None:
@@ -3312,10 +3323,64 @@ def _frc_lp_from_bin_size(
     return 2 * bin_size
 
 
-def _frc_r_max(
+def _median_lp(locs: pd.DataFrame) -> float | None:
+    """Mean of the medians of ``lpx`` and ``lpy`` (nm), None if they
+    are missing or not finite and positive."""
+    if not {"lpx", "lpy"}.issubset(locs.columns) or not len(locs):
+        return None
+    with warnings.catch_warnings():  # all-NaN columns
+        warnings.simplefilter("ignore", RuntimeWarning)
+        value = float(
+            np.nanmean(
+                [np.nanmedian(locs["lpx"]), np.nanmedian(locs["lpy"])]
+            )
+        )
+    return value if np.isfinite(value) and value > 0 else None
+
+
+def _link_near(
+    locs: pd.DataFrame,
+    info: list[dict],
+    viewport: tuple[tuple[float, float], tuple[float, float]],
+    r_max: float,
+    max_dark_time: int,
+    progress: lib.Progress,
+) -> pd.DataFrame:
+    """Link the localizations within a margin of 10 x ``r_max`` (nm)
+    around ``viewport``, so that binding events crossing its border are
+    complete, for the resolution estimates (``frc``, ``decorrelation``).
+    Reports the phase "Linking localizations" to ``progress``.
+
+    Ambiguous event lengths are kept: the resolution only needs one
+    position estimate per binding event, not its complete length.
+    """
+    (y_min, x_min), (y_max, x_max) = viewport
+    margin = 10.0 * r_max
+    in_region = (
+        (locs["x"] > x_min - margin)
+        & (locs["y"] > y_min - margin)
+        & (locs["x"] < x_max + margin)
+        & (locs["y"] < y_max + margin)
+    )
+    n_locs = int(in_region.sum())
+    lib.start_phase(progress, "Linking localizations", n_locs, unit="loc")
+    progress.set_value(0)
+    linked_locs, _ = link(
+        locs.loc[in_region],
+        info,
+        r_max=r_max,
+        max_dark_time=max_dark_time,
+        remove_ambiguous_lengths=False,
+    )
+    progress.set_value(n_locs)
+    return linked_locs
+
+
+def _link_r_max(
     r_max: float | Literal["auto"], median_lp: float | None
 ) -> float:
-    """Linking distance (nm) of ``frc`` and ``frc_rois``: 3 x
+    """Linking distance (nm) of ``frc``, ``frc_rois`` and
+    ``decorrelation``: 3 x
     ``median_lp`` for ``"auto"``, else ``r_max``, with a warning if it
     is smaller than ``median_lp``.
 
@@ -3346,7 +3411,7 @@ def _frc_r_max(
             "prevent correct linking of localizations belonging to the "
             "same emitter.",
             UserWarning,
-            stacklevel=3,  # the caller of frc or frc_rois
+            stacklevel=3,  # the caller of frc, frc_rois or decorrelation
         )
     return resolved
 
@@ -3487,9 +3552,10 @@ def frc(
     """
     lp = _frc_lp_from_bin_size(lp, bin_size)
     already_linked = _is_linked(locs)
+    to_link = _to_link(locs)
     if lp is None and not already_linked:
         first_phase = "Calculating NeNA"
-    elif not already_linked:
+    elif to_link:
         first_phase = "Linking localizations"
     else:
         first_phase = "Calculating FRC"
@@ -3522,35 +3588,15 @@ def frc(
         _check_frc_image_size(x_max - x_min, lp, max_image_size)
 
         # Link only localizations near the requested viewport.
-        # The generous margin keeps nearby localizations available to
-        # form events crossing the viewport boundary.
-        if not already_linked:
-            resolved_r_max = _frc_r_max(r_max, median_lp)
-            link_margin = 10.0 * resolved_r_max
-
-            in_link_region = (
-                (locs["x"] > x_min - link_margin)
-                & (locs["y"] > y_min - link_margin)
-                & (locs["x"] < x_max + link_margin)
-                & (locs["y"] < y_max + link_margin)
-            )
-            n_link = int(in_link_region.sum())
-
-            # Keep ambiguous event lengths: FRC only requires one
-            # position estimate per emitter activation, not complete
-            # reconstruction of the binding event.
-            lib.start_phase(
-                progress, "Linking localizations", n_link, unit="loc"
-            )
-            progress.set_value(0)
-            locs, _ = link(
-                locs.loc[in_link_region],
+        if to_link:
+            locs = _link_near(
+                locs,
                 info,
-                r_max=resolved_r_max,
-                max_dark_time=max_dark_time,
-                remove_ambiguous_lengths=False,
+                viewport,
+                _link_r_max(r_max, median_lp),
+                max_dark_time,
+                progress,
             )
-            progress.set_value(n_link)
 
         lib.start_phase(progress, "Calculating FRC", 1, unit="image pair")
         progress.set_value(0)
@@ -3688,6 +3734,7 @@ def frc_rois(
     """
     lp = _frc_lp_from_bin_size(lp, bin_size)
     already_linked = _is_linked(locs)
+    to_link = _to_link(locs)
 
     # Keep the original dataset for ROI selection.
     original_locs = locs
@@ -3717,8 +3764,8 @@ def frc_rois(
         _check_frc_image_size(roi_size, lp, max_image_size)
 
         # Link the full dataset once, if needed, so n_locs is correct
-        if not already_linked:
-            resolved_r_max = _frc_r_max(r_max, median_lp)
+        if to_link:
+            resolved_r_max = _link_r_max(r_max, median_lp)
 
             lib.start_phase(
                 progress,
@@ -4020,6 +4067,8 @@ def decorrelation(
     n_radii: int = 50,
     n_filters: int = 10,
     max_image_size: int | None = 8192,
+    r_max: float | Literal["auto"] = "auto",
+    max_dark_time: int = 3,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> dict:
     """Resolution of localizations by decorrelation analysis (Descloux
@@ -4040,10 +4089,15 @@ def decorrelation(
     below about 1-4 x 10^4 localizations per um^2 of sample, it improves
     with more localizations (Descloux et al., 2021). The density is
     reported over the area covered by the sample: the pixels of a
-    bilinear histogram with 5 nm pixels above 0.5, as in that paper. As
-    for the FRC, repeated localizations of the same molecule (e.g.,
-    blinking or rebinding) correlate and may make the resolution
-    appear better than it is.
+    bilinear histogram with 5 nm pixels above 0.5, as in that paper.
+
+    As for the FRC, the localizations of one binding event correlate
+    and may make the resolution appear better than it is, so unlinked
+    localizations are linked into binding events first (see ``link``);
+    already linked localizations (with the columns ``len`` and ``n``)
+    are used as they are, as are, with a warning, localizations without
+    ``frame``, ``lpx`` or ``lpy``. Repeated binding events of the same molecule
+    (e.g., blinking or rebinding) are not corrected for.
 
     Parameters
     ----------
@@ -4072,11 +4126,20 @@ def decorrelation(
         Largest side length (pixels) of the rendered images; smaller
         pixel sizes are skipped, since the memory grows with the square
         of the side length. None renders any size. Default is 8192.
+    r_max : float or {'auto'}, optional
+        Maximum distance (nm) for linking unlinked localizations. If
+        'auto', 3 x the median localization precision (``lpx``,
+        ``lpy``). A UserWarning is issued if an explicit value is
+        smaller than the median precision. Default is 'auto'.
+    max_dark_time : int, optional
+        Maximum number of dark frames bridged when linking
+        localizations. Default is 3.
     progress : lib.Progress, "console" or None, optional
         Progress tracker, see ``picasso.lib.Progress``: e.g. a
         ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
-        or None for no reporting. Reports "Calculating decorrelation"
-        over the pixel sizes. Default is None.
+        or None for no reporting. Reports "Linking localizations" when
+        linking is required, then "Calculating decorrelation" over the
+        pixel sizes. Default is None.
 
     Returns
     -------
@@ -4098,7 +4161,9 @@ def decorrelation(
           pixel size (curves, peaks, etc.).
         - "skipped_pixel_sizes": pixel sizes skipped for the size of
           their image, in nm.
-        - "n_locs": number of localizations in the viewport.
+        - "n_locs": number of localizations in the viewport, after
+          linking.
+        - "linked": whether the localizations were linked here.
         - "sample_area": area covered by the localizations in nm^2, and
           "density": localizations per um^2 of it.
         - "viewport".
@@ -4106,9 +4171,10 @@ def decorrelation(
     Raises
     ------
     ValueError
-        If the viewport is empty, a pixel size is not positive or no
+        If the viewport is empty, a pixel size is not positive, no
         pixel size gives an image of 32 to ``max_image_size`` pixels on
-        a side.
+        a side, or ``r_max`` is invalid (or "auto" without a median
+        localization precision).
 
     See Also
     --------
@@ -4141,14 +4207,26 @@ def decorrelation(
     used, skipped = _decorrelation_pixel_sizes(
         viewport, pixel_size, max_image_size
     )
-    x = locs["x"].to_numpy(dtype=np.float64)
-    y = locs["y"].to_numpy(dtype=np.float64)
-    in_view = (x >= x_min) & (x < x_max) & (y >= y_min) & (y < y_max)
-    x, y = x[in_view], y[in_view]
+    to_link = _to_link(locs)
+    if to_link:  # check before any work
+        resolved_r_max = _link_r_max(r_max, _median_lp(locs))
 
     results = []
     phase = "Calculating decorrelation"
-    with lib.tracked_progress(progress, phase, unit="pixel size") as progress:
+    with lib.tracked_progress(
+        progress,
+        "Linking localizations" if to_link else phase,
+        unit="loc" if to_link else "pixel size",
+    ) as progress:
+        if to_link:
+            locs = _link_near(
+                locs, info, viewport, resolved_r_max, max_dark_time, progress
+            )
+        x = locs["x"].to_numpy(dtype=np.float64)
+        y = locs["y"].to_numpy(dtype=np.float64)
+        in_view = (x >= x_min) & (x < x_max) & (y >= y_min) & (y < y_max)
+        x, y = x[in_view], y[in_view]
+
         lib.start_phase(progress, phase, len(used), unit="pixel size")
         progress.set_value(0)
         for i, (size, shape) in enumerate(used):
@@ -4177,6 +4255,7 @@ def decorrelation(
         "results": results,
         "skipped_pixel_sizes": np.array(skipped),
         "n_locs": int(len(x)),
+        "linked": to_link,
         "sample_area": area,
         "density": len(x) / (area / 1e6) if area > 0 else np.nan,
         "viewport": viewport,
@@ -4377,8 +4456,9 @@ def plot_decorrelation(
         title += " (limited by the pixel size)"
     if in_nm:
         title += (
-            f"\n{result['n_locs']:,} localizations, "
-            f"{result['density']:,.0f} per µm² of sample"
+            f"\n{result['n_locs']:,} "
+            f"{'binding events' if result.get('linked') else 'localizations'}"
+            f", {result['density']:,.0f} per µm² of sample"
         )
     fig.suptitle(title)
     return fig

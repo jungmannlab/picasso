@@ -1565,6 +1565,22 @@ class TestFrc:
                     locs, info, viewport=FRC_VIEWPORT, bin_size=bin_size
                 )
 
+    def test_without_precisions_warns_and_does_not_link(
+        self, locs, info, monkeypatch
+    ):
+        monkeypatch.setattr(
+            postprocess, "link", lambda *a, **k: pytest.fail("linked")
+        )
+        with pytest.warns(UserWarning, match="cannot be linked") as record:
+            frc_res = postprocess.frc(
+                locs.drop(columns=["lpx", "lpy"]),
+                info,
+                viewport=FRC_VIEWPORT,
+                lp=10.0,
+            )
+        assert record[0].filename == __file__
+        assert len(frc_res["frc_curve"])
+
     def test_invalid_lp_raises(self, locs, info):
         with pytest.raises(ValueError, match="localization precision"):
             postprocess.frc(locs, info, viewport=FRC_VIEWPORT, lp=-1.0)
@@ -4858,7 +4874,9 @@ class TestDecorrelation:
         assert result["resolutions"][-1] == pytest.approx(
             2 * result["pixel_sizes"][-1], rel=0.3
         )
-        assert result["n_locs"] == len(locs)
+        # linked into binding events first
+        assert result["linked"]
+        assert 0 < result["n_locs"] < len(locs)
         assert not len(result["skipped_pixel_sizes"])
         # smaller pixels than the best were rendered
         assert not result["pixel_size_limited"]
@@ -4922,7 +4940,9 @@ class TestDecorrelation:
             {"frame": np.zeros(len(x), np.uint32), "x": x, "y": y}
         )
         info = [{"Width": 10, "Height": 10, "Pixelsize": 100.0}]
-        result = postprocess.decorrelation(locs, info, pixel_size=16.0)
+        with pytest.warns(UserWarning, match="cannot be linked"):
+            result = postprocess.decorrelation(locs, info, pixel_size=16.0)
+        assert not result["linked"]
         assert result["density"] == pytest.approx(1e6, rel=0.03)
 
     def test_no_resolution_without_structure(self):
@@ -4932,11 +4952,59 @@ class TestDecorrelation:
             {"frame": np.zeros(2000, np.uint32), "x": x, "y": y}
         )
         info = [{"Width": 50, "Height": 50, "Pixelsize": 100.0}]
-        result = postprocess.decorrelation(locs, info, pixel_size=[16.0])
+        with pytest.warns(UserWarning, match="no lpx, lpy"):
+            result = postprocess.decorrelation(locs, info, pixel_size=[16.0])
         assert np.isnan(result["resolution"])
         assert np.isnan(result["pixel_size"])
         fig = postprocess.plot_decorrelation(result)
         assert "n/a" in fig.get_suptitle()
+
+    def test_links_unlinked_localizations(self, monkeypatch):
+        # each molecule is localized in 5 consecutive frames
+        rng = np.random.default_rng(1)
+        n = 400
+        x0, y0 = rng.uniform(200, 4800, (2, n))
+        frames = np.repeat(np.arange(n) * 10, 5) + np.tile(np.arange(5), n)
+        locs = pd.DataFrame(
+            {
+                "frame": frames.astype(np.uint32),
+                "x": np.repeat(x0, 5) + rng.normal(0, 1, 5 * n),
+                "y": np.repeat(y0, 5) + rng.normal(0, 1, 5 * n),
+                "lpx": np.full(5 * n, 3.0, np.float32),
+                "lpy": np.full(5 * n, 3.0, np.float32),
+            }
+        )
+        info = [{"Width": 50, "Height": 50, "Pixelsize": 100.0}]
+        result = postprocess.decorrelation(locs, info, pixel_size=[16.0])
+        assert result["linked"]
+        assert result["n_locs"] == n  # one per binding event
+        fig = postprocess.plot_decorrelation(result)
+        assert f"{n:,} binding events" in fig.get_suptitle()
+
+        # already linked: used as they are
+        linked, _ = postprocess.link(
+            locs, info, r_max=9.0, remove_ambiguous_lengths=False
+        )
+        monkeypatch.setattr(
+            postprocess,
+            "link",
+            lambda *a, **k: pytest.fail("linked localizations relinked"),
+        )
+        result = postprocess.decorrelation(linked, info, pixel_size=[16.0])
+        assert not result["linked"]
+        assert result["n_locs"] == n
+
+    def test_invalid_r_max_raises_before_linking(self, sharp, monkeypatch):
+        locs, info, _ = sharp
+        monkeypatch.setattr(
+            postprocess, "link", lambda *a, **k: pytest.fail("linked")
+        )
+        with pytest.raises(ValueError, match="'r_max' must be"):
+            postprocess.decorrelation(locs, info, r_max=0.0)
+        with pytest.raises(ValueError, match="automatic linking"):
+            postprocess.decorrelation(
+                locs.assign(lpx=np.nan, lpy=np.nan), info
+            )
 
     def test_plot_and_tables(self, sharp):
         _, _, result = sharp

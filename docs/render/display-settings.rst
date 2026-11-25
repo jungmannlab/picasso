@@ -559,8 +559,10 @@ Estimates the resolution by decorrelation analysis (`Descloux et al., Nature
 Methods, 2019 <https://doi.org/10.1038/s41592-019-0515-7>`__) from all
 localizations at once, unlike the FRC, which splits them in two:
 
-- ``Calculate`` in the ``Decorrelation (FOV)`` row renders the localizations of the **current
-  field of view** as a bilinear histogram (each localization spread on its
+- ``Calculate`` in the ``Decorrelation (FOV)`` row first links the
+  localizations of the **current field of view** into binding events, as
+  for the :ref:`FRC <render-info-frc>`, and renders them as a bilinear
+  histogram (each localization spread on its
   four nearest pixels) and correlates the image with its Fourier transform
   normalized to unit amplitude, low-pass filtered at increasing frequencies.
   The correlation peaks where higher frequencies add more noise than signal;
@@ -581,10 +583,15 @@ localizations at once, unlike the FRC, which splits them in two:
   the cut-off) and the resolution at each pixel size.
 - The estimate needs enough localizations: Descloux et al. (2021) found it
   reliable above about 1-4 x 10^4 localizations per µm² of sample; below,
-  it improves with more localizations. The plot reports this density. Unlike
-  the FRC, decorrelation does not link the localizations: repeated
-  localizations of the same molecule are not corrected for, so the value
-  reported may be optimistic.
+  it improves with more localizations. The plot reports this density, of
+  binding events once they are linked.
+- Linking removes the repeated localizations within one binding event, which
+  correlate and make the resolution appear better than it is. Localizations
+  that are already linked are used as they are, and localizations without
+  ``frame``, ``lpx`` or ``lpy`` cannot be linked (with a warning). As for
+  the FRC, repeated binding events of the same molecule (blinking,
+  DNA-PAINT rebinding) are not corrected for, so the value reported may
+  still be optimistic.
 
 The same analysis runs from the command line over the whole field of view,
 see :ref:`cmd-decorrelation`.

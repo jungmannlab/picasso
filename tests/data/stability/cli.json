@@ -63,11 +63,15 @@
   "--radius-z"
  ],
  "decorrelation": [
+  "--distance",
   "--max-image-size",
   "--n-filters",
   "--n-radii",
   "--pixel-size",
-  "-px"
+  "--tolerance",
+  "-d",
+  "-px",
+  "-t"
  ],
  "density": [],
  "design": [],

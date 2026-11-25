@@ -974,6 +974,8 @@ Move tool, see :ref:`render-stitch-without-stage-positions`, or with
      - off
      - Do not offset the frames of consecutive tiles.
 
+.. _cmd-link:
+
 link
 ----
 Link localizations in consecutive frames.
@@ -1629,7 +1631,9 @@ The localizations are rendered as a bilinear histogram at each pixel size and
 the smallest resolution is reported (Descloux et al., Communications Biology,
 2021). Pixel sizes that give an image larger than ``--max-image-size`` pixels
 on a side are skipped; a warning says when the resolution may be limited by
-the smallest pixel size rendered, e.g., over a large field of view. See
+the smallest pixel size rendered, e.g., over a large field of view. Unlinked
+localizations are linked into binding events first (``-d`` and ``-t``, as in
+:ref:`link <cmd-link>`); linked files are used as they are. See
 :ref:`render-info-decorrelation` for details.
 
 Prints the resolution at each pixel size and saves next to each file ``<file
@@ -1640,7 +1644,7 @@ size of the resolution) and the plot ``<file name>_decorrelation.png``.
 
 .. code-block:: bash
 
-   picasso decorrelation files [-px pixel_size ...] [--n-radii n] [--n-filters n] [--max-image-size pixels]
+   picasso decorrelation files [-px pixel_size ...] [--n-radii n] [--n-filters n] [--max-image-size pixels] [-d distance] [-t tolerance]
 
 For example, at pixel sizes of 4, 8 and 16 nm:
 
@@ -1669,6 +1673,14 @@ For example, at pixel sizes of 4, 8 and 16 nm:
      - ``8192``
      - The largest side length (pixels) of the rendered images; smaller
        pixel sizes are skipped. ``0`` for no limit.
+   * - ``-d``, ``--distance`` (float)
+     - 3 x precision
+     - The maximum distance (nm) for linking unlinked localizations into
+       binding events; by default 3 times their median localization
+       precision.
+   * - ``-t``, ``--tolerance`` (int)
+     - ``3``
+     - The maximum dark time (frames) for linking unlinked localizations.
 
 .. _cmd-dye-performance:
 
