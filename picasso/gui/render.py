@@ -7036,9 +7036,14 @@ class InfoDialog(lib.Dialog):
             else:
                 path = None
 
-            if lp is None:
+            already_linked = len(locs) > 0 and {"len", "n"}.issubset(
+                locs.columns
+            )
+
+            if lp is None and not already_linked:
                 nena_result, lp = postprocess.nena(locs, info)
                 self._record_nena(locs, info, nena_result, lp)
+
             # calculate frc
             # the size was confirmed above
             frc_result = postprocess.frc(
@@ -7087,6 +7092,8 @@ class InfoDialog(lib.Dialog):
             self.frc_rois_window = None
         roi_size = 1000 * self.frc_roi_size.value()
         min_locs = self.frc_min_locs.value()
+
+        already_linked = len(locs) > 0 and {"len", "n"}.issubset(locs.columns)
         lp = self.known_nena(channel)
 
         def compute(progress: lib.TaskProgress) -> dict:
@@ -7102,7 +7109,8 @@ class InfoDialog(lib.Dialog):
             )
 
         def apply(result: dict) -> None:
-            if lp is None:  # calculated now; no curve to plot from it
+            if lp is None and not already_linked:
+                # NeNA was calculated during FRC ROI processing.
                 self._record_nena(locs, info, {}, result["lp"])
             self._show_frc_rois_result(locs, info, viewport, n_rois, result)
 
@@ -7716,7 +7724,7 @@ class FRCRoisWindow(QtWidgets.QWidget):
                 f"<b>FRC resolution: {text}</b> (mean ± std)<br>"
                 f"median {np.median(resolutions):.2f} nm, "
                 f"{len(resolutions)} of {n_total} ROIs used, "
-                "NeNA "
+                "Localization precision (for bin size): "
                 f"{self.result['lp']:.2f} nm"
             )
         # the Info dialog shows the ROIs of the selected channel only
