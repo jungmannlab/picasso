@@ -7011,11 +7011,7 @@ class InfoDialog(lib.Dialog):
             else:
                 path = None
 
-            already_linked = len(locs) > 0 and {"len", "n"}.issubset(
-                locs.columns
-            )
-
-            if lp is None and not already_linked:
+            if lp is None and not postprocess._is_linked(locs):
                 nena_result, lp = postprocess.nena(locs, info)
                 self._record_nena(locs, info, nena_result, lp)
 
@@ -7089,7 +7085,6 @@ class InfoDialog(lib.Dialog):
         roi_size = 1000 * self.frc_roi_size.value()
         min_locs = self.frc_min_locs.value()
 
-        already_linked = len(locs) > 0 and {"len", "n"}.issubset(locs.columns)
         lp = self.known_nena(channel)
 
         def compute(progress: lib.TaskProgress) -> dict:
@@ -7105,9 +7100,10 @@ class InfoDialog(lib.Dialog):
             )
 
         def apply(result: dict) -> None:
-            if lp is None and not already_linked:
-                # NeNA was calculated during FRC ROI processing.
-                self._record_nena(locs, info, {}, result["lp"])
+            if result["nena"] is not None:
+                # NeNA was calculated during FRC ROI processing; not
+                # recorded if it failed and the median precision was used
+                self._record_nena(locs, info, {}, result["nena"])
             self._show_frc_rois_result(locs, info, viewport, n_rois, result)
 
         def failed(error: Exception) -> None:

@@ -1602,13 +1602,28 @@ class TestFrc:
         median_lp = float(
             np.nanmean([np.nanmedian(locs["lpx"]), np.nanmedian(locs["lpy"])])
         )
-        with pytest.warns(UserWarning, match="'r_max'"):
+        with pytest.warns(UserWarning, match="'r_max'") as record:
             postprocess.frc(
                 locs,
                 info,
                 viewport=FRC_VIEWPORT,
                 r_max=0.5 * median_lp,
             )
+        # reported at the call of frc, not inside postprocess
+        assert record[0].filename == __file__
+        with pytest.warns(UserWarning, match="'r_max'") as record:
+            postprocess.frc_rois(
+                locs,
+                info,
+                viewport=((10 * PX, 10 * PX), (20 * PX, 20 * PX)),
+                n_rois=4,
+                roi_size=260,
+                min_locs=10,
+                lp=12.0,
+                r_max=0.5 * median_lp,
+            )
+        assert len(record) == 1  # once, not again per ROI
+        assert record[0].filename == __file__
 
     def test_does_not_modify_locs(self, locs, info):
         ref = locs.copy()
@@ -1652,7 +1667,27 @@ class TestFrcRois:
         )
         assert tracker.phases[1].maximum == len(locs)
         assert tracker.phases[2].maximum == n
+        assert result["nena"] == result["lp"]  # NeNA set the bin size
         pd.testing.assert_frame_equal(locs, ref)
+
+    def test_failed_nena_is_not_returned(self, locs, info, monkeypatch):
+        def raise_runtime_error(*args, **kwargs):
+            raise RuntimeError("NeNA fit failed")
+
+        monkeypatch.setattr(postprocess, "nena", raise_runtime_error)
+        result = postprocess.frc_rois(
+            locs,
+            info,
+            viewport=((10 * PX, 10 * PX), (20 * PX, 20 * PX)),
+            n_rois=4,
+            roi_size=260,
+            min_locs=10,
+        )
+        median_lp = float(
+            np.nanmean([np.nanmedian(locs["lpx"]), np.nanmedian(locs["lpy"])])
+        )
+        assert result["lp"] == pytest.approx(median_lp)  # the fallback
+        assert result["nena"] is None
 
     def test_given_lp_skips_nena(self, locs, info, monkeypatch):
         def no_nena(*args, **kwargs):
@@ -1671,6 +1706,7 @@ class TestFrcRois:
             progress=tracker,
         )
         assert result["lp"] == 12.0
+        assert result["nena"] is None
         assert_phases(tracker, ["Linking localizations", "Calculating FRC"])
         assert tracker.phases[0].maximum == len(locs)
         assert tracker.phases[1].maximum == len(result["rois"])
@@ -1748,6 +1784,7 @@ class TestFrcRois:
             progress=tracker,
         )
         assert result["lp"] > 0
+        assert result["nena"] is None
         assert len(result["resolutions"]) == len(result["rois"])
         assert_phases(tracker, ["Calculating FRC"])
         assert tracker.phases[0].maximum == len(result["rois"])

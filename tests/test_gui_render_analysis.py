@@ -910,6 +910,35 @@ def test_frc_rois_without_enough_localizations(window, answers, qt_offscreen):
     assert "No ROI with enough localizations" in answers.messages[0]
 
 
+def test_frc_rois_record_only_a_found_nena(
+    window, answers, qt_offscreen, monkeypatch
+):
+    """If the NeNA fit fails, FRC in ROIs uses the median precision,
+    which is not recorded as NeNA."""
+    answers.record_messages()
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("NeNA fit failed")
+
+    monkeypatch.setattr(postprocess, "nena", fail)
+    info_dialog = window.info_dialog
+    info_dialog.frc_n_rois.setValue(4)
+    info_dialog.frc_roi_size.setValue(2.0)
+    info_dialog.frc_min_locs.setValue(100)
+    info_dialog.calculate_frc_rois()
+    _wait_for_tasks(qt_offscreen)
+    review = info_dialog.frc_rois_window
+    assert review is not None and review.result["nena"] is None
+    assert info_dialog.known_nena(0) is None
+    assert "NeNA (nm)" not in window.view.infos[0][-1]
+    review.close()
+
+
+def test_frc_rois_record_the_nena(frc_rois, window):
+    assert frc_rois.result["nena"] is not None
+    assert window.info_dialog.known_nena(0) == frc_rois.result["nena"]
+
+
 def test_frc_rois_too_large_images(window, answers, qt_offscreen, monkeypatch):
     """The API refuses too large images before linking; the dialog
     says which ROI side length fits."""

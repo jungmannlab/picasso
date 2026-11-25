@@ -3222,6 +3222,113 @@ def _check_frc_image_size(
         raise FRCImageTooLargeError(image_size, max_image_size, bin_size)
 
 
+def _is_linked(locs: pd.DataFrame) -> bool:
+    """Whether ``locs`` are linked binding events (see ``link``), i.e.,
+    have the columns ``len`` and ``n``."""
+    return len(locs) > 0 and {"len", "n"}.issubset(locs.columns)
+
+
+def _frc_precision(
+    locs: pd.DataFrame,
+    info: list[dict],
+    lp: float | None,
+    linked: bool,
+    progress: lib.Progress | None = None,
+) -> tuple[float, float | None, float | None]:
+    """Localization precision that sets the bin size of the FRC images.
+
+    ``lp`` if given; otherwise NeNA of unlinked ``locs`` and, if that
+    fails or ``locs`` are linked, the median of ``lpx`` and ``lpy``.
+
+    Returns
+    -------
+    lp : float
+        Localization precision (nm).
+    found_nena : float or None
+        NeNA (nm) if calculated successfully here, None otherwise.
+    median_lp : float or None
+        Median of ``lpx`` and ``lpy`` (nm), None if not available or
+        not needed (``lp`` given and ``locs`` linked).
+
+    Raises
+    ------
+    ValueError
+        If no valid positive precision can be determined.
+    """
+    # median localization precision, needed for linking (r_max) or as a
+    # fallback for lp
+    median_lp = None
+    if (not linked or lp is None) and {"lpx", "lpy"}.issubset(locs.columns):
+        value = float(
+            np.nanmean(
+                [np.nanmedian(locs["lpx"]), np.nanmedian(locs["lpy"])]
+            )
+        )
+        if np.isfinite(value) and value > 0:
+            median_lp = value
+
+    found_nena = None
+    if lp is None:
+        if not linked:  # NeNA needs unlinked localizations
+            try:
+                nena_lp = nena(locs, info, progress=progress)[1]
+            except RuntimeError:  # the fit failed
+                nena_lp = None
+            if nena_lp is not None and np.isfinite(nena_lp) and nena_lp > 0:
+                found_nena = lp = float(nena_lp)
+        if lp is None:
+            lp = median_lp
+    else:
+        lp = float(lp)
+
+    if lp is None or not np.isfinite(lp) or lp <= 0:
+        raise ValueError(
+            "Cannot determine a valid positive localization precision "
+            "'lp'. Pass 'lp' explicitly or ensure valid 'lpx' and 'lpy' "
+            "values are available."
+        )
+    return lp, found_nena, median_lp
+
+
+def _frc_r_max(
+    r_max: float | Literal["auto"], median_lp: float | None
+) -> float:
+    """Linking distance (nm) of ``frc`` and ``frc_rois``: 3 x
+    ``median_lp`` for ``"auto"``, else ``r_max``, with a warning if it
+    is smaller than ``median_lp``.
+
+    Raises
+    ------
+    ValueError
+        If ``r_max`` is an unknown option, ``"auto"`` without a median
+        precision, or not a finite positive distance.
+    """
+    if isinstance(r_max, str):
+        if r_max != "auto":
+            raise ValueError(f"Unsupported r_max option: {r_max!r}")
+        if median_lp is None:
+            raise ValueError(
+                "Cannot determine a valid median localization precision "
+                "for automatic linking. Ensure valid 'lpx' and 'lpy' "
+                "values are available, or pass 'r_max' explicitly."
+            )
+        return 3.0 * median_lp
+
+    resolved = float(r_max)
+    if not np.isfinite(resolved) or resolved <= 0:
+        raise ValueError("'r_max' must be a finite positive distance.")
+    if median_lp is not None and resolved < median_lp:
+        warnings.warn(
+            f"'r_max' ({resolved:.2f} nm) is smaller than the median "
+            f"localization precision ({median_lp:.2f} nm). This may "
+            "prevent correct linking of localizations belonging to the "
+            "same emitter.",
+            UserWarning,
+            stacklevel=3,  # the caller of frc or frc_rois
+        )
+    return resolved
+
+
 def plot_frc(
     frc_result: dict,
     fig: plt.Figure = None,
@@ -3300,7 +3407,9 @@ def frc(
         Random seed for splitting the data into halves. Default is 42.
     lp : float or None, optional
         Localization precision (nm) that sets the bin size of the
-        rendered images (``lp / 2``). If None (default), NeNA of ``locs`` is used.
+        rendered images (``lp / 2``). If None (default), NeNA of
+        ``locs`` is used; the median of ``lpx`` and ``lpy`` if the NeNA
+        fit fails or ``locs`` are already linked.
     max_image_size : int or None, optional
         Largest side length (pixels) of the rendered images. A larger
         (square) viewport raises ``FRCImageTooLargeError`` (a
@@ -3339,49 +3448,8 @@ def frc(
     nanoscopy. Nat Methods 10, 557-562 (2013).
     https://doi.org/10.1038/nmeth.2448
     """
-    already_linked = len(locs) > 0 and {"len", "n"}.issubset(locs.columns)
-
-    # Calculate median localization precision only when needed for linking
-    # or as a fallback estimate of lp.
-    median_lp = None
-    if (not already_linked or lp is None) and {"lpx", "lpy"}.issubset(
-        locs.columns
-    ):
-        value = float(
-            np.nanmean(
-                [
-                    np.nanmedian(locs["lpx"]),
-                    np.nanmedian(locs["lpy"]),
-                ]
-            )
-        )
-        if np.isfinite(value) and value > 0:
-            median_lp = value
-
-    # Estimate localization precision lp for FRC rendering.
-    if lp is None:
-        if not already_linked:
-            try:
-                nena_lp = nena(locs, info)[1]
-                if (
-                    nena_lp is not None
-                    and np.isfinite(nena_lp)
-                    and nena_lp > 0
-                ):
-                    lp = float(nena_lp)
-            except RuntimeError:
-                lp = None
-
-        if lp is None:
-            lp = median_lp
-    else:
-        lp = float(lp)
-
-    if lp is None or not np.isfinite(lp) or lp <= 0:
-        raise ValueError(
-            "Cannot determine a valid positive localization precision 'lp'. "
-            "Pass 'lp' explicitly or ensure valid 'lpx' and 'lpy' values are available."
-        )
+    already_linked = _is_linked(locs)
+    lp, _, median_lp = _frc_precision(locs, info, lp, already_linked)
 
     # Correct the viewport to be square before selecting localizations.
     viewport_width = viewport[1][1] - viewport[0][1]
@@ -3408,40 +3476,7 @@ def frc(
     # The generous margin keeps nearby localizations available to form
     # events crossing the viewport boundary.
     if not already_linked:
-        if isinstance(r_max, str):
-            if r_max != "auto":
-                raise ValueError(f"Unsupported r_max option: {r_max!r}")
-
-            if median_lp is None:
-                raise ValueError(
-                    "Cannot determine a valid median localization precision "
-                    "for automatic linking. Ensure valid 'lpx' and 'lpy' "
-                    "values are available, or pass 'r_max' explicitly."
-                )
-
-            resolved_r_max = 3.0 * median_lp
-
-        else:
-            resolved_r_max = float(r_max)
-
-        if not np.isfinite(resolved_r_max) or resolved_r_max <= 0:
-            raise ValueError("'r_max' must be a finite positive distance.")
-
-        # Warn if the explicit linking radius is smaller than median lp.
-        if (
-            not isinstance(r_max, str)
-            and median_lp is not None
-            and resolved_r_max < median_lp
-        ):
-            warnings.warn(
-                f"'r_max' ({resolved_r_max:.2f} nm) is smaller than "
-                f"the median localization precision "
-                f"({median_lp:.2f} nm). This may prevent correct "
-                "linking of localizations belonging to the same emitter.",
-                UserWarning,
-                stacklevel=2,
-            )
-
+        resolved_r_max = _frc_r_max(r_max, median_lp)
         link_margin = 10.0 * resolved_r_max
 
         in_link_region = (
@@ -3451,8 +3486,9 @@ def frc(
             & (locs["y"] < y_max + link_margin)
         )
 
-        # Keep ambiguous event lengths: FRC only requires one position estimate
-        # per emitter activation, not complete reconstruction of the binding event.
+        # Keep ambiguous event lengths: FRC only requires one position
+        # estimate per emitter activation, not complete reconstruction
+        # of the binding event.
         locs, _ = link(
             locs.loc[in_link_region],
             info,
@@ -3570,7 +3606,11 @@ def frc_rois(
     -------
     result : dict
         Dictionary with keys "rois", "n_locs", "frc_results",
-        "resolutions" and "lp".
+        "resolutions", "lp" (nm, the localization precision that set the
+        bin size) and "nena" (nm, the NeNA calculated here; None if
+        ``lp`` was given, the localizations were already linked or the
+        NeNA fit failed and ``lp`` is the median of ``lpx`` and
+        ``lpy``).
 
     Raises
     ------
@@ -3580,7 +3620,7 @@ def frc_rois(
     ValueError
         If a valid localization precision cannot be determined.
     """
-    already_linked = len(locs) > 0 and {"len", "n"}.issubset(locs.columns)
+    already_linked = _is_linked(locs)
 
     # Keep the original dataset for ROI selection.
     original_locs = locs
@@ -3601,85 +3641,17 @@ def frc_rois(
         unit="loc",
     ) as progress:
 
-        # Calculate median localization precision only when needed for
-        # linking or as a fallback estimate of lp.
-        median_lp = None
-        if (not already_linked or lp is None) and {"lpx", "lpy"}.issubset(
-            original_locs.columns
-        ):
-            value = float(
-                np.nanmean(
-                    [
-                        np.nanmedian(original_locs["lpx"]),
-                        np.nanmedian(original_locs["lpy"]),
-                    ]
-                )
-            )
-            if np.isfinite(value) and value > 0:
-                median_lp = value
-
         # Estimate localization precision from the full dataset.
-        if lp is None:
-            if not already_linked:
-                try:
-                    nena_lp = nena(original_locs, info, progress=progress)[1]
-                    if (
-                        nena_lp is not None
-                        and np.isfinite(nena_lp)
-                        and nena_lp > 0
-                    ):
-                        lp = float(nena_lp)
-                except RuntimeError:
-                    lp = None
-
-            if lp is None:
-                lp = median_lp
-        else:
-            lp = float(lp)
-
-        if lp is None or not np.isfinite(lp) or lp <= 0:
-            raise ValueError(
-                "Cannot determine a valid positive localization precision 'lp'. "
-                "Pass 'lp' explicitly or ensure valid 'lpx' and 'lpy' values are available."
-            )
+        lp, found_nena, median_lp = _frc_precision(
+            original_locs, info, lp, already_linked, progress=progress
+        )
 
         # All ROIs have the same size: check it once, before linking.
         _check_frc_image_size(roi_size, lp, max_image_size)
 
         # Link the full dataset once, if needed, so n_locs is correct
         if not already_linked:
-            if isinstance(r_max, str):
-                if r_max != "auto":
-                    raise ValueError(f"Unsupported r_max option: {r_max!r}")
-
-                if median_lp is None:
-                    raise ValueError(
-                        "Cannot determine a valid median localization precision "
-                        "for automatic linking. Ensure valid 'lpx' and 'lpy' "
-                        "values are available, or pass 'r_max' explicitly."
-                    )
-
-                resolved_r_max = 3.0 * median_lp
-            else:
-                resolved_r_max = float(r_max)
-
-            if not np.isfinite(resolved_r_max) or resolved_r_max <= 0:
-                raise ValueError("'r_max' must be a finite positive distance.")
-
-            # Warn once if the explicit linking radius is too small.
-            if (
-                not isinstance(r_max, str)
-                and median_lp is not None
-                and resolved_r_max < median_lp
-            ):
-                warnings.warn(
-                    f"'r_max' ({resolved_r_max:.2f} nm) is smaller than "
-                    f"the median localization precision "
-                    f"({median_lp:.2f} nm). This may prevent correct "
-                    "linking of localizations belonging to the same emitter.",
-                    UserWarning,
-                    stacklevel=2,
-                )
+            resolved_r_max = _frc_r_max(r_max, median_lp)
 
             lib.start_phase(
                 progress,
@@ -3746,6 +3718,7 @@ def frc_rois(
         "frc_results": frc_results,
         "resolutions": resolutions,
         "lp": lp,
+        "nena": found_nena,
     }
 
 
