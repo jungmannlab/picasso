@@ -2566,8 +2566,7 @@ def _resolve_split_fov_regions(
         )
     if not (0 <= reference < n_channels):
         raise ValueError(
-            f"reference={reference} is out of range for {n_channels} "
-            "regions."
+            f"reference={reference} is out of range for {n_channels} regions."
         )
     region_rects = [_normalized_region(r) for r in regions]
     # reference region must be channel 0 (identity) for the transform and

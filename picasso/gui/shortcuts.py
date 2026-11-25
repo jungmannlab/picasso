@@ -470,8 +470,10 @@ class ShortcutsDialog(lib.Dialog):
         box.button(
             QtWidgets.QDialogButtonBox.StandardButton.RestoreDefaults
         ).clicked.connect(
-            lambda: lib.confirm_restore_defaults(self, "all shortcuts")
-            and self.restore_defaults()
+            lambda: (
+                lib.confirm_restore_defaults(self, "all shortcuts")
+                and self.restore_defaults()
+            )
         )
         box.accepted.connect(self.accept)
         box.rejected.connect(self.reject)

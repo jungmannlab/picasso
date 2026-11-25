@@ -42,9 +42,9 @@ def main():
         for key, arr in out.items():
             # freezing an accidentally-empty render would make the test
             # a no-op, so refuse it here
-            assert (
-                np.abs(arr.astype(np.float64)).sum() > 0
-            ), f"scene {scene['name']} produced an empty '{key}' array"
+            assert np.abs(arr.astype(np.float64)).sum() > 0, (
+                f"scene {scene['name']} produced an empty '{key}' array"
+            )
             arrays[f"{scene['name']}::{key}"] = arr
             print(
                 f"{scene['name']:26s} {key:5s} {str(arr.shape):15s} "

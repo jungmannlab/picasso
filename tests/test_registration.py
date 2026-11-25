@@ -739,8 +739,9 @@ class TestMultiFovBeads:
 
     def test_a_single_frame_movie_is_unaffected(self):
         movie = self._movie(1)
-        assert self._register(movie, multi_fov=True)["n_pairs"] == (
-            self._register(movie, multi_fov=False)["n_pairs"]
+        assert (
+            self._register(movie, multi_fov=True)["n_pairs"]
+            == (self._register(movie, multi_fov=False)["n_pairs"])
         )
 
 

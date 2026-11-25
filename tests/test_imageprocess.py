@@ -146,12 +146,12 @@ class TestRCC:
 
         # rcc returns (shift_y, shift_x) per segment relative to segment 0
         for i, (dy, dx) in enumerate(offsets):
-            assert (
-                abs(shift_y[i] - dy) < 0.5
-            ), f"segment {i}: dy={shift_y[i]:.3f} vs {dy}"
-            assert (
-                abs(shift_x[i] - dx) < 0.5
-            ), f"segment {i}: dx={shift_x[i]:.3f} vs {dx}"
+            assert abs(shift_y[i] - dy) < 0.5, (
+                f"segment {i}: dy={shift_y[i]:.3f} vs {dy}"
+            )
+            assert abs(shift_x[i] - dx) < 0.5, (
+                f"segment {i}: dx={shift_x[i]:.3f} vs {dx}"
+            )
 
     def test_progress_counts_pairs(self):
         size = 32

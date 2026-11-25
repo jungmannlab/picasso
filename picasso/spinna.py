@@ -751,7 +751,7 @@ def plot_NN(  # noqa: C901
             " 'counts' keys."
         )
         assert len(hist_data["bins"]) == len(hist_data["counts"]), (
-            "'bins' and 'counts' in hist_data must have the same" " length."
+            "'bins' and 'counts' in hist_data must have the same length."
         )
         n_neighbors = len(hist_data["bins"])
 
@@ -783,7 +783,7 @@ def plot_NN(  # noqa: C901
         elif i == 2:
             label = "3rd NN"
         else:
-            label = f"{i+1}th NN"
+            label = f"{i + 1}th NN"
         if mode == "hist":
             ax.bar(
                 (bins_[:-1] + bins_[1:]) / 2,
@@ -1193,9 +1193,9 @@ class MaskGenerator:
         if isinstance(binsize, (int, float)):
             binsize = (binsize,) * self.ndim
         elif isinstance(binsize, (tuple, list)):
-            assert (
-                len(binsize) == 2
-            ), "If binsize is a tuple/list, it must have 2 values."
+            assert len(binsize) == 2, (
+                "If binsize is a tuple/list, it must have 2 values."
+            )
             if self.ndim == 2:
                 binsize = (binsize[0], binsize[0])
             else:
@@ -1222,9 +1222,9 @@ class MaskGenerator:
         if isinstance(sigma, (int, float)):
             sigma = (sigma,) * self.ndim
         elif isinstance(sigma, (tuple, list)):
-            assert (
-                len(sigma) == 2
-            ), "If sigma is a tuple/list, it must have 2 values."
+            assert len(sigma) == 2, (
+                "If sigma is a tuple/list, it must have 2 values."
+            )
             if self.ndim == 2:
                 sigma = (sigma[0], sigma[0])
             else:
@@ -5085,7 +5085,7 @@ def _compare_models_given_label_unc(
                 ]
             )
             savepath = os.path.join(
-                savedir, f"fit_scores_model_{i+1}_label_unc_{suffix}.csv"
+                savedir, f"fit_scores_model_{i + 1}_label_unc_{suffix}.csv"
             )
         # the fit starts its own progress phases, titled spinner_title
         opt_props, score = spinner.fit_stoichiometry(
@@ -6249,7 +6249,7 @@ def _spinna_process_row(
     progress: lib.Progress,
 ) -> dict:
     """Run a single SPINNA analysis row and return the results dict."""
-    _log.info(f"Running SPINNA on row {index+1} out of {len(parameters)}.")
+    _log.info(f"Running SPINNA on row {index + 1} out of {len(parameters)}.")
 
     le_fitting = (
         "le_fitting" in row.index

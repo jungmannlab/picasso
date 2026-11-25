@@ -94,9 +94,9 @@ def test_no_old_progress_arguments(name, fn):
         for p in params
         if re.search("progress", p) and p not in NOT_TRACKERS | {"progress"}
     )
-    assert (
-        not extra
-    ), f"{name} takes {extra}; report every step through one `progress`."
+    assert not extra, (
+        f"{name} takes {extra}; report every step through one `progress`."
+    )
 
 
 @pytest.mark.parametrize(
@@ -109,8 +109,7 @@ def test_progress_argument_is_consistent(name, fn, documented):
     assert param.default is None, f"{name}: progress must default to None."
     # postponed annotations are stored re-unparsed, with single quotes
     assert str(param.annotation).replace("'", '"') == ANNOTATION, (
-        f"{name}: annotate progress as {ANNOTATION}, not "
-        f"{param.annotation!r}."
+        f"{name}: annotate progress as {ANNOTATION}, not {param.annotation!r}."
     )
     doc = inspect.getdoc(documented) or ""
     assert re.search(

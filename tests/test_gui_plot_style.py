@@ -394,8 +394,8 @@ def test_render_plot_windows_follow_style(qt_offscreen):
     plot_style.set_current(style)
     for window in windows:
         assert window.plot_style == style
-        assert to_hex(window.figure.get_facecolor()) == (
-            THEMES["Dark"]["figure"]
+        assert (
+            to_hex(window.figure.get_facecolor()) == (THEMES["Dark"]["figure"])
         )
         for axes in window.figure.axes:
             assert to_hex(axes.get_facecolor()) == THEMES["Dark"]["axes"]

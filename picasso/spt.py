@@ -1650,8 +1650,7 @@ def plot_track_lengths(
     )
     mean = n_locs.mean() if len(n_locs) else 0
     ax.set_title(
-        f"Track lengths, {len(n_locs):,} tracks, mean {mean:.1f} "
-        "localizations"
+        f"Track lengths, {len(n_locs):,} tracks, mean {mean:.1f} localizations"
     )
     ax.set_xlabel("Localizations per track")
     ax.set_ylabel("Counts")

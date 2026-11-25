@@ -1378,8 +1378,7 @@ def _dye_performance_summary(
         )
     else:
         print(
-            "  localization drop not available:"
-            f" {errors['localization_drop']}"
+            f"  localization drop not available: {errors['localization_drop']}"
         )
     if damage is not None:
         summary |= {
@@ -2446,8 +2445,7 @@ def _localize_load_3d_calibration(
 
     if not os.path.isfile(args.zc):
         print(
-            "Given path for calibration file not found."
-            " Please enter manually:"
+            "Given path for calibration file not found. Please enter manually:"
         )
         zpath = input("Path to *.yaml calibration file: ")
     else:
@@ -4028,7 +4026,7 @@ def _camera_calibrate(args: argparse.Namespace) -> None:
         print(f"Maps and histograms: {plot_path}")
     except Exception as error:
         print(f"The diagnostic plot could not be saved: {error}")
-    print("Use it with: picasso localize <movie> -cm " f"{out_path} -a mle")
+    print(f"Use it with: picasso localize <movie> -cm {out_path} -a mle")
 
 
 def _camera_validate(args: argparse.Namespace) -> None:
@@ -4893,9 +4891,9 @@ def _print_deprecation(notice: deprecation.Deprecation) -> None:
     print(f"Warning: {notice.text()}", file=sys.stderr)
 
 
-def _build_parser() -> (
-    tuple[argparse.ArgumentParser, argparse._SubParsersAction]
-):
+def _build_parser() -> tuple[
+    argparse.ArgumentParser, argparse._SubParsersAction
+]:
     """The parser of the ``picasso`` command line and its subcommands
     (the action plugins add their commands to, see ``main``).
 
@@ -5265,9 +5263,7 @@ def _build_parser() -> (
         "-zg",
         "--fit-z-gpu",
         action="store_true",
-        help=(
-            "fit z coordinates on a CUDA-capable GPU (numba.cuda);" " 3D only"
-        ),
+        help=("fit z coordinates on a CUDA-capable GPU (numba.cuda); 3D only"),
     )
 
     localize_parser.add_argument(
@@ -5441,8 +5437,7 @@ def _build_parser() -> (
         type=str,
         default="",
         help=(
-            "output calibration path (.hdf5); default alongside the dark "
-            "movie"
+            "output calibration path (.hdf5); default alongside the dark movie"
         ),
     )
 
@@ -7019,8 +7014,7 @@ def _build_parser() -> (
     groupprops_parser = subparsers.add_parser(
         "group-properties",
         help=(
-            "calculate kinetics "
-            "and various properties of localization groups"
+            "calculate kinetics and various properties of localization groups"
         ),
     )
     groupprops_parser.add_argument(

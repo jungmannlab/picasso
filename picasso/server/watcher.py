@@ -317,7 +317,6 @@ def check_new_and_process(  # noqa: C901
             try:
                 saved = []  # the localization files, for $LOCS
                 for settings in settings_list:
-
                     if len(settings_list) > 1:
                         print_to_file(
                             logfile,
@@ -433,7 +432,6 @@ def watcher():  # noqa: C901
         st.error("Not a valid path.")
     else:
         with st.expander("Settings"):
-
             n_columns = int(
                 st.number_input(
                     "Number of Parameter Groups",
@@ -456,7 +454,7 @@ def watcher():  # noqa: C901
                 col = columns[i]
                 settings[i] = {}
                 if n_columns > 1:
-                    col.write(f"Group {i+1} (pg_{i+1})")
+                    col.write(f"Group {i + 1} (pg_{i + 1})")
 
                 settings[i]["box"] = col.number_input(
                     label="Box side length:", value=7, key=f"box_{i}"
@@ -558,7 +556,6 @@ def watcher():  # noqa: C901
             logfile = st.text_input("Logfile", logfile)
 
             if st.button("Submit", icon=":material/send:"):
-
                 settings_list = []
 
                 for i in range(n_columns):
@@ -589,7 +586,7 @@ def watcher():  # noqa: C901
                     if n_columns == 1:
                         suffix = ""
                     else:
-                        suffix = f"_pg_{i+1}"
+                        suffix = f"_pg_{i + 1}"
                     settings_selected["suffix"] = suffix
                     settings_list.append(settings_selected)
 
@@ -630,7 +627,7 @@ def watcher():  # noqa: C901
                 write_table(df, "watcher", if_exists="append")
 
                 for reset in range(3):
-                    display.success(f"Restarting in {3-reset}.")
+                    display.success(f"Restarting in {3 - reset}.")
                     time.sleep(1)
                 display.success("Please refresh page.")
                 st.stop()

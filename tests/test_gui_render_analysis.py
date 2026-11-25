@@ -23,7 +23,8 @@ import os
 import numpy as np
 import pandas as pd
 import pytest
-from PyQt6 import QtWidgets
+from matplotlib.backend_bases import MouseButton
+from PyQt6 import QtCore, QtWidgets
 
 from picasso import io, lib_qt, postprocess
 from picasso.gui import render as gui_render
@@ -611,8 +612,9 @@ def test_frc_of_a_large_view_asks_first(
     monkeypatch.setattr(
         QtWidgets.QMessageBox,
         "question",
-        lambda *a, **k: asked.append(a[2])
-        or (button.Yes if proceed else button.No),
+        lambda *a, **k: (
+            asked.append(a[2]) or (button.Yes if proceed else button.No)
+        ),
     )
     calls = _frc_images_too_large(monkeypatch)
     window.info_dialog.calculate_frc_resolution()
@@ -774,14 +776,16 @@ def test_frc_bin_size(window, answers, monkeypatch, qt_offscreen):
     monkeypatch.setattr(
         postprocess,
         "frc",
-        lambda *a, **k: calls.append((k["lp"], k.get("bin_size")))
-        or frc(*a, **k),
+        lambda *a, **k: (
+            calls.append((k["lp"], k.get("bin_size"))) or frc(*a, **k)
+        ),
     )
     monkeypatch.setattr(
         postprocess,
         "frc_rois",
-        lambda *a, **k: calls.append((k["lp"], k["bin_size"]))
-        or frc_rois(*a, **k),
+        lambda *a, **k: (
+            calls.append((k["lp"], k["bin_size"])) or frc_rois(*a, **k)
+        ),
     )
     info_dialog = window.info_dialog
     assert info_dialog.frc_bin_size.text() == "Auto"
@@ -948,9 +952,52 @@ def test_frc_rois_click_selects_a_roi(frc_rois):
         inaxes=frc_rois.figure.axes[0],
         xdata=(x0 + x1) / 2 / 1000,  # um
         ydata=(y0 + y1) / 2 / 1000,
+        button=MouseButton.LEFT,
     )
     frc_rois.on_click(event)
     assert frc_rois.selected_row() == last
+
+
+def test_frc_rois_right_click_toggles_use(frc_rois):
+    """Right-clicking an ROI ticks/unticks it and keeps the selection
+    and the zoom of the overview."""
+    from types import SimpleNamespace
+
+    usable = np.flatnonzero(np.isfinite(frc_rois.result["resolutions"]))
+    if not len(usable):
+        pytest.skip("no ROI with a resolution in the synthetic data")
+    row = usable[-1]
+    selected = frc_rois.selected_row()
+    ax_map = frc_rois.figure.axes[0]
+    ax_map.set_xlim(ax_map.get_xlim()[0], np.mean(ax_map.get_xlim()))
+    xlim = ax_map.get_xlim()
+    (y0, x0), (y1, x1) = frc_rois.result["rois"][row]
+
+    def right_click():
+        frc_rois.on_click(
+            SimpleNamespace(
+                inaxes=frc_rois.figure.axes[0],
+                xdata=(x0 + x1) / 2 / 1000,  # um
+                ydata=(y0 + y1) / 2 / 1000,
+                button=MouseButton.RIGHT,
+            )
+        )
+
+    right_click()
+    assert not frc_rois.used[row]
+    assert frc_rois.selected_row() == selected
+    assert frc_rois.figure.axes[0].get_xlim() == xlim
+    right_click()
+    assert frc_rois.used[row]
+    assert frc_rois.selected_row() == selected
+
+
+def test_frc_rois_right_click_ignores_unusable_rois(frc_rois):
+    """ROIs without a 1/7 crossing (not checkable) cannot be ticked."""
+    used = frc_rois.used[0]
+    frc_rois.table.item(0, 0).setFlags(QtCore.Qt.ItemFlag.ItemIsSelectable)
+    frc_rois.toggle_used(0)
+    assert frc_rois.used[0] == used
 
 
 def test_frc_rois_export(frc_rois, monkeypatch, tmp_path):

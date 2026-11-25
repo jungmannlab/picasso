@@ -59,7 +59,7 @@ Picasso 1.0 is the largest update since Picasso was first published. The highlig
 - Faster circular picking of localizations.
 - Undrifting from picked localizations is fast and memory-efficient for many picks.
 - Faster FRC.
-- FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*).
+- FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*). ([#729](https://github.com/jungmannlab/picasso/issues/729)); thanks to @boydcpeters.
 - FRC links localizations into binding events before splitting them into two halves, so that the localizations of one binding event do not correlate the halves and inflate the resolution. Already linked localizations are used as they are. FRC in several ROIs shows the bin size used (was labeled *NeNA*).
 - Resolution by decorrelation analysis (Descloux et al., *Nat. Methods* 2019), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-info-decorrelation). As for the FRC, unlinked localizations are linked into binding events first (`picasso.postprocess.decorrelation`'s `r_max` and `max_dark_time`; `picasso decorrelation -d` and `-t`).
 - The pick statistics of the Info dialog include the dye performance of picked docking sites (Steen et al., *Nat. Methods* 2024). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-info-dye-performance).
@@ -209,6 +209,7 @@ The [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html)
 - Screen readers (VoiceOver, Narrator, Orca) announce the input fields of all Picasso windows by their labels, fields in tables by their column and icon-only buttons by their tooltip. See the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#accessibility). Note this is an experimental feature, if there is room for improvement, please raise a [GitHub issue](https://github.com/jungmannlab/picasso/issues)
 - Buttons that show a state (e.g., a loaded file in SPINNA) show an icon besides their color, so that the state does not rely on color alone; screen readers read it out.
 - Code readability clean ups (flake8).
+- For developers: the code is formatted and checked with [Ruff](https://docs.astral.sh/ruff/) instead of black and flake8, in the `pre-commit` hook and in the CI, which also fails on unformatted code. [prek](https://github.com/j178/prek) works with the same hook configuration ([#728](https://github.com/jungmannlab/picasso/issues/728)); thanks to @boydcpeters.
 - For developers: `picasso.deprecation` declares deprecations with the version that may remove them, and `tests/test_stability.py` compares the public names and the command line with snapshots and fails once a deprecated name is due for removal. See the [documentation](https://picassosr.readthedocs.io/en/latest/versioning.html#versioning-developers).
 - The spatial index stored in localization .hdf5 files (`/render_index`). See the [documentation](https://picassosr.readthedocs.io/en/latest/files.html#spatial-index).
 - The user settings file (`~/.picasso/settings.yaml`) is no longer lost when it cannot be read. Also, the [documentation](https://picassosr.readthedocs.io/en/latest/others.html#user-settings-file) has been added.

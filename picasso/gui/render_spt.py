@@ -662,8 +662,7 @@ class TrackAnalysisWindow(QtWidgets.QWidget):
             text = f"MSD: D = {msd_fit['D']:.4g} µm²/s"
             if np.isfinite(msd_fit["sigma"]):
                 text += (
-                    ", apparent localization error "
-                    f"{msd_fit['sigma']:.1f} nm"
+                    f", apparent localization error {msd_fit['sigma']:.1f} nm"
                 )
             lines.append(text + ".")
         else:

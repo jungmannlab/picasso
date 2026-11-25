@@ -830,8 +830,7 @@ class IdentificationParameters:
             method = settings
         elif info.get("Min. Net Gradient") is None:
             raise ValueError(
-                "The net gradient identification needs a "
-                "'Min. Net Gradient'."
+                "The net gradient identification needs a 'Min. Net Gradient'."
             )
         else:
             minimum = info["Min. Net Gradient"]
@@ -3405,8 +3404,7 @@ def wavelet_from_parameters(
         # split-FOV: one setting per region (a scalar applies to all)
         if len(lengths) > 1:
             raise ValueError(
-                "The per-region wavelet settings differ in length: "
-                f"{stored}."
+                f"The per-region wavelet settings differ in length: {stored}."
             )
         n_regions = lengths.pop()
         return [
@@ -3664,9 +3662,9 @@ def picks_to_identifications(
         "contain two numbers (x and y coordinates)."
     )
     if isinstance(drift, pd.DataFrame):
-        assert all(
-            col in drift.columns for col in ["x", "y"]
-        ), "Drift data frame must contain 'x' and 'y' columns."
+        assert all(col in drift.columns for col in ["x", "y"]), (
+            "Drift data frame must contain 'x' and 'y' columns."
+        )
     if n_frames is None:
         if drift is None:
             raise ValueError(
@@ -3763,12 +3761,12 @@ def locs_to_identifications(
     KeyError
         If ``pixelsize`` is None and ``movie_info`` has no ``Pixelsize``.
     """
-    assert isinstance(
-        locs, pd.DataFrame
-    ), "Localizations must be a pandas data frame"
-    assert (
-        isinstance(n_frames, int) and n_frames >= 0
-    ), "n_frames must be a non-negative integer"
+    assert isinstance(locs, pd.DataFrame), (
+        "Localizations must be a pandas data frame"
+    )
+    assert isinstance(n_frames, int) and n_frames >= 0, (
+        "n_frames must be a non-negative integer"
+    )
     max_frames = lib.get_from_metadata(movie_info, "Frames", raise_error=True)
     if pixelsize is None:
         pixelsize = lib.get_from_metadata(
@@ -5028,13 +5026,13 @@ def _validate_fit_args(
         bitplane.MovieMapper,
         bitplane.MovieMapperStack,
     )
-    assert isinstance(
-        movie, accepted_movie_types
-    ), "movie must be a movie loaded by picasso.io.load_movie"
+    assert isinstance(movie, accepted_movie_types), (
+        "movie must be a movie loaded by picasso.io.load_movie"
+    )
     assert isinstance(camera_info, dict), "camera_info must be a dict"
-    assert isinstance(
-        identifications, pd.DataFrame
-    ), "identifications must be a DataFrame"
+    assert isinstance(identifications, pd.DataFrame), (
+        "identifications must be a DataFrame"
+    )
     assert isinstance(box, int) and box > 0, "box must be a positive integer"
     assert fitting_method in FIT_METHODS, (
         f"fitting_method '{fitting_method}' is not one of "
@@ -5045,12 +5043,12 @@ def _validate_fit_args(
             "spline_calibration (a spline PSF calibration dict, see "
             "io.load_spline_calibration) is required for spline fitting"
         )
-    assert eps is None or (
-        isinstance(eps, (int, float)) and eps > 0
-    ), "eps must be a positive number or None"
-    assert max_it is None or (
-        isinstance(max_it, int) and max_it > 0
-    ), "max_it must be a positive integer or None"
+    assert eps is None or (isinstance(eps, (int, float)) and eps > 0), (
+        "eps must be a positive number or None"
+    )
+    assert max_it is None or (isinstance(max_it, int) and max_it > 0), (
+        "max_it must be a positive integer or None"
+    )
     assert isinstance(parallel, bool), "parallel must be a boolean"
     pixelsize = camera_info.get("Pixelsize")
     if not _is_positive_number(pixelsize):
@@ -13241,9 +13239,9 @@ camera_calibration, parallel
         :func:`localize` returns them, with ``frame`` shifted by
         ``start_frame``.
     """
-    assert (
-        isinstance(start_frame, (int, np.integer)) and start_frame >= 0
-    ), "start_frame must be a non-negative integer"
+    assert isinstance(start_frame, (int, np.integer)) and start_frame >= 0, (
+        "start_frame must be a non-negative integer"
+    )
     if camera_info is None:
         camera_info = _camera_info_from_info(info)
     else:
@@ -13292,9 +13290,9 @@ def _validate_calibration_3d(
     ``calibration_3d`` was given and the fitting method supports it."""
     if calibration_3d is None:
         return False
-    assert isinstance(
-        calibration_3d, (dict, str)
-    ), "calibration_3d must be a dict or a path to a YAML file"
+    assert isinstance(calibration_3d, (dict, str)), (
+        "calibration_3d must be a dict or a path to a YAML file"
+    )
     if fitting_method.startswith("spline"):
         # The spline PSF fit recovers z itself, from spline_calibration.
         warnings.warn(

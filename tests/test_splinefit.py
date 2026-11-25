@@ -1093,9 +1093,7 @@ def _synthetic_movie(
                 frame,
                 row - radius : row + radius + 1,
                 column - radius : column + radius + 1,
-            ] += (
-                amplitude * phi
-            )
+            ] += amplitude * phi
             truth.append((frame, column, row, z_native))
     movie = rng.poisson(clean).astype(np.uint16)
     info = [
@@ -1344,9 +1342,7 @@ class TestMultichannelIntegration:
                         frame,
                         iy - radius : iy + radius + 1,
                         ix - radius : ix + radius + 1,
-                    ] += (
-                        4000.0 * phi
-                    )
+                    ] += 4000.0 * phi
         info = [
             {
                 "Byte Order": "<",
@@ -1405,8 +1401,9 @@ class TestMultichannelIntegration:
         y_px = locs.y.values / ps
         assert np.abs(x_px - [t[1] for t in truth]).max() < 0.05
         assert np.abs(y_px - [t[2] for t in truth]).max() < 0.05
-        z_native = calibration["z_center"] - locs.z.values / (
-            calibration["z_step_nm"]
+        z_native = (
+            calibration["z_center"]
+            - locs.z.values / (calibration["z_step_nm"])
         )
         assert np.abs(z_native - [t[3] for t in truth]).max() < 0.5
         # the photon-decoupled model reports per-channel photons

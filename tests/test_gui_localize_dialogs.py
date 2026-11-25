@@ -125,8 +125,9 @@ class TestLocalize:
         locs, info = io.load_locs(str(tmp_path / "Channel 0_locs.hdf5"))
         assert len(locs) == 2 * FRAMES
         # the metadata the identification and the fit returned
-        assert _step(info, "Identify")["Box Size"] == (
-            loaded.parameters["Box Size"]
+        assert (
+            _step(info, "Identify")["Box Size"]
+            == (loaded.parameters["Box Size"])
         )
         assert info[-1]["Step"] == "Fit 2D"
         assert _status(loaded) == f"Saved {2 * FRAMES} localizations."
@@ -2527,8 +2528,8 @@ class TestMetadata:
         loaded.localize()
         _wait(loaded)
         shown = []
-        loaded.metadata_dialog.set_infos = (
-            lambda infos, labels=None: shown.append(infos)
+        loaded.metadata_dialog.set_infos = lambda infos, labels=None: (
+            shown.append(infos)
         )
         loaded.show_metadata()
         assert shown == [loaded.extra_info]
@@ -2960,8 +2961,9 @@ class TestChannelSum:
         assert window.channels[1].identifications is None
         info = _step(window.identifications_info, "Identify")
         assert info["Identification Mode"] == "sum"
-        assert info["Sum Channel Transforms"] == (
-            registration["channel_transforms"]
+        assert (
+            info["Sum Channel Transforms"]
+            == (registration["channel_transforms"])
         )
         assert fit.calls == [((), {})]
 

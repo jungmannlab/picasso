@@ -649,8 +649,7 @@ def pick_similar(
         )
     if picks is None:
         raise ValueError(
-            "Pick similar needs seed picks, or n_locs_range and/or "
-            "rmsd_range."
+            "Pick similar needs seed picks, or n_locs_range and/or rmsd_range."
         )
     pick_shape, pick_size = _pick_similar_shape_and_size(
         picks, pick_shape, pick_size
@@ -1040,13 +1039,13 @@ def _validate_pick_similar_args(
 ) -> None:
     """Validate ``pick_similar``'s shape/size/spacing arguments."""
     _valid_shapes = ("Circle", "Rectangle", "Square", "Box")
-    assert (
-        pick_shape in _valid_shapes
-    ), f"Invalid pick shape: {pick_shape}. Choose one of {_valid_shapes}."
+    assert pick_shape in _valid_shapes, (
+        f"Invalid pick shape: {pick_shape}. Choose one of {_valid_shapes}."
+    )
     if pick_shape != "Box":
-        assert isinstance(
-            pick_size, (int, float)
-        ), "pick_size must be a number."
+        assert isinstance(pick_size, (int, float)), (
+            "pick_size must be a number."
+        )
     if grid_spacing is not None and pick_shape != "Rectangle":
         raise ValueError(
             "grid_spacing is only supported for rectangular picks."
@@ -3331,9 +3330,7 @@ def _median_lp(locs: pd.DataFrame) -> float | None:
     with warnings.catch_warnings():  # all-NaN columns
         warnings.simplefilter("ignore", RuntimeWarning)
         value = float(
-            np.nanmean(
-                [np.nanmedian(locs["lpx"]), np.nanmedian(locs["lpy"])]
-            )
+            np.nanmean([np.nanmedian(locs["lpx"]), np.nanmedian(locs["lpy"])])
         )
     return value if np.isfinite(value) and value > 0 else None
 
@@ -3754,7 +3751,6 @@ def frc_rois(
         "Calculating NeNA" if lp is None else "Calculating FRC",
         unit="loc",
     ) as progress:
-
         # Estimate localization precision from the full dataset.
         lp, found_nena, median_lp = _frc_precision(
             original_locs, info, lp, already_linked, progress=progress
@@ -3796,7 +3792,6 @@ def frc_rois(
         progress.set_value(0)
 
         for k, ((y0, x0), (y1, x1)) in enumerate(rois):
-
             # Count linked localizations inside the ROI.
             in_roi = (x > x0) & (y > y0) & (x < x1) & (y < y1)
             n_locs.append(int(in_roi.sum()))
@@ -5796,8 +5791,7 @@ def localization_rate_drop(
     n_last = int(np.count_nonzero(frame >= (1 - fraction) * n_frames))
     if not n_first:
         raise ValueError(
-            f"No localizations in the first {100 * fraction:g}% of the "
-            "frames."
+            f"No localizations in the first {100 * fraction:g}% of the frames."
         )
     return 1.0 - n_last / n_first
 
@@ -6895,9 +6889,9 @@ def apply_drift(
         ``"Drift file"`` of a drift loaded with ``io.load_drift``
         (``drift.attrs["Path"]``).
     """
-    assert isinstance(
-        drift, (pd.DataFrame, np.ndarray)
-    ), "Drift must be a DataFrame or numpy array"
+    assert isinstance(drift, (pd.DataFrame, np.ndarray)), (
+        "Drift must be a DataFrame or numpy array"
+    )
     n_frames = lib.get_from_metadata(info, "Frames", raise_error=True)
     if isinstance(drift, pd.DataFrame):
         required_columns = {"x", "y"}
@@ -6942,9 +6936,9 @@ def plot_drift(
         The figure containing the plot.
     """
     assert isinstance(drift, pd.DataFrame), "Drift must be a DataFrame."
-    assert (
-        "x" in drift.columns and "y" in drift.columns
-    ), "Drift must have 'x' and 'y' columns."
+    assert "x" in drift.columns and "y" in drift.columns, (
+        "Drift must have 'x' and 'y' columns."
+    )
     if fig is None:
         fig = plt.Figure(figsize=(10, 6), constrained_layout=True)
     else:
@@ -7951,8 +7945,7 @@ def remove_non_overlapping_locs(
     region = overlap_region(locs)
     if region is None:
         raise ValueError(
-            "The channels do not overlap, so no localizations would be"
-            " kept."
+            "The channels do not overlap, so no localizations would be kept."
         )
     (x_min, x_max), (y_min, y_max) = region
     return [
@@ -9770,8 +9763,7 @@ def _check_pair_statistic_arguments(
         raise ValueError("n_simulations must not be negative.")
     if cross and cross_null not in ("shift", "labels"):
         raise ValueError(
-            f"Invalid cross_null: {cross_null!r}; choose 'shift' or "
-            "'labels'."
+            f"Invalid cross_null: {cross_null!r}; choose 'shift' or 'labels'."
         )
     if not use_z:
         return
@@ -10905,8 +10897,7 @@ def _checked_nnd_arguments(
         raise ValueError("n_simulations must not be negative.")
     if n_channels > 1 and cross_null not in ("shift", "labels"):
         raise ValueError(
-            f"Invalid cross_null: {cross_null!r}; choose 'shift' or "
-            "'labels'."
+            f"Invalid cross_null: {cross_null!r}; choose 'shift' or 'labels'."
         )
     if not use_z:
         return names
@@ -11477,8 +11468,8 @@ def _fit_knn_density(
     # only lies above it
     start = np.log(n_events / exposure)
     result = minimize_scalar(
-        lambda log_rate: -_knn_log_likelihood(
-            np.exp(log_rate), samples, dim, r_min
+        lambda log_rate: (
+            -_knn_log_likelihood(np.exp(log_rate), samples, dim, r_min)
         ),
         bounds=(start - 1.0, start + 10.0),
         method="bounded",

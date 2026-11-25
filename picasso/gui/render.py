@@ -34,6 +34,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets, sip
 
 # must come after the PyQt6 import so that matplotlib's qt_compat
 # selects the PyQt6 binding (picasso core no longer imports PyQt6)
+from matplotlib.backend_bases import MouseButton
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 from matplotlib.figure import Figure
@@ -380,7 +381,7 @@ def check_pick(f: Callable) -> Callable:
             QtWidgets.QMessageBox.information(
                 args[0],
                 "Pick Error",
-                ("No localizations picked." " Please pick first."),
+                ("No localizations picked. Please pick first."),
             )
         else:
             return f(args[0])
@@ -995,8 +996,7 @@ class PickCandidatesWindow(lib.GenericPlotWindow):
                 )
             style.title(
                 self.figure,
-                f"{len(candidates):,} candidate picks of "
-                f"{self.diameter:g} nm",
+                f"{len(candidates):,} candidate picks of {self.diameter:g} nm",
             )
             self._draw_classes(axes)
         self.selector = RectangleSelector(
@@ -2617,7 +2617,7 @@ class DatasetDialog(lib.Dialog):
                     self.resolve_color_identifier(color)
                 except ValueError as e:
                     raise ValueError(
-                        f"'{color}' at position {i+1} is invalid."
+                        f"'{color}' at position {i + 1} is invalid."
                     ) from e
 
             # add the names to the 'Color' column (self.colorselection)
@@ -5396,12 +5396,12 @@ class TestClustererDialog(lib.Dialog):
             params["frame_analysis"] = self.test_smlm_params.fa.isChecked()
         elif clusterer_name == "G5M":
             params["DBSCAN"] = {}
-            params["DBSCAN"][
-                "radius"
-            ] = self.test_g5m_params.dbscan_radius.value()
-            params["DBSCAN"][
-                "min_samples"
-            ] = self.test_g5m_params.dbscan_min_samples.value()
+            params["DBSCAN"]["radius"] = (
+                self.test_g5m_params.dbscan_radius.value()
+            )
+            params["DBSCAN"]["min_samples"] = (
+                self.test_g5m_params.dbscan_min_samples.value()
+            )
             params["G5M"] = {}
             params["G5M"]["min_locs"] = self.test_g5m_params.min_locs.value()
             handle = self.test_g5m_params.loc_prec_handling.currentText()
@@ -5413,9 +5413,9 @@ class TestClustererDialog(lib.Dialog):
                 self.test_g5m_params.min_sigma.value(),
                 self.test_g5m_params.max_sigma.value(),
             )
-            params["G5M"][
-                "postprocess"
-            ] = self.test_g5m_params.postprocess_check.isChecked()
+            params["G5M"]["postprocess"] = (
+                self.test_g5m_params.postprocess_check.isChecked()
+            )
             if self.test_g5m_params.spline_mode:  # spline
                 params["G5M"]["mode"] = "spline"
                 params["G5M"]["calibration"] = None
@@ -6557,8 +6557,7 @@ class InfoDialog(lib.Dialog):
         # end, the popup list the full names
         self.precision_channel = lib_qt.TailElidedComboBox(max_chars=20)
         self.precision_channel.setToolTip(
-            "Channel whose precision and resolution are shown and"
-            " calculated."
+            "Channel whose precision and resolution are shown and calculated."
         )
         self.precision_channel.currentIndexChanged.connect(
             self.update_fit_precision
@@ -7646,6 +7645,8 @@ class FRCRoisWindow(QtWidgets.QWidget):
     from the mean and standard deviation. The overview shows where the
     ROIs lie in the image (used: green, excluded: gray, selected: red)
     and the lower plot shows the FRC curve of the selected ROI.
+    Left-clicking an ROI in the overview selects it; right-clicking it
+    ticks or unticks it without changing the selection.
     """
 
     COLUMNS = ["Use", "ROI", "x (µm)", "y (µm)", "Locs", "FRC (nm)"]
@@ -7808,6 +7809,11 @@ class FRCRoisWindow(QtWidgets.QWidget):
 
     def update_plots(self) -> None:
         """Redraw the ROI overview and the selected ROI's FRC curve."""
+        # keep the zoom of the overview, e.g., while ticking ROIs
+        limits = None
+        if self.figure.axes:
+            old_map = self.figure.axes[0]
+            limits = old_map.get_xlim(), old_map.get_ylim()
         self.figure.clear()
         ax_map, ax_frc = self.figure.subplots(2, 1, height_ratios=[3, 2])
         ax_map.imshow(
@@ -7837,8 +7843,11 @@ class FRCRoisWindow(QtWidgets.QWidget):
             )
         ax_map.set_xlabel("x (µm)")
         ax_map.set_ylabel("y (µm)")
-        ax_map.set_title("ROIs (click to select)")
+        ax_map.set_title("ROIs (left-click: select, right-click: use)")
         ax_map.grid(False)
+        if limits is not None:
+            ax_map.set_xlim(limits[0])
+            ax_map.set_ylim(limits[1])
 
         if selected is not None:
             frc_result = self.result["frc_results"][selected]
@@ -7867,7 +7876,8 @@ class FRCRoisWindow(QtWidgets.QWidget):
         self.canvas.draw()
 
     def on_click(self, event) -> None:
-        """Select the ROI under a click in the overview."""
+        """Select (left-click) or tick/untick (right-click) the ROI
+        under a click in the overview."""
         if event.inaxes is None or event.inaxes is not self.figure.axes[0]:
             return
         if self.canvas.toolbar is not None and self.canvas.toolbar.mode:
@@ -7876,8 +7886,27 @@ class FRCRoisWindow(QtWidgets.QWidget):
         x, y = event.xdata * to_nm, event.ydata * to_nm
         for k, ((y0, x0), (y1, x1)) in enumerate(self.result["rois"]):
             if x0 <= x < x1 and y0 <= y < y1:
-                self.table.selectRow(k)
+                if event.button == MouseButton.RIGHT:
+                    self.toggle_used(k)
+                else:
+                    self.table.selectRow(k)
                 return
+
+    def toggle_used(self, row: int) -> None:
+        """Tick or untick an ROI; the selection stays as it is.
+
+        ROIs without a 1/7 crossing cannot be ticked.
+        """
+        item = self.table.item(row, 0)
+        if not item.flags() & QtCore.Qt.ItemFlag.ItemIsUserCheckable:
+            return
+        checked = item.checkState() == QtCore.Qt.CheckState.Checked
+        # on_item_changed updates the summary and the plots
+        item.setCheckState(
+            QtCore.Qt.CheckState.Unchecked
+            if checked
+            else QtCore.Qt.CheckState.Checked
+        )
 
     def export(self) -> None:
         """Save the per-ROI results as .csv."""
@@ -12507,7 +12536,7 @@ class SlicerDialog(lib.Dialog):
             # save each channel one by one
             for i in range(self.sl.maximum() + 1):
                 self.sl.setValue(i)
-                out_path = f"{base}_Z{i:03d}_CH{j+1:03d}.tif"
+                out_path = f"{base}_Z{i:03d}_CH{j + 1:03d}.tif"
                 if self.full_check.isChecked():  # full FOV
                     viewport = self.window.view.full_fov_viewport()
                     qimage = self.window.view.render_scene(
@@ -15102,7 +15131,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return True
         else:
             message = (
-                f"Channel #{channel+1} ("
+                f"Channel #{channel + 1} ("
                 f"{self.window.dataset_dialog.checks[channel].text()})"
                 f" does not contain the '{group_column}' column. Please run"
                 " DBSCAN (or similar) to group the localizations first."
@@ -15122,7 +15151,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if any(n_locs > max_locs):
             qm = QtWidgets.QMessageBox()
             message = (
-                f"Channel #{channel+1} ({channel_name})"
+                f"Channel #{channel + 1} ({channel_name})"
                 " contains clusters which can be fiducial markers."
                 " These will likely extend the computation"
                 " time and possibly crash the process.\n\n"
@@ -16450,9 +16479,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 "Individual loc. prec., iso": "gaussian_iso",
                 "Adaptive hist. (quad-tree)": "quadtree",
                 "Jittered triangulation": "triangulation",
-            }[
-                blur_method
-            ]  # convert from display name to render name
+            }[blur_method]  # convert from display name to render name
 
         # the display pixel size at which one rendered pixel is one
         # screen pixel
@@ -17828,7 +17855,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         nn = postprocess.nn_analysis(X1, X2, nn_count)
         new_locs = self.locs[channel1].copy()
         for i in range(nn_count):
-            new_locs[f"nnd_{i+1}"] = nn[:, i]
+            new_locs[f"nnd_{i + 1}"] = nn[:, i]
 
         # save new locs
         new_info = {
@@ -22247,9 +22274,9 @@ class Window(QtWidgets.QMainWindow):
             except Exception:  # otherwise, save magma
                 current_colormap = "magma"
         settings["Render"]["Colormap"] = current_colormap
-        settings["Render"][
-            "Colormap Property"
-        ] = self.display_settings_dlg.colormap_prop.currentText()
+        settings["Render"]["Colormap Property"] = (
+            self.display_settings_dlg.colormap_prop.currentText()
+        )
         if self.view.locs_paths != []:
             settings["Render"]["PWD"] = os.path.dirname(
                 self.view.locs_paths[0]
@@ -22258,15 +22285,15 @@ class Window(QtWidgets.QMainWindow):
             name: [list(stop) for stop in stops]
             for name, stops in self.custom_colormaps_stops.items()
         }
-        settings["Render"][
-            "ToolStyles"
-        ] = self.tools_settings_dialog.overlay_style_settings()
-        settings["Render"][
-            "Grid"
-        ] = self.display_settings_dlg.grid_box.settings()
-        settings["Render"][
-            "Grid3D"
-        ] = self.window_rot.display_settings_dlg.grid_box.settings()
+        settings["Render"]["ToolStyles"] = (
+            self.tools_settings_dialog.overlay_style_settings()
+        )
+        settings["Render"]["Grid"] = (
+            self.display_settings_dlg.grid_box.settings()
+        )
+        settings["Render"]["Grid3D"] = (
+            self.window_rot.display_settings_dlg.grid_box.settings()
+        )
         settings["Render"]["ScaleBar"] = (
             self.display_settings_dlg.scalebar_groupbox.settings(
                 include_length=False
@@ -22277,9 +22304,9 @@ class Window(QtWidgets.QMainWindow):
                 include_length=False
             )
         )
-        settings["Render"][
-            "Tracks"
-        ] = self.display_settings_dlg.tracks_box.settings()
+        settings["Render"]["Tracks"] = (
+            self.display_settings_dlg.tracks_box.settings()
+        )
         io.save_user_settings(settings)
         QtWidgets.QApplication.instance().closeAllWindows()
 

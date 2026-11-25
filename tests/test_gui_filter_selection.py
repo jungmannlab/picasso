@@ -136,3 +136,23 @@ def test_numeric_filter_keeps_its_column_without_a_selection(window):
         assert window.filter_num.attributes.currentText() == "bg"
     finally:
         window.filter_num.close()
+
+
+@pytest.mark.parametrize(
+    "field, label",
+    [
+        ("x", "x (nm)"),
+        ("area", "area (nm^2)"),
+        ("d_zcalib", "d_zcalib (nm^0.5)"),
+        ("convexhull", "convexhull"),
+        ("photons", "photons"),
+    ],
+)
+def test_axis_label_units(field, label):
+    assert gui_filter._axis_label(field) == label
+
+
+def test_axis_label_unknown_power(monkeypatch):
+    """A unit power without a label gives the bare column name."""
+    monkeypatch.setitem(gui_filter.legacy.LEGACY_PIXEL_COLUMNS, "foo", 4)
+    assert gui_filter._axis_label("foo") == "foo"

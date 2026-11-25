@@ -169,7 +169,9 @@ def test_localize_follows_a_new_look(shown, monkeypatch):  # noqa: F811
 
 
 def test_localize_exports_the_scale_bar(
-    shown, tmp_path, monkeypatch  # noqa: F811
+    shown,
+    tmp_path,
+    monkeypatch,  # noqa: F811
 ):
     paths = iter([tmp_path / "plain.png", tmp_path / "bar.png"])
     monkeypatch.setattr(
@@ -190,7 +192,10 @@ def test_localize_exports_the_scale_bar(
 
 
 def test_spinna_mask_view_uses_the_shared_look(
-    mask_tab, dialogs, out, monkeypatch  # noqa: F811
+    mask_tab,
+    dialogs,
+    out,
+    monkeypatch,  # noqa: F811
 ):
     load_mask_locs(mask_tab, dialogs, save_molecules(out / "A.hdf5"))
     mask_tab.generate_mask()
@@ -212,7 +217,9 @@ def test_spinna_mask_view_uses_the_shared_look(
 
 
 def test_spinna_structure_preview_draws_the_scale_bar(
-    structures_tab, dialogs, monkeypatch  # noqa: F811
+    structures_tab,
+    dialogs,
+    monkeypatch,  # noqa: F811
 ):
     add_structure(structures_tab, dialogs, "AB")
     structures_tab.add_molecular_target()

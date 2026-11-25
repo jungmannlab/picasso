@@ -457,11 +457,13 @@ class TestQuery:
 
         # Random viewport inside the FOV, kept well under the bypass
         # coverage ratio so this test exercises the gather path.
-        cx, cy = rng.uniform(50 * PS, W - 50 * PS), rng.uniform(
-            50 * PS, H - 50 * PS
+        cx, cy = (
+            rng.uniform(50 * PS, W - 50 * PS),
+            rng.uniform(50 * PS, H - 50 * PS),
         )
-        half_w, half_h = rng.uniform(5 * PS, 100 * PS), rng.uniform(
-            5 * PS, 100 * PS
+        half_w, half_h = (
+            rng.uniform(5 * PS, 100 * PS),
+            rng.uniform(5 * PS, 100 * PS),
         )
         viewport = (
             (cy - half_h, cx - half_w),

@@ -251,18 +251,18 @@ def _assert_drift_recovers(recovered, injected, tol, coords=("x", "y")):
     before comparing.
     """
     assert isinstance(recovered, pd.DataFrame)
-    assert set(coords).issubset(
-        recovered.columns
-    ), f"Expected columns {coords}, got {list(recovered.columns)}"
+    assert set(coords).issubset(recovered.columns), (
+        f"Expected columns {coords}, got {list(recovered.columns)}"
+    )
     assert len(recovered) == len(injected)
     assert recovered[list(coords)].isna().sum().sum() == 0
     for c in coords:
         rec = recovered[c].to_numpy()
         inj = injected[c].to_numpy()
         diff = (rec - rec.mean()) - (inj - inj.mean())
-        assert (
-            np.max(np.abs(diff)) < tol
-        ), f"Coord '{c}' worst error {np.max(np.abs(diff)):.3f} >= tol {tol}"
+        assert np.max(np.abs(diff)) < tol, (
+            f"Coord '{c}' worst error {np.max(np.abs(diff)):.3f} >= tol {tol}"
+        )
 
 
 def _assert_undrifted_locs_invariants(undrifted, original):

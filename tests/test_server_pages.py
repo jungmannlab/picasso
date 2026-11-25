@@ -298,8 +298,7 @@ class TestHistory:
         [
             (
                 "cell|r2",
-                "Filtering for filenames containing ['cell'] but not "
-                "['r2'].",
+                "Filtering for filenames containing ['cell'] but not ['r2'].",
                 1,
             ),
             ("cell", "Filtering for filenames containing ['cell'].", 2),

@@ -384,8 +384,7 @@ def _plugin_updates_text(updates: list[dict]) -> str:
         line += str(update["version"])
         if not update["compatible"]:
             line += (
-                " (requires Picasso"
-                f" \u2265 {update['min_picasso_version']})"
+                f" (requires Picasso \u2265 {update['min_picasso_version']})"
             )
         lines.append(line)
     return "\n".join(lines)

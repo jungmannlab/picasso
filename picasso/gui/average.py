@@ -393,8 +393,7 @@ class View(QtWidgets.QLabel):
             QtWidgets.QMessageBox.information(
                 self.window,
                 "Average",
-                "Averaging is running. Abort it before opening another"
-                " file.",
+                "Averaging is running. Abort it before opening another file.",
             )
             return
         try:

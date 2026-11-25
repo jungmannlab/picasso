@@ -191,8 +191,7 @@ class _Evaluator:
             )
         known = list(self.columns) + list(self.variables)
         hint = (
-            " Use 'pixelsize' only with metadata that contains the pixel"
-            " size."
+            " Use 'pixelsize' only with metadata that contains the pixel size."
             if name in METADATA_VARIABLES
             else ""
         )

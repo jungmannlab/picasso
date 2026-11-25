@@ -127,7 +127,6 @@ class Generator(QtCore.QThread):
         Y_files = []
 
         for id, locs in self.locs_files.items():
-
             info = self.infos[id]
             data = []
             labels = []
@@ -137,7 +136,6 @@ class Generator(QtCore.QThread):
             export_path = os.path.dirname(self.export_paths[id]) + "/"
 
             for c, pick in enumerate(np.unique(locs.group)):
-
                 pick_img = nanotron.roi_to_img(
                     locs=locs,
                     info=info,
@@ -166,7 +164,6 @@ class Generator(QtCore.QThread):
                     last_rot = 360 - delta
                     splits = 360 / delta
                     for angle in range(delta, last_rot, delta):
-
                         rot_img = nanotron.rotate_img(pick_img, angle)
                         rot_img = nanotron.prepare_img(
                             rot_img, img_shape=img_shape, alpha=10, bg=1
@@ -698,7 +695,6 @@ class train_dialog(lib.Dialog):
         self.nodes.clear()
         n_layers = self.n_layers.value()
         for layer in range(n_layers):
-
             n = QtWidgets.QSpinBox()
             n.resize(100, 50)
             n.setRange(1, 999)
@@ -709,7 +705,6 @@ class train_dialog(lib.Dialog):
     def save_model(self):
 
         if self.mlp is not None:
-
             fname, ext = lib.get_save_filename_ext_dialog(
                 self,
                 "Save model file",
@@ -768,7 +763,6 @@ class train_dialog(lib.Dialog):
 
     def show_learning_stats(self):
         if self.mlp is not None:
-
             canvas = lib.GenericPlotWindow("Learning history", "nanotron")
 
             def draw():
@@ -842,7 +836,6 @@ class train_dialog(lib.Dialog):
             self.file_slots_btn.setDisabled(True)
 
             for file in range(self.choose_n_files.value()):
-
                 c = QtWidgets.QLabel("{}:".format(file))
                 self.train_files_grid.addWidget(c, file, 0)
 
@@ -941,7 +934,6 @@ class train_dialog(lib.Dialog):
                 self.classes[counter] = name
 
         if (n_files == len(names)) and (n_files == n_datasets):
-
             if len(names) == len(set(names)):
                 passed = True
 
@@ -953,7 +945,6 @@ class train_dialog(lib.Dialog):
             median_length = int(np.median(lengths))
 
             for key, file in self.training_files.items():
-
                 val = max(np.unique(file["group"])) / median_length
 
                 if val >= 1.5:
@@ -1311,7 +1302,6 @@ class Window(QtWidgets.QMainWindow):
     def predict(self):
 
         if (self.predicting is False) and (self.model_loaded is True):
-
             if io.FORMAT_VERSION_ATTR not in self.model_info:
                 # a model trained before Picasso 1.0: pick diameter in
                 # camera pixels and an oversampling factor in place of
@@ -1354,7 +1344,6 @@ class Window(QtWidgets.QMainWindow):
     def show_probs(self):
 
         if self.predicting is False:
-
             if "score" not in self.locs.columns:
                 msgBox = QtWidgets.QMessageBox(self)
                 msgBox.setIcon(QtWidgets.QMessageBox.Icon.Information)
@@ -1363,7 +1352,6 @@ class Window(QtWidgets.QMainWindow):
                 msgBox.setInformativeText("Predict first and try again.")
                 msgBox.exec()
             else:
-
                 canvas = lib.GenericPlotWindow("Probabilities", "nanotron")
 
                 probabilities_per_pick = np.zeros(
@@ -1564,7 +1552,6 @@ class Window(QtWidgets.QMainWindow):
 
         self.clearLayout(self.classbox_grid)
         for id, name in self.classes.items():
-
             c = QtWidgets.QCheckBox(name)
             c.setChecked(True)
             self.classbox_grid.addWidget(c)
@@ -1593,7 +1580,6 @@ class Window(QtWidgets.QMainWindow):
             for i in range(self.classbox_grid.count())
         )
         for btn in checks:
-
             if isinstance(btn, QtWidgets.QWidgetItem):
                 if btn.widget().isChecked():
                     export_map.append(True)

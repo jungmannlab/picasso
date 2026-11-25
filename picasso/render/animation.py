@@ -562,23 +562,23 @@ def build_animation(
         True when the animation and its settings file were written,
         False when the build was canceled.
     """
-    assert isinstance(path, str) and path.endswith(
-        ".mp4"
-    ), "path must be a string ending with '.mp4'."
-    assert isinstance(
-        locs, (pd.DataFrame, list)
-    ), "locs must be a pd.DataFrame or a list of pd.DataFrames."
+    assert isinstance(path, str) and path.endswith(".mp4"), (
+        "path must be a string ending with '.mp4'."
+    )
+    assert isinstance(locs, (pd.DataFrame, list)), (
+        "locs must be a pd.DataFrame or a list of pd.DataFrames."
+    )
     if isinstance(locs, list):
-        assert all(
-            isinstance(locs_, pd.DataFrame) for locs_ in locs
-        ), "All elements of locs must be pd.DataFrames."
+        assert all(isinstance(locs_, pd.DataFrame) for locs_ in locs), (
+            "All elements of locs must be pd.DataFrames."
+        )
         assert len(locs) >= 1, "locs must contain at least one DataFrame."
-    assert (
-        isinstance(info, list) and len(info) >= 1
-    ), "info must be a non-empty list."
-    assert (
-        isinstance(positions, list) and len(positions) >= 2
-    ), "positions must be a list with at least 2 elements."
+    assert isinstance(info, list) and len(info) >= 1, (
+        "info must be a non-empty list."
+    )
+    assert isinstance(positions, list) and len(positions) >= 2, (
+        "positions must be a list with at least 2 elements."
+    )
     positions = _normalize_animation_positions(positions)
     if segment_rotations is not None:
         assert (
@@ -598,9 +598,9 @@ def build_animation(
         + ", ".join(f"'{t}'" for t in ANIMATION_TRANSITIONS)
         + "."
     )
-    assert (
-        isinstance(disp_px_size, (int, float)) and disp_px_size > 0
-    ), "disp_px_size must be a positive number."
+    assert isinstance(disp_px_size, (int, float)) and disp_px_size > 0, (
+        "disp_px_size must be a positive number."
+    )
     assert (
         isinstance(image_size, (tuple, list))
         and len(image_size) == 2
@@ -618,9 +618,9 @@ def build_animation(
         "blur_method must be one of 'gaussian', 'gaussian_iso', 'smooth', "
         "'convolve', 'quadtree', 'triangulation' or None."
     )
-    assert (
-        isinstance(min_blur_width, (int, float)) and min_blur_width >= 0
-    ), "min_blur_width must be a non-negative number."
+    assert isinstance(min_blur_width, (int, float)) and min_blur_width >= 0, (
+        "min_blur_width must be a non-negative number."
+    )
     if contrast is not None:
         assert (
             isinstance(contrast, (tuple, list))
@@ -640,30 +640,30 @@ def build_animation(
         )
     if colors is not None:
         n_channels = len(locs) if isinstance(locs, list) else 1
-        assert (
-            len(colors) == n_channels
-        ), "colors must have one entry per channel."
+        assert len(colors) == n_channels, (
+            "colors must have one entry per channel."
+        )
     if channel_contrast is not None:
         n_channels = len(locs) if isinstance(locs, list) else 1
-        assert (
-            len(channel_contrast) == n_channels
-        ), "channel_contrast must have one entry per channel."
+        assert len(channel_contrast) == n_channels, (
+            "channel_contrast must have one entry per channel."
+        )
         assert all(
             len(pair) == 2 and 0 <= pair[0] < pair[1]
             for pair in channel_contrast
         ), "Each channel_contrast pair must satisfy 0 <= low < high."
     assert isinstance(fps, int) and fps > 0, "fps must be a positive integer."
-    assert isinstance(
-        adjust_pixel_size, bool
-    ), "adjust_pixel_size must be a bool."
+    assert isinstance(adjust_pixel_size, bool), (
+        "adjust_pixel_size must be a bool."
+    )
     if scalebar_length_nm is not None:
         assert (
             isinstance(scalebar_length_nm, (int, float))
             and scalebar_length_nm > 0
         ), "scalebar_length_nm must be a positive number or None."
-    assert isinstance(
-        scalebar_display_length, bool
-    ), "scalebar_display_length must be a bool."
+    assert isinstance(scalebar_display_length, bool), (
+        "scalebar_display_length must be a bool."
+    )
     assert scalebar_style is None or (
         isinstance(scalebar_style, dict)
         and not {
@@ -676,9 +676,9 @@ def build_animation(
         "scalebar_style must be a dict of draw_scalebar's appearance "
         "arguments or None."
     )
-    assert grid is None or isinstance(
-        grid, GridOverlay
-    ), "grid must be a GridOverlay or None."
+    assert grid is None or isinstance(grid, GridOverlay), (
+        "grid must be a GridOverlay or None."
+    )
     if grid is not None and grid_bounds is not None:
         assert np.shape(grid_bounds) == (2, 3), (
             "grid_bounds must be ((x_min, y_min, z_min), "

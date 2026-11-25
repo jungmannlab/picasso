@@ -931,7 +931,7 @@ def _poly6_device(c: lib.FloatArray1D, z: float) -> float:
     """Evaluate the degree-6 z calibration polynomial (highest power
     first, as returned by ``np.polyfit``) via Horner's scheme."""
     return (
-        (((((c[0] * z + c[1]) * z + c[2]) * z + c[3]) * z + c[4]) * z + c[5])
+        ((((c[0] * z + c[1]) * z + c[2]) * z + c[3]) * z + c[4]) * z + c[5]
     ) * z + c[6]
 
 
@@ -1357,9 +1357,9 @@ def zfit(
             "(picasso.localize.localize)."
         )
     if pixelsize is not None:
-        assert isinstance(
-            pixelsize, (int, float)
-        ), "Pixelsize must be a number in nm."
+        assert isinstance(pixelsize, (int, float)), (
+            "Pixelsize must be a number in nm."
+        )
         pixelsize = float(pixelsize)
     else:
         pixelsize = lib.get_from_metadata(info, "Pixelsize")
@@ -1370,14 +1370,14 @@ def zfit(
             )
     calibration = _calibration_in_nm(calibration, pixelsize)
     if magnification_factor is not None:
-        assert isinstance(
-            magnification_factor, (int, float)
-        ), "Magnification factor must be a number."
+        assert isinstance(magnification_factor, (int, float)), (
+            "Magnification factor must be a number."
+        )
         calibration["Magnification factor"] = float(magnification_factor)
     else:
-        assert (
-            "Magnification factor" in calibration
-        ), "Magnification factor is missing in calibration."
+        assert "Magnification factor" in calibration, (
+            "Magnification factor is missing in calibration."
+        )
 
     with lib.tracked_progress(progress, "Fitting z", unit="loc") as progress:
         return _zfit(

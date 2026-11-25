@@ -565,9 +565,7 @@ class TestModuleCache:
 
 def test_importing_plugins_does_not_import_qt():
     """The CLI and scripts must be able to use plugins without a GUI stack."""
-    code = (
-        "import sys; import picasso.plugins; " "print('PyQt6' in sys.modules)"
-    )
+    code = "import sys; import picasso.plugins; print('PyQt6' in sys.modules)"
     out = subprocess.run(
         [sys.executable, "-c", code], capture_output=True, text=True
     )

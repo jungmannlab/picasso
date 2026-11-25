@@ -85,8 +85,8 @@ server = [
 ]
 dev = [
     "build",
-    "black",
     "pre-commit",
+    "ruff",
     "twine",
 ]
 # Optional movie-format readers (czifile, liffile and ptufile require
@@ -252,19 +252,13 @@ exclude_also = [
     "@cuda\\.jit\\b",
 ]
 
-[tool.black]
+[tool.ruff]
 line-length = 79
-include = "\\.pyi?$"
-exclude = '''
-(
-    \.git
-  | \.hg
-  | \.mypy_cache
-  | \.tox
-  | \.venv
-  | _build
-  | buck-out
-  | build
-  | dist
-)
-'''
+# the sample notebooks are not formatted
+extend-exclude = ["*.ipynb"]
+
+[tool.ruff.lint]
+# syntax errors, undefined names and comparisons that are always true or
+# false; the CI fails on these
+select = ["E9", "F63", "F7", "F82"]
+exclude = ["tests", "picasso/ext", "dist", "release"]

@@ -337,7 +337,9 @@ def test_scale_bar_is_mirrored_to_linked_windows(qt_offscreen, tmp_path):
 
 
 def test_animation_gets_the_appearance(
-    dialog, qapp, monkeypatch  # noqa: F811
+    dialog,
+    qapp,
+    monkeypatch,  # noqa: F811
 ):
     """The 3D window's scale bar style reaches the animation, with the
     text size of exported images whatever the windows' font size."""
