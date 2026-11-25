@@ -7578,8 +7578,6 @@ class FRCRoisWindow(QtWidgets.QWidget):
 
     COLUMNS = ["Use", "ROI", "x (µm)", "y (µm)", "Locs", "FRC (nm)"]
 
-    # TODO: it says now NeNa = value for linked localizations, this is not the NeNa, this is the lp used...
-
     def __init__(
         self,
         info_dialog: InfoDialog,
