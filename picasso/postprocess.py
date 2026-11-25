@@ -3235,7 +3235,7 @@ def frc(
 ) -> dict:
     """Calculate the Fourier Ring Correlation (FRC) resolution.
 
-    See Nieuwenhuizen et al., Nat. Methods 10, 557-562 (2013).
+    See Nieuwenhuizen et al. (2013).
 
     Parameters
     ----------
