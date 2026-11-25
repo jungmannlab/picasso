@@ -6616,7 +6616,9 @@ class InfoDialog(lib.Dialog):
         calculate_frc_button.setToolTip(
             "Calculate the FRC resolution in the current field of view."
         )
-        calculate_frc_button.clicked.connect(self.calculate_frc_resolution)
+        calculate_frc_button.clicked.connect(
+            lambda: self.calculate_frc_resolution()
+        )
         grid.addWidget(calculate_frc_button, 3, 2)
         show_frc_button = QtWidgets.QPushButton("Plot")
         show_frc_button.setToolTip("Display the FRC curve.")
@@ -6986,42 +6988,92 @@ class InfoDialog(lib.Dialog):
             return None
         return channel
 
-    def calculate_frc_resolution(self) -> None:
+    def calculate_frc_resolution(
+        self,
+        on_done: Callable[[], None] | None = None,
+        max_image_size: int | None = postprocess.FRC_MAX_IMAGE_SIZE,
+        path: str | None = None,
+    ) -> None:
         """Calculate FRC resolution of the selected channel in the
-        current field of view. NeNA, which sets the bin size, is reused
-        if known (see ``known_nena``)."""
+        current field of view on a worker thread, see
+        ``postprocess.frc``. NeNA, which sets the bin size, is reused if
+        known (see ``known_nena``).
+
+        Parameters
+        ----------
+        on_done : callable, optional
+            Called once the result is shown, since the calculation runs
+            on a worker thread. Default None.
+        max_image_size : int or None, optional
+            Passed to ``postprocess.frc``. If the images would be
+            larger, the user is asked whether to go ahead without a
+            limit. Default is ``postprocess.FRC_MAX_IMAGE_SIZE``.
+        path : str or None, optional
+            Where to save the images (``_1`` and ``_2`` are appended),
+            asked for if ``Save FRC images`` is checked and None.
+            Default None.
+        """
+        title = "FRC resolution"
         channel = self.selected_channel()
-        if channel is not None:
-            locs = self.window.view.locs[channel]
-            info = self.window.view.infos[channel]
-            lp = self.known_nena(channel)
+        if channel is None:
+            return
+        locs = self.window.view.locs[channel]
+        info = self.window.view.infos[channel]
+        viewport = self.window.view.viewport
+        lp = self.known_nena(channel)
 
-            # get the name prefix for saving images
-            if self.save_images_check.isChecked():
-                path, ext = lib.get_save_filename_ext_dialog(
+        # get the name prefix for saving images
+        if path is None and self.save_images_check.isChecked():
+            path, ext = lib.get_save_filename_ext_dialog(
+                self,
+                "Save images",
+                os.path.splitext(self.window.view.locs_paths[channel])[0]
+                + "_frc_im.tif",
+                filter="*.tif",
+                check_ext=["_1.tif", "_2.tif"],
+            )
+            if not path:
+                return
+
+        def compute(progress: lib.TaskProgress) -> dict:
+            return postprocess.frc(
+                locs,
+                info,
+                viewport=viewport,
+                lp=lp,
+                max_image_size=max_image_size,
+                progress=progress,
+            )
+
+        def apply(result: dict) -> None:
+            if result["nena"] is not None:
+                # not recorded if the NeNA fit failed and the median
+                # precision was used
+                self._record_nena(locs, info, {}, result["nena"])
+            if path:  # save images
+                base, ext = os.path.splitext(path)
+                for i, image in enumerate(result["images"], start=1):
+                    Image.fromarray(image).save(f"{base}_{i}{ext}")
+            self._frc_cache[(id(locs), len(locs))] = result
+            self.update_fit_precision()
+            if result["resolution"] is None:
+                # The FRC curve never crosses the 1/7 threshold, e.g. when
+                # the viewport holds too few localizations to resolve
+                # anything.
+                QtWidgets.QMessageBox.information(
                     self,
-                    "Save images",
-                    os.path.splitext(self.window.view.locs_paths[channel])[0]
-                    + "_frc_im.tif",
-                    filter="*.tif",
-                    check_ext=["_1.tif", "_2.tif"],
+                    title,
+                    "The FRC curve does not cross the 1/7 threshold, so no "
+                    "resolution can be given. Try a larger viewport or "
+                    "more localizations. Check that your NeNA value seems "
+                    "reasonable - FRC pixel size is taken from NeNA",
                 )
-                if not path:
-                    return
-            else:
-                path = None
+            if on_done is not None:
+                on_done()
 
-            if lp is None and not postprocess._is_linked(locs):
-                nena_result, lp = postprocess.nena(locs, info)
-                self._record_nena(locs, info, nena_result, lp)
-
-            # calculate frc; frc checks the image size before any work
-            # and the user may go ahead with larger images
-            try:
-                frc_result = postprocess.frc(
-                    locs, info, viewport=self.window.view.viewport, lp=lp
-                )
-            except postprocess.FRCImageTooLargeError as error:
+        def failed(error: Exception) -> None:
+            if isinstance(error, postprocess.FRCImageTooLargeError):
+                # refused before any work: ask, then start again
                 reply = QtWidgets.QMessageBox.question(
                     self,
                     "Field of view too large",
@@ -7036,34 +7088,23 @@ class InfoDialog(lib.Dialog):
                     | QtWidgets.QMessageBox.StandardButton.No,
                     QtWidgets.QMessageBox.StandardButton.No,
                 )
-                if reply != QtWidgets.QMessageBox.StandardButton.Yes:
-                    return
-                frc_result = postprocess.frc(
-                    locs,
-                    info,
-                    viewport=self.window.view.viewport,
-                    lp=lp,
-                    max_image_size=None,
-                )
-            if path:  # save images
-                base, ext = os.path.splitext(path)
-                image1 = Image.fromarray(frc_result["images"][0])
-                image1.save(f"{base}_1{ext}")
-                image2 = Image.fromarray(frc_result["images"][1])
-                image2.save(f"{base}_2{ext}")
-            self._frc_cache[(id(locs), len(locs))] = frc_result
-            self.update_fit_precision()
-            if frc_result["resolution"] is None:
-                # The FRC curve never crosses the 1/7 threshold, e.g. when the
-                # viewport holds too few localizations to resolve anything.
-                QtWidgets.QMessageBox.information(
-                    self,
-                    "FRC resolution",
-                    "The FRC curve does not cross the 1/7 threshold, so no "
-                    "resolution can be given. Try a larger viewport or more "
-                    "localizations. Check that your NeNA value seems "
-                    "reasonable - FRC pixel size is taken from NeNA",
-                )
+                if reply == QtWidgets.QMessageBox.StandardButton.Yes:
+                    self.calculate_frc_resolution(
+                        on_done=on_done, max_image_size=None, path=path or ""
+                    )
+            elif isinstance(error, (ValueError, RuntimeError)):
+                QtWidgets.QMessageBox.warning(self, title, str(error))
+            else:  # unexpected, report as usual
+                sys.excepthook(type(error), error, error.__traceback__)
+
+        lib.run_task(
+            compute,
+            "Calculating FRC resolution",
+            self,
+            apply,
+            on_failed=failed,
+            title=title,
+        )
 
     def calculate_frc_rois(self) -> None:
         """Calculate FRC resolution in random ROIs of the whole image
@@ -7466,9 +7507,15 @@ class InfoDialog(lib.Dialog):
     def show_frc_plot(self) -> None:
         """Show FRC plot window."""
         if not self.frc_result:
-            self.calculate_frc_resolution()
-            if not self.frc_result:  # canceled
-                return
+            self.calculate_frc_resolution(on_done=self._show_frc_window)
+        else:
+            self._show_frc_window()
+
+    def _show_frc_window(self) -> None:
+        """Plot the FRC result in a new window."""
+        if not self.frc_result:  # another channel selected meanwhile
+            return
+        # keep a reference to the window to prevent garbage collection
         self.frc_window = FRCPlotWindow(self)
         self.frc_window.plot(self.frc_result)
         self.frc_window.show()

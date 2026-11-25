@@ -277,7 +277,17 @@ CASES = [
             min_locs=20,
             progress=p,
         ),
-        ["Calculating NeNA", "Calculating FRC"],
+        ["Calculating NeNA", "Linking localizations", "Calculating FRC"],
+    ),
+    (
+        "frc",
+        lambda l, i, p: postprocess.frc(
+            l,
+            i,
+            viewport=((10 * PX, 10 * PX), (20 * PX, 20 * PX)),
+            progress=p,
+        ),
+        ["Calculating NeNA", "Linking localizations", "Calculating FRC"],
     ),
     (
         "cbc",

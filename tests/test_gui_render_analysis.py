@@ -560,10 +560,11 @@ def _frc_label_is_set(info_dialog) -> bool:
     return text.endswith(" nm") or text == "n/a"
 
 
-def test_frc_resolution_of_the_view(window, answers):
+def test_frc_resolution_of_the_view(window, answers, qt_offscreen):
     answers.record_messages()
     info_dialog = window.info_dialog
     info_dialog.calculate_frc_resolution()
+    _wait_for_tasks(qt_offscreen)
     assert _frc_label_is_set(info_dialog)
     assert {"resolution", "frc_curve"} <= set(info_dialog.frc_result)
     # a resolution, or the reason why there is none
@@ -572,11 +573,14 @@ def test_frc_resolution_of_the_view(window, answers):
     )
 
 
-def test_frc_saves_the_rendered_images(window, answers, tmp_path):
+def test_frc_saves_the_rendered_images(
+    window, answers, tmp_path, qt_offscreen
+):
     answers.record_messages()
     window.info_dialog.save_images_check.setChecked(True)
     answers.save_path(tmp_path / "frc.tif")
     window.info_dialog.calculate_frc_resolution()
+    _wait_for_tasks(qt_offscreen)
     assert _saved(tmp_path) == ["frc_1.tif", "frc_2.tif"]
 
 
@@ -598,7 +602,9 @@ def _frc_images_too_large(monkeypatch) -> list:
 
 
 @pytest.mark.parametrize("proceed", [False, True])
-def test_frc_of_a_large_view_asks_first(proceed, window, answers, monkeypatch):
+def test_frc_of_a_large_view_asks_first(
+    proceed, window, answers, monkeypatch, qt_offscreen
+):
     answers.record_messages()
     asked = []
     button = QtWidgets.QMessageBox.StandardButton
@@ -610,6 +616,7 @@ def test_frc_of_a_large_view_asks_first(proceed, window, answers, monkeypatch):
     )
     calls = _frc_images_too_large(monkeypatch)
     window.info_dialog.calculate_frc_resolution()
+    _wait_for_tasks(qt_offscreen)
     assert "100,000 x 100,000 pixels" in asked[0]
     assert f"{postprocess.FRC_MAX_IMAGE_SIZE:,} pixels" in asked[0]
     # the API checks with its default limit; None only once confirmed
@@ -621,16 +628,19 @@ def test_frc_of_a_large_view_asks_first(proceed, window, answers, monkeypatch):
     assert bool(window.info_dialog.frc_result) is proceed
 
 
-def test_frc_plot(window, answers):
+def test_frc_plot(window, answers, qt_offscreen):
     answers.record_messages()
     info_dialog = window.info_dialog
     info_dialog.show_frc_plot()  # calculates first
+    _wait_for_tasks(qt_offscreen)
     assert info_dialog.frc_window.isVisible()
     assert info_dialog.frc_window.figure.axes
     info_dialog.frc_window.close()
 
 
-def test_frc_plot_without_a_calculation(window, answers, monkeypatch):
+def test_frc_plot_without_a_calculation(
+    window, answers, monkeypatch, qt_offscreen
+):
     """Declining a large FOV leaves nothing to plot."""
     answers.record_messages()
     monkeypatch.setattr(
@@ -640,6 +650,7 @@ def test_frc_plot_without_a_calculation(window, answers, monkeypatch):
     )
     _frc_images_too_large(monkeypatch)
     window.info_dialog.show_frc_plot()
+    _wait_for_tasks(qt_offscreen)
     assert not window.info_dialog.frc_result
     assert getattr(window.info_dialog, "frc_window", None) is None
 
@@ -715,7 +726,7 @@ def test_channel_dialogs_list_full_paths(window2, monkeypatch, method, extra):
     assert getattr(view, method)() is None
 
 
-def test_frc_records_nena(window, answers, monkeypatch):
+def test_frc_records_nena(window, answers, monkeypatch, qt_offscreen):
     """FRC calculates NeNA once; it is then shown and reused."""
     answers.record_messages()
     info_dialog = window.info_dialog
@@ -727,14 +738,18 @@ def test_frc_records_nena(window, answers, monkeypatch):
         lambda *a, **k: calls.append(1) or nena(*a, **k),
     )
     info_dialog.calculate_frc_resolution()
+    _wait_for_tasks(qt_offscreen)
     assert len(calls) == 1
     assert "NeNA (nm)" in window.view.infos[0][-1]
     assert info_dialog.nena_label.text().endswith("nm")
     info_dialog.calculate_frc_resolution()
+    _wait_for_tasks(qt_offscreen)
     assert len(calls) == 1
 
 
-def test_frc_uses_nena_from_metadata(window, answers, monkeypatch):
+def test_frc_uses_nena_from_metadata(
+    window, answers, monkeypatch, qt_offscreen
+):
     answers.record_messages()
     window.view.infos[0].append({"Step": "Render : NeNA", "NeNA (nm)": 8.0})
     lps = []
@@ -745,7 +760,26 @@ def test_frc_uses_nena_from_metadata(window, answers, monkeypatch):
         lambda *a, **k: lps.append(k["lp"]) or frc(*a, **k),
     )
     window.info_dialog.calculate_frc_resolution()
+    _wait_for_tasks(qt_offscreen)
     assert lps == [8.0]
+
+
+def test_frc_record_only_a_found_nena(
+    window, answers, monkeypatch, qt_offscreen
+):
+    """If the NeNA fit fails, the FRC of the view uses the median
+    precision, which is not recorded as NeNA."""
+    answers.record_messages()
+
+    def fail(*args, **kwargs):
+        raise RuntimeError("NeNA fit failed")
+
+    monkeypatch.setattr(postprocess, "nena", fail)
+    info_dialog = window.info_dialog
+    info_dialog.calculate_frc_resolution()
+    _wait_for_tasks(qt_offscreen)
+    assert info_dialog.frc_result["nena"] is None
+    assert info_dialog.known_nena(0) is None
 
 
 def test_frc_rois_reuse_nena(window, answers, qt_offscreen, monkeypatch):

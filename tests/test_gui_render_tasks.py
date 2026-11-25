@@ -191,6 +191,7 @@ def test_precision_follows_selected_channel(window, qt_offscreen, tmp_path):
     assert "NeNA (nm)" in window.view.infos[1][-1]
     assert "NeNA (nm)" not in window.view.infos[0][-1]
     info_dialog.calculate_frc_resolution()
+    _wait_for_tasks(qt_offscreen)
     assert info_dialog.frc_result
     frc_text = info_dialog.frc_resolution.text()
     assert frc_text != "-"

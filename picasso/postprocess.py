@@ -3388,6 +3388,7 @@ def frc(
     max_image_size: int | None = FRC_MAX_IMAGE_SIZE,
     r_max: float | Literal["auto"] = "auto",
     max_dark_time: int = 3,
+    progress: lib.Progress | Literal["console"] | None = None,
 ) -> dict:
     """Calculate the Fourier Ring Correlation (FRC) resolution.
 
@@ -3425,14 +3426,22 @@ def frc(
     max_dark_time : int, optional
         Maximum number of dark frames bridged when linking
         localizations. Default is 3.
+    progress : lib.Progress, "console" or None, optional
+        Progress tracker, see ``picasso.lib.Progress``. Reports
+        "Calculating NeNA" when required, "Linking localizations" when
+        linking is required, and "Calculating FRC". Default is None.
 
     Returns
     -------
     frc_result : dict
         Dictionary with keys "frc_curve", "frc_curve_smooth",
         "frequencies" (for spatial frequencies probed (nm^-1)),
-        "resolution" (estimated resolution in nm) and "images"
-        (2 grayscale images rendered and masked).
+        "resolution" (estimated resolution in nm), "images"
+        (2 grayscale images rendered and masked), "lp" (nm, the
+        localization precision that set the bin size) and "nena" (nm,
+        the NeNA calculated here; None if ``lp`` was given, the
+        localizations were already linked or the NeNA fit failed and
+        ``lp`` is the median of ``lpx`` and ``lpy``).
 
     Raises
     ------
@@ -3449,84 +3458,104 @@ def frc(
     https://doi.org/10.1038/nmeth.2448
     """
     already_linked = _is_linked(locs)
-    lp, _, median_lp = _frc_precision(locs, info, lp, already_linked)
+    if lp is None and not already_linked:
+        first_phase = "Calculating NeNA"
+    elif not already_linked:
+        first_phase = "Linking localizations"
+    else:
+        first_phase = "Calculating FRC"
 
-    # Correct the viewport to be square before selecting localizations.
-    viewport_width = viewport[1][1] - viewport[0][1]
-    viewport_height = viewport[1][0] - viewport[0][0]
-
-    if viewport_width < viewport_height:
-        y_center = 0.5 * (viewport[0][0] + viewport[1][0])
-        y_min = y_center - viewport_width / 2
-        y_max = y_center + viewport_width / 2
-        viewport = ((y_min, viewport[0][1]), (y_max, viewport[1][1]))
-
-    elif viewport_height < viewport_width:
-        x_center = 0.5 * (viewport[0][1] + viewport[1][1])
-        x_min = x_center - viewport_height / 2
-        x_max = x_center + viewport_height / 2
-        viewport = ((viewport[0][0], x_min), (viewport[1][0], x_max))
-
-    (y_min, x_min), (y_max, x_max) = viewport
-
-    # Validate image size before linking to fail early.
-    _check_frc_image_size(x_max - x_min, lp, max_image_size)
-
-    # Link only localizations near the requested viewport.
-    # The generous margin keeps nearby localizations available to form
-    # events crossing the viewport boundary.
-    if not already_linked:
-        resolved_r_max = _frc_r_max(r_max, median_lp)
-        link_margin = 10.0 * resolved_r_max
-
-        in_link_region = (
-            (locs["x"] > x_min - link_margin)
-            & (locs["y"] > y_min - link_margin)
-            & (locs["x"] < x_max + link_margin)
-            & (locs["y"] < y_max + link_margin)
+    with lib.tracked_progress(progress, first_phase, unit="loc") as progress:
+        lp, found_nena, median_lp = _frc_precision(
+            locs, info, lp, already_linked, progress=progress
         )
 
-        # Keep ambiguous event lengths: FRC only requires one position
-        # estimate per emitter activation, not complete reconstruction
-        # of the binding event.
-        locs, _ = link(
-            locs.loc[in_link_region],
-            info,
-            r_max=resolved_r_max,
-            max_dark_time=max_dark_time,
-            remove_ambiguous_lengths=False,
+        # Correct the viewport to be square before selecting
+        # localizations.
+        viewport_width = viewport[1][1] - viewport[0][1]
+        viewport_height = viewport[1][0] - viewport[0][0]
+
+        if viewport_width < viewport_height:
+            y_center = 0.5 * (viewport[0][0] + viewport[1][0])
+            y_min = y_center - viewport_width / 2
+            y_max = y_center + viewport_width / 2
+            viewport = ((y_min, viewport[0][1]), (y_max, viewport[1][1]))
+
+        elif viewport_height < viewport_width:
+            x_center = 0.5 * (viewport[0][1] + viewport[1][1])
+            x_min = x_center - viewport_height / 2
+            x_max = x_center + viewport_height / 2
+            viewport = ((viewport[0][0], x_min), (viewport[1][0], x_max))
+
+        (y_min, x_min), (y_max, x_max) = viewport
+
+        # Validate image size before linking to fail early.
+        _check_frc_image_size(x_max - x_min, lp, max_image_size)
+
+        # Link only localizations near the requested viewport.
+        # The generous margin keeps nearby localizations available to
+        # form events crossing the viewport boundary.
+        if not already_linked:
+            resolved_r_max = _frc_r_max(r_max, median_lp)
+            link_margin = 10.0 * resolved_r_max
+
+            in_link_region = (
+                (locs["x"] > x_min - link_margin)
+                & (locs["y"] > y_min - link_margin)
+                & (locs["x"] < x_max + link_margin)
+                & (locs["y"] < y_max + link_margin)
+            )
+            n_link = int(in_link_region.sum())
+
+            # Keep ambiguous event lengths: FRC only requires one
+            # position estimate per emitter activation, not complete
+            # reconstruction of the binding event.
+            lib.start_phase(
+                progress, "Linking localizations", n_link, unit="loc"
+            )
+            progress.set_value(0)
+            locs, _ = link(
+                locs.loc[in_link_region],
+                info,
+                r_max=resolved_r_max,
+                max_dark_time=max_dark_time,
+                remove_ambiguous_lengths=False,
+            )
+            progress.set_value(n_link)
+
+        lib.start_phase(progress, "Calculating FRC", 1, unit="image pair")
+        progress.set_value(0)
+
+        # Keep only localizations within the original square viewport.
+        in_view = (
+            (locs["x"] > x_min)
+            & (locs["y"] > y_min)
+            & (locs["x"] < x_max)
+            & (locs["y"] < y_max)
         )
+        locs = locs.loc[in_view]
 
-    # Keep only localizations within the original square viewport.
-    in_view = (
-        (locs["x"] > x_min)
-        & (locs["y"] > y_min)
-        & (locs["x"] < x_max)
-        & (locs["y"] < y_max)
-    )
-    locs = locs.loc[in_view]
+        # Split locs randomly into two halves using a local RNG.
+        rng = np.random.default_rng(random_seed)
+        r_idx = rng.permutation(len(locs))
+        locs1 = locs.iloc[r_idx[: len(r_idx) // 2]]
+        locs2 = locs.iloc[r_idx[len(r_idx) // 2 :]]
 
-    # Split locs randomly into two halves using a local RNG.
-    rng = np.random.default_rng(random_seed)
-    r_idx = rng.permutation(len(locs))
-    locs1 = locs.iloc[r_idx[: len(r_idx) // 2]]
-    locs2 = locs.iloc[r_idx[len(r_idx) // 2 :]]
+        # Run FRC.
+        frc_curve, frc_curve_smooth, frequencies, resolution, images = _frc(
+            locs1, locs2, info, lp, viewport
+        )
+        progress.set_value(1)
 
-    # Run FRC.
-    frc_curve, frc_curve_smooth, frequencies, resolution, images = _frc(
-        locs1, locs2, info, lp, viewport
-    )
-
-    # Summarize findings.
-    frc_result = {
+    return {
         "frc_curve": frc_curve,
         "frc_curve_smooth": frc_curve_smooth,
         "frequencies": frequencies,
         "resolution": resolution,
         "images": images,
+        "lp": lp,
+        "nena": found_nena,
     }
-
-    return frc_result
 
 
 def frc_rois(
