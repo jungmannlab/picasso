@@ -3230,10 +3230,12 @@ def frc(
     random_seed: int = 42,
     lp: float | None = None,
     max_image_size: int | None = 16384,
+    r_max: float | Literal["auto"] = "auto",
+    max_dark_time: int = 3,
 ) -> dict:
     """Calculate the Fourier Ring Correlation (FRC) resolution.
 
-    See Nieuwenhuizen et al., Nat. Methods 10, 557–562 (2013).
+    See Nieuwenhuizen et al., Nat. Methods 10, 557-562 (2013).
 
     Parameters
     ----------
@@ -3249,14 +3251,21 @@ def frc(
         Random seed for splitting the data into halves. Default is 42.
     lp : float or None, optional
         Localization precision (nm) that sets the bin size of the
-        rendered images (``lp / 2``). If None (default), NeNA of
-        ``locs`` is used.
+        rendered images (``lp / 2``). If None (default), NeNA of ``locs`` is used.
     max_image_size : int or None, optional
         Largest side length (pixels) of the rendered images. A larger
         (square) viewport raises a ValueError instead of rendering
         images that may not fit into memory, which grows with the
-        square of the side length. None renders any size. Default is
-        16384.
+        square of the side length. None renders any size. Default is 16384.
+    r_max : float or {'auto'}, optional
+        Maximum distance (nm) for linking unlinked localizations across
+        frames prior to splitting. If 'auto', set to 3.0 * median lp
+        (in nm) calculated from lpx and lpy. An explicit value overrides
+        this default. A UserWarning is issued if the explicit value is
+        smaller than median lp, when available. Default is 'auto'.
+    max_dark_time : int, optional
+        Maximum number of dark frames bridged when linking
+        localizations. Default is 3.
 
     Returns
     -------
@@ -3269,8 +3278,8 @@ def frc(
     Raises
     ------
     ValueError
-        If the rendered images would be larger than
-        ``max_image_size`` pixels on a side.
+        If the rendered images would be larger than max_image_size pixels
+        on a side, or if a valid localization precision cannot be determined.
 
     References
     ----------
@@ -3278,25 +3287,74 @@ def frc(
     nanoscopy. Nat Methods 10, 557-562 (2013).
     https://doi.org/10.1038/nmeth.2448
     """
+    already_linked = len(locs) > 0 and {"len", "n"}.issubset(locs.columns)
+
+    # Calculate median localization precision only when needed for linking
+    # or as a fallback estimate of lp.
+    median_lp = None
+    if (not already_linked or lp is None) and {"lpx", "lpy"}.issubset(
+        locs.columns
+    ):
+        value = float(
+            np.nanmean(
+                [
+                    np.nanmedian(locs["lpx"]),
+                    np.nanmedian(locs["lpy"]),
+                ]
+            )
+        )
+        if np.isfinite(value) and value > 0:
+            median_lp = value
+
+    # Estimate localization precision lp for FRC rendering.
     if lp is None:
-        lp = nena(locs, info)[1]
-    # correct for the viewport to be square
+        if not already_linked:
+            try:
+                nena_lp = nena(locs, info)[1]
+                if (
+                    nena_lp is not None
+                    and np.isfinite(nena_lp)
+                    and nena_lp > 0
+                ):
+                    lp = float(nena_lp)
+            except RuntimeError:
+                lp = None
+
+        if lp is None:
+            lp = median_lp
+    else:
+        lp = float(lp)
+
+    if lp is None or not np.isfinite(lp) or lp <= 0:
+        raise ValueError(
+            "Cannot determine a valid positive localization precision 'lp'. "
+            "Pass 'lp' explicitly or ensure valid 'lpx' and 'lpy' values are available."
+        )
+
+    # Correct the viewport to be square before selecting localizations.
     viewport_width = viewport[1][1] - viewport[0][1]
     viewport_height = viewport[1][0] - viewport[0][0]
+
     if viewport_width < viewport_height:
         y_center = 0.5 * (viewport[0][0] + viewport[1][0])
         y_min = y_center - viewport_width / 2
         y_max = y_center + viewport_width / 2
         viewport = ((y_min, viewport[0][1]), (y_max, viewport[1][1]))
+
     elif viewport_height < viewport_width:
         x_center = 0.5 * (viewport[0][1] + viewport[1][1])
         x_min = x_center - viewport_height / 2
         x_max = x_center + viewport_height / 2
         viewport = ((viewport[0][0], x_min), (viewport[1][0], x_max))
 
-    # select the locs within the viewport
+    # Link only localizations near the requested viewport.
+    # The generous margin keeps nearby localizations available to form
+    # events crossing the viewport boundary.
     (y_min, x_min), (y_max, x_max) = viewport
+
+    # Validate image size before linking to fail early.
     image_size = (x_max - x_min) / (lp / 2)
+
     if max_image_size is not None and image_size > max_image_size:
         raise ValueError(
             f"The FRC images would be {image_size:,.0f} x "
@@ -3306,6 +3364,62 @@ def frc(
             "memory. Use a smaller viewport (e.g., frc_rois for the whole "
             "field of view) or raise max_image_size."
         )
+
+    if not already_linked:
+        if isinstance(r_max, str):
+            if r_max != "auto":
+                raise ValueError(f"Unsupported r_max option: {r_max!r}")
+
+            if median_lp is None:
+                raise ValueError(
+                    "Cannot determine a valid median localization precision "
+                    "for automatic linking. Ensure valid 'lpx' and 'lpy' "
+                    "values are available, or pass 'r_max' explicitly."
+                )
+
+            resolved_r_max = 3.0 * median_lp
+
+        else:
+            resolved_r_max = float(r_max)
+
+        if not np.isfinite(resolved_r_max) or resolved_r_max <= 0:
+            raise ValueError("'r_max' must be a finite positive distance.")
+
+        # Warn if the explicit linking radius is smaller than median lp.
+        if (
+            not isinstance(r_max, str)
+            and median_lp is not None
+            and resolved_r_max < median_lp
+        ):
+            warnings.warn(
+                f"'r_max' ({resolved_r_max:.2f} nm) is smaller than "
+                f"the median localization precision "
+                f"({median_lp:.2f} nm). This may prevent correct "
+                "linking of localizations belonging to the same emitter.",
+                UserWarning,
+                stacklevel=2,
+            )
+
+        link_margin = 10.0 * resolved_r_max
+
+        in_link_region = (
+            (locs["x"] > x_min - link_margin)
+            & (locs["y"] > y_min - link_margin)
+            & (locs["x"] < x_max + link_margin)
+            & (locs["y"] < y_max + link_margin)
+        )
+
+        # Keep ambiguous event lengths: FRC only requires one position estimate
+        # per emitter activation, not complete reconstruction of the binding event.
+        locs, _ = link(
+            locs.loc[in_link_region],
+            info,
+            r_max=resolved_r_max,
+            max_dark_time=max_dark_time,
+            remove_ambiguous_lengths=False,
+        )
+
+    # Keep only localizations within the original square viewport.
     in_view = (
         (locs["x"] > x_min)
         & (locs["y"] > y_min)
@@ -3314,16 +3428,18 @@ def frc(
     )
     locs = locs.loc[in_view]
 
-    np.random.seed(random_seed)
-    # split locs randomly into two halves
-    r_idx = np.random.permutation(len(locs))
+    # Split locs randomly into two halves using a local RNG.
+    rng = np.random.default_rng(random_seed)
+    r_idx = rng.permutation(len(locs))
     locs1 = locs.iloc[r_idx[: len(r_idx) // 2]]
     locs2 = locs.iloc[r_idx[len(r_idx) // 2 :]]
-    # run FRC
+
+    # Run FRC.
     frc_curve, frc_curve_smooth, frequencies, resolution, images = _frc(
         locs1, locs2, info, lp, viewport
     )
-    # smooth the FRC curve and summarize findings
+
+    # Summarize findings.
     frc_result = {
         "frc_curve": frc_curve,
         "frc_curve_smooth": frc_curve_smooth,
@@ -3331,6 +3447,7 @@ def frc(
         "resolution": resolution,
         "images": images,
     }
+
     return frc_result
 
 
@@ -3344,16 +3461,26 @@ def frc_rois(
     min_locs: int = 1000,
     random_seed: int = 42,
     lp: float | None = None,
+    r_max: float | Literal["auto"] = "auto",
+    max_dark_time: int = 3,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> dict:
     """Calculate the FRC resolution in several random ROIs.
 
     Places up to ``n_rois`` non-overlapping square ROIs in ``viewport``
-    (see ``lib.select_frc_rois``) and runs ``frc`` in each of them. The
-    image bin size is set by the NeNA of all ``locs``, computed once
-    (unless given as ``lp``), so that the ROIs are comparable. The
-    spread of the resolutions across ROIs estimates the uncertainty of
-    the FRC resolution.
+    (see ``lib.select_frc_rois``) and runs ``frc`` in each of them.
+
+    Localization precision is estimated once from the full dataset.
+    NeNA is used for unlinked localizations, with the median of ``lpx``
+    and ``lpy`` as a fallback. For already-linked localizations, the
+    median of ``lpx`` and ``lpy`` is used instead.
+
+    If linking is required, the full localization dataset is linked
+    once before selecting and analyzing the ROIs. This ensures that
+    each ROI uses the same linked localization list.
+
+    The spread of the resolutions across ROIs estimates the
+    uncertainty of the FRC resolution.
 
     Parameters
     ----------
@@ -3371,30 +3498,39 @@ def frc_rois(
     min_locs : int, optional
         Minimum number of localizations per ROI. Default is 1000.
     random_seed : int, optional
-        Random seed for the ROI placement and the splitting into
-        halves. Default is 42.
+        Random seed for the ROI placement and splitting into halves.
+        Default is 42.
     lp : float or None, optional
         Localization precision (nm) that sets the bin size of the
-        rendered images (``lp / 2``), e.g. a NeNA calculated before. If
-        None (default), NeNA of ``locs`` is calculated.
+        rendered images (``lp / 2``). If None (default), NeNA of ``locs``
+        is used.
+    r_max : float or {'auto'}, optional
+        Maximum distance (nm) for linking unlinked localizations across
+        frames. If ``'auto'``, set to ``3.0 * median_lp`` calculated
+        from ``lpx`` and ``lpy``. An explicit value overrides this
+        default. A UserWarning is issued if the explicit value is
+        smaller than median lp. Default is ``'auto'``.
+    max_dark_time : int, optional
+        Maximum number of dark frames bridged when linking
+        localizations. Default is 3.
     progress : lib.Progress, "console" or None, optional
-        Progress tracker, see ``picasso.lib.Progress``: e.g. a
-        ``lib.ProgressDialog``, "console" for a tqdm bar in the console,
-        or None for no reporting. Reports "Calculating NeNA" over the
-        localizations (unless ``lp`` is given), then "Calculating FRC"
-        over the ROIs. Default is None.
+        Progress tracker. Reports "Calculating NeNA" when required,
+        "Linking localizations" when linking is required, and
+        "Calculating FRC" over the ROIs. Default is None.
 
     Returns
     -------
     result : dict
-        Dictionary with keys "rois" (viewports of the ROIs in nm),
-        "n_locs" (localizations per ROI), "frc_results" (list of
-        ``frc`` results, one per ROI), "resolutions" (in nm, NaN where
-        the FRC curve does not cross the 1/7 threshold) and "lp" (NeNA
-        in nm, or ``lp`` if given).
+        Dictionary with keys "rois", "n_locs", "frc_results",
+        "resolutions" and "lp".
     """
+    already_linked = len(locs) > 0 and {"len", "n"}.issubset(locs.columns)
+
+    # Keep the original dataset for ROI selection.
+    original_locs = locs
+
     rois = lib.select_frc_rois(
-        locs,
+        original_locs,
         info,
         viewport,
         n_rois=n_rois,
@@ -3402,40 +3538,148 @@ def frc_rois(
         min_locs=min_locs,
         random_seed=random_seed,
     )
+
     with lib.tracked_progress(
         progress,
         "Calculating NeNA" if lp is None else "Calculating FRC",
         unit="loc",
     ) as progress:
+
+        # Calculate median localization precision only when needed for
+        # linking or as a fallback estimate of lp.
+        median_lp = None
+        if (not already_linked or lp is None) and {"lpx", "lpy"}.issubset(
+            original_locs.columns
+        ):
+            value = float(
+                np.nanmean(
+                    [
+                        np.nanmedian(original_locs["lpx"]),
+                        np.nanmedian(original_locs["lpy"]),
+                    ]
+                )
+            )
+            if np.isfinite(value) and value > 0:
+                median_lp = value
+
+        # Estimate localization precision from the full dataset.
         if lp is None:
-            lp = nena(locs, info, progress=progress)[1]
+            if not already_linked:
+                try:
+                    nena_lp = nena(original_locs, info, progress=progress)[1]
+                    if (
+                        nena_lp is not None
+                        and np.isfinite(nena_lp)
+                        and nena_lp > 0
+                    ):
+                        lp = float(nena_lp)
+                except RuntimeError:
+                    lp = None
+
+            if lp is None:
+                lp = median_lp
+        else:
+            lp = float(lp)
+
+        if lp is None or not np.isfinite(lp) or lp <= 0:
+            raise ValueError(
+                "Cannot determine a valid positive localization precision 'lp'. "
+                "Pass 'lp' explicitly or ensure valid 'lpx' and 'lpy' values are available."
+            )
+
+        # Link the full dataset once, if needed, so n_locs is correct
+        if not already_linked:
+            if isinstance(r_max, str):
+                if r_max != "auto":
+                    raise ValueError(f"Unsupported r_max option: {r_max!r}")
+
+                if median_lp is None:
+                    raise ValueError(
+                        "Cannot determine a valid median localization precision "
+                        "for automatic linking. Ensure valid 'lpx' and 'lpy' "
+                        "values are available, or pass 'r_max' explicitly."
+                    )
+
+                resolved_r_max = 3.0 * median_lp
+            else:
+                resolved_r_max = float(r_max)
+
+            if not np.isfinite(resolved_r_max) or resolved_r_max <= 0:
+                raise ValueError("'r_max' must be a finite positive distance.")
+
+            # Warn once if the explicit linking radius is too small.
+            if (
+                not isinstance(r_max, str)
+                and median_lp is not None
+                and resolved_r_max < median_lp
+            ):
+                warnings.warn(
+                    f"'r_max' ({resolved_r_max:.2f} nm) is smaller than "
+                    f"the median localization precision "
+                    f"({median_lp:.2f} nm). This may prevent correct "
+                    "linking of localizations belonging to the same emitter.",
+                    UserWarning,
+                    stacklevel=2,
+                )
+
+            lib.start_phase(
+                progress,
+                "Linking localizations",
+                len(original_locs),
+                unit="loc",
+            )
+            progress.set_value(0)
+            locs, _ = link(
+                original_locs,
+                info,
+                r_max=resolved_r_max,
+                max_dark_time=max_dark_time,
+                remove_ambiguous_lengths=False,
+            )
+            progress.set_value(len(original_locs))
+        else:
+            locs = original_locs
+
+        # Coordinates of the linked localizations are used for ROI counts.
         x = locs["x"].to_numpy()
         y = locs["y"].to_numpy()
+
         n_locs = []
         frc_results = []
+
         lib.start_phase(progress, "Calculating FRC", len(rois), unit="ROI")
         progress.set_value(0)
+
         for k, ((y0, x0), (y1, x1)) in enumerate(rois):
+
+            # Count linked localizations inside the ROI.
             in_roi = (x > x0) & (y > y0) & (x < x1) & (y < y1)
             n_locs.append(int(in_roi.sum()))
+
+            # Pass the already-linked dataset to frc().
             frc_result = frc(
-                locs.loc[in_roi],
+                locs,
                 info,
                 viewport=((y0, x0), (y1, x1)),
                 random_seed=random_seed,
                 lp=lp,
             )
-            # drop the rendered images: tens of ROIs would hold GBs
+
+            # Drop rendered images to avoid retaining large arrays.
             del frc_result["images"]
+
             frc_results.append(frc_result)
             progress.set_value(k + 1)
+
         progress.set_value(len(rois))
+
     resolutions = np.array(
         [
-            np.nan if _["resolution"] is None else _["resolution"]
-            for _ in frc_results
+            np.nan if result["resolution"] is None else result["resolution"]
+            for result in frc_results
         ]
     )
+
     return {
         "rois": rois,
         "n_locs": np.array(n_locs, dtype=int),
