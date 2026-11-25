@@ -1532,6 +1532,39 @@ class TestFrc:
         frc_res = postprocess.frc(locs, info, viewport=FRC_VIEWPORT)
         assert frc_res["resolution"] > 0
 
+    def test_bin_size_sets_the_pixel_size(self, locs, info, monkeypatch):
+        def fail(*args, **kwargs):
+            raise AssertionError("NeNA is not needed for a given bin size")
+
+        expected = postprocess.frc(
+            locs, info, viewport=FRC_VIEWPORT, lp=10.0
+        )
+        monkeypatch.setattr(postprocess, "nena", fail)
+        frc_res = postprocess.frc(
+            locs, info, viewport=FRC_VIEWPORT, bin_size=5.0
+        )
+        assert frc_res["bin_size"] == 5.0
+        assert frc_res["lp"] == 10.0
+        assert frc_res["nena"] is None
+        np.testing.assert_allclose(
+            frc_res["frc_curve"], expected["frc_curve"]
+        )
+        side = FRC_VIEWPORT[1][1] - FRC_VIEWPORT[0][1]
+        assert frc_res["images"][0].shape[0] == pytest.approx(
+            side / 5.0, abs=1
+        )
+
+    def test_invalid_bin_size_raises(self, locs, info):
+        with pytest.raises(ValueError, match="either 'lp' or 'bin_size'"):
+            postprocess.frc(
+                locs, info, viewport=FRC_VIEWPORT, lp=10.0, bin_size=5.0
+            )
+        for bin_size in (0.0, -1.0, np.inf):
+            with pytest.raises(ValueError, match="'bin_size' must be"):
+                postprocess.frc(
+                    locs, info, viewport=FRC_VIEWPORT, bin_size=bin_size
+                )
+
     def test_invalid_lp_raises(self, locs, info):
         with pytest.raises(ValueError, match="localization precision"):
             postprocess.frc(locs, info, viewport=FRC_VIEWPORT, lp=-1.0)
@@ -1731,6 +1764,24 @@ class TestFrcRois:
                 max_image_size=10,  # 260 / 6 = 43 pixels
             )
         assert error.value.image_size == pytest.approx(260 / 6)
+
+    def test_bin_size(self, locs, info, monkeypatch):
+        def fail(*args, **kwargs):
+            raise AssertionError("NeNA is not needed for a given bin size")
+
+        monkeypatch.setattr(postprocess, "nena", fail)
+        result = postprocess.frc_rois(
+            locs,
+            info,
+            viewport=((10 * PX, 10 * PX), (20 * PX, 20 * PX)),
+            n_rois=4,
+            roi_size=260,
+            min_locs=10,
+            bin_size=6.0,
+        )
+        assert result["bin_size"] == 6.0
+        assert result["lp"] == 12.0
+        assert result["nena"] is None
 
     def test_max_image_size_passed_to_frc(self, locs, info, monkeypatch):
         frc = postprocess.frc

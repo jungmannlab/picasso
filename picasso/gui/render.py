@@ -6624,11 +6624,28 @@ class InfoDialog(lib.Dialog):
         show_frc_button.setToolTip("Display the FRC curve.")
         show_frc_button.clicked.connect(self.show_frc_plot)
         grid.addWidget(show_frc_button, 3, 3)
+        frc_bin_label = QtWidgets.QLabel("Bin size (nm):")
+        frc_bin_label.setToolTip(
+            "Pixel size at which the localizations are rendered for the\n"
+            "FRC (FOV and ROIs). 'Auto' uses half the NeNA or, for\n"
+            "linked localizations or if the NeNA fit fails, half the\n"
+            "median localization precision."
+        )
+        frc_bin_label.setIndent(20)
+        grid.addWidget(frc_bin_label, 4, 0)
+        self.frc_bin_size = QtWidgets.QDoubleSpinBox()
+        self.frc_bin_size.setRange(0.0, 1000.0)
+        self.frc_bin_size.setDecimals(2)
+        self.frc_bin_size.setSingleStep(0.5)
+        self.frc_bin_size.setSpecialValueText("Auto")
+        self.frc_bin_size.setValue(0.0)
+        frc_bin_label.setBuddy(self.frc_bin_size)
+        grid.addWidget(self.frc_bin_size, 4, 1)
         self.save_images_check = QtWidgets.QCheckBox("Save FRC images")
         self.save_images_check.setToolTip(
             "Save the 2 images rendered for the FRC as .tif files."
         )
-        grid.addWidget(self.save_images_check, 4, 1, 1, 3)
+        grid.addWidget(self.save_images_check, 4, 2, 1, 2)
 
         decorrelation_label = QtWidgets.QLabel("Decorrelation (FOV):")
         decorrelation_label.setToolTip(
@@ -7020,7 +7037,8 @@ class InfoDialog(lib.Dialog):
         locs = self.window.view.locs[channel]
         info = self.window.view.infos[channel]
         viewport = self.window.view.viewport
-        lp = self.known_nena(channel)
+        bin_size = self.frc_bin_size.value() or None
+        lp = None if bin_size else self.known_nena(channel)
 
         # get the name prefix for saving images
         if path is None and self.save_images_check.isChecked():
@@ -7041,6 +7059,7 @@ class InfoDialog(lib.Dialog):
                 info,
                 viewport=viewport,
                 lp=lp,
+                bin_size=bin_size,
                 max_image_size=max_image_size,
                 progress=progress,
             )
@@ -7065,8 +7084,9 @@ class InfoDialog(lib.Dialog):
                     title,
                     "The FRC curve does not cross the 1/7 threshold, so no "
                     "resolution can be given. Try a larger viewport or "
-                    "more localizations. Check that your NeNA value seems "
-                    "reasonable - FRC pixel size is taken from NeNA",
+                    "more localizations. Check that the bin size "
+                    f"({result['bin_size']:.2f} nm) seems reasonable: by "
+                    "default, it is half the NeNA.",
                 )
             if on_done is not None:
                 on_done()
@@ -7125,8 +7145,8 @@ class InfoDialog(lib.Dialog):
             self.frc_rois_window = None
         roi_size = 1000 * self.frc_roi_size.value()
         min_locs = self.frc_min_locs.value()
-
-        lp = self.known_nena(channel)
+        bin_size = self.frc_bin_size.value() or None
+        lp = None if bin_size else self.known_nena(channel)
 
         def compute(progress: lib.TaskProgress) -> dict:
             return postprocess.frc_rois(
@@ -7137,6 +7157,7 @@ class InfoDialog(lib.Dialog):
                 roi_size=roi_size,
                 min_locs=min_locs,
                 lp=lp,
+                bin_size=bin_size,
                 progress=progress,
             )
 
@@ -7775,8 +7796,8 @@ class FRCRoisWindow(QtWidgets.QWidget):
                 f"<b>FRC resolution: {text}</b> (mean ± std)<br>"
                 f"median {np.median(resolutions):.2f} nm, "
                 f"{len(resolutions)} of {n_total} ROIs used, "
-                "Localization precision (for bin size): "
-                f"{self.result['lp']:.2f} nm"
+                "bin size "
+                f"{self.result['bin_size']:.2f} nm"
             )
         # the Info dialog shows the ROIs of the selected channel only
         dialog = self.info_dialog

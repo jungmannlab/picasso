@@ -764,6 +764,45 @@ def test_frc_uses_nena_from_metadata(
     assert lps == [8.0]
 
 
+def test_frc_bin_size(window, answers, monkeypatch, qt_offscreen):
+    """A bin size set in the dialog is used instead of NeNA, by FRC of
+    the view and in ROIs."""
+    answers.record_messages()
+    window.view.infos[0].append({"Step": "Render : NeNA", "NeNA (nm)": 8.0})
+    calls = []
+    frc, frc_rois = postprocess.frc, postprocess.frc_rois
+    monkeypatch.setattr(
+        postprocess,
+        "frc",
+        lambda *a, **k: calls.append((k["lp"], k.get("bin_size")))
+        or frc(*a, **k),
+    )
+    monkeypatch.setattr(
+        postprocess,
+        "frc_rois",
+        lambda *a, **k: calls.append((k["lp"], k["bin_size"]))
+        or frc_rois(*a, **k),
+    )
+    info_dialog = window.info_dialog
+    assert info_dialog.frc_bin_size.text() == "Auto"
+    info_dialog.calculate_frc_resolution()
+    _wait_for_tasks(qt_offscreen)
+    assert calls == [(8.0, None)]  # the known NeNA
+    info_dialog.frc_bin_size.setValue(3.0)
+    info_dialog.calculate_frc_resolution()
+    info_dialog.frc_n_rois.setValue(4)
+    info_dialog.frc_roi_size.setValue(2.0)
+    info_dialog.frc_min_locs.setValue(100)
+    info_dialog.calculate_frc_rois()
+    _wait_for_tasks(qt_offscreen)
+    # then frc_rois, which calls frc in each ROI with the resolved lp
+    assert calls[1:3] == [(None, 3.0), (None, 3.0)]
+    assert set(calls[3:]) == {(6.0, None)}
+    assert info_dialog.frc_result["bin_size"] == 3.0
+    assert "bin size 3.00 nm" in info_dialog.frc_rois_window.summary.text()
+    info_dialog.frc_rois_window.close()
+
+
 def test_frc_record_only_a_found_nena(
     window, answers, monkeypatch, qt_offscreen
 ):

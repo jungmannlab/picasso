@@ -3290,6 +3290,28 @@ def _frc_precision(
     return lp, found_nena, median_lp
 
 
+def _frc_lp_from_bin_size(
+    lp: float | None, bin_size: float | None
+) -> float | None:
+    """``lp`` for the ``bin_size`` (nm) of ``frc`` and ``frc_rois``:
+    ``2 * bin_size`` if given, ``lp`` otherwise.
+
+    Raises
+    ------
+    ValueError
+        If both are given or ``bin_size`` is not a finite positive
+        distance.
+    """
+    if bin_size is None:
+        return lp
+    if lp is not None:
+        raise ValueError("Pass either 'lp' or 'bin_size', not both.")
+    bin_size = float(bin_size)
+    if not np.isfinite(bin_size) or bin_size <= 0:
+        raise ValueError("'bin_size' must be a finite positive distance.")
+    return 2 * bin_size
+
+
 def _frc_r_max(
     r_max: float | Literal["auto"], median_lp: float | None
 ) -> float:
@@ -3385,6 +3407,7 @@ def frc(
     viewport: tuple[tuple[float, float], tuple[float, float]],
     random_seed: int = 42,
     lp: float | None = None,
+    bin_size: float | None = None,
     max_image_size: int | None = FRC_MAX_IMAGE_SIZE,
     r_max: float | Literal["auto"] = "auto",
     max_dark_time: int = 3,
@@ -3411,6 +3434,10 @@ def frc(
         rendered images (``lp / 2``). If None (default), NeNA of
         ``locs`` is used; the median of ``lpx`` and ``lpy`` if the NeNA
         fit fails or ``locs`` are already linked.
+    bin_size : float or None, optional
+        Pixel size (nm) of the rendered images, in place of ``lp / 2``
+        (NeNA is then not calculated). Pass either ``lp`` or
+        ``bin_size``. Default is None.
     max_image_size : int or None, optional
         Largest side length (pixels) of the rendered images. A larger
         (square) viewport raises ``FRCImageTooLargeError`` (a
@@ -3438,7 +3465,8 @@ def frc(
         "frequencies" (for spatial frequencies probed (nm^-1)),
         "resolution" (estimated resolution in nm), "images"
         (2 grayscale images rendered and masked), "lp" (nm, the
-        localization precision that set the bin size) and "nena" (nm,
+        localization precision that set the bin size), "bin_size" (nm,
+        the pixel size of the images, ``lp / 2``) and "nena" (nm,
         the NeNA calculated here; None if ``lp`` was given, the
         localizations were already linked or the NeNA fit failed and
         ``lp`` is the median of ``lpx`` and ``lpy``).
@@ -3457,6 +3485,7 @@ def frc(
     nanoscopy. Nat Methods 10, 557-562 (2013).
     https://doi.org/10.1038/nmeth.2448
     """
+    lp = _frc_lp_from_bin_size(lp, bin_size)
     already_linked = _is_linked(locs)
     if lp is None and not already_linked:
         first_phase = "Calculating NeNA"
@@ -3554,6 +3583,7 @@ def frc(
         "resolution": resolution,
         "images": images,
         "lp": lp,
+        "bin_size": lp / 2,
         "nena": found_nena,
     }
 
@@ -3568,6 +3598,7 @@ def frc_rois(
     min_locs: int = 1000,
     random_seed: int = 42,
     lp: float | None = None,
+    bin_size: float | None = None,
     r_max: float | Literal["auto"] = "auto",
     max_dark_time: int = 3,
     max_image_size: int | None = FRC_MAX_IMAGE_SIZE,
@@ -3610,8 +3641,13 @@ def frc_rois(
         Default is 42.
     lp : float or None, optional
         Localization precision (nm) that sets the bin size of the
-        rendered images (``lp / 2``). If None (default), NeNA of ``locs``
-        is used.
+        rendered images (``lp / 2``). If None (default), NeNA of
+        ``locs`` is used; the median of ``lpx`` and ``lpy`` if the NeNA
+        fit fails or ``locs`` are already linked.
+    bin_size : float or None, optional
+        Pixel size (nm) of the rendered images, in place of ``lp / 2``
+        (NeNA is then not calculated). Pass either ``lp`` or
+        ``bin_size``. Default is None.
     r_max : float or {'auto'}, optional
         Maximum distance (nm) for linking unlinked localizations across
         frames. If ``'auto'``, set to ``3.0 * median_lp`` calculated
@@ -3636,7 +3672,8 @@ def frc_rois(
     result : dict
         Dictionary with keys "rois", "n_locs", "frc_results",
         "resolutions", "lp" (nm, the localization precision that set the
-        bin size) and "nena" (nm, the NeNA calculated here; None if
+        bin size), "bin_size" (nm, the pixel size of the images,
+        ``lp / 2``) and "nena" (nm, the NeNA calculated here; None if
         ``lp`` was given, the localizations were already linked or the
         NeNA fit failed and ``lp`` is the median of ``lpx`` and
         ``lpy``).
@@ -3649,6 +3686,7 @@ def frc_rois(
     ValueError
         If a valid localization precision cannot be determined.
     """
+    lp = _frc_lp_from_bin_size(lp, bin_size)
     already_linked = _is_linked(locs)
 
     # Keep the original dataset for ROI selection.
@@ -3747,6 +3785,7 @@ def frc_rois(
         "frc_results": frc_results,
         "resolutions": resolutions,
         "lp": lp,
+        "bin_size": lp / 2,
         "nena": found_nena,
     }
 

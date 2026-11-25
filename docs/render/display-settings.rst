@@ -474,16 +474,21 @@ Nature Methods, 2013 <https://doi.org/10.1038/nmeth.2448>`__):
   localizations of the **current field of view** (cropped to a square) into
   binding events (see :ref:`Link <render-link-localizations>`), so that the
   localizations of one binding event do not end up in both halves and
-  correlate them. It
-  then splits the binding events randomly into two halves, renders an image
-  of each with a pixel size of half the NeNA, and correlates them. The
+  correlate them. It then splits the binding events randomly into two
+  halves, renders an image of each with the bin size (pixel size, see
+  below), and correlates them. The
   resolution is where the FRC curve drops below 1/7. Zoom to a region of
   interest first; a large field of view takes long. If the images would be
   larger than 16,384 pixels on a side, Picasso asks whether to go ahead.
+- ``Bin size (nm)`` sets the pixel size of the images, for the FRC of the
+  field of view and in ROIs. *Auto* (0, the default) uses half the NeNA.
 - Localizations that are already linked (with the columns ``len`` and ``n``)
-  are used as they are. NeNA needs unlinked localizations, so their pixel
-  size is set by their median localization precision instead, which is
-  smaller than the NeNA of the unlinked localizations.
+  are used as they are. NeNA needs unlinked localizations, so *Auto* uses
+  half their median localization precision instead, which is smaller than
+  the NeNA of the unlinked localizations: the same data linked before or
+  by the FRC can give a different resolution. Set ``Bin size (nm)`` to
+  compare them. *Auto* also uses the median localization precision if the
+  NeNA fit fails.
 - ``Save FRC images`` also saves the two images as ``_1.tif`` and
   ``_2.tif``.
 - ``Plot`` shows the FRC curve.
@@ -504,9 +509,7 @@ the FRC resolution:
 - Unlinked localizations are linked once, over the whole image, before the
   FRC is calculated in each ROI with the same pixel size, and
   ``FRC resolution, ROIs (nm)`` shows their mean ± standard deviation. The
-  pixel size is set by NeNA, or by the median localization precision for
-  localizations that are already linked; the window shows it as
-  ``Localization precision (for bin size)``.
+  review window shows the bin size used.
 - ``Review ROIs`` opens a window listing the ROIs with their positions,
   localization counts and resolutions, an overview of where they lie (used:
   green, excluded: gray, selected: red) and the FRC curve of the selected
@@ -522,8 +525,9 @@ the FRC resolution:
    image. Both link unlinked localizations first: ``r_max`` (nm; ``"auto"``,
    the default, is 3 x the median localization precision) and
    ``max_dark_time`` (frames, 3 by default) set the linking as in
-   ``postprocess.link``. ``lp`` (nm) sets the pixel size (``lp / 2``)
-   instead of NeNA. Images larger than ``max_image_size`` pixels on a side
+   ``postprocess.link``. ``bin_size`` (nm) sets the pixel size instead of
+   half the NeNA, as does ``lp`` (nm, a known NeNA; pixel size
+   ``lp / 2``); pass one of them. Images larger than ``max_image_size`` pixels on a side
    (``postprocess.FRC_MAX_IMAGE_SIZE``, 16384, by default; None for no
    limit) raise ``postprocess.FRCImageTooLargeError`` before anything is
    linked or rendered.
@@ -531,7 +535,7 @@ the FRC resolution:
    .. code-block:: python
 
       frc = postprocess.frc(locs, info, viewport=((0, 0), (8320, 8320)))
-      print(frc["resolution"])                        # nm
+      print(frc["resolution"], frc["bin_size"])       # nm
       fig = postprocess.plot_frc(frc)
 
       rois = postprocess.frc_rois(
