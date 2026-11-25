@@ -603,7 +603,8 @@ def test_decorrelation_saves_tables_and_a_plot(locs_path, monkeypatch, capsys):
     assert len(pd.read_csv(base + "_curves.csv")) == 50
     assert os.path.getsize(base + ".png") > 0
     out = capsys.readouterr().out
-    assert "localizations" in out and "per um^2 of sample" in out
+    # linked into binding events first
+    assert "binding events" in out and "per um^2 of sample" in out
     assert "WARNING" not in out
     # 32 nm pixels limit the resolution of the bundled data
     _picasso(monkeypatch, "decorrelation", locs_path, "-px", 32)

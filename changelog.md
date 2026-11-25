@@ -1,6 +1,6 @@
 # Changelog
 
-Last change: 24-NOV-2026 CET
+Last change: 25-NOV-2026 CET
 
 ## 1.0.0
 
@@ -60,7 +60,8 @@ Picasso 1.0 is the largest update since Picasso was first published. The highlig
 - Undrifting from picked localizations is fast and memory-efficient for many picks.
 - Faster FRC.
 - FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*).
-- Resolution by decorrelation analysis (Descloux et al., *Nat. Methods* 2019), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-info-decorrelation).
+- FRC links localizations into binding events before splitting them into two halves, so that the localizations of one binding event do not correlate the halves and inflate the resolution. Already linked localizations are used as they are. FRC in several ROIs shows the bin size used (was labeled *NeNA*).
+- Resolution by decorrelation analysis (Descloux et al., *Nat. Methods* 2019), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-info-decorrelation). As for the FRC, unlinked localizations are linked into binding events first (`picasso.postprocess.decorrelation`'s `r_max` and `max_dark_time`; `picasso decorrelation -d` and `-t`).
 - The pick statistics of the Info dialog include the dye performance of picked docking sites (Steen et al., *Nat. Methods* 2024). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-info-dye-performance).
 - Pick similar without seed picks, see the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-pick-by-n-locs-rmsd).
 - *Mask image* refines the mask: fill holes, remove small regions, keep the largest ones, and grow or shrink it by a distance. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-tools.html#render-mask-image).
@@ -77,7 +78,7 @@ Picasso 1.0 is the largest update since Picasso was first published. The highlig
 - `View > Save FOV...` (Ctrl+Shift+B) and `View > Load FOV...` (Ctrl+B) save and load the field of view as a .txt file, as the buttons of the *Info* dialog do.
 - The zoom-in rectangle (main and 3D window) can be dragged in any direction and canceled with a right click or Esc. See the [documentation](https://picassosr.readthedocs.io/en/latest/render.html#render-navigation).
 - The View menu no longer lists Left/Right/Up/Down and Zoom in/out (their keyboard shortcuts still work); *Filter picks by number of localizations* is now *Filter picks by count*.
-- Long operations run in the background and can be canceled: undrifting (AIM, RCC, from picked), DBSCAN, HDBSCAN, SMLM clusterer, G5M, RESI, NeNA, FRC in ROIs, pick statistics and saving pick properties. The windows keep repainting while they run.
+- Long operations run in the background and can be canceled: undrifting (AIM, RCC, from picked), DBSCAN, HDBSCAN, SMLM clusterer, G5M, RESI, NeNA, FRC, FRC in ROIs, pick statistics and saving pick properties. The windows keep repainting while they run.
 - Link localizations can be run on all channels sequentially.
 - Coordinate-based colocalization (CBC, Malkusch, et al., *Histochem Cell Biol* 2012). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/analysis.html#render-cbc).
 - New `Postprocess > Spatial statistics` submenu for analyzing how the molecules of one channel, or of several channels with respect to each other, are distributed, including Ripley's H function (Ripley, *J R Stat Soc B* 1977), the radial distribution function (RDF), the nearest neighbor distance distributions of all channels and the density from the k nearest neighbors (Thompson, *Ecology* 1956), each compared with random simulations. See the [documentation](https://picassosr.readthedocs.io/en/latest/render/menu-postprocess.html#render-menu-spatial-statistics).
@@ -228,7 +229,8 @@ The [migration guide](https://picassosr.readthedocs.io/en/latest/migration.html)
 - Fixed: `picasso undrift-fiducials` failed for movies shorter than 7000 frames: the RCC before picking the fiducials used segments of 2000 frames. It now uses at most a quarter of the frames.
 - Fixed: `picasso hdf2csv` wrote the row numbers as an extra unnamed first column.
 - `picasso.localize.FIT_METHOD_ALIASES` and `resolve_fit_method` give the fitting method behind a short name of `picasso localize --fit-method` (e.g., "mle-3d"), and `picasso.localize.to_photons` converts camera counts to photons.
-- `picasso.postprocess.frc` raises an error instead of rendering images larger than `max_image_size` pixels on a side (16384 by default), which may not fit into memory.
+- `picasso.postprocess.frc` and `frc_rois` raise `picasso.postprocess.FRCImageTooLargeError` (a `ValueError`) instead of rendering images larger than `max_image_size` pixels on a side (`picasso.postprocess.FRC_MAX_IMAGE_SIZE`, 16384, by default), which may not fit into memory. They check before linking or calculating anything; `frc_rois` checks once, as all ROIs have the same size. Render's *Info* dialog uses the same limit: *FRC (FOV)* asks whether to go ahead and *FRC in several ROIs* gives the largest ROI side length that fits.
+- `picasso.postprocess.frc` and `frc_rois` link the localizations (`link` with `remove_ambiguous_lengths=False`) before the FRC unless they are already linked (have the columns `len` and `n`). The new arguments `r_max` (3 × the median localization precision by default, `"auto"`) and `max_dark_time` (3 by default) set the linking. If NeNA fails, or for already linked localizations, the bin size is set by the median localization precision (`lpx`, `lpy`). `bin_size` (nm) sets the pixel size of the FRC images instead of half the NeNA, also in Render's *Info* dialog (*Bin size (nm)*, *Auto* by default). `frc` reports its progress (`progress`), and both return the localization precision and bin size used (`"lp"`, `"bin_size"`) and the NeNA they calculated (`"nena"`; None if they used the median precision or a given `lp`), and Render records only that value as the channel's NeNA. The halves are split with a local random generator (`numpy.random.default_rng`), which no longer changes NumPy's global random state; the split, and thus the FRC curve, differs from earlier versions for the same `random_seed`.
 - `picasso.spinna.fit_label_uncertainty` fits the label uncertainty of each molecular target, the first step of `compare_models`, and returns the score of every candidate value, e.g., to plot them. `picasso.spinna.targets_from_structures` lists the targets of structures.
 - `picasso.spinna.batch_analysis` runs the batch analysis of a parameters file (`picasso spinna -p`) from Python and returns the folder with the results and the summary of all rows.
 - SPINNA gives the uncertainty of fitted labeling efficiencies, see the [documentation](https://picassosr.readthedocs.io/en/latest/spinna.html#spinna-le-fitting).

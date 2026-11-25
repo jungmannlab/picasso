@@ -470,17 +470,32 @@ FRC
 Estimates the resolution by Fourier ring correlation (`Nieuwenhuizen et al.,
 Nature Methods, 2013 <https://doi.org/10.1038/nmeth.2448>`__):
 
-- ``Calculate`` in the ``FRC resolution (FOV)`` row splits the localizations of the **current field of view**
-  (cropped to a square) randomly into two halves, renders an image of each
-  with a pixel size set by NeNA, and correlates them. The resolution is where
-  the FRC curve drops below 1/7. Zoom to a region of interest first;
-  a large field of view takes long.
+- ``Calculate`` in the ``FRC resolution (FOV)`` row first links the
+  localizations of the **current field of view** (cropped to a square) into
+  binding events (see :ref:`Link <render-link-localizations>`), so that the
+  localizations of one binding event do not end up in both halves and
+  correlate them. It then splits the binding events randomly into two
+  halves, renders an image of each with the bin size (pixel size, see
+  below), and correlates them. The
+  resolution is where the FRC curve drops below 1/7. Zoom to a region of
+  interest first; a large field of view takes long. If the images would be
+  larger than 16,384 pixels on a side, Picasso asks whether to go ahead.
+- ``Bin size (nm)`` sets the pixel size of the images, for the FRC of the
+  field of view and in ROIs. *Auto* (0, the default) uses half the NeNA.
+- Localizations that are already linked (with the columns ``len`` and ``n``)
+  are used as they are. NeNA needs unlinked localizations, so *Auto* uses
+  half their median localization precision instead, which is smaller than
+  the NeNA of the unlinked localizations: the same data linked before or
+  by the FRC can give a different resolution. Set ``Bin size (nm)`` to
+  compare them. *Auto* also uses the median localization precision if the
+  NeNA fit fails.
 - ``Save FRC images`` also saves the two images as ``_1.tif`` and
   ``_2.tif``.
 - ``Plot`` shows the FRC curve.
-- The Q factor correction for repeated localizations of the same molecule
-  (blinking, DNA-PAINT rebinding) is not applied, so the value reported may be
-  optimistic.
+- Linking removes the repeated localizations within one binding event. The
+  Q factor correction for repeated binding events of the same molecule
+  (blinking, DNA-PAINT rebinding) is not applied, so the value reported may
+  still be optimistic.
 
 ``FRC in several ROIs`` (collapsed by default) estimates the uncertainty of
 the FRC resolution:
@@ -488,9 +503,13 @@ the FRC resolution:
 - ``Calculate FRC in ROIs`` places up to ``Number of ROIs`` (30)
   non-overlapping random square ROIs of ``ROI side length (µm)`` (5 µm)
   across the whole image, not only the current field of view. ROIs with fewer
-  than ``Min. localizations per ROI`` (1,000) are not used.
-- The FRC is calculated in each ROI with the same NeNA-based pixel size, and
-  ``FRC resolution, ROIs (nm)`` shows their mean ± standard deviation.
+  than ``Min. localizations per ROI`` (1,000) are not used. ROIs whose
+  images would be larger than 16,384 pixels on a side are refused, with the
+  largest ROI side length that fits.
+- Unlinked localizations are linked once, over the whole image, before the
+  FRC is calculated in each ROI with the same pixel size, and
+  ``FRC resolution, ROIs (nm)`` shows their mean ± standard deviation. The
+  review window shows the bin size used.
 - ``Review ROIs`` opens a window listing the ROIs with their positions,
   localization counts and resolutions, an overview of where they lie (used:
   green, excluded: gray, selected: red) and the FRC curve of the selected
@@ -503,12 +522,20 @@ the FRC resolution:
 
    ``frc`` works on one viewport (``((y_min, x_min), (y_max, x_max))`` in
    nm), ``frc_rois`` on random ROIs (``roi_size`` in nm) over the whole
-   image.
+   image. Both link unlinked localizations first: ``r_max`` (nm; ``"auto"``,
+   the default, is 3 x the median localization precision) and
+   ``max_dark_time`` (frames, 3 by default) set the linking as in
+   ``postprocess.link``. ``bin_size`` (nm) sets the pixel size instead of
+   half the NeNA, as does ``lp`` (nm, a known NeNA; pixel size
+   ``lp / 2``); pass one of them. Images larger than ``max_image_size`` pixels on a side
+   (``postprocess.FRC_MAX_IMAGE_SIZE``, 16384, by default; None for no
+   limit) raise ``postprocess.FRCImageTooLargeError`` before anything is
+   linked or rendered.
 
    .. code-block:: python
 
       frc = postprocess.frc(locs, info, viewport=((0, 0), (8320, 8320)))
-      print(frc["resolution"])                        # nm
+      print(frc["resolution"], frc["bin_size"])       # nm
       fig = postprocess.plot_frc(frc)
 
       rois = postprocess.frc_rois(
@@ -516,6 +543,12 @@ the FRC resolution:
           n_rois=30, roi_size=5000.0, min_locs=1000,  # roi_size in nm
       )
       print(rois["resolutions"].mean(), rois["resolutions"].std())
+
+      # set the linking explicitly, e.g., for long dark times
+      frc = postprocess.frc(
+          locs, info, viewport=((0, 0), (8320, 8320)),
+          r_max=30.0, max_dark_time=5,  # nm, frames
+      )
 
 .. _render-info-decorrelation:
 
@@ -526,8 +559,10 @@ Estimates the resolution by decorrelation analysis (`Descloux et al., Nature
 Methods, 2019 <https://doi.org/10.1038/s41592-019-0515-7>`__) from all
 localizations at once, unlike the FRC, which splits them in two:
 
-- ``Calculate`` in the ``Decorrelation (FOV)`` row renders the localizations of the **current
-  field of view** as a bilinear histogram (each localization spread on its
+- ``Calculate`` in the ``Decorrelation (FOV)`` row first links the
+  localizations of the **current field of view** into binding events, as
+  for the :ref:`FRC <render-info-frc>`, and renders them as a bilinear
+  histogram (each localization spread on its
   four nearest pixels) and correlates the image with its Fourier transform
   normalized to unit amplitude, low-pass filtered at increasing frequencies.
   The correlation peaks where higher frequencies add more noise than signal;
@@ -548,9 +583,15 @@ localizations at once, unlike the FRC, which splits them in two:
   the cut-off) and the resolution at each pixel size.
 - The estimate needs enough localizations: Descloux et al. (2021) found it
   reliable above about 1-4 x 10^4 localizations per µm² of sample; below,
-  it improves with more localizations. The plot reports this density. As for
-  the FRC, repeated localizations of the same molecule are not corrected for,
-  so the value reported may be optimistic.
+  it improves with more localizations. The plot reports this density, of
+  binding events once they are linked.
+- Linking removes the repeated localizations within one binding event, which
+  correlate and make the resolution appear better than it is. Localizations
+  that are already linked are used as they are, and localizations without
+  ``frame``, ``lpx`` or ``lpy`` cannot be linked (with a warning). As for
+  the FRC, repeated binding events of the same molecule (blinking,
+  DNA-PAINT rebinding) are not corrected for, so the value reported may
+  still be optimistic.
 
 The same analysis runs from the command line over the whole field of view,
 see :ref:`cmd-decorrelation`.

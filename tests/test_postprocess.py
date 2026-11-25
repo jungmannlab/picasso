@@ -1496,6 +1496,20 @@ class TestFrc:
         frc_res = postprocess.frc(locs, info, viewport=viewport)
         assert frc_res["images"][0].shape[0] == frc_res["images"][0].shape[1]
 
+    def test_random_seed_reproducible_and_distinct(self, locs, info):
+        res_a = postprocess.frc(
+            locs, info, viewport=FRC_VIEWPORT, random_seed=123
+        )
+        res_b = postprocess.frc(
+            locs, info, viewport=FRC_VIEWPORT, random_seed=123
+        )
+        res_c = postprocess.frc(
+            locs, info, viewport=FRC_VIEWPORT, random_seed=999
+        )
+        assert res_a["resolution"] == pytest.approx(res_b["resolution"])
+        np.testing.assert_allclose(res_a["frc_curve"], res_b["frc_curve"])
+        assert not np.allclose(res_a["frc_curve"], res_c["frc_curve"])
+
     def test_given_lp_skips_nena(self, locs, info, monkeypatch):
         viewport = ((15 * PX, 15 * PX), (16 * PX, 16 * PX))
         expected = postprocess.frc(locs, info, viewport=viewport)
@@ -1508,6 +1522,71 @@ class TestFrc:
         frc_res = postprocess.frc(locs, info, viewport=viewport, lp=lp)
         assert frc_res["resolution"] == pytest.approx(expected["resolution"])
 
+    def test_nena_failure_falls_back_to_median_lp(
+        self, locs, info, monkeypatch
+    ):
+        def raise_runtime_error(*args, **kwargs):
+            raise RuntimeError("NeNA fit failed")
+
+        monkeypatch.setattr(postprocess, "nena", raise_runtime_error)
+        frc_res = postprocess.frc(locs, info, viewport=FRC_VIEWPORT)
+        assert frc_res["resolution"] > 0
+
+    def test_bin_size_sets_the_pixel_size(self, locs, info, monkeypatch):
+        def fail(*args, **kwargs):
+            raise AssertionError("NeNA is not needed for a given bin size")
+
+        expected = postprocess.frc(
+            locs, info, viewport=FRC_VIEWPORT, lp=10.0
+        )
+        monkeypatch.setattr(postprocess, "nena", fail)
+        frc_res = postprocess.frc(
+            locs, info, viewport=FRC_VIEWPORT, bin_size=5.0
+        )
+        assert frc_res["bin_size"] == 5.0
+        assert frc_res["lp"] == 10.0
+        assert frc_res["nena"] is None
+        np.testing.assert_allclose(
+            frc_res["frc_curve"], expected["frc_curve"]
+        )
+        side = FRC_VIEWPORT[1][1] - FRC_VIEWPORT[0][1]
+        assert frc_res["images"][0].shape[0] == pytest.approx(
+            side / 5.0, abs=1
+        )
+
+    def test_invalid_bin_size_raises(self, locs, info):
+        with pytest.raises(ValueError, match="either 'lp' or 'bin_size'"):
+            postprocess.frc(
+                locs, info, viewport=FRC_VIEWPORT, lp=10.0, bin_size=5.0
+            )
+        for bin_size in (0.0, -1.0, np.inf):
+            with pytest.raises(ValueError, match="'bin_size' must be"):
+                postprocess.frc(
+                    locs, info, viewport=FRC_VIEWPORT, bin_size=bin_size
+                )
+
+    def test_without_precisions_warns_and_does_not_link(
+        self, locs, info, monkeypatch
+    ):
+        monkeypatch.setattr(
+            postprocess, "link", lambda *a, **k: pytest.fail("linked")
+        )
+        with pytest.warns(UserWarning, match="cannot be linked") as record:
+            frc_res = postprocess.frc(
+                locs.drop(columns=["lpx", "lpy"]),
+                info,
+                viewport=FRC_VIEWPORT,
+                lp=10.0,
+            )
+        assert record[0].filename == __file__
+        assert len(frc_res["frc_curve"])
+
+    def test_invalid_lp_raises(self, locs, info):
+        with pytest.raises(ValueError, match="localization precision"):
+            postprocess.frc(locs, info, viewport=FRC_VIEWPORT, lp=-1.0)
+        with pytest.raises(ValueError, match="localization precision"):
+            postprocess.frc(locs, info, viewport=FRC_VIEWPORT, lp=0.0)
+
     def test_too_large_images_raise(self, locs, info, monkeypatch):
         viewport = ((15 * PX, 15 * PX), (16 * PX, 16 * PX))
         lp = 1.0  # 2 * PX pixels on a side
@@ -1516,10 +1595,17 @@ class TestFrc:
             raise AssertionError("nothing may be rendered")
 
         monkeypatch.setattr(postprocess.render, "render", fail)
-        with pytest.raises(ValueError, match="max_image_size"):
+        monkeypatch.setattr(postprocess, "link", fail)  # checked first
+        with pytest.raises(
+            postprocess.FRCImageTooLargeError, match="max_image_size"
+        ) as error:
             postprocess.frc(
                 locs, info, viewport=viewport, lp=lp, max_image_size=PX
             )
+        assert isinstance(error.value, ValueError)
+        assert error.value.image_size == pytest.approx(2 * PX)
+        assert error.value.max_image_size == PX
+        assert error.value.bin_size == pytest.approx(lp / 2)
 
     def test_max_image_size_none_renders_any_size(self, locs, info):
         viewport = ((15 * PX, 15 * PX), (16 * PX, 16 * PX))
@@ -1527,6 +1613,66 @@ class TestFrc:
             locs, info, viewport=viewport, max_image_size=None
         )
         assert frc_res["resolution"] > 0
+
+    def test_linking_parameters_and_already_linked(self, locs, info):
+        res_custom = postprocess.frc(
+            locs,
+            info,
+            viewport=FRC_VIEWPORT,
+            r_max=50.0,
+            max_dark_time=5,
+        )
+        assert len(res_custom["images"]) == 2
+        assert res_custom["frc_curve"].shape == res_custom["frequencies"].shape
+
+        linked_locs, _ = postprocess.link(
+            locs,
+            info,
+            r_max=50.0,
+            max_dark_time=5,
+            remove_ambiguous_lengths=False,
+        )
+        res_linked = postprocess.frc(
+            linked_locs, info, viewport=FRC_VIEWPORT, lp=15.0
+        )
+        assert len(res_linked["images"]) == 2
+        assert res_linked["frc_curve"].shape == res_linked["frequencies"].shape
+        assert res_linked["resolution"] is None or res_linked["resolution"] > 0
+
+        with pytest.raises(ValueError, match="Unsupported r_max option"):
+            postprocess.frc(locs, info, viewport=FRC_VIEWPORT, r_max="invalid")
+
+        with pytest.raises(
+            ValueError, match="'r_max' must be a finite positive"
+        ):
+            postprocess.frc(locs, info, viewport=FRC_VIEWPORT, r_max=0.0)
+
+    def test_small_explicit_r_max_warns(self, locs, info):
+        median_lp = float(
+            np.nanmean([np.nanmedian(locs["lpx"]), np.nanmedian(locs["lpy"])])
+        )
+        with pytest.warns(UserWarning, match="'r_max'") as record:
+            postprocess.frc(
+                locs,
+                info,
+                viewport=FRC_VIEWPORT,
+                r_max=0.5 * median_lp,
+            )
+        # reported at the call of frc, not inside postprocess
+        assert record[0].filename == __file__
+        with pytest.warns(UserWarning, match="'r_max'") as record:
+            postprocess.frc_rois(
+                locs,
+                info,
+                viewport=((10 * PX, 10 * PX), (20 * PX, 20 * PX)),
+                n_rois=4,
+                roi_size=260,
+                min_locs=10,
+                lp=12.0,
+                r_max=0.5 * median_lp,
+            )
+        assert len(record) == 1  # once, not again per ROI
+        assert record[0].filename == __file__
 
     def test_does_not_modify_locs(self, locs, info):
         ref = locs.copy()
@@ -1551,18 +1697,46 @@ class TestFrcRois:
             viewport=viewport,
             n_rois=4,
             roi_size=260,  # 2 camera pixels
-            min_locs=20,
+            min_locs=10,
             progress=tracker,
         )
         n = len(result["rois"])
         assert 0 < n <= 4
         assert len(result["frc_results"]) == n
         assert result["resolutions"].shape == (n,)
-        assert (result["n_locs"] >= 20).all()
+        assert (result["n_locs"] >= 10).all()
         assert all("images" not in _ for _ in result["frc_results"])
-        assert_phases(tracker, ["Calculating NeNA", "Calculating FRC"])
-        assert tracker.phases[1].maximum == n
+        assert_phases(
+            tracker,
+            [
+                "Calculating NeNA",
+                "Linking localizations",
+                "Calculating FRC",
+            ],
+        )
+        assert tracker.phases[1].maximum == len(locs)
+        assert tracker.phases[2].maximum == n
+        assert result["nena"] == result["lp"]  # NeNA set the bin size
         pd.testing.assert_frame_equal(locs, ref)
+
+    def test_failed_nena_is_not_returned(self, locs, info, monkeypatch):
+        def raise_runtime_error(*args, **kwargs):
+            raise RuntimeError("NeNA fit failed")
+
+        monkeypatch.setattr(postprocess, "nena", raise_runtime_error)
+        result = postprocess.frc_rois(
+            locs,
+            info,
+            viewport=((10 * PX, 10 * PX), (20 * PX, 20 * PX)),
+            n_rois=4,
+            roi_size=260,
+            min_locs=10,
+        )
+        median_lp = float(
+            np.nanmean([np.nanmedian(locs["lpx"]), np.nanmedian(locs["lpy"])])
+        )
+        assert result["lp"] == pytest.approx(median_lp)  # the fallback
+        assert result["nena"] is None
 
     def test_given_lp_skips_nena(self, locs, info, monkeypatch):
         def no_nena(*args, **kwargs):
@@ -1576,12 +1750,111 @@ class TestFrcRois:
             viewport=((10 * PX, 10 * PX), (20 * PX, 20 * PX)),
             n_rois=4,
             roi_size=260,
-            min_locs=20,
+            min_locs=10,
             lp=12.0,
             progress=tracker,
         )
         assert result["lp"] == 12.0
+        assert result["nena"] is None
+        assert_phases(tracker, ["Linking localizations", "Calculating FRC"])
+        assert tracker.phases[0].maximum == len(locs)
+        assert tracker.phases[1].maximum == len(result["rois"])
+
+    def test_too_large_images_raise_before_linking(
+        self, locs, info, monkeypatch
+    ):
+        def fail(*args, **kwargs):
+            raise AssertionError("checked before linking and FRC")
+
+        monkeypatch.setattr(postprocess, "link", fail)
+        monkeypatch.setattr(postprocess, "frc", fail)
+        with pytest.raises(postprocess.FRCImageTooLargeError) as error:
+            postprocess.frc_rois(
+                locs,
+                info,
+                viewport=((10 * PX, 10 * PX), (20 * PX, 20 * PX)),
+                n_rois=4,
+                roi_size=260,
+                min_locs=10,
+                lp=12.0,
+                max_image_size=10,  # 260 / 6 = 43 pixels
+            )
+        assert error.value.image_size == pytest.approx(260 / 6)
+
+    def test_bin_size(self, locs, info, monkeypatch):
+        def fail(*args, **kwargs):
+            raise AssertionError("NeNA is not needed for a given bin size")
+
+        monkeypatch.setattr(postprocess, "nena", fail)
+        result = postprocess.frc_rois(
+            locs,
+            info,
+            viewport=((10 * PX, 10 * PX), (20 * PX, 20 * PX)),
+            n_rois=4,
+            roi_size=260,
+            min_locs=10,
+            bin_size=6.0,
+        )
+        assert result["bin_size"] == 6.0
+        assert result["lp"] == 12.0
+        assert result["nena"] is None
+
+    def test_max_image_size_passed_to_frc(self, locs, info, monkeypatch):
+        frc = postprocess.frc
+        limits = []
+
+        def record(*args, **kwargs):
+            limits.append(kwargs["max_image_size"])
+            return frc(*args, **kwargs)
+
+        monkeypatch.setattr(postprocess, "frc", record)
+        result = postprocess.frc_rois(
+            locs,
+            info,
+            viewport=((10 * PX, 10 * PX), (20 * PX, 20 * PX)),
+            n_rois=4,
+            roi_size=260,
+            min_locs=10,
+            lp=12.0,
+            max_image_size=None,
+        )
+        assert limits == [None] * len(result["rois"])
+
+    def test_already_linked_skips_linking_and_nena(
+        self, locs, info, monkeypatch
+    ):
+        linked_locs, _ = postprocess.link(
+            locs,
+            info,
+            r_max=50.0,
+            max_dark_time=3,
+            remove_ambiguous_lengths=False,
+        )
+
+        def fail_nena(*args, **kwargs):
+            raise AssertionError("nena must not run for already-linked locs")
+
+        def fail_link(*args, **kwargs):
+            raise AssertionError("link must not run for already-linked locs")
+
+        monkeypatch.setattr(postprocess, "nena", fail_nena)
+        monkeypatch.setattr(postprocess, "link", fail_link)
+
+        tracker = RecordingProgress()
+        result = postprocess.frc_rois(
+            linked_locs,
+            info,
+            viewport=((10 * PX, 10 * PX), (20 * PX, 20 * PX)),
+            n_rois=4,
+            roi_size=260,
+            min_locs=10,
+            progress=tracker,
+        )
+        assert result["lp"] > 0
+        assert result["nena"] is None
+        assert len(result["resolutions"]) == len(result["rois"])
         assert_phases(tracker, ["Calculating FRC"])
+        assert tracker.phases[0].maximum == len(result["rois"])
 
 
 class TestPairCorrelation:
@@ -4601,7 +4874,9 @@ class TestDecorrelation:
         assert result["resolutions"][-1] == pytest.approx(
             2 * result["pixel_sizes"][-1], rel=0.3
         )
-        assert result["n_locs"] == len(locs)
+        # linked into binding events first
+        assert result["linked"]
+        assert 0 < result["n_locs"] < len(locs)
         assert not len(result["skipped_pixel_sizes"])
         # smaller pixels than the best were rendered
         assert not result["pixel_size_limited"]
@@ -4665,7 +4940,9 @@ class TestDecorrelation:
             {"frame": np.zeros(len(x), np.uint32), "x": x, "y": y}
         )
         info = [{"Width": 10, "Height": 10, "Pixelsize": 100.0}]
-        result = postprocess.decorrelation(locs, info, pixel_size=16.0)
+        with pytest.warns(UserWarning, match="cannot be linked"):
+            result = postprocess.decorrelation(locs, info, pixel_size=16.0)
+        assert not result["linked"]
         assert result["density"] == pytest.approx(1e6, rel=0.03)
 
     def test_no_resolution_without_structure(self):
@@ -4675,11 +4952,59 @@ class TestDecorrelation:
             {"frame": np.zeros(2000, np.uint32), "x": x, "y": y}
         )
         info = [{"Width": 50, "Height": 50, "Pixelsize": 100.0}]
-        result = postprocess.decorrelation(locs, info, pixel_size=[16.0])
+        with pytest.warns(UserWarning, match="no lpx, lpy"):
+            result = postprocess.decorrelation(locs, info, pixel_size=[16.0])
         assert np.isnan(result["resolution"])
         assert np.isnan(result["pixel_size"])
         fig = postprocess.plot_decorrelation(result)
         assert "n/a" in fig.get_suptitle()
+
+    def test_links_unlinked_localizations(self, monkeypatch):
+        # each molecule is localized in 5 consecutive frames
+        rng = np.random.default_rng(1)
+        n = 400
+        x0, y0 = rng.uniform(200, 4800, (2, n))
+        frames = np.repeat(np.arange(n) * 10, 5) + np.tile(np.arange(5), n)
+        locs = pd.DataFrame(
+            {
+                "frame": frames.astype(np.uint32),
+                "x": np.repeat(x0, 5) + rng.normal(0, 1, 5 * n),
+                "y": np.repeat(y0, 5) + rng.normal(0, 1, 5 * n),
+                "lpx": np.full(5 * n, 3.0, np.float32),
+                "lpy": np.full(5 * n, 3.0, np.float32),
+            }
+        )
+        info = [{"Width": 50, "Height": 50, "Pixelsize": 100.0}]
+        result = postprocess.decorrelation(locs, info, pixel_size=[16.0])
+        assert result["linked"]
+        assert result["n_locs"] == n  # one per binding event
+        fig = postprocess.plot_decorrelation(result)
+        assert f"{n:,} binding events" in fig.get_suptitle()
+
+        # already linked: used as they are
+        linked, _ = postprocess.link(
+            locs, info, r_max=9.0, remove_ambiguous_lengths=False
+        )
+        monkeypatch.setattr(
+            postprocess,
+            "link",
+            lambda *a, **k: pytest.fail("linked localizations relinked"),
+        )
+        result = postprocess.decorrelation(linked, info, pixel_size=[16.0])
+        assert not result["linked"]
+        assert result["n_locs"] == n
+
+    def test_invalid_r_max_raises_before_linking(self, sharp, monkeypatch):
+        locs, info, _ = sharp
+        monkeypatch.setattr(
+            postprocess, "link", lambda *a, **k: pytest.fail("linked")
+        )
+        with pytest.raises(ValueError, match="'r_max' must be"):
+            postprocess.decorrelation(locs, info, r_max=0.0)
+        with pytest.raises(ValueError, match="automatic linking"):
+            postprocess.decorrelation(
+                locs.assign(lpx=np.nan, lpy=np.nan), info
+            )
 
     def test_plot_and_tables(self, sharp):
         _, _, result = sharp

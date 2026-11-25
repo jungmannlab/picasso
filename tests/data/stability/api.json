@@ -269,6 +269,8 @@
   "frc",
   "frc_rois",
   "plot_frc",
+  "FRC_MAX_IMAGE_SIZE",
+  "FRCImageTooLargeError",
   "decorrelation",
   "plot_decorrelation",
   "nn_analysis",
