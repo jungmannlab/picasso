@@ -59,7 +59,7 @@ Picasso 1.0 is the largest update since Picasso was first published. The highlig
 - Faster circular picking of localizations.
 - Undrifting from picked localizations is fast and memory-efficient for many picks.
 - Faster FRC.
-- FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*).
+- FRC in several random ROIs (*Info* dialog, *FRC in several ROIs*). ([#729](https://github.com/jungmannlab/picasso/issues/729)); thanks to @boydcpeters.
 - FRC links localizations into binding events before splitting them into two halves, so that the localizations of one binding event do not correlate the halves and inflate the resolution. Already linked localizations are used as they are. FRC in several ROIs shows the bin size used (was labeled *NeNA*).
 - Resolution by decorrelation analysis (Descloux et al., *Nat. Methods* 2019), see the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-info-decorrelation). As for the FRC, unlinked localizations are linked into binding events first (`picasso.postprocess.decorrelation`'s `r_max` and `max_dark_time`; `picasso decorrelation -d` and `-t`).
 - The pick statistics of the Info dialog include the dye performance of picked docking sites (Steen et al., *Nat. Methods* 2024). See the [documentation](https://picassosr.readthedocs.io/en/latest/render/display-settings.html#render-info-dye-performance).

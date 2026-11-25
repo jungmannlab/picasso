@@ -34,6 +34,7 @@ from PyQt6 import QtCore, QtGui, QtWidgets, sip
 
 # must come after the PyQt6 import so that matplotlib's qt_compat
 # selects the PyQt6 binding (picasso core no longer imports PyQt6)
+from matplotlib.backend_bases import MouseButton
 from matplotlib.backends.backend_qt5agg import FigureCanvas
 from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT
 from matplotlib.figure import Figure
@@ -7646,6 +7647,8 @@ class FRCRoisWindow(QtWidgets.QWidget):
     from the mean and standard deviation. The overview shows where the
     ROIs lie in the image (used: green, excluded: gray, selected: red)
     and the lower plot shows the FRC curve of the selected ROI.
+    Left-clicking an ROI in the overview selects it; right-clicking it
+    ticks or unticks it without changing the selection.
     """
 
     COLUMNS = ["Use", "ROI", "x (µm)", "y (µm)", "Locs", "FRC (nm)"]
@@ -7808,6 +7811,11 @@ class FRCRoisWindow(QtWidgets.QWidget):
 
     def update_plots(self) -> None:
         """Redraw the ROI overview and the selected ROI's FRC curve."""
+        # keep the zoom of the overview, e.g., while ticking ROIs
+        limits = None
+        if self.figure.axes:
+            old_map = self.figure.axes[0]
+            limits = old_map.get_xlim(), old_map.get_ylim()
         self.figure.clear()
         ax_map, ax_frc = self.figure.subplots(2, 1, height_ratios=[3, 2])
         ax_map.imshow(
@@ -7837,8 +7845,11 @@ class FRCRoisWindow(QtWidgets.QWidget):
             )
         ax_map.set_xlabel("x (µm)")
         ax_map.set_ylabel("y (µm)")
-        ax_map.set_title("ROIs (click to select)")
+        ax_map.set_title("ROIs (left-click: select, right-click: use)")
         ax_map.grid(False)
+        if limits is not None:
+            ax_map.set_xlim(limits[0])
+            ax_map.set_ylim(limits[1])
 
         if selected is not None:
             frc_result = self.result["frc_results"][selected]
@@ -7867,7 +7878,8 @@ class FRCRoisWindow(QtWidgets.QWidget):
         self.canvas.draw()
 
     def on_click(self, event) -> None:
-        """Select the ROI under a click in the overview."""
+        """Select (left-click) or tick/untick (right-click) the ROI
+        under a click in the overview."""
         if event.inaxes is None or event.inaxes is not self.figure.axes[0]:
             return
         if self.canvas.toolbar is not None and self.canvas.toolbar.mode:
@@ -7876,8 +7888,27 @@ class FRCRoisWindow(QtWidgets.QWidget):
         x, y = event.xdata * to_nm, event.ydata * to_nm
         for k, ((y0, x0), (y1, x1)) in enumerate(self.result["rois"]):
             if x0 <= x < x1 and y0 <= y < y1:
-                self.table.selectRow(k)
+                if event.button == MouseButton.RIGHT:
+                    self.toggle_used(k)
+                else:
+                    self.table.selectRow(k)
                 return
+
+    def toggle_used(self, row: int) -> None:
+        """Tick or untick an ROI; the selection stays as it is.
+
+        ROIs without a 1/7 crossing cannot be ticked.
+        """
+        item = self.table.item(row, 0)
+        if not item.flags() & QtCore.Qt.ItemFlag.ItemIsUserCheckable:
+            return
+        checked = item.checkState() == QtCore.Qt.CheckState.Checked
+        # on_item_changed updates the summary and the plots
+        item.setCheckState(
+            QtCore.Qt.CheckState.Unchecked
+            if checked
+            else QtCore.Qt.CheckState.Checked
+        )
 
     def export(self) -> None:
         """Save the per-ROI results as .csv."""
