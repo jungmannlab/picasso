@@ -368,9 +368,9 @@ class AveragePool:
     def __init__(
         self, locs: pd.DataFrame, n_workers: int | None = None
     ) -> None:
-        assert (
-            "group" in locs.columns
-        ), "Localizations DataFrame must have a 'group' column."
+        assert "group" in locs.columns, (
+            "Localizations DataFrame must have a 'group' column."
+        )
         self.group_index = build_group_index(locs)
         self.n_groups = self.group_index.shape[0]
         self.n_locs = len(locs)
@@ -565,9 +565,9 @@ def average(
     None is returned instead of the tuple if the averaging was aborted
     via ``abort_callback``.
     """
-    assert (
-        "group" in locs.columns
-    ), "Localizations DataFrame must have a 'group' column."
+    assert "group" in locs.columns, (
+        "Localizations DataFrame must have a 'group' column."
+    )
     own_pool = pool is None
     if own_pool:
         pool = AveragePool(locs)

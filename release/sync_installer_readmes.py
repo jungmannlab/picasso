@@ -129,8 +129,7 @@ def main() -> int:
         missing = target_keys - set(sections)
         if missing:
             raise SystemExit(
-                f"{target}: keys not found in main readme: "
-                f"{sorted(missing)}"
+                f"{target}: keys not found in main readme: {sorted(missing)}"
             )
         not_in_target = set(sections) - target_keys
         if not_in_target:

@@ -57,11 +57,12 @@ def test_previews_follow_the_windows_theme(window, restore_theme):
     assert to_hex(_frame(window).get_edgecolor()) == dark["text_muted"]
 
     theme.apply(restore_theme, theme.Appearance(mode="Light"))
-    assert to_hex(window.figure1.get_facecolor()) == (
-        THEMES["Light"]["figure"]
+    assert (
+        to_hex(window.figure1.get_facecolor()) == (THEMES["Light"]["figure"])
     )
-    assert to_hex(_frame(window).get_edgecolor()) == (
-        THEMES["Light"]["text_muted"]
+    assert (
+        to_hex(_frame(window).get_edgecolor())
+        == (THEMES["Light"]["text_muted"])
     )
 
 

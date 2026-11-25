@@ -2322,20 +2322,19 @@ def merge_locs(
     locs : pd.DataFrame
         Merged localizations.
     """
-    assert isinstance(
-        increment_frames, (bool, list)
-    ), "increment_frames must be a boolean or a list of integers."
-    assert isinstance(
-        increment_groups, (bool, list)
-    ), "increment_groups must be a boolean or a list of integers."
+    assert isinstance(increment_frames, (bool, list)), (
+        "increment_frames must be a boolean or a list of integers."
+    )
+    assert isinstance(increment_groups, (bool, list)), (
+        "increment_groups must be a boolean or a list of integers."
+    )
     if isinstance(increment_frames, list):
         assert len(increment_frames) == len(locs_list), (
             "If increment_frames is a list, its length must be the same"
             " as locs_list."
         )
         assert all(isinstance(i, int) for i in increment_frames), (
-            "If increment_frames is a list, all its elements must be "
-            "integers."
+            "If increment_frames is a list, all its elements must be integers."
         )
     if isinstance(increment_groups, list):
         assert len(increment_groups) == len(locs_list), (
@@ -2343,8 +2342,7 @@ def merge_locs(
             " as locs_list."
         )
         assert all(isinstance(i, int) for i in increment_groups), (
-            "If increment_groups is a list, all its elements must be "
-            "integers."
+            "If increment_groups is a list, all its elements must be integers."
         )
     # convert boolean increments to lists of integers
     if increment_frames is True:
@@ -3107,11 +3105,9 @@ def check_if_in_polygon(
         for j in range(n_polygon):
             j_next = (j + 1) % n_polygon
             if ((Y[j] > y[i]) != (Y[j_next] > y[i])) and (
-                (
-                    x[i]
-                    < X[j]
-                    + (X[j_next] - X[j]) * (y[i] - Y[j]) / (Y[j_next] - Y[j])
-                )
+                x[i]
+                < X[j]
+                + (X[j_next] - X[j]) * (y[i] - Y[j]) / (Y[j_next] - Y[j])
             ):
                 count += 1
         if count % 2 == 1:
@@ -4547,8 +4543,7 @@ def _subclustering_title(
             "adjust distance parameters."
         )
     return (
-        "No molecules found in either population, adjust distance"
-        " parameters."
+        "No molecules found in either population, adjust distance parameters."
     )
 
 
@@ -4750,9 +4745,9 @@ def unfold_localizations_square(
         view (``Width`` and ``Height``) and an entry recording the
         unfolding appended, see ``lib.append_metadata``.
     """
-    assert (
-        "group" in locs.columns
-    ), "Localizations must contain a 'group' column."
+    assert "group" in locs.columns, (
+        "Localizations must contain a 'group' column."
+    )
     # ensure groups are consecutive integers starting from 0
     locs = locs.copy()  # pandas SettingWithCopyWarning
     updated_info = deepcopy(info)
@@ -4812,9 +4807,9 @@ def sync_groups(locs: list[pd.DataFrame]) -> list[pd.DataFrame]:
     synced_locs : list of pd.DataFrame
         List of localization lists with synced group indices.
     """
-    assert all(
-        "group" in loc.columns for loc in locs
-    ), "All localization lists must contain a 'group' column."
+    assert all("group" in loc.columns for loc in locs), (
+        "All localization lists must contain a 'group' column."
+    )
     unique_groups = [np.unique(loc["group"]) for loc in locs]
     common_groups = set(unique_groups[0]).intersection(*unique_groups)
     for i in range(len(locs)):

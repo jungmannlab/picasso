@@ -1536,9 +1536,7 @@ class TestFrc:
         def fail(*args, **kwargs):
             raise AssertionError("NeNA is not needed for a given bin size")
 
-        expected = postprocess.frc(
-            locs, info, viewport=FRC_VIEWPORT, lp=10.0
-        )
+        expected = postprocess.frc(locs, info, viewport=FRC_VIEWPORT, lp=10.0)
         monkeypatch.setattr(postprocess, "nena", fail)
         frc_res = postprocess.frc(
             locs, info, viewport=FRC_VIEWPORT, bin_size=5.0
@@ -1546,9 +1544,7 @@ class TestFrc:
         assert frc_res["bin_size"] == 5.0
         assert frc_res["lp"] == 10.0
         assert frc_res["nena"] is None
-        np.testing.assert_allclose(
-            frc_res["frc_curve"], expected["frc_curve"]
-        )
+        np.testing.assert_allclose(frc_res["frc_curve"], expected["frc_curve"])
         side = FRC_VIEWPORT[1][1] - FRC_VIEWPORT[0][1]
         assert frc_res["images"][0].shape[0] == pytest.approx(
             side / 5.0, abs=1
@@ -4349,8 +4345,9 @@ class TestCrossPairStatistics:
         h = postprocess.ripley_h(a, self.INFO, partner_locs=b, n_simulations=2)
         ax = postprocess.plot_ripley_h(h).axes[0]
         assert ax.get_title() == "Ripley's cross H function"
-        assert "Independence envelope (2 random shifts)" in (
-            ax.get_legend_handles_labels()[1]
+        assert (
+            "Independence envelope (2 random shifts)"
+            in (ax.get_legend_handles_labels()[1])
         )
 
     def test_invalid_cross_null(self):

@@ -1216,9 +1216,9 @@ def _run_g5m_group_2D(
         "local",
         "abs",
     ], "loc_prec_handle must be 'local'  or 'abs'."
-    assert (
-        len(sigma_bounds) == 2
-    ), "sigma_bounds must be a tuple of two values."
+    assert len(sigma_bounds) == 2, (
+        "sigma_bounds must be a tuple of two values."
+    )
 
     # check that the number of localizations is within the limits
     n_locs = len(locs_group)
@@ -2138,9 +2138,9 @@ def _run_g5m_group_3D(
         "local",
         "abs",
     ], "loc_prec_handle must be 'local' or 'abs'."
-    assert (
-        len(sigma_bounds) == 2
-    ), "sigma_bounds must be a tuple of two values."
+    assert len(sigma_bounds) == 2, (
+        "sigma_bounds must be a tuple of two values."
+    )
     # make sure lpz is available. For astigmatism (assume gauss
     # least-squares used for localization) it can be derived from the
     # calibration; spline fitting already provides lpz directly.
@@ -2255,9 +2255,9 @@ class G5M_3D(G5M):
         ), "covariance_type must be 'diagonal' or 'rotated' for 3D data."
         # the rotated model couples the two principal axes via the
         # calibration, so it is only defined in astigmatism mode
-        assert not (
-            covariance_type == "rotated" and mode == "spline"
-        ), "covariance_type='rotated' requires mode='astigmatism'."
+        assert not (covariance_type == "rotated" and mode == "spline"), (
+            "covariance_type='rotated' requires mode='astigmatism'."
+        )
         if mode == "astigmatism":
             for key in [
                 "X Coefficients",
@@ -3510,12 +3510,12 @@ def _validate_g5m_args(
         "local",
         "abs",
     ], "loc_prec_handle must be 'local' or 'abs'."
-    assert (
-        len(sigma_bounds) == 2
-    ), "sigma_bounds must be a tuple of two values."
-    assert (
-        sigma_bounds[0] <= sigma_bounds[1]
-    ), "sigma_bounds[0] must not be larger than sigma_bounds[1]."
+    assert len(sigma_bounds) == 2, (
+        "sigma_bounds must be a tuple of two values."
+    )
+    assert sigma_bounds[0] <= sigma_bounds[1], (
+        "sigma_bounds[0] must not be larger than sigma_bounds[1]."
+    )
     assert group_column in [
         "group",
         "group_input",

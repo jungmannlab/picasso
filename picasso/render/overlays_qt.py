@@ -1308,7 +1308,7 @@ def draw_legend(
         Image with the drawn legend.
     """
     assert len(channel_names) == len(channel_colors), (
-        "Length of channel_names must match number of channels in " "dataset."
+        "Length of channel_names must match number of channels in dataset."
     )
     n_channels = len(channel_names)
     ratio = text_fontsize / LEGEND_FONT_SIZE
@@ -1440,9 +1440,9 @@ def _colorbar_layout(
         and ``height`` of the bar in display pixels.
     """
     colors_arr = np.asarray(colors, dtype=np.float32)
-    assert (
-        colors_arr.ndim == 2 and colors_arr.shape[1] == 3
-    ), "colors must hold one (r, g, b) tuple (0 to 1) per color."
+    assert colors_arr.ndim == 2 and colors_arr.shape[1] == 3, (
+        "colors must hold one (r, g, b) tuple (0 to 1) per color."
+    )
     if color is None:
         color = QtGui.QColor("white")
     if background is None:

@@ -17,7 +17,7 @@
 
 <!-- See CONTRIBUTING.rst for details. -->
 
-- [ ] The code is formatted with `black --line-length=79` (e.g. via the `pre-commit` hook).
+- [ ] The code is formatted with `ruff format` (e.g. via the `pre-commit` hook).
 - [ ] Tests were added or updated for the changed behaviour.
 - [ ] `pytest` passes locally.
 - [ ] The documentation was updated if the PR adds or changes functionality.

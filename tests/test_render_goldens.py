@@ -220,18 +220,18 @@ def _assert_gpu_golden(label, scene, arr, golden):
     )
     mismatch = (~close).mean()
     if rotated:
-        assert (
-            mismatch < GPU_ROTATED_MISMATCH
-        ), f"{label}: {mismatch:.2e} of the pixels outside the GPU tolerance"
+        assert mismatch < GPU_ROTATED_MISMATCH, (
+            f"{label}: {mismatch:.2e} of the pixels outside the GPU tolerance"
+        )
     else:
         assert close.all(), (
             f"{label}: {(~close).sum()} pixels outside the GPU tolerance "
             f"(max deviation {np.abs(arr - golden).max():.3g} of a maximum "
             f"{golden.max():.3g})"
         )
-    assert (
-        abs(arr.sum() - golden.sum()) < GPU_SUM_RTOL * golden.sum()
-    ), f"{label}: total intensity {arr.sum():.6g} vs golden {golden.sum():.6g}"
+    assert abs(arr.sum() - golden.sum()) < GPU_SUM_RTOL * golden.sum(), (
+        f"{label}: total intensity {arr.sum():.6g} vs golden {golden.sum():.6g}"
+    )
 
 
 def _cpu_count(scene, inputs, info):
@@ -257,9 +257,9 @@ def test_golden(scene, render_backend, inputs, info, golden_data):
         arr = out[key]
         label = f"{scene['name']}::{key}"
         golden = golden_data[label]
-        assert (
-            arr.shape == golden.shape
-        ), f"{label} shape {arr.shape} != golden {golden.shape}; {REGEN_HINT}"
+        assert arr.shape == golden.shape, (
+            f"{label} shape {arr.shape} != golden {golden.shape}; {REGEN_HINT}"
+        )
         if on_gpu:
             _assert_gpu_golden(label, scene, arr, golden)
         else:

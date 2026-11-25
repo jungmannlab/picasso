@@ -446,9 +446,9 @@ class TestRotatedAngleConvention:
         got = float(mols["angle"].iloc[0])
         # axial data: compare modulo 180 deg
         diff = (got - angle_deg + 90.0) % 180.0 - 90.0
-        assert (
-            abs(diff) < 8.0
-        ), f"expected the major axis near {angle_deg} deg, got {got} deg"
+        assert abs(diff) < 8.0, (
+            f"expected the major axis near {angle_deg} deg, got {got} deg"
+        )
 
     def test_recovers_elongation(self, info):
         locs = _rotated_cluster(30.0)

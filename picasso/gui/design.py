@@ -156,7 +156,6 @@ allSeqShort = "None"
 allSeqLong = " "
 
 for i in range(1, len(PaintHandles)):
-
     allSeqShort = allSeqShort + ", " + PaintHandles[i][0]
     allSeqLong = allSeqLong + ", " + PaintHandles[i][1]
 

@@ -216,7 +216,6 @@ def compare():  # noqa: C901
         )
 
         if len(selected) > 0:
-
             file_dict = {}
             hdf_dict = {}
             for file in selected:

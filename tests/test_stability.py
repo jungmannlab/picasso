@@ -240,10 +240,9 @@ class TestDeprecationCycle:
             for entry in deprecation.REGISTRY
             if deprecation.removal_due(entry, __version__)
         ]
-        assert (
-            not overdue
-        ), f"Picasso {__version__} must no longer contain:\n  " + "\n  ".join(
-            overdue
+        assert not overdue, (
+            f"Picasso {__version__} must no longer contain:\n  "
+            + "\n  ".join(overdue)
         )
 
     def test_every_deprecation_follows_the_cycle(self):

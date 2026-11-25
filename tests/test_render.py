@@ -2781,9 +2781,9 @@ class TestMasking:
         mask, _ = masking.mask_image(image, method=method)
         assert mask.shape == image.shape
         assert mask.dtype == bool
-        assert (
-            mask.sum() > 0
-        ), f"Method {method!r} produced an empty mask on the test image"
+        assert mask.sum() > 0, (
+            f"Method {method!r} produced an empty mask on the test image"
+        )
 
     def test_mask_locs_partitions_input(self, locs, info, image):
         mask, _ = masking.mask_image(image, method="otsu")

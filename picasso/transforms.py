@@ -525,8 +525,7 @@ def _matrix_3x3(matrix, name: str) -> np.ndarray:
     m = np.asarray(matrix, dtype=np.float64)
     if m.shape != (3, 3):
         raise ValueError(
-            f"{name} must be a (3, 3) homogeneous matrix, got shape "
-            f"{m.shape}."
+            f"{name} must be a (3, 3) homogeneous matrix, got shape {m.shape}."
         )
     # C-contiguous unconditionally: `apply` multiplies by a slice of this
     # matrix, and a transposed (F-contiguous) buffer would take a different

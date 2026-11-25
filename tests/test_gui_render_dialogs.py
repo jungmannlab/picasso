@@ -461,8 +461,9 @@ def test_delete_colormap_asks_first(confirm, cmap_dialog, window, monkeypatch):
     monkeypatch.setattr(
         QtWidgets.QMessageBox,
         "question",
-        lambda *a, **k: asked.append(a[2])
-        or (button.Yes if confirm else button.No),
+        lambda *a, **k: (
+            asked.append(a[2]) or (button.Yes if confirm else button.No)
+        ),
     )
     cmap_dialog.delete_btn.click()
     assert asked == ["Delete custom colormap 'Fire'?"]
@@ -1617,8 +1618,9 @@ def test_save_many_picks_separately_asks_first(
     monkeypatch.setattr(
         QtWidgets.QMessageBox,
         "question",
-        lambda *a, **k: asked.append(a[2])
-        or (button.Yes if proceed else button.No),
+        lambda *a, **k: (
+            asked.append(a[2]) or (button.Yes if proceed else button.No)
+        ),
     )
     answers.save_path(tmp_path / "pick.hdf5")
     window.save_picked_locs_separately()
@@ -1843,8 +1845,9 @@ def test_cbc_of_all_pairs_asks_before_overwriting(
     monkeypatch.setattr(
         QtWidgets.QMessageBox,
         "question",
-        lambda *a, **k: asked.append(a[2])
-        or (button.Yes if overwrite else button.No),
+        lambda *a, **k: (
+            asked.append(a[2]) or (button.Yes if overwrite else button.No)
+        ),
     )
     window2.view.cbc()
     _wait_for_tasks(qt_offscreen)

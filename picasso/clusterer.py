@@ -560,8 +560,7 @@ def cluster(
     n_raw = len(locs)
     if "z" in locs.columns and radius_z is None:  # 3D
         raise ValueError(
-            "The clustering radius in z must be specified for 3D"
-            " clustering."
+            "The clustering radius in z must be specified for 3D clustering."
         )
     with lib.tracked_progress(progress, "Clustering", unit="loc") as progress:
         if "z" in locs.columns:  # 3D
@@ -1343,9 +1342,9 @@ def cluster_areas(
     AssertionError
         If ``locs`` has no ``group`` column.
     """
-    assert (
-        "group" in locs.columns
-    ), "Localizations must contain 'group' column."
+    assert "group" in locs.columns, (
+        "Localizations must contain 'group' column."
+    )
 
     groups = np.unique(locs["group"])
     area_key = "Area (LP^2)" if "z" not in locs.columns else "Volume (LP^3)"
@@ -1434,11 +1433,11 @@ def test_subclustering(
     Gaussian Mixture Modeling. Nat Commun 17, 2315 (2026).
     https://doi.org/10.1038/s41467-026-70198-5
     """
-    assert (
-        "n_events" in mols.columns
-    ), "The input molecules must have n_events attribute."
+    assert "n_events" in mols.columns, (
+        "The input molecules must have n_events attribute."
+    )
     assert sparse_dist > clustering_dist, (
-        "The sparse distance must be larger than the clustering " "distance."
+        "The sparse distance must be larger than the clustering distance."
     )
 
     # get 1st nearest neighbor distances

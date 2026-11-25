@@ -918,9 +918,9 @@ class TestIdentifyByFrameNumber:
             ]
             single_set = set(zip(single["y"], single["x"]))
             full_set = set(zip(full_subset["y"], full_subset["x"]))
-            assert (
-                single_set == full_set
-            ), f"frame={frame}: per-frame {single_set} != full {full_set}"
+            assert single_set == full_set, (
+                f"frame={frame}: per-frame {single_set} != full {full_set}"
+            )
 
     def test_frame_outside_bounds_returns_empty(self, movie):
         out = localize.identify_by_frame_number(
@@ -2432,7 +2432,7 @@ class TestMovieLoadWorker:
 
         monkeypatch.setattr(io, "load_movie", fake_load_movie)
         worker = localize_gui.MovieLoadWorker(
-            ["m.czi"], prompt_for_path=lambda p: (lambda chans: "GFP")
+            ["m.czi"], prompt_for_path=lambda p: lambda chans: "GFP"
         )
 
         seen = {}
@@ -8630,8 +8630,9 @@ class TestGaussianFilterGui:
                 if key != "gaussian_filter_sigma"
             }
             window._apply_params(legacy)
-            assert dialog.gaussian_filter_spinbox.value() == (
-                localize_gui.DEFAULT_PARAMETERS["Gaussian Filter Sigma"]
+            assert (
+                dialog.gaussian_filter_spinbox.value()
+                == (localize_gui.DEFAULT_PARAMETERS["Gaussian Filter Sigma"])
             )
         finally:
             dialog.close()
@@ -9829,7 +9830,7 @@ class TestCalibrateAffineDialogGUI:
             calibration_path="calib.yaml",
             box=7,
             identification_method=LATERAL_NG,
-            prompt_for_path=lambda path: (lambda *a, **k: None),
+            prompt_for_path=lambda path: lambda *a, **k: None,
             pixelsize_prompt=lambda: None,
             transform_type="chromatic",
             model="polynomial3",

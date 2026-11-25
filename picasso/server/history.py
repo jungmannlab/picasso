@@ -67,7 +67,6 @@ def parse_input(input_: str):
     to_exclude = []
 
     for idx, _ in enumerate(input_):
-
         if _ in token:
             if mode == "add":
                 to_add.append(input_[last_idx:idx])
@@ -276,7 +275,6 @@ def history():
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=RuntimeWarning)
             with st.spinner("Creating plots.."):
-
                 if plotmode == "Table":
                     table = df
 
@@ -300,7 +298,6 @@ def history():
                         icon=":material/download:",
                     )
                 else:
-
                     for field in fields:
                         median_ = df[field].median()
                         unit = (

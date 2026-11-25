@@ -384,10 +384,10 @@ class ScaleBarStyleWidget(QtWidgets.QWidget):
         reset_button = QtWidgets.QPushButton("Reset")
         reset_button.setToolTip("Restore the default look of the scale bar.")
         reset_button.clicked.connect(
-            lambda: lib.confirm_restore_defaults(
-                self, "the look of the scale bar"
+            lambda: (
+                lib.confirm_restore_defaults(self, "the look of the scale bar")
+                and self.reset()
             )
-            and self.reset()
         )
         self.grid.addWidget(
             reset_button, row, 3, alignment=QtCore.Qt.AlignmentFlag.AlignRight

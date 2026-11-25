@@ -7440,8 +7440,7 @@ class ParametersDialog(lib.Dialog):
         self.sensitivity.setToolTip(
             "Replaced by the per-pixel gain map; showing 1 / its median."
             if has_gain
-            else "Camera sensitivity in counts per photon (conversion "
-            "factor)."
+            else "Camera sensitivity in counts per photon (conversion factor)."
         )
         self.gain.setEnabled(not loaded)
         self.gain.setToolTip(
@@ -9294,53 +9293,53 @@ class Window(QtWidgets.QMainWindow):
     def closeEvent(self, event: QtGui.QCloseEvent) -> None:
         """Close the application, save user settings."""
         settings = io.load_user_settings()
-        settings["Localize"][
-            LifetimeDialog.SETTINGS_KEY
-        ] = self.lifetime_dialog.settings()
+        settings["Localize"][LifetimeDialog.SETTINGS_KEY] = (
+            self.lifetime_dialog.settings()
+        )
         if self.movie_path != []:
             settings["Localize"]["PWD"] = os.path.dirname(self.movie_path)
-            settings["Localize"][
-                "box_size"
-            ] = self.parameters_dialog.box_spinbox.value()
-            settings["Localize"][
-                "gradient"
-            ] = self.parameters_dialog.mng_slider.value()
-        settings["Localize"][
-            "temporal_median"
-        ] = self.parameters_dialog.temporal_median_spinbox.value()
-        settings["Localize"][
-            "temporal_median_on"
-        ] = self.parameters_dialog.temporal_median_checkbox.isChecked()
-        settings["Localize"][
-            "gaussian_filter_sigma"
-        ] = self.parameters_dialog.gaussian_filter_spinbox.value()
-        settings["Localize"][
-            "edge_spots"
-        ] = self.parameters_dialog.edge_spots_checkbox.isChecked()
-        settings["Localize"][
-            "psf_filter_on"
-        ] = self.parameters_dialog.psf_filter_checkbox.isChecked()
-        settings["Localize"][
-            "identification_method"
-        ] = self.parameters_dialog.identification_method()
-        settings["Localize"][
-            "wavelet_threshold"
-        ] = self.parameters_dialog.wavelet_threshold_spinbox.value()
-        settings["Localize"][
-            "wavelet_noise"
-        ] = self.parameters_dialog.wavelet_noise()
-        settings["Localize"][
-            "wavelet_min_area"
-        ] = self.parameters_dialog.wavelet_min_area_spinbox.value()
-        settings["Localize"][
-            "fit_model"
-        ] = self.parameters_dialog.fit_model.currentText()
-        settings["Localize"][
-            "fit_optimizer"
-        ] = self.parameters_dialog.fit_optimizer.currentText()
-        settings["Localize"][
-            "fit_mode"
-        ] = self.parameters_dialog.fit_mode_combo.currentText()
+            settings["Localize"]["box_size"] = (
+                self.parameters_dialog.box_spinbox.value()
+            )
+            settings["Localize"]["gradient"] = (
+                self.parameters_dialog.mng_slider.value()
+            )
+        settings["Localize"]["temporal_median"] = (
+            self.parameters_dialog.temporal_median_spinbox.value()
+        )
+        settings["Localize"]["temporal_median_on"] = (
+            self.parameters_dialog.temporal_median_checkbox.isChecked()
+        )
+        settings["Localize"]["gaussian_filter_sigma"] = (
+            self.parameters_dialog.gaussian_filter_spinbox.value()
+        )
+        settings["Localize"]["edge_spots"] = (
+            self.parameters_dialog.edge_spots_checkbox.isChecked()
+        )
+        settings["Localize"]["psf_filter_on"] = (
+            self.parameters_dialog.psf_filter_checkbox.isChecked()
+        )
+        settings["Localize"]["identification_method"] = (
+            self.parameters_dialog.identification_method()
+        )
+        settings["Localize"]["wavelet_threshold"] = (
+            self.parameters_dialog.wavelet_threshold_spinbox.value()
+        )
+        settings["Localize"]["wavelet_noise"] = (
+            self.parameters_dialog.wavelet_noise()
+        )
+        settings["Localize"]["wavelet_min_area"] = (
+            self.parameters_dialog.wavelet_min_area_spinbox.value()
+        )
+        settings["Localize"]["fit_model"] = (
+            self.parameters_dialog.fit_model.currentText()
+        )
+        settings["Localize"]["fit_optimizer"] = (
+            self.parameters_dialog.fit_optimizer.currentText()
+        )
+        settings["Localize"]["fit_mode"] = (
+            self.parameters_dialog.fit_mode_combo.currentText()
+        )
         dialog = self.parameters_dialog
         settings["Localize"]["multi_emitter"] = {
             "psf_model": dialog.multi_emitter_psf_model(),
@@ -9936,7 +9935,7 @@ class Window(QtWidgets.QMainWindow):
         """Build the informational message shown after a calibration run."""
         lines = [
             f"Frames used: {calibration['Frames']}",
-            "Offset: median " f"{calibration['Offset median (ADU)']:.2f} ADU",
+            f"Offset: median {calibration['Offset median (ADU)']:.2f} ADU",
             "Readout variance: median "
             f"{calibration['Variance median (ADU^2)']:.2f}, max "
             f"{calibration['Variance max (ADU^2)']:.1f} ADU^2",

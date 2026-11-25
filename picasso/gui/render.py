@@ -381,7 +381,7 @@ def check_pick(f: Callable) -> Callable:
             QtWidgets.QMessageBox.information(
                 args[0],
                 "Pick Error",
-                ("No localizations picked." " Please pick first."),
+                ("No localizations picked. Please pick first."),
             )
         else:
             return f(args[0])
@@ -996,8 +996,7 @@ class PickCandidatesWindow(lib.GenericPlotWindow):
                 )
             style.title(
                 self.figure,
-                f"{len(candidates):,} candidate picks of "
-                f"{self.diameter:g} nm",
+                f"{len(candidates):,} candidate picks of {self.diameter:g} nm",
             )
             self._draw_classes(axes)
         self.selector = RectangleSelector(
@@ -2618,7 +2617,7 @@ class DatasetDialog(lib.Dialog):
                     self.resolve_color_identifier(color)
                 except ValueError as e:
                     raise ValueError(
-                        f"'{color}' at position {i+1} is invalid."
+                        f"'{color}' at position {i + 1} is invalid."
                     ) from e
 
             # add the names to the 'Color' column (self.colorselection)
@@ -5397,12 +5396,12 @@ class TestClustererDialog(lib.Dialog):
             params["frame_analysis"] = self.test_smlm_params.fa.isChecked()
         elif clusterer_name == "G5M":
             params["DBSCAN"] = {}
-            params["DBSCAN"][
-                "radius"
-            ] = self.test_g5m_params.dbscan_radius.value()
-            params["DBSCAN"][
-                "min_samples"
-            ] = self.test_g5m_params.dbscan_min_samples.value()
+            params["DBSCAN"]["radius"] = (
+                self.test_g5m_params.dbscan_radius.value()
+            )
+            params["DBSCAN"]["min_samples"] = (
+                self.test_g5m_params.dbscan_min_samples.value()
+            )
             params["G5M"] = {}
             params["G5M"]["min_locs"] = self.test_g5m_params.min_locs.value()
             handle = self.test_g5m_params.loc_prec_handling.currentText()
@@ -5414,9 +5413,9 @@ class TestClustererDialog(lib.Dialog):
                 self.test_g5m_params.min_sigma.value(),
                 self.test_g5m_params.max_sigma.value(),
             )
-            params["G5M"][
-                "postprocess"
-            ] = self.test_g5m_params.postprocess_check.isChecked()
+            params["G5M"]["postprocess"] = (
+                self.test_g5m_params.postprocess_check.isChecked()
+            )
             if self.test_g5m_params.spline_mode:  # spline
                 params["G5M"]["mode"] = "spline"
                 params["G5M"]["calibration"] = None
@@ -6558,8 +6557,7 @@ class InfoDialog(lib.Dialog):
         # end, the popup list the full names
         self.precision_channel = lib_qt.TailElidedComboBox(max_chars=20)
         self.precision_channel.setToolTip(
-            "Channel whose precision and resolution are shown and"
-            " calculated."
+            "Channel whose precision and resolution are shown and calculated."
         )
         self.precision_channel.currentIndexChanged.connect(
             self.update_fit_precision
@@ -12538,7 +12536,7 @@ class SlicerDialog(lib.Dialog):
             # save each channel one by one
             for i in range(self.sl.maximum() + 1):
                 self.sl.setValue(i)
-                out_path = f"{base}_Z{i:03d}_CH{j+1:03d}.tif"
+                out_path = f"{base}_Z{i:03d}_CH{j + 1:03d}.tif"
                 if self.full_check.isChecked():  # full FOV
                     viewport = self.window.view.full_fov_viewport()
                     qimage = self.window.view.render_scene(
@@ -15133,7 +15131,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
             return True
         else:
             message = (
-                f"Channel #{channel+1} ("
+                f"Channel #{channel + 1} ("
                 f"{self.window.dataset_dialog.checks[channel].text()})"
                 f" does not contain the '{group_column}' column. Please run"
                 " DBSCAN (or similar) to group the localizations first."
@@ -15153,7 +15151,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         if any(n_locs > max_locs):
             qm = QtWidgets.QMessageBox()
             message = (
-                f"Channel #{channel+1} ({channel_name})"
+                f"Channel #{channel + 1} ({channel_name})"
                 " contains clusters which can be fiducial markers."
                 " These will likely extend the computation"
                 " time and possibly crash the process.\n\n"
@@ -16481,9 +16479,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
                 "Individual loc. prec., iso": "gaussian_iso",
                 "Adaptive hist. (quad-tree)": "quadtree",
                 "Jittered triangulation": "triangulation",
-            }[
-                blur_method
-            ]  # convert from display name to render name
+            }[blur_method]  # convert from display name to render name
 
         # the display pixel size at which one rendered pixel is one
         # screen pixel
@@ -17859,7 +17855,7 @@ class View(QtWidgets.QLabel, idle.SpillableChannels):
         nn = postprocess.nn_analysis(X1, X2, nn_count)
         new_locs = self.locs[channel1].copy()
         for i in range(nn_count):
-            new_locs[f"nnd_{i+1}"] = nn[:, i]
+            new_locs[f"nnd_{i + 1}"] = nn[:, i]
 
         # save new locs
         new_info = {
@@ -22278,9 +22274,9 @@ class Window(QtWidgets.QMainWindow):
             except Exception:  # otherwise, save magma
                 current_colormap = "magma"
         settings["Render"]["Colormap"] = current_colormap
-        settings["Render"][
-            "Colormap Property"
-        ] = self.display_settings_dlg.colormap_prop.currentText()
+        settings["Render"]["Colormap Property"] = (
+            self.display_settings_dlg.colormap_prop.currentText()
+        )
         if self.view.locs_paths != []:
             settings["Render"]["PWD"] = os.path.dirname(
                 self.view.locs_paths[0]
@@ -22289,15 +22285,15 @@ class Window(QtWidgets.QMainWindow):
             name: [list(stop) for stop in stops]
             for name, stops in self.custom_colormaps_stops.items()
         }
-        settings["Render"][
-            "ToolStyles"
-        ] = self.tools_settings_dialog.overlay_style_settings()
-        settings["Render"][
-            "Grid"
-        ] = self.display_settings_dlg.grid_box.settings()
-        settings["Render"][
-            "Grid3D"
-        ] = self.window_rot.display_settings_dlg.grid_box.settings()
+        settings["Render"]["ToolStyles"] = (
+            self.tools_settings_dialog.overlay_style_settings()
+        )
+        settings["Render"]["Grid"] = (
+            self.display_settings_dlg.grid_box.settings()
+        )
+        settings["Render"]["Grid3D"] = (
+            self.window_rot.display_settings_dlg.grid_box.settings()
+        )
         settings["Render"]["ScaleBar"] = (
             self.display_settings_dlg.scalebar_groupbox.settings(
                 include_length=False
@@ -22308,9 +22304,9 @@ class Window(QtWidgets.QMainWindow):
                 include_length=False
             )
         )
-        settings["Render"][
-            "Tracks"
-        ] = self.display_settings_dlg.tracks_box.settings()
+        settings["Render"]["Tracks"] = (
+            self.display_settings_dlg.tracks_box.settings()
+        )
         io.save_user_settings(settings)
         QtWidgets.QApplication.instance().closeAllWindows()
 

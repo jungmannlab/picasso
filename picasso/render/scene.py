@@ -627,9 +627,9 @@ def _channel_limits(
     else:
         windows = np.asarray(channel_contrast, dtype=np.float64)
         n_pairs = (n_channels, 2)
-        assert (
-            windows.shape == n_pairs
-        ), "channel_contrast must have one (low, high) pair per channel."
+        assert windows.shape == n_pairs, (
+            "channel_contrast must have one (low, high) pair per channel."
+        )
         assert np.all(windows[:, 0] >= 0) and np.all(
             windows[:, 0] < windows[:, 1]
         ), "Each channel_contrast pair must satisfy 0 <= low < high."
@@ -1067,9 +1067,9 @@ def split_locs_by_property(
         Each element corresponds to a group of localizations with
         similar property values.
     """
-    assert (
-        property_name in locs.columns
-    ), f"Property '{property_name}' not found in localizations."
+    assert property_name in locs.columns, (
+        f"Property '{property_name}' not found in localizations."
+    )
     values = locs[property_name]
     if min_value is None:
         min_value = values.min()
@@ -1117,9 +1117,9 @@ def split_locs_by_group(
     if group_color is not None:
         # a list would compare to a single bool below
         group_color = np.asarray(group_color)
-        assert len(group_color) == len(
-            locs
-        ), "Length of group_color must match number of localizations."
+        assert len(group_color) == len(locs), (
+            "Length of group_color must match number of localizations."
+        )
         locs_groups = [locs[group_color == _] for _ in range(n_colors)]
     elif "group" in locs.columns:
         groups = locs["group"].unique()

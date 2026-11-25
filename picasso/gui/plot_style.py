@@ -1045,10 +1045,12 @@ class PlotStyleDialog(lib.Dialog):
         )
         reset.setToolTip("Restores all settings, also hidden ones.")
         reset.clicked.connect(
-            lambda: lib.confirm_restore_defaults(
-                self, "all plot settings, also hidden ones,"
+            lambda: (
+                lib.confirm_restore_defaults(
+                    self, "all plot settings, also hidden ones,"
+                )
+                and self.set_style(PlotStyle())
             )
-            and self.set_style(PlotStyle())
         )
         close = buttons.addButton(
             QtWidgets.QDialogButtonBox.StandardButton.Close

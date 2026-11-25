@@ -63,14 +63,16 @@ jobs:
           # fail here rather than skip its tests if it does not import
           python -c "import vectorfit_py; print('VectorFit', vectorfit_py.__version__)"
         fi
-    - name: Lint with flake8
+    - name: Lint and check formatting with Ruff
       if: runner.os == 'Linux'
       run: |
-        pip install flake8
+        # same version as in .pre-commit-config.yaml; the settings are in
+        # pyproject.toml ([tool.ruff])
+        pip install ruff==0.17.6
         # stop the build if there are Python syntax errors or undefined names
-        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics --exclude=tests,picasso/ext,dist,release
-        # exit-zero treats all errors as warnings. Line length and E203 match black configuration
-        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=79 --extend-ignore=E203 --statistics --exclude=tests,picasso/ext,dist,release
+        ruff check --output-format=github .
+        # stop the build if the code is not formatted (pre-commit hook)
+        ruff format --check .
     - name: Test with pytest
       env:
         # one job measures which code the tests run (pyproject.toml,

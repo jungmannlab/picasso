@@ -156,8 +156,9 @@ def test_every_color_group_is_set():
     """Nothing of the platform's palette may show through."""
     palette = theme.build_palette(Appearance(), dark=True)
     for group in (Group.Active, Group.Inactive, Group.Disabled):
-        assert palette.color(group, Role.Window).name() == (
-            NEUTRALS["Dark"]["window"]
+        assert (
+            palette.color(group, Role.Window).name()
+            == (NEUTRALS["Dark"]["window"])
         )
     assert palette.color(Role.Highlight).name().upper() == ACCENTS["Blue"]
 
@@ -332,8 +333,8 @@ def test_apply_sets_style_palette_font_and_stylesheet(restore_theme):
     base_size = app.font().pointSizeF()
     appearance = Appearance(mode="Dark", font_scale=130, density="Compact")
     theme.apply(app, appearance)
-    assert app.palette().color(Role.Window).name() == (
-        NEUTRALS["Dark"]["window"]
+    assert (
+        app.palette().color(Role.Window).name() == (NEUTRALS["Dark"]["window"])
     )
     assert app.font().pointSizeF() == pytest.approx(round(base_size * 1.3, 1))
     assert app.styleSheet() == theme.stylesheet(appearance, dark=True)

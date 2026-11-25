@@ -3797,9 +3797,9 @@ class ND2Movie(AbstractPicassoMovie):
         sensitivity_category2 = "Sensitivity/DynamicRange"
         info["Micro-Manager Metadata"] = {
             camera_name + "-" + sensitivity_category: readout_rate,
-            camera_name
-            + "-"
-            + sensitivity_category2: (readout_mode + " " + conversion_gain),
+            camera_name + "-" + sensitivity_category2: (
+                readout_mode + " " + conversion_gain
+            ),
             "Filter": filter,
         }
         info["Picasso Metadata"] = {
@@ -4935,8 +4935,9 @@ class PTUMovie(_MultiDimMovie):
             ``(Y, X)`` sums of their delays in ns (float64).
         """
         gate_lo, gate_hi = self._microtime_range
-        lo, hi = max(gate_lo, int(dtime_range[0])), min(
-            gate_hi, int(dtime_range[1])
+        lo, hi = (
+            max(gate_lo, int(dtime_range[0])),
+            min(gate_hi, int(dtime_range[1])),
         )
         if lo >= hi:
             raise ValueError(

@@ -67,7 +67,7 @@ Here's how to set up ``picasso`` for local development. If you are new to git an
 
 3. Follow the instructions in the *Developer installation* tab of the `installation guide <https://picassosr.readthedocs.io/en/latest/getting-started/installation.html>`__.
 
-4. Set up ``pre-commit`` hooks. This ensures your code is automatically formatted with ``black`` before each commit::
+4. Set up ``pre-commit`` hooks. This ensures your code is automatically checked and formatted with `Ruff <https://docs.astral.sh/ruff/>`_ before each commit::
 
     $ pre-commit install
 
@@ -96,9 +96,12 @@ Development Workflow
 Code Style
 ^^^^^^^^^^
 
-This project uses `black <https://github.com/psf/black>`_ for code formatting with a line length of 79 characters. The ``pre-commit`` hook (set up above) will automatically format your code on each commit. You can also run it manually::
+This project uses `Ruff <https://docs.astral.sh/ruff/>`_ for code formatting with a line length of 79 characters (the settings are in ``pyproject.toml``). The ``pre-commit`` hook (set up above) will automatically format your code on each commit, and the CI checks it. You can also run it manually::
 
-    $ black --line-length=79 .
+    $ ruff check .
+    $ ruff format .
+
+`prek <https://github.com/j178/prek>`_, a faster drop-in replacement for ``pre-commit``, works with the same configuration (``prek install``).
 
 Testing
 ^^^^^^^

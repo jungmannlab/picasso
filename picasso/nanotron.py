@@ -205,7 +205,6 @@ def prepare_data(
 
     groups = np.unique(locs["group"])
     for pick in tqdm(groups, desc="Prepare " + str(label)):
-
         pick_img = roi_to_img(
             locs,
             info,

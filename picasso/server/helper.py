@@ -138,6 +138,6 @@ def refresh(to_wait: int):
     """
     ref = st.empty()
     for i in range(to_wait):
-        ref.write(f"Refreshing in {to_wait-i} s")
+        ref.write(f"Refreshing in {to_wait - i} s")
         time.sleep(1)
     st.stop()

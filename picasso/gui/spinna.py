@@ -1507,11 +1507,11 @@ class StructurePreview(QtWidgets.QLabel):
         ]
         for widget in widgets:
             name = widget.objectName()
-            if name == f"x{self.structure_tab.n_mol_tar-1}":
+            if name == f"x{self.structure_tab.n_mol_tar - 1}":
                 widget.setValue(x)
-            elif name == f"y{self.structure_tab.n_mol_tar-1}":
+            elif name == f"y{self.structure_tab.n_mol_tar - 1}":
                 widget.setValue(y)
-            elif name == f"z{self.structure_tab.n_mol_tar-1}":
+            elif name == f"z{self.structure_tab.n_mol_tar - 1}":
                 widget.setValue(z)
         self.update_scene()
 
@@ -1957,14 +1957,14 @@ class StructuresTab(lib.Dialog):
                     widget.setParent(None)
                     widget.deleteLater()
                 elif num > row:  # if the widget below, lower the object name
-                    widget.setObjectName(f"{base}{num-1}")
+                    widget.setObjectName(f"{base}{num - 1}")
                     # if this is delete button, connect it to a new function
                     if base == "del":
                         widget.released.disconnect()
                         widget.released.connect(
                             partial(
                                 self.delete_molecular_target,
-                                f"del{num-1}",
+                                f"del{num - 1}",
                             )
                         )
         self.n_mol_tar -= 1
@@ -2973,7 +2973,7 @@ class NNDPlotSettingsDialog(lib.Dialog):
             color.editingFinished.connect(self.check_color_labels)
             n_label = QtWidgets.QLabel(f"{i}th NN:")
             n_label.setToolTip(
-                f"Color for the {i}th nearest neighbors distance " "histogram."
+                f"Color for the {i}th nearest neighbors distance histogram."
             )
             const_layout.addRow(n_label, color)
             self.colors.append(color)
@@ -5534,9 +5534,9 @@ class SimulationsTab(lib.Dialog):
                 data_sim["bins_sim"] = bin_centers
                 n_neighbros = len(self.nnd_hist_data_sim[i]["counts"])
                 for nn in range(n_neighbros):
-                    data_sim[f"NN{nn+1}_values_sim"] = self.nnd_hist_data_sim[
-                        i
-                    ]["counts"][nn]
+                    data_sim[f"NN{nn + 1}_values_sim"] = (
+                        self.nnd_hist_data_sim[i]["counts"][nn]
+                    )
                 # save simulation data
                 outpath_sim = os.path.splitext(path)[0] + f"_{t1}_{t2}_sim.csv"
                 df = pd.DataFrame(data_sim)
@@ -5552,9 +5552,9 @@ class SimulationsTab(lib.Dialog):
                 data_exp["bins_exp"] = bin_centers
                 n_neighbros = len(self.nnd_hist_data_exp[i]["counts"])
                 for nn in range(n_neighbros):
-                    data_exp[f"NN{nn+1}_values_exp"] = self.nnd_hist_data_exp[
-                        i
-                    ]["counts"][nn]
+                    data_exp[f"NN{nn + 1}_values_exp"] = (
+                        self.nnd_hist_data_exp[i]["counts"][nn]
+                    )
                 # save experimental data
                 outpath_exp = os.path.splitext(path)[0] + f"_{t1}_{t2}_exp.csv"
                 df = pd.DataFrame(data_exp)

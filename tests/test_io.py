@@ -2212,9 +2212,7 @@ def _write_single_frame(path, frame):
 
 class TestMMSeparateFiles:
     def _mm2_name(self, t, c=0, p=0, z=0):
-        return (
-            f"img_channel{c:03d}_position{p:03d}" f"_time{t:09d}_z{z:03d}.tif"
-        )
+        return f"img_channel{c:03d}_position{p:03d}_time{t:09d}_z{z:03d}.tif"
 
     def _mm14_name(self, frame, channel="Default", z=0):
         return f"img_{frame:09d}_{channel}_{z:03d}.tif"

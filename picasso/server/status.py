@@ -109,7 +109,6 @@ def status():  # noqa: C901
         path = st.text_input("Enter file path or folder:")
 
         if check_file(path) & path.endswith((".raw", ".ome.tif", ".ims")):
-
             if path not in df["filename"].tolist():
                 # exists, see check_file
                 file_hdf = os.path.splitext(path)[0] + "_locs.hdf5"

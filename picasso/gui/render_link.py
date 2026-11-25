@@ -215,8 +215,7 @@ CATEGORIES = (
         "slicer",
         "Slicing",
         "Slicing",
-        "Slicing on/off, slice thickness and slice position (matched in\n"
-        "nm).",
+        "Slicing on/off, slice thickness and slice position (matched in\nnm).",
     ),
 )
 CATEGORY_KEYS = tuple(category.key for category in CATEGORIES)

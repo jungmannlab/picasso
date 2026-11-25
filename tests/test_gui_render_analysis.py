@@ -612,8 +612,9 @@ def test_frc_of_a_large_view_asks_first(
     monkeypatch.setattr(
         QtWidgets.QMessageBox,
         "question",
-        lambda *a, **k: asked.append(a[2])
-        or (button.Yes if proceed else button.No),
+        lambda *a, **k: (
+            asked.append(a[2]) or (button.Yes if proceed else button.No)
+        ),
     )
     calls = _frc_images_too_large(monkeypatch)
     window.info_dialog.calculate_frc_resolution()
@@ -775,14 +776,16 @@ def test_frc_bin_size(window, answers, monkeypatch, qt_offscreen):
     monkeypatch.setattr(
         postprocess,
         "frc",
-        lambda *a, **k: calls.append((k["lp"], k.get("bin_size")))
-        or frc(*a, **k),
+        lambda *a, **k: (
+            calls.append((k["lp"], k.get("bin_size"))) or frc(*a, **k)
+        ),
     )
     monkeypatch.setattr(
         postprocess,
         "frc_rois",
-        lambda *a, **k: calls.append((k["lp"], k["bin_size"]))
-        or frc_rois(*a, **k),
+        lambda *a, **k: (
+            calls.append((k["lp"], k["bin_size"])) or frc_rois(*a, **k)
+        ),
     )
     info_dialog = window.info_dialog
     assert info_dialog.frc_bin_size.text() == "Auto"

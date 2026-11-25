@@ -813,8 +813,7 @@ class FilterExpression(lib.Dialog):
             self.status.setText(str(e))
             return
         self.status.setText(
-            f"Kept {self.window.n_filtered:,} of {n_before:,}"
-            " localizations."
+            f"Kept {self.window.n_filtered:,} of {n_before:,} localizations."
         )
 
     def on_locs_loaded(self) -> None:

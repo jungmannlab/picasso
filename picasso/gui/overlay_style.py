@@ -278,10 +278,12 @@ class OverlayStyleWidget(QtWidgets.QWidget):
         reset_button = QtWidgets.QPushButton("Reset")
         reset_button.setToolTip("Restore the default appearance.")
         reset_button.clicked.connect(
-            lambda: lib.confirm_restore_defaults(
-                self, "the appearance of this tool"
+            lambda: (
+                lib.confirm_restore_defaults(
+                    self, "the appearance of this tool"
+                )
+                and self.reset()
             )
-            and self.reset()
         )
         grid.addWidget(
             reset_button,
