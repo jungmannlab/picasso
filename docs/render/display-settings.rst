@@ -478,7 +478,8 @@ Nature Methods, 2013 <https://doi.org/10.1038/nmeth.2448>`__):
   then splits the binding events randomly into two halves, renders an image
   of each with a pixel size of half the NeNA, and correlates them. The
   resolution is where the FRC curve drops below 1/7. Zoom to a region of
-  interest first; a large field of view takes long.
+  interest first; a large field of view takes long. If the images would be
+  larger than 16,384 pixels on a side, Picasso asks whether to go ahead.
 - Localizations that are already linked (with the columns ``len`` and ``n``)
   are used as they are. NeNA needs unlinked localizations, so their pixel
   size is set by their median localization precision instead, which is
@@ -497,7 +498,9 @@ the FRC resolution:
 - ``Calculate FRC in ROIs`` places up to ``Number of ROIs`` (30)
   non-overlapping random square ROIs of ``ROI side length (µm)`` (5 µm)
   across the whole image, not only the current field of view. ROIs with fewer
-  than ``Min. localizations per ROI`` (1,000) are not used.
+  than ``Min. localizations per ROI`` (1,000) are not used. ROIs whose
+  images would be larger than 16,384 pixels on a side are refused, with the
+  largest ROI side length that fits.
 - Unlinked localizations are linked once, over the whole image, before the
   FRC is calculated in each ROI with the same pixel size, and
   ``FRC resolution, ROIs (nm)`` shows their mean ± standard deviation. The
@@ -520,7 +523,10 @@ the FRC resolution:
    the default, is 3 x the median localization precision) and
    ``max_dark_time`` (frames, 3 by default) set the linking as in
    ``postprocess.link``. ``lp`` (nm) sets the pixel size (``lp / 2``)
-   instead of NeNA.
+   instead of NeNA. Images larger than ``max_image_size`` pixels on a side
+   (``postprocess.FRC_MAX_IMAGE_SIZE``, 16384, by default; None for no
+   limit) raise ``postprocess.FRCImageTooLargeError`` before anything is
+   linked or rendered.
 
    .. code-block:: python
 

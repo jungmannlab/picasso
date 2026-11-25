@@ -1546,10 +1546,17 @@ class TestFrc:
             raise AssertionError("nothing may be rendered")
 
         monkeypatch.setattr(postprocess.render, "render", fail)
-        with pytest.raises(ValueError, match="max_image_size"):
+        monkeypatch.setattr(postprocess, "link", fail)  # checked first
+        with pytest.raises(
+            postprocess.FRCImageTooLargeError, match="max_image_size"
+        ) as error:
             postprocess.frc(
                 locs, info, viewport=viewport, lp=lp, max_image_size=PX
             )
+        assert isinstance(error.value, ValueError)
+        assert error.value.image_size == pytest.approx(2 * PX)
+        assert error.value.max_image_size == PX
+        assert error.value.bin_size == pytest.approx(lp / 2)
 
     def test_max_image_size_none_renders_any_size(self, locs, info):
         viewport = ((15 * PX, 15 * PX), (16 * PX, 16 * PX))
@@ -1667,6 +1674,48 @@ class TestFrcRois:
         assert_phases(tracker, ["Linking localizations", "Calculating FRC"])
         assert tracker.phases[0].maximum == len(locs)
         assert tracker.phases[1].maximum == len(result["rois"])
+
+    def test_too_large_images_raise_before_linking(
+        self, locs, info, monkeypatch
+    ):
+        def fail(*args, **kwargs):
+            raise AssertionError("checked before linking and FRC")
+
+        monkeypatch.setattr(postprocess, "link", fail)
+        monkeypatch.setattr(postprocess, "frc", fail)
+        with pytest.raises(postprocess.FRCImageTooLargeError) as error:
+            postprocess.frc_rois(
+                locs,
+                info,
+                viewport=((10 * PX, 10 * PX), (20 * PX, 20 * PX)),
+                n_rois=4,
+                roi_size=260,
+                min_locs=10,
+                lp=12.0,
+                max_image_size=10,  # 260 / 6 = 43 pixels
+            )
+        assert error.value.image_size == pytest.approx(260 / 6)
+
+    def test_max_image_size_passed_to_frc(self, locs, info, monkeypatch):
+        frc = postprocess.frc
+        limits = []
+
+        def record(*args, **kwargs):
+            limits.append(kwargs["max_image_size"])
+            return frc(*args, **kwargs)
+
+        monkeypatch.setattr(postprocess, "frc", record)
+        result = postprocess.frc_rois(
+            locs,
+            info,
+            viewport=((10 * PX, 10 * PX), (20 * PX, 20 * PX)),
+            n_rois=4,
+            roi_size=260,
+            min_locs=10,
+            lp=12.0,
+            max_image_size=None,
+        )
+        assert limits == [None] * len(result["rois"])
 
     def test_already_linked_skips_linking_and_nena(
         self, locs, info, monkeypatch

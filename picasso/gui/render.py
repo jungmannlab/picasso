@@ -6996,31 +6996,6 @@ class InfoDialog(lib.Dialog):
             info = self.window.view.infos[channel]
             lp = self.known_nena(channel)
 
-            # make sure the viewport is not too large
-            bin_size = (lp or self.window.view.median_lp) / 2
-            max_size = 10_000 * bin_size
-            height, width = render.viewport_size(self.window.view.viewport)
-            if height > max_size and width > max_size:
-                text = (
-                    "The current FOV is large and will likely lead to a long "
-                    "computation time and high memory usage (current FOV "
-                    "leads to an image of size "
-                    f"{int(width/bin_size):,} x "
-                    f"{int(height/bin_size):,} pixels).\n\n"
-                    "Please consider reducing the FOV size before"
-                    " calculating the FRC resolution.\n\nDo you want to "
-                    "proceed?"
-                )
-                reply = QtWidgets.QMessageBox.question(
-                    self,
-                    "Viewport too large",
-                    text,
-                    QtWidgets.QMessageBox.StandardButton.Yes
-                    | QtWidgets.QMessageBox.StandardButton.No,
-                )
-                if not reply == QtWidgets.QMessageBox.StandardButton.Yes:
-                    return
-
             # get the name prefix for saving images
             if self.save_images_check.isChecked():
                 path, ext = lib.get_save_filename_ext_dialog(
@@ -7044,15 +7019,36 @@ class InfoDialog(lib.Dialog):
                 nena_result, lp = postprocess.nena(locs, info)
                 self._record_nena(locs, info, nena_result, lp)
 
-            # calculate frc
-            # the size was confirmed above
-            frc_result = postprocess.frc(
-                locs,
-                info,
-                viewport=self.window.view.viewport,
-                lp=lp,
-                max_image_size=None,
-            )
+            # calculate frc; frc checks the image size before any work
+            # and the user may go ahead with larger images
+            try:
+                frc_result = postprocess.frc(
+                    locs, info, viewport=self.window.view.viewport, lp=lp
+                )
+            except postprocess.FRCImageTooLargeError as error:
+                reply = QtWidgets.QMessageBox.question(
+                    self,
+                    "Field of view too large",
+                    "The FRC images of the current field of view would be "
+                    f"{error.image_size:,.0f} x {error.image_size:,.0f} "
+                    f"pixels (bin size {error.bin_size:.2f} nm), more than "
+                    f"{error.max_image_size:,} pixels on a side. This may "
+                    "take long and not fit into memory.\n\n"
+                    "Consider zooming in or using FRC in several ROIs "
+                    "instead.\n\nDo you want to proceed?",
+                    QtWidgets.QMessageBox.StandardButton.Yes
+                    | QtWidgets.QMessageBox.StandardButton.No,
+                    QtWidgets.QMessageBox.StandardButton.No,
+                )
+                if reply != QtWidgets.QMessageBox.StandardButton.Yes:
+                    return
+                frc_result = postprocess.frc(
+                    locs,
+                    info,
+                    viewport=self.window.view.viewport,
+                    lp=lp,
+                    max_image_size=None,
+                )
             if path:  # save images
                 base, ext = os.path.splitext(path)
                 image1 = Image.fromarray(frc_result["images"][0])
@@ -7115,7 +7111,19 @@ class InfoDialog(lib.Dialog):
             self._show_frc_rois_result(locs, info, viewport, n_rois, result)
 
         def failed(error: Exception) -> None:
-            if isinstance(error, (ValueError, RuntimeError)):
+            if isinstance(error, postprocess.FRCImageTooLargeError):
+                QtWidgets.QMessageBox.warning(
+                    self,
+                    "FRC in ROIs",
+                    "The FRC images of each ROI would be "
+                    f"{error.image_size:,.0f} x {error.image_size:,.0f} "
+                    f"pixels (bin size {error.bin_size:.2f} nm), more than "
+                    f"{error.max_image_size:,} pixels on a side, and may "
+                    "not fit into memory.\n\nPlease reduce the ROI side "
+                    "length to at most "
+                    f"{error.max_image_size * error.bin_size / 1000:.1f} µm.",
+                )
+            elif isinstance(error, (ValueError, RuntimeError)):
                 QtWidgets.QMessageBox.warning(self, "FRC in ROIs", str(error))
             else:  # unexpected, report as usual
                 sys.excepthook(type(error), error, error.__traceback__)

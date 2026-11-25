@@ -80,6 +80,8 @@ __all__ = [
     "frc",
     "frc_rois",
     "plot_frc",
+    "FRC_MAX_IMAGE_SIZE",
+    "FRCImageTooLargeError",
     "decorrelation",
     "plot_decorrelation",
     # spatial analysis
@@ -3173,6 +3175,53 @@ def _fill_dnfl(
                         dnfl[bin] += 1
 
 
+#: Largest side length (pixels) of the images that ``frc`` and
+#: ``frc_rois`` render by default. Memory grows with the square of it.
+FRC_MAX_IMAGE_SIZE = 16384
+
+
+class FRCImageTooLargeError(ValueError):
+    """The images of ``frc`` would be larger than ``max_image_size``
+    pixels on a side.
+
+    Attributes
+    ----------
+    image_size : float
+        Side length (pixels) the images would have.
+    max_image_size : int
+        Largest side length (pixels) allowed.
+    bin_size : float
+        Pixel size (nm) of the images, half the localization precision.
+    """
+
+    def __init__(
+        self, image_size: float, max_image_size: int, bin_size: float
+    ) -> None:
+        self.image_size = image_size
+        self.max_image_size = max_image_size
+        self.bin_size = bin_size
+        super().__init__(
+            f"The FRC images would be {image_size:,.0f} x "
+            f"{image_size:,.0f} pixels (bin size {bin_size:.2f} nm, half "
+            f"the localization precision), more than max_image_size = "
+            f"{max_image_size:,} pixels on a side, and may not fit into "
+            "memory. Use a smaller viewport or ROI, or raise "
+            "max_image_size."
+        )
+
+
+def _check_frc_image_size(
+    side_length: float, lp: float, max_image_size: int | None
+) -> None:
+    """Raise ``FRCImageTooLargeError`` if a square of ``side_length``
+    (nm) rendered with a bin size of ``lp / 2`` (nm) is larger than
+    ``max_image_size`` pixels on a side (None: no limit)."""
+    bin_size = lp / 2
+    image_size = side_length / bin_size
+    if max_image_size is not None and image_size > max_image_size:
+        raise FRCImageTooLargeError(image_size, max_image_size, bin_size)
+
+
 def plot_frc(
     frc_result: dict,
     fig: plt.Figure = None,
@@ -3229,7 +3278,7 @@ def frc(
     viewport: tuple[tuple[float, float], tuple[float, float]],
     random_seed: int = 42,
     lp: float | None = None,
-    max_image_size: int | None = 16384,
+    max_image_size: int | None = FRC_MAX_IMAGE_SIZE,
     r_max: float | Literal["auto"] = "auto",
     max_dark_time: int = 3,
 ) -> dict:
@@ -3254,9 +3303,10 @@ def frc(
         rendered images (``lp / 2``). If None (default), NeNA of ``locs`` is used.
     max_image_size : int or None, optional
         Largest side length (pixels) of the rendered images. A larger
-        (square) viewport raises a ValueError instead of rendering
-        images that may not fit into memory, which grows with the
-        square of the side length. None renders any size. Default is 16384.
+        (square) viewport raises ``FRCImageTooLargeError`` (a
+        ValueError) instead of rendering images that may not fit into
+        memory, which grows with the square of the side length. None
+        renders any size. Default is ``FRC_MAX_IMAGE_SIZE`` (16384).
     r_max : float or {'auto'}, optional
         Maximum distance (nm) for linking unlinked localizations across
         frames prior to splitting. If 'auto', set to 3.0 * median lp
@@ -3277,9 +3327,11 @@ def frc(
 
     Raises
     ------
+    FRCImageTooLargeError
+        If the rendered images would be larger than ``max_image_size``
+        pixels on a side.
     ValueError
-        If the rendered images would be larger than max_image_size pixels
-        on a side, or if a valid localization precision cannot be determined.
+        If a valid localization precision cannot be determined.
 
     References
     ----------
@@ -3347,24 +3399,14 @@ def frc(
         x_max = x_center + viewport_height / 2
         viewport = ((viewport[0][0], x_min), (viewport[1][0], x_max))
 
-    # Link only localizations near the requested viewport.
-    # The generous margin keeps nearby localizations available to form
-    # events crossing the viewport boundary.
     (y_min, x_min), (y_max, x_max) = viewport
 
     # Validate image size before linking to fail early.
-    image_size = (x_max - x_min) / (lp / 2)
+    _check_frc_image_size(x_max - x_min, lp, max_image_size)
 
-    if max_image_size is not None and image_size > max_image_size:
-        raise ValueError(
-            f"The FRC images would be {image_size:,.0f} x "
-            f"{image_size:,.0f} pixels (bin size {lp / 2:.2f} nm, half "
-            f"the localization precision), more than max_image_size = "
-            f"{max_image_size:,} pixels on a side, and may not fit into "
-            "memory. Use a smaller viewport (e.g., frc_rois for the whole "
-            "field of view) or raise max_image_size."
-        )
-
+    # Link only localizations near the requested viewport.
+    # The generous margin keeps nearby localizations available to form
+    # events crossing the viewport boundary.
     if not already_linked:
         if isinstance(r_max, str):
             if r_max != "auto":
@@ -3463,6 +3505,7 @@ def frc_rois(
     lp: float | None = None,
     r_max: float | Literal["auto"] = "auto",
     max_dark_time: int = 3,
+    max_image_size: int | None = FRC_MAX_IMAGE_SIZE,
     progress: lib.Progress | Literal["console"] | None = None,
 ) -> dict:
     """Calculate the FRC resolution in several random ROIs.
@@ -3513,6 +3556,11 @@ def frc_rois(
     max_dark_time : int, optional
         Maximum number of dark frames bridged when linking
         localizations. Default is 3.
+    max_image_size : int or None, optional
+        Largest side length (pixels) of the images rendered in each ROI
+        (``roi_size / (lp / 2)``), checked once before linking and the
+        FRC. None renders any size. Default is ``FRC_MAX_IMAGE_SIZE``
+        (16384).
     progress : lib.Progress, "console" or None, optional
         Progress tracker. Reports "Calculating NeNA" when required,
         "Linking localizations" when linking is required, and
@@ -3523,6 +3571,14 @@ def frc_rois(
     result : dict
         Dictionary with keys "rois", "n_locs", "frc_results",
         "resolutions" and "lp".
+
+    Raises
+    ------
+    FRCImageTooLargeError
+        If the images of an ROI would be larger than ``max_image_size``
+        pixels on a side.
+    ValueError
+        If a valid localization precision cannot be determined.
     """
     already_linked = len(locs) > 0 and {"len", "n"}.issubset(locs.columns)
 
@@ -3586,6 +3642,9 @@ def frc_rois(
                 "Cannot determine a valid positive localization precision 'lp'. "
                 "Pass 'lp' explicitly or ensure valid 'lpx' and 'lpy' values are available."
             )
+
+        # All ROIs have the same size: check it once, before linking.
+        _check_frc_image_size(roi_size, lp, max_image_size)
 
         # Link the full dataset once, if needed, so n_locs is correct
         if not already_linked:
@@ -3663,6 +3722,7 @@ def frc_rois(
                 viewport=((y0, x0), (y1, x1)),
                 random_seed=random_seed,
                 lp=lp,
+                max_image_size=max_image_size,
             )
 
             # Drop rendered images to avoid retaining large arrays.
